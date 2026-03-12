@@ -155,7 +155,7 @@ export const DetailPlanner: React.FC = () => {
         setStep(3);
         
         for (let i = 0; i < segments.length; i++) {
-            if (segments[i].imageUrl) continue; // Skip already generated images (e.g., size chart)
+            if (segments[i].imageUrl) continue;
 
             setSegments(prev => {
                 const newSegs = [...prev];
@@ -451,21 +451,19 @@ export const DetailPlanner: React.FC = () => {
                     </div>
 
                     <div className="flex justify-center">
-                        <div className="w-full max-w-md bg-white shadow-2xl overflow-hidden" style={{ minHeight: '800px' }}>
+                        <div className="w-full max-w-md bg-white shadow-2xl overflow-hidden">
                             {segments.map((seg, idx) => (
-                                <div key={seg.id} className="relative w-full aspect-[9/16] bg-slate-100 border-b border-slate-200 flex items-center justify-center">
+                                <div key={seg.id} className="relative w-full bg-slate-100 border-b border-slate-200 flex items-center justify-center">
                                     {seg.imageUrl ? (
-                                        <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-full object-cover" />
+                                        <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-auto object-contain" />
                                     ) : seg.isGenerating ? (
-                                        <div className="flex flex-col items-center text-slate-500">
+                                        <div className="flex flex-col items-center text-slate-500 py-20">
                                             <Loader2 className="w-8 h-8 animate-spin mb-2 text-blue-500" />
                                             <p className="font-medium">이미지 생성 중...</p>
                                         </div>
                                     ) : (
-                                        <div className="text-slate-400">대기 중...</div>
+                                        <div className="text-slate-400 py-20">대기 중...</div>
                                     )}
-                                    
-                                    {/* Overlay for debugging/info */}
                                     <div className="absolute top-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
                                         {idx + 1}. {seg.title}
                                     </div>
