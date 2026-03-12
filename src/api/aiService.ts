@@ -7,14 +7,14 @@ const getApiKey = () => {
          "";
 };
 
-// [중요] 생성자에서 정식 버전(v1)을 사용하도록 명시합니다.
+// 인스턴스 생성
 const genAI = new GoogleGenerativeAI(getApiKey());
 
 export const removeBackground = async (image: string) => image;
 
 export const planDetail = async (data: any) => {
   try {
-    // 모델을 가져올 때 v1 버전을 사용하도록 강제 설정합니다.
+    // [중요] apiVersion을 'v1'으로 명시하여 호출합니다.
     const model = genAI.getGenerativeModel({ 
       model: "gemini-1.5-flash" 
     }, { apiVersion: 'v1' });
@@ -23,8 +23,12 @@ export const planDetail = async (data: any) => {
     
     const result = await model.generateContent(prompt);
     const text = result.response.text();
+    
+    // 마크다운 형식(```json)이 섞여올 경우를 대비해 청소
     const cleanJson = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(cleanJson).map((item: any) => ({
+    const parsed = JSON.parse(cleanJson);
+    
+    return parsed.map((item: any) => ({
       ...item,
       id: Math.random().toString(36).substring(7)
     }));
@@ -36,7 +40,7 @@ export const planDetail = async (data: any) => {
 
 export const generateImage = async (prompt: string, base64Images: string[] = [], aspectRatio: string = "9:16") => {
   try {
-    // 이미지 생성도 동일하게 v1 경로를 사용합니다.
+    // 이미지 생성 시에도 v1 버전을 사용합니다.
     const model = genAI.getGenerativeModel({ 
       model: "gemini-1.5-flash" 
     }, { apiVersion: 'v1' });
