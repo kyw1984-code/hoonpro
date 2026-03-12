@@ -3,39 +3,16 @@ import { GoogleGenAI, Type } from "@google/genai";
 import axios from "axios";
 
 const getAiInstance = () => {
-    const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || import.meta.env.VITE_GEMINI_API_KEY;
+    // Vercel 환경변수에서 키를 가져오는 우선순위를 정합니다.
+    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.GEMINI_API_KEY;
     return new GoogleGenAI({ apiKey: apiKey as string });
 };
 
+// [수정] 배경 제거 기능을 건너뛰도록 변경
 export const removeBackground = async (base64Image: string): Promise<string> => {
-    const apiKey = import.meta.env.VITE_REMOVE_BG_API_KEY;
-    if (!apiKey) {
-        throw new Error("VITE_REMOVE_BG_API_KEY is not set in environment variables.");
-    }
-
-    const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
-
-    try {
-        const response = await axios.post(
-            'https://api.remove.bg/v1.0/removebg',
-            {
-                image_file_b64: base64Data,
-                size: 'auto'
-            },
-            {
-                headers: {
-                    'X-Api-Key': apiKey,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
-            }
-        );
-
-        return `data:image/png;base64,${response.data.data.result_b64}`;
-    } catch (error) {
-        console.error("Error removing background:", error);
-        throw error;
-    }
+    console.log("Skipping remove.bg process...");
+    // 기능을 사용하지 않으므로 바로 원본 이미지를 돌려줍니다.
+    return base64Image;
 };
 
 export const planDetail = async (data: {
@@ -80,7 +57,8 @@ Return the result as a JSON array.
 `;
 
     const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        // [수정] 할당량이 적은 preview 대신 안정적인 flash 모델 사용
+        model: "gemini-1.5-flash", 
         contents: prompt,
         config: {
             responseMimeType: "application/json",
@@ -133,24 +111,27 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
     
     parts.push({ text: prompt });
 
-    const model = fastMode ? "gemini-2.5-flash-image" : "gemini-3.1-flash-image-preview";
+    // [수정] 이미지 생성이 지원되는 최신 모델명으로 고정
+    const model = "gemini-2.0-flash"; 
     const imageConfig: any = { aspectRatio: aspectRatio as any };
-    if (!fastMode) {
-        imageConfig.imageSize = "1K";
-    }
+    
+    try {
+        const response = await ai.models.generateContent({
+            model,
+            contents: { parts },
+            config: {
+                imageConfig
+            }
+        });
 
-    const response = await ai.models.generateContent({
-        model,
-        contents: { parts },
-        config: {
-            imageConfig
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+            }
         }
-    });
-
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData) {
-            return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-        }
+    } catch (error) {
+        console.error("Image generation failed:", error);
+        throw error;
     }
     return undefined;
 };
