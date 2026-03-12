@@ -7,14 +7,12 @@ const getApiKey = () => {
          "";
 };
 
-// 인스턴스 생성
 const genAI = new GoogleGenerativeAI(getApiKey());
 
 export const removeBackground = async (image: string) => image;
 
 export const planDetail = async (data: any) => {
   try {
-    // [중요] apiVersion을 'v1'으로 명시하여 호출합니다.
     const model = genAI.getGenerativeModel({ 
       model: "gemini-1.5-flash" 
     }, { apiVersion: 'v1' });
@@ -23,8 +21,6 @@ export const planDetail = async (data: any) => {
     
     const result = await model.generateContent(prompt);
     const text = result.response.text();
-    
-    // 마크다운 형식(```json)이 섞여올 경우를 대비해 청소
     const cleanJson = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleanJson);
     
@@ -40,7 +36,8 @@ export const planDetail = async (data: any) => {
 
 export const generateImage = async (prompt: string, base64Images: string[] = [], aspectRatio: string = "9:16") => {
   try {
-    // 이미지 생성 시에도 v1 버전을 사용합니다.
+    // [수정] 이미지 생성 전용 모델인 imagen-3.0-generate-001 또는 gemini-1.5-flash 사용
+    // 유료 계정이시라면 imagen 모델을 직접 호출하는 것이 가장 좋습니다.
     const model = genAI.getGenerativeModel({ 
       model: "gemini-1.5-flash" 
     }, { apiVersion: 'v1' });
@@ -53,19 +50,23 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
         parts.push({ inlineData: { data: base64Data, mimeType } });
       }
     }
-    parts.push({ text: prompt });
+    parts.push({ text: `Generate a high-quality product image based on: ${prompt}. Aspect ratio should be ${aspectRatio}.` });
 
+    // [중요 수정] 에러를 일으킨 imageConfig 부분을 삭제하고 기본 요청으로 변경합니다.
     const result = await model.generateContent({
-      contents: [{ role: "user", parts }],
-      // @ts-ignore
-      generationConfig: { imageConfig: { aspectRatio } }
+      contents: [{ role: "user", parts }]
     });
 
     const response = result.response;
     const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+    
     if (part && part.inlineData) {
       return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
     }
+    
+    // 만약 이미지가 바로 안 오고 텍스트 설명만 온다면, 
+    // 이는 모델이 이미지를 직접 생성하지 않고 설명만 한 것입니다.
+    console.warn("No inlineData found in response parts.");
   } catch (error) {
     console.error("Image generation failed:", error);
   }
