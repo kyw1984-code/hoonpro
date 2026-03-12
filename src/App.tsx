@@ -24,7 +24,7 @@ export default function App() {
               <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
                 <LayoutTemplate className="w-5 h-5 text-white" />
               </div>
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">쇼크트리 훈프로 빌더</h1>
+              <h1 className="text-xl font-bold text-slate-900 tracking-tight">쇼크트리 훈프로 AI 자동화 프로그램</h1>
             </div>
             
             <div className="flex bg-slate-100 p-1 rounded-xl">
