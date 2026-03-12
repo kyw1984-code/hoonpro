@@ -1,31 +1,3 @@
-import crypto from 'crypto';
-
-const COUPANG_ACCESS_KEY = process.env.COUPANG_ACCESS_KEY || '';
-const COUPANG_SECRET_KEY = process.env.COUPANG_SECRET_KEY || '';
-
-function generateHmac(method: string, url: string, secretKey: string, accessKey: string): string {
-  const [path, ...queryParts] = url.split('?');
-  const query = queryParts.length > 0 ? queryParts[0] : '';
-
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const yy = String(now.getUTCFullYear()).slice(2);
-  const mm = pad(now.getUTCMonth() + 1);
-  const dd = pad(now.getUTCDate());
-  const HH = pad(now.getUTCHours());
-  const MM = pad(now.getUTCMinutes());
-  const SS = pad(now.getUTCSeconds());
-  const datetimeGMT = `${yy}${mm}${dd}T${HH}${MM}${SS}Z`;
-
-  const message = datetimeGMT + method + path + query;
-  const signature = crypto
-    .createHmac('sha256', Buffer.from(secretKey, 'utf-8'))
-    .update(Buffer.from(message, 'utf-8'))
-    .digest('hex');
-
-  return `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${datetimeGMT}, signature=${signature}`;
-}
-
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -34,53 +6,90 @@ export default async function handler(req: any, res: any) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { productId } = req.body;
-  if (!productId) return res.status(400).json({ error: 'productId is required' });
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'url is required' });
 
   try {
-    const DOMAIN = 'https://api-gateway.coupang.com';
-    const method = 'GET';
-
-    // ✅ 상품ID로 검색해서 상품 정보 가져오기
-    const urlPath = `/v2/providers/affiliate_open_api/apis/openapi/v1/products/search?keyword=${productId}&limit=1`;
-    const authorization = generateHmac(method, urlPath, COUPANG_SECRET_KEY, COUPANG_ACCESS_KEY);
-
-    const response = await fetch(DOMAIN + urlPath, {
-      method,
+    // 쿠팡 페이지 HTML 가져오기
+    const response = await fetch(url, {
       headers: {
-        Authorization: authorization,
-        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ko-KR,ko;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
       },
     });
 
-    const data = await response.json();
-
-    // 검색 결과에서 첫 번째 상품 추출
-    const productList = data?.data?.productData ?? data?.data ?? [];
-    const product = Array.isArray(productList) ? productList[0] : null;
-
-    if (!product) {
-      // 검색 결과 없으면 디버그 정보 반환
-      return res.status(200).json({
-        error: true,
-        message: '상품을 찾을 수 없습니다.',
-        _debug: data
-      });
+    if (!response.ok) {
+      return res.status(200).json({ error: true, message: `페이지 로드 실패: ${response.status}` });
     }
 
-    const reviewCount = Number(product.reviewCount ?? product.review_count ?? 0);
-    const price = Number(product.productPrice ?? product.salePrice ?? product.price ?? 0);
-    const rating = Number(product.rating ?? product.totalScore ?? 0);
+    const html = await response.text();
+
+    // HTML에서 핵심 부분만 추출 (너무 길면 Gemini 토큰 초과)
+    // 상품명, 가격, 리뷰 관련 부분만 추출
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    const body = bodyMatch ? bodyMatch[1] : html;
+
+    // 스크립트, 스타일 제거
+    const cleanHtml = body
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 8000); // 8000자로 제한
+
+    // Gemini API로 파싱
+    const geminiRes = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': process.env.GEMINI_API_KEY || '',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: `아래는 쿠팡 상품 페이지의 텍스트입니다. 다음 정보를 추출해서 JSON으로만 반환하세요. 다른 텍스트 없이 JSON만 반환하세요.
+
+{
+  "productName": "상품명",
+  "price": 숫자만 (원 단위, 없으면 0),
+  "reviewCount": 숫자만 (없으면 0),
+  "rating": 숫자만 소수점 포함 (없으면 0),
+  "categoryName": "카테고리명 (없으면 빈 문자열)"
+}
+
+페이지 텍스트:
+${cleanHtml}`
+          }]
+        }],
+        generationConfig: {
+          responseMimeType: 'application/json'
+        }
+      })
+    });
+
+    const geminiData = await geminiRes.json();
+    const text = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+    
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
+    } catch {
+      return res.status(200).json({ error: true, message: '데이터 파싱 실패' });
+    }
+
+    const reviewCount = Number(parsed.reviewCount) || 0;
+    const price = Number(parsed.price) || 0;
 
     return res.status(200).json({
-      productId: String(product.productId ?? productId),
-      productName: String(product.productName ?? '상품명 없음'),
+      productName: parsed.productName || '상품명 없음',
       price,
       reviewCount,
-      rating,
-      categoryName: String(product.categoryName ?? product.category ?? ''),
-      imageUrl: String(product.productImage ?? product.mainImageUrl ?? product.imageUrl ?? ''),
-      productUrl: `https://www.coupang.com/vp/products/${product.productId ?? productId}`,
+      rating: Number(parsed.rating) || 0,
+      categoryName: parsed.categoryName || '',
       estimatedSales: reviewCount * 10,
       estimatedRevenue: reviewCount * 10 * price,
     });
