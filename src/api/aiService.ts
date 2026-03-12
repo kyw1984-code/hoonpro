@@ -60,7 +60,7 @@ export const generateImage = async (
     });
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash-image-preview",
       contents: [{ role: "user", parts }],
       config: {
         responseModalities: [Modality.IMAGE, Modality.TEXT],
