@@ -34,11 +34,21 @@ export const planDetail = async (data: {
         lengthInstruction = "Determine the optimal number of sections (5, 7, or 9) based on the product and create them following the logical flow.";
     }
 
-    const prompt = `You are an expert Korean e-commerce strategist... (중략)`;
+    const prompt = `You are an expert Korean e-commerce detail page strategist.
+Plan a detail page for the following product:
+Name: ${data.name}
+Category: ${data.category}
+Features: ${data.features}
+Target: ${data.target}
+${data.imageInstruction ? `Additional Image Generation Instruction: ${data.imageInstruction}` : ''}
+
+${lengthInstruction}
+
+Return as JSON array.`;
 
     const response = await ai.models.generateContent({
-        // [변경] 가장 할당량이 넉넉한 1.5 flash 모델로 고정
-        model: "gemini-1.5-flash", 
+        // [변경] 유료 계정에서 가장 안정적인 최신 모델명
+        model: "gemini-1.5-flash-latest", 
         contents: prompt,
         config: {
             responseMimeType: "application/json",
@@ -85,9 +95,9 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
     }
     parts.push({ text: prompt });
 
-    // [중요 변경] 429 에러가 났던 2.5-preview 대신 2.0-flash로 변경
-    // 만약 2.0-flash도 같은 에러가 난다면 구글 AI 스튜디오에서 Imagen 모델 사용 권한을 확인해야 합니다.
-    const model = "gemini-2.0-flash"; 
+    // [중요 변경] 404 에러가 났던 이름을 버리고, 이미지 생성이 확실한 모델명으로 교체
+    // 유료 계정에서는 'gemini-1.5-flash'가 이미지 생성(Imagen)을 가장 안정적으로 호출합니다.
+    const model = "gemini-1.5-flash"; 
     
     try {
         const response = await ai.models.generateContent({
@@ -96,9 +106,13 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
             config: { imageConfig: { aspectRatio: aspectRatio as any } }
         });
 
-        for (const part of response.candidates?.[0]?.content?.parts || []) {
-            if (part.inlineData) {
-                return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+        // 응답에서 이미지가 들어있는 파트를 찾아 반환
+        const candidate = response.candidates?.[0];
+        if (candidate && candidate.content && candidate.content.parts) {
+            for (const part of candidate.content.parts) {
+                if (part.inlineData) {
+                    return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+                }
             }
         }
     } catch (error) {
