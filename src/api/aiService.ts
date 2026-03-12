@@ -13,12 +13,31 @@ const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 export const removeBackground = async (image: string) => image;
 
-// ✅ 텍스트 생성
+// ✅ 텍스트 생성 - responseMimeType으로 JSON 강제
 export const planDetail = async (data: any) => {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `You are an expert Korean e-commerce strategist. Plan a detail page for: ${data.name}. Return JSON array in Korean.`,
+      config: {
+        responseMimeType: "application/json",
+      },
+      contents: `
+당신은 한국 이커머스 전문 기획자입니다.
+아래 상품의 상세페이지 기획안을 JSON 배열로 작성해주세요.
+
+상품명: ${data.name}
+${data.description ? `상품 설명: ${data.description}` : ""}
+
+반드시 아래 형식의 JSON 배열만 반환하세요. 설명 텍스트 없이 JSON만 반환하세요.
+[
+  {
+    "section": "섹션명 (예: 메인 비주얼, 제품 특징, 사용 방법 등)",
+    "title": "섹션 제목",
+    "description": "섹션 내용 설명",
+    "imagePrompt": "이미지 생성을 위한 영문 프롬프트"
+  }
+]
+      `.trim(),
     });
 
     const text = response.text ?? "";
@@ -35,7 +54,7 @@ export const planDetail = async (data: any) => {
   }
 };
 
-// ✅ 이미지 생성 - gemini-2.5-flash-image (정식 모델명, preview 없음)
+// ✅ 이미지 생성 - gemini-2.5-flash-image
 export const generateImage = async (
   prompt: string,
   base64Images: string[] = [],
