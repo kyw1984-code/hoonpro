@@ -1,25 +1,25 @@
 import { useState } from "react";
 import type { SearchResult } from "../../types/coupang";
 import { MOCK_PRODUCTS } from "../../lib/coupang";
-import SearchBar    from "./SearchBar";
-import SummaryCards from "./SummaryCards";
-import ProductList  from "./ProductList";
+import SearchBar     from "./SearchBar";
+import SummaryCards  from "./SummaryCards";
+import ProductList   from "./ProductList";
 import StrategyPanel from "./StrategyPanel";
-import PriceChart   from "./PriceChart";
+import PriceChart    from "./PriceChart";
 
 type Tab = "products" | "strategy" | "chart";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "products", label: "📦 상품 목록"  },
-  { id: "strategy", label: "🎯 전략 분석"  },
-  { id: "chart",    label: "📊 가격 분포"  },
+  { id: "products", label: "📦 상품 목록" },
+  { id: "strategy", label: "🎯 전략 분석" },
+  { id: "chart",    label: "📊 가격 분포" },
 ];
 
 export default function CoupangResearch() {
-  const [keyword,  setKeyword]  = useState("");
-  const [results,  setResults]  = useState<SearchResult | null>(null);
-  const [loading,  setLoading]  = useState(false);
-  const [error,    setError]    = useState("");
+  const [keyword,   setKeyword]   = useState("");
+  const [results,   setResults]   = useState<SearchResult | null>(null);
+  const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("products");
 
   async function handleSearch() {
@@ -29,20 +29,17 @@ export default function CoupangResearch() {
     setResults(null);
 
     try {
-      // Vercel Serverless Function 호출
       const res = await fetch(
-        `/api/coupang-search?keyword=${encodeURIComponent(keyword)}&limit=10`
+        `/api/coupang?keyword=${encodeURIComponent(keyword)}&limit=10`
       );
 
       if (!res.ok) {
-        // API 키 미설정 등 서버 오류 → 데모 모드 fallback
         throw new Error(await res.text());
       }
 
       const data = await res.json();
       setResults({ products: data.products, keyword, isMock: false });
     } catch (err) {
-      // fallback: 데모 데이터
       console.warn("API 호출 실패, 데모 데이터 사용:", err);
       await new Promise((r) => setTimeout(r, 800));
       setResults({ products: MOCK_PRODUCTS, keyword, isMock: true });
@@ -52,9 +49,10 @@ export default function CoupangResearch() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-neutral-100"
-         style={{ fontFamily: "'DM Sans', 'Apple SD Gothic Neo', sans-serif" }}>
-
+    <div
+      className="min-h-screen bg-[#0a0a0f] text-neutral-100"
+      style={{ fontFamily: "'DM Sans', 'Apple SD Gothic Neo', sans-serif" }}
+    >
       {/* 헤더 */}
       <header className="border-b border-white/[0.06] bg-white/[0.02]">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -78,7 +76,6 @@ export default function CoupangResearch() {
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
-
         <SearchBar
           keyword={keyword}
           onChange={setKeyword}
@@ -108,9 +105,10 @@ export default function CoupangResearch() {
             {results.isMock && (
               <div className="bg-amber-500/[0.08] border border-amber-500/20 rounded-lg
                               px-4 py-2.5 mb-5 text-xs text-amber-400">
-                📌 데모 모드 — 샘플 데이터입니다.
-                Vercel 환경변수에 <code className="bg-white/10 px-1 rounded">COUPANG_ACCESS_KEY</code>와{" "}
-                <code className="bg-white/10 px-1 rounded">COUPANG_SECRET_KEY</code>를 설정하면 실제 데이터가 조회됩니다.
+                📌 데모 모드 — 샘플 데이터입니다. Vercel 환경변수에{" "}
+                <code className="bg-white/10 px-1 rounded">COUPANG_ACCESS_KEY</code>와{" "}
+                <code className="bg-white/10 px-1 rounded">COUPANG_SECRET_KEY</code>를
+                설정하면 실제 데이터가 조회됩니다.
               </div>
             )}
 
@@ -133,9 +131,9 @@ export default function CoupangResearch() {
               ))}
             </div>
 
-            {activeTab === "products" && <ProductList  products={results.products} />}
+            {activeTab === "products" && <ProductList   products={results.products} />}
             {activeTab === "strategy" && <StrategyPanel products={results.products} />}
-            {activeTab === "chart"    && <PriceChart   products={results.products} />}
+            {activeTab === "chart"    && <PriceChart    products={results.products} />}
           </>
         )}
 
@@ -153,3 +151,12 @@ export default function CoupangResearch() {
     </div>
   );
 }
+```
+
+기존 파일과 딱 한 줄만 달라요.
+```
+// 변경 전
+/api/coupang-search?keyword=...
+
+// 변경 후
+/api/coupang?keyword=...
