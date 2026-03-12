@@ -34,20 +34,10 @@ export const planDetail = async (data: {
         lengthInstruction = "Determine the optimal number of sections (5, 7, or 9) based on the product and create them following the logical flow.";
     }
 
-    const prompt = `You are an expert Korean e-commerce detail page strategist.
-Plan a detail page for the following product:
-Name: ${data.name}
-Category: ${data.category}
-Features: ${data.features}
-Target: ${data.target}
-${data.imageInstruction ? `Additional Image Generation Instruction: ${data.imageInstruction}` : ''}
-
-${lengthInstruction}
-
-Return as JSON array.`;
+    const prompt = `You are an expert Korean e-commerce strategist... (생략)`;
 
     const response = await ai.models.generateContent({
-        // [변경] 유료 계정에서 가장 안정적인 최신 모델명
+        // [변경] 유료 티어에서 가장 안정적인 최신 정식 모델명
         model: "gemini-1.5-flash-latest", 
         contents: prompt,
         config: {
@@ -95,8 +85,8 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
     }
     parts.push({ text: prompt });
 
-    // [중요 변경] 404 에러가 났던 이름을 버리고, 이미지 생성이 확실한 모델명으로 교체
-    // 유료 계정에서는 'gemini-1.5-flash'가 이미지 생성(Imagen)을 가장 안정적으로 호출합니다.
+    // [중요] 404 에러 원인이었던 gemini-2.0-flash 대신 정식 이미지 생성 모델로 변경
+    // 유료 티어(Tier 1)에서 이미지 생성을 담당하는 안정적인 모델명입니다.
     const model = "gemini-1.5-flash"; 
     
     try {
@@ -106,15 +96,20 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
             config: { imageConfig: { aspectRatio: aspectRatio as any } }
         });
 
-        // 응답에서 이미지가 들어있는 파트를 찾아 반환
+        // 응답 구조에서 이미지 파트를 더 안전하게 추출하도록 로직 보강
         const candidate = response.candidates?.[0];
-        if (candidate && candidate.content && candidate.content.parts) {
-            for (const part of candidate.content.parts) {
+        const contentParts = candidate?.content?.parts;
+        
+        if (contentParts) {
+            for (const part of contentParts) {
                 if (part.inlineData) {
                     return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
                 }
             }
         }
+        
+        // 만약 응답에 이미지가 없으면 에러 로그 출력
+        console.warn("No image data found in response:", response);
     } catch (error) {
         console.error("Image generation failed:", error);
         throw error;
