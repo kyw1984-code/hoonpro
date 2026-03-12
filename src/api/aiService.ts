@@ -11,11 +11,12 @@ const genAI = new GoogleGenerativeAI(getApiKey());
 
 export const removeBackground = async (image: string) => image;
 
+// ✅ 텍스트 생성 - gemini-2.0-flash 사용 (안정적)
 export const planDetail = async (data: any) => {
   try {
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash" 
-    }, { apiVersion: 'v1' });
+      model: "gemini-2.0-flash"
+    });
 
     const prompt = `You are an expert Korean e-commerce strategist. Plan a detail page for: ${data.name}. Return JSON array in Korean.`;
     
@@ -34,41 +35,55 @@ export const planDetail = async (data: any) => {
   }
 };
 
-export const generateImage = async (prompt: string, base64Images: string[] = [], aspectRatio: string = "9:16") => {
+// ✅ 이미지 생성 - gemini-2.0-flash-preview-image-generation 사용
+export const generateImage = async (
+  prompt: string, 
+  base64Images: string[] = [], 
+  aspectRatio: string = "9:16"
+) => {
   try {
-    // [수정] 이미지 생성 전용 모델인 imagen-3.0-generate-001 또는 gemini-1.5-flash 사용
-    // 유료 계정이시라면 imagen 모델을 직접 호출하는 것이 가장 좋습니다.
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash" 
-    }, { apiVersion: 'v1' });
+      model: "gemini-2.0-flash-preview-image-generation"
+    });
 
     const parts: any[] = [];
+
+    // 참조 이미지가 있으면 포함
     if (base64Images.length > 0) {
       for (const base64Image of base64Images) {
         const mimeType = base64Image.split(';')[0].split(':')[1] || 'image/png';
-        const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
+        const base64Data = base64Image.includes(',') 
+          ? base64Image.split(',')[1] 
+          : base64Image;
         parts.push({ inlineData: { data: base64Data, mimeType } });
       }
     }
-    parts.push({ text: `Generate a high-quality product image based on: ${prompt}. Aspect ratio should be ${aspectRatio}.` });
 
-    // [중요 수정] 에러를 일으킨 imageConfig 부분을 삭제하고 기본 요청으로 변경합니다.
+    parts.push({ 
+      text: `Generate a high-quality product image. ${prompt}. Aspect ratio: ${aspectRatio}.` 
+    });
+
     const result = await model.generateContent({
-      contents: [{ role: "user", parts }]
+      contents: [{ role: "user", parts }],
+      generationConfig: {
+        responseModalities: ["IMAGE", "TEXT"], // ✅ 이미지 응답 요청
+      } as any,
     });
 
     const response = result.response;
-    const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
-    
-    if (part && part.inlineData) {
-      return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+    const imagePart = response.candidates?.[0]?.content?.parts?.find(
+      (p: any) => p.inlineData
+    );
+
+    if (imagePart?.inlineData) {
+      return `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
     }
-    
-    // 만약 이미지가 바로 안 오고 텍스트 설명만 온다면, 
-    // 이는 모델이 이미지를 직접 생성하지 않고 설명만 한 것입니다.
-    console.warn("No inlineData found in response parts.");
+
+    console.warn("이미지 데이터가 응답에 없습니다.");
+    return undefined;
+
   } catch (error) {
     console.error("Image generation failed:", error);
+    return undefined;
   }
-  return undefined;
 };
