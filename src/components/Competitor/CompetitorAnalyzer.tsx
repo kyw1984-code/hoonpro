@@ -102,10 +102,10 @@ export const CompetitorAnalyzer: React.FC = () => {
     try {
       const competitorInfo = products.map((p, i) => `
 경쟁사 ${i + 1}: ${p.productName}
-- 판매가: ${p.price.toLocaleString()}원
-- 리뷰수: ${p.reviewCount.toLocaleString()}개
+- 판매가: ${(Number(p.price) || 0).toLocaleString()}원
+- 리뷰수: ${(Number(p.reviewCount) || 0).toLocaleString()}개
 - 평점: ${p.rating}점
-- 추정 판매수량: ${p.estimatedSales.toLocaleString()}개 (리뷰수 x10)
+- 추정 판매수량: ${(Number(p.estimatedSales) || 0).toLocaleString()}개 (리뷰수 x10)
 - 추정 매출: ${formatNumber(p.estimatedRevenue)}
 - 카테고리: ${p.categoryName}
       `.trim()).join('\n\n');
@@ -244,19 +244,19 @@ ${myInfo}
                       <div className="flex items-center gap-1 text-xs text-slate-500 mb-1">
                         <DollarSign className="w-3 h-3" /> 판매가
                       </div>
-                      <p className="font-bold text-slate-800">{p.price.toLocaleString()}원</p>
+                      <p className="font-bold text-slate-800">{(Number(p.price) || 0).toLocaleString()}원</p>
                     </div>
                     <div className="bg-slate-50 rounded-lg p-3">
                       <div className="flex items-center gap-1 text-xs text-slate-500 mb-1">
                         <Star className="w-3 h-3 text-yellow-400" /> 평점/리뷰
                       </div>
-                      <p className="font-bold text-slate-800">{p.rating}점 / {p.reviewCount.toLocaleString()}개</p>
+                      <p className="font-bold text-slate-800">{p.rating}점 / {(Number(p.reviewCount) || 0).toLocaleString()}개</p>
                     </div>
                     <div className="bg-blue-50 rounded-lg p-3">
                       <div className="flex items-center gap-1 text-xs text-blue-500 mb-1">
                         <ShoppingCart className="w-3 h-3" /> 추정 판매수량
                       </div>
-                      <p className="font-bold text-blue-700">{p.estimatedSales.toLocaleString()}개</p>
+                      <p className="font-bold text-blue-700">{(Number(p.estimatedSales) || 0).toLocaleString()}개</p>
                       <p className="text-xs text-blue-400">리뷰수 × 10</p>
                     </div>
                     <div className="bg-green-50 rounded-lg p-3">
