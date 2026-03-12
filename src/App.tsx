@@ -6,9 +6,10 @@ import React, { useState } from 'react';
 import { DetailPlanner } from './components/Detail/DetailPlanner';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
+import { ProductNameGenerator } from './components/ProductName/ProductNameGenerator';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Lock } from 'lucide-react';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, Lock } from 'lucide-react';
 
 const PASSWORD = '202603';
 
@@ -35,7 +36,6 @@ function PasswordGate({ onSuccess }: { onSuccess: () => void }) {
         </div>
         <h1 className="text-xl font-bold text-slate-900 mb-1">쇼크트리 훈프로</h1>
         <p className="text-sm text-slate-500 mb-8">접속하려면 비밀번호를 입력하세요.</p>
-
         <input
           type="password"
           value={input}
@@ -43,17 +43,13 @@ function PasswordGate({ onSuccess }: { onSuccess: () => void }) {
           onKeyDown={e => e.key === 'Enter' && handleSubmit()}
           placeholder="비밀번호 입력"
           className={`w-full p-3 border rounded-xl text-center text-lg tracking-widest outline-none focus:ring-2 transition-all ${
-            error 
-              ? 'border-red-400 ring-2 ring-red-200 bg-red-50' 
+            error
+              ? 'border-red-400 ring-2 ring-red-200 bg-red-50'
               : 'border-slate-300 focus:ring-blue-500'
           }`}
           autoFocus
         />
-
-        {error && (
-          <p className="text-red-500 text-sm mt-2">비밀번호가 틀렸습니다.</p>
-        )}
-
+        {error && <p className="text-red-500 text-sm mt-2">비밀번호가 틀렸습니다.</p>}
         <button
           onClick={handleSubmit}
           className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition-colors"
@@ -69,7 +65,7 @@ export default function App() {
   const [authed, setAuthed] = useState(
     sessionStorage.getItem('auth') === 'true'
   );
-  const [activeTab, setActiveTab] = useState<'detail' | 'thumbnail' | 'analyzer'>('thumbnail');
+  const [activeTab, setActiveTab] = useState<'thumbnail' | 'detail' | 'analyzer' | 'productname'>('thumbnail');
 
   if (!authed) {
     return <PasswordGate onSuccess={() => setAuthed(true)} />;
@@ -87,13 +83,13 @@ export default function App() {
               </div>
               <h1 className="text-xl font-bold text-slate-900 tracking-tight">쇼크트리 훈프로 AI 자동화 프로그램</h1>
             </div>
-            
+
             <div className="flex bg-slate-100 p-1 rounded-xl">
               <button
                 onClick={() => setActiveTab('thumbnail')}
                 className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'thumbnail' 
-                    ? 'bg-white text-blue-700 shadow-sm' 
+                  activeTab === 'thumbnail'
+                    ? 'bg-white text-blue-700 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -103,8 +99,8 @@ export default function App() {
               <button
                 onClick={() => setActiveTab('detail')}
                 className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'detail' 
-                    ? 'bg-white text-blue-700 shadow-sm' 
+                  activeTab === 'detail'
+                    ? 'bg-white text-blue-700 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -114,13 +110,24 @@ export default function App() {
               <button
                 onClick={() => setActiveTab('analyzer')}
                 className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'analyzer' 
-                    ? 'bg-white text-blue-700 shadow-sm' 
+                  activeTab === 'analyzer'
+                    ? 'bg-white text-blue-700 shadow-sm'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 <BarChart3 className="w-4 h-4 mr-2" />
                 광고 성과 분석
+              </button>
+              <button
+                onClick={() => setActiveTab('productname')}
+                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'productname'
+                    ? 'bg-white text-orange-600 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Tag className="w-4 h-4 mr-2" />
+                상품명 제조기
               </button>
             </div>
           </div>
@@ -128,9 +135,10 @@ export default function App() {
 
         {/* Main Content */}
         <main className={`flex-grow ${activeTab === 'analyzer' ? '' : 'py-8'}`}>
-          {activeTab === 'detail' && <DetailPlanner />}
           {activeTab === 'thumbnail' && <ThumbnailGenerator />}
+          {activeTab === 'detail' && <DetailPlanner />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
+          {activeTab === 'productname' && <ProductNameGenerator />}
         </main>
 
         <Footer />
