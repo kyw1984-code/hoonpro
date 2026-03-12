@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import {
-  Loader2, TrendingUp, ShoppingCart, Plus, Trash2, BarChart2, Wand2, Link, RefreshCw
+  Loader2, TrendingUp, ShoppingCart, Plus, Trash2,
+  BarChart2, Wand2, Sparkles
 } from 'lucide-react';
 
 const getApiKey = () =>
@@ -13,7 +14,6 @@ const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 interface CompetitorData {
   id: string;
-  url: string;
   productName: string;
   price: number;
   reviewCount: number;
@@ -22,7 +22,7 @@ interface CompetitorData {
   estimatedSales: number;
   estimatedRevenue: number;
   loading: boolean;
-  error: string;
+  estimated: boolean; // AI 추정 여부
 }
 
 function formatNumber(n: number): string {
@@ -33,7 +33,6 @@ function formatNumber(n: number): string {
 
 const emptyCompetitor = (): CompetitorData => ({
   id: Math.random().toString(36).substring(7),
-  url: '',
   productName: '',
   price: 0,
   reviewCount: 0,
@@ -42,7 +41,7 @@ const emptyCompetitor = (): CompetitorData => ({
   estimatedSales: 0,
   estimatedRevenue: 0,
   loading: false,
-  error: '',
+  estimated: false,
 });
 
 export const CompetitorAnalyzer: React.FC = () => {
@@ -55,63 +54,76 @@ export const CompetitorAnalyzer: React.FC = () => {
   const addCompetitor = () => setCompetitors(prev => [...prev, emptyCompetitor()]);
   const removeCompetitor = (id: string) => setCompetitors(prev => prev.filter(c => c.id !== id));
 
-  const updateUrl = (id: string, url: string) => {
-    setCompetitors(prev => prev.map(c => c.id === id ? { ...c, url } : c));
+  const updateName = (id: string, productName: string) => {
+    setCompetitors(prev => prev.map(c => c.id === id ? { ...c, productName, estimated: false } : c));
   };
 
-  const fetchCompetitor = async (id: string) => {
+  // AI로 경쟁사 데이터 추정
+  const estimateCompetitor = async (id: string) => {
     const competitor = competitors.find(c => c.id === id);
-    if (!competitor?.url.trim()) return;
+    if (!competitor?.productName.trim()) return;
 
-    setCompetitors(prev => prev.map(c => c.id === id ? { ...c, loading: true, error: '' } : c));
+    setCompetitors(prev => prev.map(c => c.id === id ? { ...c, loading: true } : c));
 
     try {
-      const res = await fetch('/api/coupang', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: competitor.url }),
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        config: { responseMimeType: 'application/json' },
+        contents: `
+당신은 한국 쿠팡 이커머스 전문가입니다.
+아래 상품명을 보고 쿠팡에서 해당 상품의 일반적인 시장 데이터를 추정해주세요.
+
+상품명: ${competitor.productName}
+
+반드시 아래 JSON 형식으로만 반환하세요:
+{
+  "price": 예상 판매가 (숫자만, 원 단위),
+  "reviewCount": 중간 정도 판매량 상품의 예상 리뷰수 (숫자만),
+  "rating": 예상 평점 (숫자, 소수점 1자리),
+  "categoryName": "카테고리명",
+  "priceRange": "최저가~최고가 범위 (예: 15,000~35,000원)",
+  "marketComment": "해당 카테고리 경쟁 강도와 시장 특성 한 줄 설명"
+}
+        `.trim(),
       });
 
-      const data = await res.json();
+      const text = response.text ?? '{}';
+      const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
 
-      if (data.error) {
-        setCompetitors(prev => prev.map(c =>
-          c.id === id ? { ...c, loading: false, error: data.message || '조회 실패' } : c
-        ));
-        return;
-      }
+      const reviewCount = Number(parsed.reviewCount) || 0;
+      const price = Number(parsed.price) || 0;
 
       setCompetitors(prev => prev.map(c =>
         c.id === id ? {
           ...c,
           loading: false,
-          error: '',
-          productName: data.productName,
-          price: data.price,
-          reviewCount: data.reviewCount,
-          rating: data.rating,
-          categoryName: data.categoryName,
-          estimatedSales: data.estimatedSales,
-          estimatedRevenue: data.estimatedRevenue,
-        } : c
+          estimated: true,
+          price,
+          reviewCount,
+          rating: Number(parsed.rating) || 0,
+          categoryName: parsed.categoryName || '',
+          estimatedSales: reviewCount * 10,
+          estimatedRevenue: reviewCount * 10 * price,
+          priceRange: parsed.priceRange,
+          marketComment: parsed.marketComment,
+        } as any : c
       ));
-    } catch (e: any) {
+    } catch (e) {
       setCompetitors(prev => prev.map(c =>
-        c.id === id ? { ...c, loading: false, error: '네트워크 오류' } : c
+        c.id === id ? { ...c, loading: false } : c
       ));
     }
   };
 
-  const fetchAll = async () => {
-    const urlCompetitors = competitors.filter(c => c.url.trim());
-    if (urlCompetitors.length === 0) return;
-    await Promise.all(urlCompetitors.map(c => fetchCompetitor(c.id)));
+  const estimateAll = async () => {
+    const toEstimate = competitors.filter(c => c.productName.trim() && !c.estimated);
+    await Promise.all(toEstimate.map(c => estimateCompetitor(c.id)));
   };
 
   const handleAnalyze = async () => {
     const valid = competitors.filter(c => c.productName.trim());
     if (valid.length === 0) {
-      setGlobalError('먼저 경쟁사 URL을 입력하고 조회해주세요.');
+      setGlobalError('최소 1개 이상의 경쟁사 상품명을 입력해주세요.');
       return;
     }
     setGlobalError('');
@@ -121,12 +133,13 @@ export const CompetitorAnalyzer: React.FC = () => {
     try {
       const competitorInfo = valid.map((c, i) => `
 경쟁사 ${i + 1}: ${c.productName}
-- 판매가: ${c.price.toLocaleString()}원
+- 판매가: ${c.price.toLocaleString()}원 ${(c as any).priceRange ? `(시장 범위: ${(c as any).priceRange})` : ''}
 - 리뷰수: ${c.reviewCount.toLocaleString()}개
 - 평점: ${c.rating}점
 - 카테고리: ${c.categoryName}
-- 추정 판매수량: ${c.estimatedSales.toLocaleString()}개 (리뷰수 × 10)
+- 추정 판매수량: ${c.estimatedSales.toLocaleString()}개
 - 추정 매출: ${formatNumber(c.estimatedRevenue)}
+${(c as any).marketComment ? `- 시장 특성: ${(c as any).marketComment}` : ''}
       `.trim()).join('\n\n');
 
       const myInfo = myProduct.name
@@ -165,19 +178,22 @@ ${myInfo}
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800">🔍 경쟁사 분석기</h2>
-        <p className="text-slate-500 mt-1">쿠팡 상품 링크를 입력하면 AI가 자동으로 데이터를 분석해드려요.</p>
+        <p className="text-slate-500 mt-1">경쟁사 상품명만 입력하면 AI가 시장 데이터를 추정하고 전략을 분석해드려요.</p>
       </div>
 
-      {/* 경쟁사 URL 입력 */}
+      {/* 경쟁사 입력 */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold text-slate-700">1. 경쟁사 상품 링크 입력</h3>
+          <div>
+            <h3 className="text-lg font-bold text-slate-700">1. 경쟁사 상품명 입력</h3>
+            <p className="text-sm text-slate-400 mt-0.5">쿠팡에서 경쟁사 상품명을 복사해서 붙여넣으세요.</p>
+          </div>
           <button
-            onClick={fetchAll}
+            onClick={estimateAll}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
           >
-            <RefreshCw className="w-4 h-4" />
-            전체 조회
+            <Sparkles className="w-4 h-4" />
+            전체 AI 추정
           </button>
         </div>
 
@@ -186,23 +202,23 @@ ${myInfo}
             <div key={c.id} className="space-y-2">
               <div className="flex gap-2">
                 <div className="flex items-center gap-2 flex-1 border border-slate-300 rounded-xl px-3 focus-within:ring-2 focus-within:ring-blue-500">
-                  <Link className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span className="text-xs font-bold text-blue-500 shrink-0">{i + 1}</span>
                   <input
                     type="text"
-                    value={c.url}
-                    onChange={e => updateUrl(c.id, e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && fetchCompetitor(c.id)}
-                    placeholder={`경쟁사 ${i + 1} 쿠팡 링크 입력 후 엔터`}
+                    value={c.productName}
+                    onChange={e => updateName(c.id, e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && estimateCompetitor(c.id)}
+                    placeholder="쿠팡 경쟁사 상품명 입력 후 엔터"
                     className="flex-1 py-3 outline-none text-sm"
                   />
                   {c.loading && <Loader2 className="w-4 h-4 animate-spin text-blue-500 shrink-0" />}
                 </div>
                 <button
-                  onClick={() => fetchCompetitor(c.id)}
-                  disabled={c.loading || !c.url.trim()}
+                  onClick={() => estimateCompetitor(c.id)}
+                  disabled={c.loading || !c.productName.trim()}
                   className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-xl text-sm font-medium text-slate-700 transition-colors shrink-0"
                 >
-                  조회
+                  AI 추정
                 </button>
                 {competitors.length > 1 && (
                   <button onClick={() => removeCompetitor(c.id)} className="p-2 text-red-400 hover:text-red-600 transition-colors">
@@ -211,22 +227,23 @@ ${myInfo}
                 )}
               </div>
 
-              {/* 오류 메시지 */}
-              {c.error && (
-                <p className="text-red-500 text-xs ml-2">{c.error} — 직접 입력하시겠어요?</p>
-              )}
-
-              {/* 조회 결과 */}
-              {c.productName && (
-                <div className="ml-2 border border-slate-100 bg-slate-50 rounded-xl p-4">
-                  <p className="font-medium text-slate-800 text-sm mb-3">{c.productName}</p>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {/* AI 추정 결과 */}
+              {c.estimated && c.price > 0 && (
+                <div className="ml-2 border border-blue-100 bg-blue-50/50 rounded-xl p-4">
+                  <div className="flex items-center gap-1 mb-3">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                    <span className="text-xs text-blue-500 font-medium">AI 추정 데이터</span>
+                    {(c as any).priceRange && (
+                      <span className="text-xs text-slate-400 ml-2">시장 가격대: {(c as any).priceRange}</span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
                     <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
-                      <p className="text-xs text-slate-400">판매가</p>
+                      <p className="text-xs text-slate-400">추정 판매가</p>
                       <p className="font-bold text-slate-700 text-sm">{c.price.toLocaleString()}원</p>
                     </div>
                     <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
-                      <p className="text-xs text-slate-400">리뷰/평점</p>
+                      <p className="text-xs text-slate-400">추정 리뷰/평점</p>
                       <p className="font-bold text-slate-700 text-sm">{c.reviewCount.toLocaleString()}개 / {c.rating}점</p>
                     </div>
                     <div className="bg-blue-50 rounded-lg p-2 text-center border border-blue-100">
@@ -238,6 +255,9 @@ ${myInfo}
                       <p className="font-bold text-green-700 text-sm">{formatNumber(c.estimatedRevenue)}</p>
                     </div>
                   </div>
+                  {(c as any).marketComment && (
+                    <p className="text-xs text-slate-500 mt-1">💡 {(c as any).marketComment}</p>
+                  )}
                 </div>
               )}
             </div>
