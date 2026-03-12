@@ -8,10 +8,72 @@ import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
-import { LayoutTemplate, Image as ImageIcon, BarChart3 } from 'lucide-react';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Lock } from 'lucide-react';
+
+const PASSWORD = '202603';
+
+function PasswordGate({ onSuccess }: { onSuccess: () => void }) {
+  const [input, setInput] = useState('');
+  const [error, setError] = useState(false);
+
+  const handleSubmit = () => {
+    if (input === PASSWORD) {
+      sessionStorage.setItem('auth', 'true');
+      onSuccess();
+    } else {
+      setError(true);
+      setInput('');
+      setTimeout(() => setError(false), 2000);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-10 w-full max-w-sm flex flex-col items-center">
+        <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center mb-4">
+          <Lock className="w-7 h-7 text-white" />
+        </div>
+        <h1 className="text-xl font-bold text-slate-900 mb-1">쇼크트리 훈프로</h1>
+        <p className="text-sm text-slate-500 mb-8">접속하려면 비밀번호를 입력하세요.</p>
+
+        <input
+          type="password"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+          placeholder="비밀번호 입력"
+          className={`w-full p-3 border rounded-xl text-center text-lg tracking-widest outline-none focus:ring-2 transition-all ${
+            error 
+              ? 'border-red-400 ring-2 ring-red-200 bg-red-50' 
+              : 'border-slate-300 focus:ring-blue-500'
+          }`}
+          autoFocus
+        />
+
+        {error && (
+          <p className="text-red-500 text-sm mt-2">비밀번호가 틀렸습니다.</p>
+        )}
+
+        <button
+          onClick={handleSubmit}
+          className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition-colors"
+        >
+          입장하기
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
+  const [authed, setAuthed] = useState(
+    sessionStorage.getItem('auth') === 'true'
+  );
   const [activeTab, setActiveTab] = useState<'detail' | 'thumbnail' | 'analyzer'>('thumbnail');
+
+  if (!authed) {
+    return <PasswordGate onSuccess={() => setAuthed(true)} />;
+  }
 
   return (
     <ApiKeyCheck>
@@ -27,7 +89,6 @@ export default function App() {
             </div>
             
             <div className="flex bg-slate-100 p-1 rounded-xl">
-              {/* ✅ 순서 변경: 썸네일 → 상세페이지 → 광고성과 */}
               <button
                 onClick={() => setActiveTab('thumbnail')}
                 className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
