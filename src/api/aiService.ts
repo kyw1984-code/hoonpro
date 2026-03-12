@@ -1,6 +1,5 @@
 /// <reference types="vite/client" />
 import { GoogleGenAI, Type } from "@google/genai";
-import axios from "axios";
 
 const getAiInstance = () => {
     const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || 
@@ -9,39 +8,29 @@ const getAiInstance = () => {
     return new GoogleGenAI({ apiKey: apiKey as string });
 };
 
-// 배경 제거 건너뛰기
 export const removeBackground = async (base64Image: string): Promise<string> => {
     return base64Image;
 };
 
-export const planDetail = async (data: {
-    name: string;
-    category: string;
-    features: string;
-    target: string;
-    imageInstruction?: string;
-    length: string | number;
-}) => {
-    const genAI = getAiInstance();
-    // models/ 접두사를 생략하고 모델명만 전달
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+export const planDetail = async (data: any) => {
+    const ai = getAiInstance();
     
-    let lengthInstruction = "";
-    if (data.length === 5) lengthInstruction = "Create exactly 5 sections: Hook -> Solution -> Clarity -> Proof -> Service.";
-    else if (data.length === 7) lengthInstruction = "Create exactly 7 sections: Hook -> Solution -> Clarity -> Proof -> Detail -> Service -> Risk Reversal.";
-    else if (data.length === 9) lengthInstruction = "Create exactly 9 sections: Hook -> Solution -> Clarity -> Proof -> Detail -> Brand Story -> Comparison -> Service -> Risk Reversal.";
-    else lengthInstruction = "Determine the optimal number of sections.";
-
+    // SDK 버전에 따라 ai.models 가 없을 수 있으므로 안전하게 호출
+    const modelName = "gemini-1.5-flash";
+    
     const prompt = `You are an expert Korean e-commerce strategist. Plan a detail page for: ${data.name}. Return JSON array.`;
 
     try {
-        const result = await model.generateContent({
+        // 구형 SDK 방식인 ai.models.generateContent 사용
+        const response = await (ai as any).models.generateContent({
+            model: modelName,
             contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: {
+            config: {
                 responseMimeType: "application/json",
             }
         });
-        const text = result.response.text();
+
+        const text = response.text;
         const parsed = JSON.parse(text);
         return parsed.map((item: any) => ({
             ...item,
@@ -53,13 +42,10 @@ export const planDetail = async (data: {
     }
 };
 
-export const generateImage = async (prompt: string, base64Images: string[] = [], aspectRatio: string = "9:16"): Promise<string | undefined> => {
-    const genAI = getAiInstance();
-    
-    // [핵심 수정] 유료 티어에서 가장 안정적인 모델 호출 방식
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
+export const generateImage = async (prompt: string, base64Images: string[] = [], aspectRatio: string = "9:16") => {
+    const ai = getAiInstance();
     const parts: any[] = [];
+    
     if (base64Images.length > 0) {
         for (const base64Image of base64Images) {
             const mimeType = base64Image.split(';')[0].split(':')[1] || 'image/png';
@@ -70,16 +56,15 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
     parts.push({ text: prompt });
 
     try {
-        const result = await model.generateContent({
+        // [수정] TypeError를 피하기 위해 가장 호환성이 높은 호출 방식 사용
+        const response = await (ai as any).models.generateContent({
+            model: "gemini-1.5-flash",
             contents: [{ role: "user", parts }],
-            // 이미지 생성 시 필요한 설정 (SDK 버전에 따라 조절)
-            generationConfig: {
-                // @ts-ignore
+            config: {
                 imageConfig: { aspectRatio }
             }
         });
 
-        const response = result.response;
         if (response.candidates?.[0]?.content?.parts) {
             for (const part of response.candidates[0].content.parts) {
                 if (part.inlineData) {
@@ -87,8 +72,6 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
                 }
             }
         }
-        
-        // 만약 여기서도 404가 난다면 모델명을 "gemini-1.5-pro"로 시도해 보세요.
     } catch (error) {
         console.error("Image generation failed:", error);
         throw error;
