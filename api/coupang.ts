@@ -52,31 +52,11 @@ export default async function handler(req: any, res: any) {
     });
 
     const data = await response.json();
-    console.log('Coupang raw response:', JSON.stringify(data));
 
-    // 응답 구조 유연하게 처리
-    const product = data?.data ?? data?.product ?? data ?? {};
-
-    // ✅ 모든 필드에 기본값 보장
-    const reviewCount = Number(product.reviewCount ?? product.review_count ?? 0);
-    const price = Number(product.salePrice ?? product.sale_price ?? product.productPrice ?? product.originalPrice ?? 0);
-    const rating = Number(product.rating ?? product.totalScore ?? 0);
-
-    return res.status(200).json({
-      productId: String(product.productId ?? product.id ?? productId),
-      productName: String(product.productName ?? product.name ?? '상품명 없음'),
-      price,
-      reviewCount,
-      rating,
-      categoryName: String(product.categoryName ?? product.category ?? ''),
-      imageUrl: String(product.mainImageUrl ?? product.imageUrl ?? product.productImage ?? ''),
-      productUrl: `https://www.coupang.com/vp/products/${productId}`,
-      estimatedSales: reviewCount * 10,
-      estimatedRevenue: reviewCount * 10 * price,
-    });
+    // ✅ 임시: 실제 API 응답 구조 그대로 반환해서 확인
+    return res.status(200).json({ _debug: data });
 
   } catch (error: any) {
-    console.error('Server error:', error);
     return res.status(500).json({ error: error.message });
   }
 }
