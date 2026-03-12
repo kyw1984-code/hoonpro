@@ -7,9 +7,10 @@ import { DetailPlanner } from './components/Detail/DetailPlanner';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { ProductNameGenerator } from './components/ProductName/ProductNameGenerator';
+import { CompetitorAnalyzer } from './components/Competitor/CompetitorAnalyzer';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, Lock } from 'lucide-react';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, Search, Lock } from 'lucide-react';
 
 const PASSWORD = '202603';
 
@@ -43,9 +44,7 @@ function PasswordGate({ onSuccess }: { onSuccess: () => void }) {
           onKeyDown={e => e.key === 'Enter' && handleSubmit()}
           placeholder="비밀번호 입력"
           className={`w-full p-3 border rounded-xl text-center text-lg tracking-widest outline-none focus:ring-2 transition-all ${
-            error
-              ? 'border-red-400 ring-2 ring-red-200 bg-red-50'
-              : 'border-slate-300 focus:ring-blue-500'
+            error ? 'border-red-400 ring-2 ring-red-200 bg-red-50' : 'border-slate-300 focus:ring-blue-500'
           }`}
           autoFocus
         />
@@ -61,20 +60,25 @@ function PasswordGate({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-export default function App() {
-  const [authed, setAuthed] = useState(
-    sessionStorage.getItem('auth') === 'true'
-  );
-  const [activeTab, setActiveTab] = useState<'thumbnail' | 'detail' | 'analyzer' | 'productname'>('thumbnail');
+type Tab = 'thumbnail' | 'detail' | 'analyzer' | 'productname' | 'competitor';
 
-  if (!authed) {
-    return <PasswordGate onSuccess={() => setAuthed(true)} />;
-  }
+export default function App() {
+  const [authed, setAuthed] = useState(sessionStorage.getItem('auth') === 'true');
+  const [activeTab, setActiveTab] = useState<Tab>('thumbnail');
+
+  if (!authed) return <PasswordGate onSuccess={() => setAuthed(true)} />;
+
+  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: 'thumbnail', label: '썸네일 제작', icon: <ImageIcon className="w-4 h-4 mr-2" /> },
+    { id: 'detail', label: '상세페이지 제작', icon: <LayoutTemplate className="w-4 h-4 mr-2" /> },
+    { id: 'analyzer', label: '광고 성과 분석', icon: <BarChart3 className="w-4 h-4 mr-2" /> },
+    { id: 'productname', label: '상품명 제조기', icon: <Tag className="w-4 h-4 mr-2" /> },
+    { id: 'competitor', label: '경쟁사 분석', icon: <Search className="w-4 h-4 mr-2" /> },
+  ];
 
   return (
     <ApiKeyCheck>
       <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-        {/* Header */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -83,62 +87,28 @@ export default function App() {
               </div>
               <h1 className="text-xl font-bold text-slate-900 tracking-tight">쇼크트리 훈프로 AI 자동화 프로그램</h1>
             </div>
-
             <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button
-                onClick={() => setActiveTab('thumbnail')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'thumbnail'
-                    ? 'bg-white text-blue-700 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <ImageIcon className="w-4 h-4 mr-2" />
-                썸네일 제작
-              </button>
-              <button
-                onClick={() => setActiveTab('detail')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'detail'
-                    ? 'bg-white text-blue-700 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <LayoutTemplate className="w-4 h-4 mr-2" />
-                상세페이지 제작
-              </button>
-              <button
-                onClick={() => setActiveTab('analyzer')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'analyzer'
-                    ? 'bg-white text-blue-700 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <BarChart3 className="w-4 h-4 mr-2" />
-                광고 성과 분석
-              </button>
-              <button
-                onClick={() => setActiveTab('productname')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'productname'
-                    ? 'bg-white text-orange-600 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Tag className="w-4 h-4 mr-2" />
-                상품명 제조기
-              </button>
+              {tabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    activeTab === tab.id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  {tab.icon}{tab.label}
+                </button>
+              ))}
             </div>
           </div>
         </header>
 
-        {/* Main Content */}
         <main className={`flex-grow ${activeTab === 'analyzer' ? '' : 'py-8'}`}>
           {activeTab === 'thumbnail' && <ThumbnailGenerator />}
           {activeTab === 'detail' && <DetailPlanner />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
           {activeTab === 'productname' && <ProductNameGenerator />}
+          {activeTab === 'competitor' && <CompetitorAnalyzer />}
         </main>
 
         <Footer />
