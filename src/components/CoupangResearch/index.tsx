@@ -61,7 +61,7 @@ export default function CoupangResearch() {
               쿠
             </div>
             <div>
-              <p className="text-sm font-bold tracking-tight">쿠팡 셀러 리서치</p>
+              <p className="text-sm font-bold tracking-tight">쿠팡 AI 시장분석기</p>
               <p className="text-[10px] text-neutral-600 mt-0.5">
                 Powered by Coupang Partners API
               </p>
