@@ -29,8 +29,9 @@ export default function CoupangResearch() {
     setResults(null);
 
     try {
+      const encodedKeyword = encodeURIComponent(keyword);
       const res = await fetch(
-        `/api/coupang?keyword=${encodeURIComponent(keyword)}&limit=10`
+        "/api/coupang-search?keyword=" + encodedKeyword + "&limit=10"
       );
 
       if (!res.ok) {
@@ -53,12 +54,10 @@ export default function CoupangResearch() {
       className="min-h-screen bg-[#0a0a0f] text-neutral-100"
       style={{ fontFamily: "'DM Sans', 'Apple SD Gothic Neo', sans-serif" }}
     >
-      {/* 헤더 */}
       <header className="border-b border-white/[0.06] bg-white/[0.02]">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-600 to-red-400
-                            flex items-center justify-center text-lg font-extrabold">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-600 to-red-400 flex items-center justify-center text-lg font-extrabold">
               쿠
             </div>
             <div>
@@ -68,8 +67,7 @@ export default function CoupangResearch() {
               </p>
             </div>
           </div>
-          <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full
-                           bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+          <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
             BETA
           </span>
         </div>
@@ -83,15 +81,12 @@ export default function CoupangResearch() {
           loading={loading}
         />
 
-        {/* 오류 */}
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3
-                          mb-5 text-sm text-red-300">
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 mb-5 text-sm text-red-300">
             {error}
           </div>
         )}
 
-        {/* 로딩 */}
         {loading && (
           <div className="text-center py-20">
             <div className="text-4xl mb-4 animate-spin inline-block">⏳</div>
@@ -99,12 +94,10 @@ export default function CoupangResearch() {
           </div>
         )}
 
-        {/* 결과 */}
         {results && !loading && (
           <>
             {results.isMock && (
-              <div className="bg-amber-500/[0.08] border border-amber-500/20 rounded-lg
-                              px-4 py-2.5 mb-5 text-xs text-amber-400">
+              <div className="bg-amber-500/[0.08] border border-amber-500/20 rounded-lg px-4 py-2.5 mb-5 text-xs text-amber-400">
                 📌 데모 모드 — 샘플 데이터입니다. Vercel 환경변수에{" "}
                 <code className="bg-white/10 px-1 rounded">COUPANG_ACCESS_KEY</code>와{" "}
                 <code className="bg-white/10 px-1 rounded">COUPANG_SECRET_KEY</code>를
@@ -114,17 +107,17 @@ export default function CoupangResearch() {
 
             <SummaryCards products={results.products} />
 
-            {/* 탭 */}
             <div className="flex gap-1.5 mb-5">
               {TABS.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => setActiveTab(t.id)}
-                  className={`px-4 py-2 rounded-lg text-xs font-semibold border transition
-                    ${activeTab === t.id
+                  className={
+                    "px-4 py-2 rounded-lg text-xs font-semibold border transition " +
+                    (activeTab === t.id
                       ? "bg-red-500/20 text-red-400 border-red-500/40"
-                      : "bg-white/[0.04] text-neutral-500 border-white/[0.06] hover:text-neutral-300"
-                    }`}
+                      : "bg-white/[0.04] text-neutral-500 border-white/[0.06] hover:text-neutral-300")
+                  }
                 >
                   {t.label}
                 </button>
@@ -137,7 +130,6 @@ export default function CoupangResearch() {
           </>
         )}
 
-        {/* 빈 상태 */}
         {!results && !loading && (
           <div className="text-center py-20 text-neutral-700">
             <div className="text-5xl mb-4 opacity-30">🔍</div>
@@ -151,12 +143,3 @@ export default function CoupangResearch() {
     </div>
   );
 }
-```
-
-기존 파일과 딱 한 줄만 달라요.
-```
-// 변경 전
-/api/coupang-search?keyword=...
-
-// 변경 후
-/api/coupang?keyword=...
