@@ -1,11 +1,12 @@
 /// <reference types="vite/client" />
-// [수정] 라이브러리 경로를 @google/generative-ai 로 변경
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const getAiInstance = () => {
     const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || 
                    import.meta.env.VITE_GEMINI_API_KEY || 
                    import.meta.env.GEMINI_API_KEY;
+    
+    // [핵심] 유료 계정은 v1 정식 버전을 사용하는 것이 가장 안전합니다.
     return new GoogleGenerativeAI(apiKey as string);
 };
 
@@ -15,18 +16,16 @@ export const removeBackground = async (base64Image: string): Promise<string> => 
 
 export const planDetail = async (data: any) => {
     const genAI = getAiInstance();
-    // 유료 티어에서 가장 안정적인 모델
+    // [수정] v1 버전을 명시하여 모델을 가져옵니다.
     const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        generationConfig: { responseMimeType: "application/json" }
-    });
+        model: "gemini-1.5-flash" 
+    }, { apiVersion: 'v1' });
 
-    const prompt = `You are an expert Korean e-commerce strategist. Plan a detail page for: ${data.name}. Return JSON array.`;
+    const prompt = `You are an expert Korean e-commerce strategist. Plan a detail page for: ${data.name}. Return JSON array in Korean.`;
 
     try {
         const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
+        const text = result.response.text();
         return JSON.parse(text).map((item: any) => ({
             ...item,
             id: Math.random().toString(36).substring(7)
@@ -39,7 +38,10 @@ export const planDetail = async (data: any) => {
 
 export const generateImage = async (prompt: string, base64Images: string[] = [], aspectRatio: string = "9:16") => {
     const genAI = getAiInstance();
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // [수정] 이미지 생성도 v1 경로를 통해 호출합니다.
+    const model = genAI.getGenerativeModel({ 
+        model: "gemini-1.5-flash" 
+    }, { apiVersion: 'v1' });
 
     const parts: any[] = [];
     if (base64Images.length > 0) {
@@ -54,12 +56,14 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
     try {
         const result = await model.generateContent({
             contents: [{ role: "user", parts }],
-            // 유료 티어 이미지 생성 설정
             // @ts-ignore
-            generationConfig: { imageConfig: { aspectRatio } }
+            generationConfig: { 
+                // 유료 계정 이미지 생성을 위한 설정
+                imageConfig: { aspectRatio } 
+            }
         });
 
-        const response = await result.response;
+        const response = result.response;
         if (response.candidates?.[0]?.content?.parts) {
             for (const part of response.candidates[0].content.parts) {
                 if (part.inlineData) {
@@ -67,8 +71,9 @@ export const generateImage = async (prompt: string, base64Images: string[] = [],
                 }
             }
         }
-    } catch (error) {
+    } catch (error: any) {
         console.error("Image generation failed:", error);
+        // 만약 v1에서도 안된다면 계정의 결제 프로젝트 연결 상태를 다시 점검해야 합니다.
         throw error;
     }
     return undefined;
