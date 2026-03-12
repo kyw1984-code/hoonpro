@@ -2,7 +2,6 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-
 import React, { useState } from 'react';
 import { DetailPlanner } from './components/Detail/DetailPlanner';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
@@ -12,7 +11,7 @@ import { Footer } from './components/Layout/Footer';
 import { LayoutTemplate, Image as ImageIcon, BarChart3 } from 'lucide-react';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'detail' | 'thumbnail' | 'analyzer'>('detail');
+  const [activeTab, setActiveTab] = useState<'detail' | 'thumbnail' | 'analyzer'>('thumbnail');
 
   return (
     <ApiKeyCheck>
@@ -28,17 +27,7 @@ export default function App() {
             </div>
             
             <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button
-                onClick={() => setActiveTab('detail')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'detail' 
-                    ? 'bg-white text-blue-700 shadow-sm' 
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <LayoutTemplate className="w-4 h-4 mr-2" />
-                상세페이지 제작
-              </button>
+              {/* ✅ 순서 변경: 썸네일 → 상세페이지 → 광고성과 */}
               <button
                 onClick={() => setActiveTab('thumbnail')}
                 className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
@@ -49,6 +38,17 @@ export default function App() {
               >
                 <ImageIcon className="w-4 h-4 mr-2" />
                 썸네일 제작
+              </button>
+              <button
+                onClick={() => setActiveTab('detail')}
+                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'detail' 
+                    ? 'bg-white text-blue-700 shadow-sm' 
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <LayoutTemplate className="w-4 h-4 mr-2" />
+                상세페이지 제작
               </button>
               <button
                 onClick={() => setActiveTab('analyzer')}
