@@ -28,7 +28,7 @@ export const planDetail = async (data: any) => {
 상품명: ${data.name}
 ${data.description ? `상품 설명: ${data.description}` : ""}
 
-반드시 아래 형식의 JSON 배열만 반환하세요. 설명 텍스트 없이 JSON만 반환하세요.
+반드시 아래 형식의 JSON 배열만 반환하세요. 객체로 감싸지 말고 배열 [ ] 로 시작해야 합니다.
 [
   {
     "section": "섹션명 (예: 메인 비주얼, 제품 특징, 사용 방법 등)",
@@ -44,7 +44,21 @@ ${data.description ? `상품 설명: ${data.description}` : ""}
     const cleanJson = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleanJson);
 
-    return parsed.map((item: any) => ({
+    // ✅ 배열이 아닌 경우 방어 처리
+    let arr: any[] = [];
+    if (Array.isArray(parsed)) {
+      arr = parsed;
+    } else if (parsed && typeof parsed === "object") {
+      // { sections: [...] } 또는 { data: [...] } 형태로 올 경우 대응
+      const firstArray = Object.values(parsed).find((v) => Array.isArray(v));
+      if (firstArray) {
+        arr = firstArray as any[];
+      } else {
+        arr = [parsed]; // 단일 객체면 배열로 감싸기
+      }
+    }
+
+    return arr.map((item: any) => ({
       ...item,
       id: Math.random().toString(36).substring(7),
     }));
