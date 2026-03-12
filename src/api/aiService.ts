@@ -35,7 +35,7 @@ export const planDetail = async (data: any) => {
   }
 };
 
-// ✅ 이미지 생성
+// ✅ 이미지 생성 - gemini-2.5-flash-image (정식 모델명, preview 없음)
 export const generateImage = async (
   prompt: string,
   base64Images: string[] = [],
@@ -60,7 +60,7 @@ export const generateImage = async (
     });
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-image-preview",
+      model: "gemini-2.5-flash-image",
       contents: [{ role: "user", parts }],
       config: {
         responseModalities: [Modality.IMAGE, Modality.TEXT],
