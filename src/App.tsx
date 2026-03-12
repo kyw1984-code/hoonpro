@@ -123,7 +123,7 @@ export default function App() {
                 }`}
               >
                 <Search className="w-4 h-4 mr-2" />
-                셀러 리서치
+                쿠팡 시장분석기
               </button>
             </div>
           </div>
