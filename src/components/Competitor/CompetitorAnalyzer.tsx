@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import {
-  Loader2, TrendingUp, Star, ShoppingCart,
-  DollarSign, Lightbulb, Plus, Trash2, BarChart2, Wand2
+  Loader2, TrendingUp, ShoppingCart, Plus, Trash2, BarChart2, Wand2, Link, RefreshCw
 } from 'lucide-react';
 
 const getApiKey = () =>
@@ -14,11 +13,16 @@ const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 interface CompetitorData {
   id: string;
+  url: string;
   productName: string;
-  price: string;
-  reviewCount: string;
-  rating: string;
-  features: string;
+  price: number;
+  reviewCount: number;
+  rating: number;
+  categoryName: string;
+  estimatedSales: number;
+  estimatedRevenue: number;
+  loading: boolean;
+  error: string;
 }
 
 function formatNumber(n: number): string {
@@ -29,11 +33,16 @@ function formatNumber(n: number): string {
 
 const emptyCompetitor = (): CompetitorData => ({
   id: Math.random().toString(36).substring(7),
+  url: '',
   productName: '',
-  price: '',
-  reviewCount: '',
-  rating: '',
-  features: '',
+  price: 0,
+  reviewCount: 0,
+  rating: 0,
+  categoryName: '',
+  estimatedSales: 0,
+  estimatedRevenue: 0,
+  loading: false,
+  error: '',
 });
 
 export const CompetitorAnalyzer: React.FC = () => {
@@ -41,45 +50,84 @@ export const CompetitorAnalyzer: React.FC = () => {
   const [myProduct, setMyProduct] = useState({ name: '', price: '', features: '' });
   const [analyzing, setAnalyzing] = useState(false);
   const [analysis, setAnalysis] = useState('');
-  const [error, setError] = useState('');
+  const [globalError, setGlobalError] = useState('');
 
   const addCompetitor = () => setCompetitors(prev => [...prev, emptyCompetitor()]);
   const removeCompetitor = (id: string) => setCompetitors(prev => prev.filter(c => c.id !== id));
-  const updateCompetitor = (id: string, field: keyof CompetitorData, value: string) => {
-    setCompetitors(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+
+  const updateUrl = (id: string, url: string) => {
+    setCompetitors(prev => prev.map(c => c.id === id ? { ...c, url } : c));
   };
 
-  const getEstimates = (c: CompetitorData) => {
-    const reviewCount = Number(c.reviewCount) || 0;
-    const price = Number(c.price) || 0;
-    const estimatedSales = reviewCount * 10;
-    const estimatedRevenue = estimatedSales * price;
-    return { estimatedSales, estimatedRevenue };
+  const fetchCompetitor = async (id: string) => {
+    const competitor = competitors.find(c => c.id === id);
+    if (!competitor?.url.trim()) return;
+
+    setCompetitors(prev => prev.map(c => c.id === id ? { ...c, loading: true, error: '' } : c));
+
+    try {
+      const res = await fetch('/api/coupang', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: competitor.url }),
+      });
+
+      const data = await res.json();
+
+      if (data.error) {
+        setCompetitors(prev => prev.map(c =>
+          c.id === id ? { ...c, loading: false, error: data.message || '조회 실패' } : c
+        ));
+        return;
+      }
+
+      setCompetitors(prev => prev.map(c =>
+        c.id === id ? {
+          ...c,
+          loading: false,
+          error: '',
+          productName: data.productName,
+          price: data.price,
+          reviewCount: data.reviewCount,
+          rating: data.rating,
+          categoryName: data.categoryName,
+          estimatedSales: data.estimatedSales,
+          estimatedRevenue: data.estimatedRevenue,
+        } : c
+      ));
+    } catch (e: any) {
+      setCompetitors(prev => prev.map(c =>
+        c.id === id ? { ...c, loading: false, error: '네트워크 오류' } : c
+      ));
+    }
+  };
+
+  const fetchAll = async () => {
+    const urlCompetitors = competitors.filter(c => c.url.trim());
+    if (urlCompetitors.length === 0) return;
+    await Promise.all(urlCompetitors.map(c => fetchCompetitor(c.id)));
   };
 
   const handleAnalyze = async () => {
-    const valid = competitors.filter(c => c.productName.trim() && c.price.trim());
+    const valid = competitors.filter(c => c.productName.trim());
     if (valid.length === 0) {
-      setError('최소 1개 이상의 경쟁사 상품명과 가격을 입력해주세요.');
+      setGlobalError('먼저 경쟁사 URL을 입력하고 조회해주세요.');
       return;
     }
-    setError('');
+    setGlobalError('');
     setAnalyzing(true);
     setAnalysis('');
 
     try {
-      const competitorInfo = valid.map((c, i) => {
-        const { estimatedSales, estimatedRevenue } = getEstimates(c);
-        return `
+      const competitorInfo = valid.map((c, i) => `
 경쟁사 ${i + 1}: ${c.productName}
-- 판매가: ${Number(c.price).toLocaleString()}원
-- 리뷰수: ${Number(c.reviewCount).toLocaleString()}개
-- 평점: ${c.rating || '정보 없음'}점
-- 특징: ${c.features || '정보 없음'}
-- 추정 판매수량: ${estimatedSales.toLocaleString()}개 (리뷰수 × 10)
-- 추정 매출: ${formatNumber(estimatedRevenue)}
-        `.trim();
-      }).join('\n\n');
+- 판매가: ${c.price.toLocaleString()}원
+- 리뷰수: ${c.reviewCount.toLocaleString()}개
+- 평점: ${c.rating}점
+- 카테고리: ${c.categoryName}
+- 추정 판매수량: ${c.estimatedSales.toLocaleString()}개 (리뷰수 × 10)
+- 추정 매출: ${formatNumber(c.estimatedRevenue)}
+      `.trim()).join('\n\n');
 
       const myInfo = myProduct.name
         ? `\n내 상품 정보:\n- 상품명: ${myProduct.name}\n- 판매 희망가: ${myProduct.price}원\n- 특징/강점: ${myProduct.features}`
@@ -107,7 +155,7 @@ ${myInfo}
 
       setAnalysis(response.text ?? '');
     } catch (e) {
-      setError('AI 분석 중 오류가 발생했습니다.');
+      setGlobalError('AI 분석 중 오류가 발생했습니다.');
     } finally {
       setAnalyzing(false);
     }
@@ -117,96 +165,78 @@ ${myInfo}
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-slate-800">🔍 경쟁사 분석기</h2>
-        <p className="text-slate-500 mt-1">경쟁사 정보를 입력하면 AI가 추정 매출과 차별화 전략을 분석해드려요.</p>
+        <p className="text-slate-500 mt-1">쿠팡 상품 링크를 입력하면 AI가 자동으로 데이터를 분석해드려요.</p>
       </div>
 
-      {/* 경쟁사 입력 */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 space-y-6">
-        <h3 className="text-lg font-bold text-slate-700">1. 경쟁사 상품 정보 입력</h3>
-        <p className="text-sm text-slate-400 -mt-4">쿠팡에서 경쟁사 상품 페이지를 보면서 아래에 입력해주세요.</p>
+      {/* 경쟁사 URL 입력 */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-700">1. 경쟁사 상품 링크 입력</h3>
+          <button
+            onClick={fetchAll}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            전체 조회
+          </button>
+        </div>
 
-        <div className="space-y-4">
+        <div className="space-y-3">
           {competitors.map((c, i) => (
-            <div key={c.id} className="border border-slate-200 rounded-xl p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-blue-600">경쟁사 {i + 1}</span>
+            <div key={c.id} className="space-y-2">
+              <div className="flex gap-2">
+                <div className="flex items-center gap-2 flex-1 border border-slate-300 rounded-xl px-3 focus-within:ring-2 focus-within:ring-blue-500">
+                  <Link className="w-4 h-4 text-slate-400 shrink-0" />
+                  <input
+                    type="text"
+                    value={c.url}
+                    onChange={e => updateUrl(c.id, e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && fetchCompetitor(c.id)}
+                    placeholder={`경쟁사 ${i + 1} 쿠팡 링크 입력 후 엔터`}
+                    className="flex-1 py-3 outline-none text-sm"
+                  />
+                  {c.loading && <Loader2 className="w-4 h-4 animate-spin text-blue-500 shrink-0" />}
+                </div>
+                <button
+                  onClick={() => fetchCompetitor(c.id)}
+                  disabled={c.loading || !c.url.trim()}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-xl text-sm font-medium text-slate-700 transition-colors shrink-0"
+                >
+                  조회
+                </button>
                 {competitors.length > 1 && (
-                  <button onClick={() => removeCompetitor(c.id)} className="text-red-400 hover:text-red-600 transition-colors">
+                  <button onClick={() => removeCompetitor(c.id)} className="p-2 text-red-400 hover:text-red-600 transition-colors">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-medium text-slate-600 mb-1">상품명 *</label>
-                  <input
-                    type="text"
-                    value={c.productName}
-                    onChange={e => updateCompetitor(c.id, 'productName', e.target.value)}
-                    placeholder="예: 오버핏 반팔티 남자 여름"
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">판매가 (원) *</label>
-                  <input
-                    type="number"
-                    value={c.price}
-                    onChange={e => updateCompetitor(c.id, 'price', e.target.value)}
-                    placeholder="예: 29900"
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">리뷰수</label>
-                  <input
-                    type="number"
-                    value={c.reviewCount}
-                    onChange={e => updateCompetitor(c.id, 'reviewCount', e.target.value)}
-                    placeholder="예: 1250"
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">평점</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    max="5"
-                    value={c.rating}
-                    onChange={e => updateCompetitor(c.id, 'rating', e.target.value)}
-                    placeholder="예: 4.5"
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">상품 특징</label>
-                  <input
-                    type="text"
-                    value={c.features}
-                    onChange={e => updateCompetitor(c.id, 'features', e.target.value)}
-                    placeholder="예: 순면 100%, 7가지 색상"
-                    className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                  />
-                </div>
-              </div>
 
-              {/* 실시간 추정 데이터 */}
-              {c.price && c.reviewCount && (
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <div className="bg-blue-50 rounded-lg p-3">
-                    <div className="flex items-center gap-1 text-xs text-blue-500 mb-1">
-                      <ShoppingCart className="w-3 h-3" /> 추정 판매수량
+              {/* 오류 메시지 */}
+              {c.error && (
+                <p className="text-red-500 text-xs ml-2">{c.error} — 직접 입력하시겠어요?</p>
+              )}
+
+              {/* 조회 결과 */}
+              {c.productName && (
+                <div className="ml-2 border border-slate-100 bg-slate-50 rounded-xl p-4">
+                  <p className="font-medium text-slate-800 text-sm mb-3">{c.productName}</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
+                      <p className="text-xs text-slate-400">판매가</p>
+                      <p className="font-bold text-slate-700 text-sm">{c.price.toLocaleString()}원</p>
                     </div>
-                    <p className="font-bold text-blue-700">{getEstimates(c).estimatedSales.toLocaleString()}개</p>
-                    <p className="text-xs text-blue-400">리뷰수 × 10</p>
-                  </div>
-                  <div className="bg-green-50 rounded-lg p-3">
-                    <div className="flex items-center gap-1 text-xs text-green-500 mb-1">
-                      <TrendingUp className="w-3 h-3" /> 추정 매출
+                    <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
+                      <p className="text-xs text-slate-400">리뷰/평점</p>
+                      <p className="font-bold text-slate-700 text-sm">{c.reviewCount.toLocaleString()}개 / {c.rating}점</p>
                     </div>
-                    <p className="font-bold text-green-700">{formatNumber(getEstimates(c).estimatedRevenue)}</p>
-                    <p className="text-xs text-green-400">판매수량 × 판매가</p>
+                    <div className="bg-blue-50 rounded-lg p-2 text-center border border-blue-100">
+                      <p className="text-xs text-blue-400">추정 판매수량</p>
+                      <p className="font-bold text-blue-700 text-sm">{c.estimatedSales.toLocaleString()}개</p>
+                    </div>
+                    <div className="bg-green-50 rounded-lg p-2 text-center border border-green-100">
+                      <p className="text-xs text-green-400">추정 매출</p>
+                      <p className="font-bold text-green-700 text-sm">{formatNumber(c.estimatedRevenue)}</p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -227,31 +257,13 @@ ${myInfo}
         <h3 className="text-lg font-bold text-slate-700 mb-1">2. 내 상품 정보 <span className="text-slate-400 text-sm font-normal">(선택)</span></h3>
         <p className="text-sm text-slate-400 mb-4">입력하면 더 정확한 차별화 전략을 제안해드려요.</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <input
-            type="text"
-            value={myProduct.name}
-            onChange={e => setMyProduct({ ...myProduct, name: e.target.value })}
-            placeholder="내 상품명"
-            className="p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-          />
-          <input
-            type="text"
-            value={myProduct.price}
-            onChange={e => setMyProduct({ ...myProduct, price: e.target.value })}
-            placeholder="판매 희망가 (원)"
-            className="p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-          />
-          <input
-            type="text"
-            value={myProduct.features}
-            onChange={e => setMyProduct({ ...myProduct, features: e.target.value })}
-            placeholder="내 상품 특징/강점"
-            className="p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-          />
+          <input type="text" value={myProduct.name} onChange={e => setMyProduct({ ...myProduct, name: e.target.value })} placeholder="내 상품명" className="p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+          <input type="text" value={myProduct.price} onChange={e => setMyProduct({ ...myProduct, price: e.target.value })} placeholder="판매 희망가 (원)" className="p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+          <input type="text" value={myProduct.features} onChange={e => setMyProduct({ ...myProduct, features: e.target.value })} placeholder="내 상품 특징/강점" className="p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
         </div>
       </div>
 
-      {error && <p className="text-red-500 text-sm bg-red-50 p-3 rounded-xl">{error}</p>}
+      {globalError && <p className="text-red-500 text-sm bg-red-50 p-3 rounded-xl">{globalError}</p>}
 
       <button
         onClick={handleAnalyze}
