@@ -7,7 +7,7 @@ import { DetailPlanner } from './components/Detail/DetailPlanner';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { ProductNameGenerator } from './components/ProductName/ProductNameGenerator';
-import CoupangResearch from './components/CoupangResearch';
+import CoupangResearch from './components/CoupangReserch';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, Lock, Search } from 'lucide-react';
