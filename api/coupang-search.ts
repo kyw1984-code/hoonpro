@@ -58,14 +58,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const data = await apiRes.json();
 
-    // 응답 데이터 구조 확인용 로그
     console.log("쿠팡 API 응답:", JSON.stringify(data).slice(0, 500));
 
     if (data.rCode !== "0") {
       return res.status(400).json({ error: data.rMessage ?? "Coupang API error", rCode: data.rCode });
     }
 
-    return res.status(200).json({ products: data.data?.productData ?? [] });
+    return res.status(200).json({
+      products: (data.data?.productData ?? []).map((p: any) => ({
+        productId:   String(p.productId),
+        productName: p.productName  ?? "",
+        productPrice: p.productPrice ?? 0,
+        productImage: p.productImage ?? "",
+        productUrl:   p.landingUrl   ?? p.productUrl ?? "#",
+        isRocket:     p.isRocket     ?? p.rocketBadge ?? false,
+        rating:       p.rating       ?? p.starRating  ?? 0,
+        reviewCount:  p.reviewCount  ?? p.review      ?? 0,
+        salesRank:    p.salesRank    ?? null,
+      }))
+    });
+
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return res.status(500).json({ error: message });
