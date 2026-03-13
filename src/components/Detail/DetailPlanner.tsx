@@ -75,17 +75,22 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string): Promise<strin
             canvas.height = TARGET_HEIGHT;
             const ctx = canvas.getContext('2d')!;
 
-            // 배경 검정으로 초기화
-            ctx.fillStyle = '#000000';
-            ctx.fillRect(0, 0, TARGET_WIDTH, TARGET_HEIGHT);
-
-            // 이미지를 860×1000에 contain 방식으로 그리기 (잘리지 않게 전체 표시)
-            const scale = Math.min(TARGET_WIDTH / img.width, TARGET_HEIGHT / img.height);
-            const drawW = img.width * scale;
-            const drawH = img.height * scale;
-            const drawX = (TARGET_WIDTH - drawW) / 2;
-            const drawY = (TARGET_HEIGHT - drawH) / 2;
-            ctx.drawImage(img, drawX, drawY, drawW, drawH);
+            // 이미지를 860×1000에 cover 방식으로 그리기 (꽉 채우기, 검정 없음)
+            const imgRatio = img.width / img.height;
+            const canvasRatio = TARGET_WIDTH / TARGET_HEIGHT;
+            let sx = 0, sy = 0, sw = img.width, sh = img.height;
+            if (imgRatio > canvasRatio) {
+                // 이미지가 더 넓음 → 좌우 크롭
+                sh = img.height;
+                sw = img.height * canvasRatio;
+                sx = (img.width - sw) / 2;
+            } else {
+                // 이미지가 더 높음 → 상하 크롭 (중앙 기준)
+                sw = img.width;
+                sh = img.width / canvasRatio;
+                sy = (img.height - sh) / 2;
+            }
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
 
             if (!keyMessage.trim()) {
                 resolve(canvas.toDataURL('image/png'));
