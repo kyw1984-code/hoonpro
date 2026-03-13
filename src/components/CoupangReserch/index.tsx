@@ -45,6 +45,11 @@ function getPriceRange(products: CoupangProduct[]): PriceRange {
   };
 }
 
+function isBundleProduct(name: string): boolean {
+  const keywords = ["1+1", "2+1", "3+1", "4+1", "1+2", "1+3", "1+4", "묶음", "세트", "패키지", "번들"];
+  return keywords.some(function(k) { return name.includes(k); });
+}
+
 function deriveStrategies(products: CoupangProduct[]): Strategy[] {
   const rocketRatio = products.filter(function(p) { return p.isRocket; }).length / products.length;
   const priceRange = getPriceRange(products);
@@ -210,6 +215,7 @@ export default function CoupangResearch() {
                   const estSales = estimateMonthlySales(rank, p.productPrice);
                   const estRevenue = estSales * p.productPrice;
                   const isTop3 = i < 3;
+                  const isBundle = isBundleProduct(p.productName);
                   return (
                     <div key={p.productId} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px", display: "grid", gridTemplateColumns: "32px 1fr auto", gap: 16, alignItems: "center" }}>
                       <div style={{ width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 900, background: isTop3 ? "linear-gradient(135deg,#dc2626,#f87171)" : "rgba(255,255,255,0.06)", color: isTop3 ? "#fff" : "#a3a3a3" }}>
@@ -231,6 +237,9 @@ export default function CoupangResearch() {
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
                         <p style={{ fontSize: 18, fontWeight: 900, color: "#34d399", margin: 0 }}>{p.productPrice.toLocaleString()}원</p>
+                        {isBundle && (
+                          <p style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", marginTop: 3 }}>⚠️ 가격 부정확</p>
+                        )}
                         <p style={{ fontSize: 11, color: "#8a8a8a", marginTop: 4 }}>월매출 약 {Math.round(estRevenue / 10000).toLocaleString()}만원</p>
                       </div>
                     </div>
