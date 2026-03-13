@@ -58,20 +58,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const data = await apiRes.json();
 
-    // 전체 상품 가격 목록 출력
-    console.log("가격 목록:", JSON.stringify((data.data?.productData ?? []).map((p: any) => ({
-      id: p.productId,
-      name: p.productName?.slice(0, 20),
-      price: p.productPrice,
-      landingUrl: p.landingUrl?.slice(0, 60),
-    }))));
-
     if (data.rCode !== "0") {
       return res.status(400).json({ error: data.rMessage ?? "Coupang API error", rCode: data.rCode });
     }
 
+    const productList = (data.data?.productData ?? []);
+
+    console.log("가격 목록:", JSON.stringify(productList.map((p: any) => ({
+      id: p.productId,
+      name: p.productName?.slice(0, 20),
+      price: p.productPrice,
+    }))));
+
     return res.status(200).json({
-      products: (data.data?.productData ?? []).map((p: any) => ({
+      products: productList.map((p: any, index: number) => ({
         productId:    String(p.productId),
         productName:  p.productName  ?? "",
         productPrice: p.productPrice ?? 0,
@@ -80,7 +80,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         isRocket:     p.isRocket     ?? p.rocketBadge ?? false,
         rating:       p.rating       ?? p.starRating  ?? 0,
         reviewCount:  p.reviewCount  ?? p.review      ?? 0,
-        salesRank:    p.salesRank    ?? null,
+        salesRank:    index + 1,
       }))
     });
 
