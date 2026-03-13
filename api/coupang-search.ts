@@ -1,18 +1,18 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createHmac } from "crypto";
 
-// ─── Vercel Serverless Function ───────────────────────────────────────────────
-// 환경변수: COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY
-// Vercel 대시보드 → Settings → Environment Variables 에서 설정
-// ─────────────────────────────────────────────────────────────────────────────
-
 const ACCESS_KEY = process.env.COUPANG_ACCESS_KEY ?? "";
 const SECRET_KEY = process.env.COUPANG_SECRET_KEY ?? "";
 
 function buildDatetime(): string {
-  return (
-    new Date().toISOString().replace(/[:\-]|\.\d{3}/g, "").slice(0, 15) + "Z"
-  );
+  const now = new Date();
+  const yy = String(now.getUTCFullYear()).slice(2);
+  const MM = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const HH = String(now.getUTCHours()).padStart(2, "0");
+  const mm = String(now.getUTCMinutes()).padStart(2, "0");
+  const ss = String(now.getUTCSeconds()).padStart(2, "0");
+  return yy + MM + dd + "T" + HH + mm + ss + "Z";
 }
 
 function generateSignature(secretKey: string, message: string): string {
@@ -20,7 +20,6 @@ function generateSignature(secretKey: string, message: string): string {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS 허용
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -42,16 +41,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const method    = "GET";
     const path      = "/v2/providers/affiliate_open_api/apis/openapi/products/search";
-    const query     = `keyword=${encodeURIComponent(keyword)}&limit=${limit}`;
+    const query     = "keyword=" + encodeURIComponent(keyword) + "&limit=" + limit;
     const datetime  = buildDatetime();
     const message   = datetime + method + path + query;
     const signature = generateSignature(SECRET_KEY, message);
 
     const apiRes = await fetch(
-      `https://api-gateway.coupang.com${path}?${query}`,
+      "https://api-gateway.coupang.com" + path + "?" + query,
       {
         headers: {
-          Authorization: `CEA algorithm=HmacSHA256, access-key=${ACCESS_KEY}, signed-date=${datetime}, signature=${signature}`,
+          Authorization: "CEA algorithm=HmacSHA256, access-key=" + ACCESS_KEY + ", signed-date=" + datetime + ", signature=" + signature,
           "Content-Type": "application/json;charset=UTF-8",
         },
       }
@@ -60,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = await apiRes.json();
 
     if (data.rCode !== "0") {
-      return res.status(400).json({ error: data.rMessage ?? "Coupang API error" });
+      return res.status(400).json({ error: data.rMessage ?? "Coupang API error", rCode: data.rCode });
     }
 
     return res.status(200).json({ products: data.data?.productData ?? [] });
