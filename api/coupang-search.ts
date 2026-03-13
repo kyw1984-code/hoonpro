@@ -58,7 +58,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const data = await apiRes.json();
 
-    console.log("쿠팡 API 응답 샘플:", JSON.stringify(data?.data?.productData?.[0] ?? data).slice(0, 800));
+    // 전체 상품 가격 목록 출력
+    console.log("가격 목록:", JSON.stringify((data.data?.productData ?? []).map((p: any) => ({
+      id: p.productId,
+      name: p.productName?.slice(0, 20),
+      price: p.productPrice,
+      landingUrl: p.landingUrl?.slice(0, 60),
+    }))));
 
     if (data.rCode !== "0") {
       return res.status(400).json({ error: data.rMessage ?? "Coupang API error", rCode: data.rCode });
