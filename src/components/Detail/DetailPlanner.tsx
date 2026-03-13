@@ -61,88 +61,74 @@ const generateSizeChartImage = (gender: 'women' | 'men', data: Record<string, Re
     return canvas.toDataURL('image/png');
 };
 
-// ✅ 핵심: AI 이미지 위에 한글 텍스트를 Canvas로 덧씌우기
+// ✅ AI 이미지를 860×1000으로 리사이즈 후 한글 텍스트 Canvas 덧씌우기
+const TARGET_WIDTH = 860;
+const TARGET_HEIGHT = 1000;
+
 const overlayTextOnImage = (imageUrl: string, keyMessage: string): Promise<string> => {
     return new Promise((resolve) => {
         const img = new window.Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
+            // 고정 사이즈 860×1000
             const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
+            canvas.width = TARGET_WIDTH;
+            canvas.height = TARGET_HEIGHT;
             const ctx = canvas.getContext('2d')!;
 
-            // 원본 이미지 그리기
-            ctx.drawImage(img, 0, 0);
+            // 이미지를 860×1000에 꽉 차게 그리기 (cover 방식)
+            const imgRatio = img.width / img.height;
+            const canvasRatio = TARGET_WIDTH / TARGET_HEIGHT;
+            let sx = 0, sy = 0, sw = img.width, sh = img.height;
+            if (imgRatio > canvasRatio) {
+                sw = img.height * canvasRatio;
+                sx = (img.width - sw) / 2;
+            } else {
+                sh = img.width / canvasRatio;
+                sy = (img.height - sh) / 2;
+            }
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
 
             if (!keyMessage.trim()) {
                 resolve(canvas.toDataURL('image/png'));
                 return;
             }
 
-            const lines = keyMessage.split('\n').filter(l => l.trim());
-            const maxWidth = canvas.width * 0.85;
-
-            // 텍스트 영역 높이 계산
-            const fontSize = Math.max(36, Math.round(canvas.width * 0.055));
+            const fontSize = 42;
             const lineHeight = fontSize * 1.5;
+            const lines = keyMessage.split('\n').filter(l => l.trim());
             const totalTextHeight = lines.length * lineHeight;
 
-            // 하단 반투명 오버레이
-            const overlayH = totalTextHeight + fontSize * 2;
-            const overlayY = canvas.height - overlayH;
-            const gradient = ctx.createLinearGradient(0, overlayY, 0, canvas.height);
+            // 하단 그라디언트 오버레이
+            const overlayH = totalTextHeight + fontSize * 2.5;
+            const overlayY = TARGET_HEIGHT - overlayH;
+            const gradient = ctx.createLinearGradient(0, overlayY, 0, TARGET_HEIGHT);
             gradient.addColorStop(0, 'rgba(0,0,0,0)');
-            gradient.addColorStop(0.3, 'rgba(0,0,0,0.6)');
-            gradient.addColorStop(1, 'rgba(0,0,0,0.85)');
+            gradient.addColorStop(0.4, 'rgba(0,0,0,0.65)');
+            gradient.addColorStop(1, 'rgba(0,0,0,0.88)');
             ctx.fillStyle = gradient;
-            ctx.fillRect(0, overlayY, canvas.width, overlayH);
+            ctx.fillRect(0, overlayY, TARGET_WIDTH, overlayH);
 
             // 텍스트 렌더링
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(0,0,0,0.9)';
+            ctx.shadowBlur = 10;
+            ctx.shadowOffsetX = 1;
+            ctx.shadowOffsetY = 2;
 
             lines.forEach((line, i) => {
-                const y = canvas.height - totalTextHeight - fontSize * 0.8 + i * lineHeight;
-
-                // 그림자 (가독성)
-                ctx.shadowColor = 'rgba(0,0,0,0.8)';
-                ctx.shadowBlur = 12;
-                ctx.shadowOffsetX = 2;
-                ctx.shadowOffsetY = 2;
-
-                // 첫 줄은 크게, 나머지는 작게
-                if (i === 0) {
-                    ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
-                    ctx.fillStyle = '#ffffff';
-                } else {
-                    ctx.font = `${Math.round(fontSize * 0.75)}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
-                    ctx.fillStyle = 'rgba(255,255,255,0.88)';
-                }
-
-                // 긴 텍스트 줄바꿈 처리
-                const words = line.split(' ');
-                let currentLine = '';
-                let subY = y;
-                words.forEach((word) => {
-                    const testLine = currentLine ? currentLine + ' ' + word : word;
-                    if (ctx.measureText(testLine).width > maxWidth && currentLine) {
-                        ctx.fillText(currentLine, canvas.width / 2, subY);
-                        currentLine = word;
-                        subY += lineHeight * 0.8;
-                    } else {
-                        currentLine = testLine;
-                    }
-                });
-                if (currentLine) ctx.fillText(currentLine, canvas.width / 2, subY);
+                const y = TARGET_HEIGHT - totalTextHeight - fontSize * 0.9 + i * lineHeight;
+                ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(line, TARGET_WIDTH / 2, y);
             });
 
             ctx.shadowColor = 'transparent';
             ctx.shadowBlur = 0;
-
             resolve(canvas.toDataURL('image/png'));
         };
-        img.onerror = () => resolve(imageUrl); // 실패시 원본 반환
+        img.onerror = () => resolve(imageUrl);
         img.src = imageUrl;
     });
 };
