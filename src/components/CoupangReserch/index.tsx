@@ -1,6 +1,5 @@
-import { useState, useRef, KeyboardEvent } from "react";
+import { useState, useRef } from "react";
 
-// ─── 타입 ─────────────────────────────────────────────────────────────────────
 interface CoupangProduct {
   productId: string;
   productName: string;
@@ -11,13 +10,11 @@ interface CoupangProduct {
   rating: number;
   reviewCount: number;
   salesRank?: number;
-  category?: string;
 }
 
 interface SearchResult {
   products: CoupangProduct[];
   keyword: string;
-  isMock: boolean;
 }
 
 interface PriceRange {
@@ -33,7 +30,6 @@ interface Strategy {
   color: string;
 }
 
-// ─── 유틸 함수 ────────────────────────────────────────────────────────────────
 function estimateMonthlySales(rank: number, price: number): number {
   const base = Math.max(0, (10 - rank) * 250);
   const multiplier = price < 20000 ? 1.3 : price < 40000 ? 1.0 : 0.75;
@@ -41,20 +37,20 @@ function estimateMonthlySales(rank: number, price: number): number {
 }
 
 function getPriceRange(products: CoupangProduct[]): PriceRange {
-  const prices = products.map((p) => p.productPrice);
+  const prices = products.map(function(p) { return p.productPrice; });
   return {
-    min: Math.min(...prices),
-    max: Math.max(...prices),
-    avg: Math.round(prices.reduce((a, b) => a + b, 0) / prices.length),
+    min: Math.min.apply(null, prices),
+    max: Math.max.apply(null, prices),
+    avg: Math.round(prices.reduce(function(a, b) { return a + b; }, 0) / prices.length),
   };
 }
 
 function deriveStrategies(products: CoupangProduct[]): Strategy[] {
-  const rocketRatio = products.filter((p) => p.isRocket).length / products.length;
+  const rocketRatio = products.filter(function(p) { return p.isRocket; }).length / products.length;
   const priceRange = getPriceRange(products);
-  const totalEstSales = products.reduce(
-    (a, p, i) => a + estimateMonthlySales(p.salesRank ?? i + 1, p.productPrice), 0
-  );
+  const totalEstSales = products.reduce(function(a, p, i) {
+    return a + estimateMonthlySales(p.salesRank != null ? p.salesRank : i + 1, p.productPrice);
+  }, 0);
   const strategies: Strategy[] = [];
 
   if (rocketRatio > 0.6) {
@@ -64,192 +60,40 @@ function deriveStrategies(products: CoupangProduct[]): Strategy[] {
   }
 
   if (priceRange.avg < 30000) {
-    strategies.push({ icon: "💰", title: "저가 경쟁 심화 시장", desc: "평균가 " + priceRange.avg.toLocaleString() + "원. 가격 경쟁 대신 번들 구성·사은품으로 가치를 차별화하세요.", color: "#f59e0b" });
+    strategies.push({ icon: "💰", title: "저가 경쟁 심화 시장", desc: "평균가 " + priceRange.avg.toLocaleString() + "원. 가격 경쟁 대신 번들 구성 사은품으로 가치를 차별화하세요.", color: "#f59e0b" });
   } else {
-    strategies.push({ icon: "🎯", title: "프리미엄 포지셔닝 가능", desc: "평균가 " + priceRange.avg.toLocaleString() + "원. 고품질 이미지·브랜드 스토리 강조가 핵심입니다.", color: "#a855f7" });
+    strategies.push({ icon: "🎯", title: "프리미엄 포지셔닝 가능", desc: "평균가 " + priceRange.avg.toLocaleString() + "원. 고품질 이미지 브랜드 스토리 강조가 핵심입니다.", color: "#a855f7" });
   }
 
   strategies.push({ icon: "📊", title: "시장 규모 추정", desc: "상위 상품 월 추정 판매량 " + totalEstSales.toLocaleString() + "개, 거래액 약 " + Math.round((totalEstSales * priceRange.avg) / 10000).toLocaleString() + "만원 규모입니다.", color: "#3b82f6" });
-
   return strategies;
 }
 
 function buildChecklist(products: CoupangProduct[]): string[] {
   const priceRange = getPriceRange(products);
-  const rocketCount = products.filter((p) => p.isRocket).length;
+  const rocketCount = products.filter(function(p) { return p.isRocket; }).length;
   return [
     "가격대: " + priceRange.min.toLocaleString() + "원 이하 or " + Math.round(priceRange.avg * 1.2).toLocaleString() + "원 이상 프리미엄 포지셔닝",
     rocketCount > products.length / 2 ? "로켓그로스 입점 검토 필수" : "일반 판매 우선 진입 가능",
-    "상품 썸네일·상세페이지 차별화 (상위 상품 대비 시각 우위 확보)",
+    "상품 썸네일 상세페이지 차별화 (상위 상품 대비 시각 우위 확보)",
     "롱테일 키워드 변형으로 검색 노출 다각화",
     "초기 광고 집행 시 키워드 입찰가 경쟁 강도 사전 확인 필요",
   ];
 }
 
-// ─── 서브 컴포넌트 ────────────────────────────────────────────────────────────
-function SearchBar({ keyword, onChange, onSearch, loading }: { keyword: string; onChange: (v: string) => void; onSearch: () => void; loading: boolean }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const handleKey = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") onSearch(); };
-  return (
-    <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-6 mb-7">
-      <p className="text-xs font-semibold text-neutral-500 mb-3 tracking-wide uppercase">키워드로 시장 분석</p>
-      <div className="flex gap-3">
-        <input ref={inputRef} value={keyword} onChange={(e) => onChange(e.target.value)} onKeyDown={handleKey}
-          placeholder="예: 무선이어폰, 캠핑의자, 프로틴 쉐이커..."
-          className="flex-1 bg-white/[0.05] border border-white/[0.12] rounded-xl px-4 py-3 text-neutral-100 placeholder-neutral-600 text-sm outline-none focus:border-red-500/50 transition" />
-        <button onClick={onSearch} disabled={loading || !keyword.trim()}
-          className="px-7 py-3 rounded-xl font-bold text-sm text-white bg-gradient-to-r from-red-600 to-red-400 hover:from-red-500 hover:to-red-300 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap transition">
-          {loading ? "분석 중…" : "🔍 분석하기"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function SummaryCards({ products }: { products: CoupangProduct[] }) {
-  const priceRange = getPriceRange(products);
-  const rocketCount = products.filter((p) => p.isRocket).length;
-  const totalEstSales = products.reduce((a, p, i) => a + estimateMonthlySales(p.salesRank ?? i + 1, p.productPrice), 0);
-  const metrics = [
-    { label: "검색 상품 수",   value: products.length + "개",                                  sub: "조회된 상품",    color: "text-blue-400"    },
-    { label: "평균 가격",      value: priceRange.avg.toLocaleString() + "원",                  sub: priceRange.min.toLocaleString() + " ~ " + priceRange.max.toLocaleString(), color: "text-emerald-400" },
-    { label: "로켓배송 비율",  value: Math.round((rocketCount / products.length) * 100) + "%", sub: rocketCount + "/" + products.length + "개", color: "text-red-400" },
-    { label: "월 추정 판매량", value: totalEstSales.toLocaleString() + "개",                   sub: "순위 기반 추정",  color: "text-amber-400"   },
-  ];
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-      {metrics.map((m) => (
-        <div key={m.label} className="bg-white/[0.03] border border-white/[0.07] rounded-xl p-4">
-          <p className="text-xs font-semibold text-neutral-500 mb-2">{m.label}</p>
-          <p className={"text-2xl font-extrabold tracking-tight " + m.color}>{m.value}</p>
-          <p className="text-xs text-neutral-600 mt-1">{m.sub}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ProductList({ products }: { products: CoupangProduct[] }) {
-  return (
-    <div className="flex flex-col gap-2">
-      {products.map((p, i) => {
-        const rank = p.salesRank ?? i + 1;
-        const estSales = estimateMonthlySales(rank, p.productPrice);
-        const estRevenue = estSales * p.productPrice;
-        const isTop3 = i < 3;
-        const badgeClass = isTop3
-          ? "bg-gradient-to-br from-red-600 to-red-400 text-white"
-          : "bg-white/[0.06] text-neutral-500";
-        return (
-          <div key={p.productId} className="bg-white/[0.03] border border-white/[0.07] rounded-xl px-4 py-4 grid grid-cols-[32px_1fr_auto] gap-4 items-center hover:border-white/[0.15] transition">
-            <div className={"w-8 h-8 rounded-lg flex items-center justify-center text-sm font-extrabold " + badgeClass}>
-              {i + 1}
-            </div>
-            <div className="min-w-0">
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
-                <p className="text-sm font-medium leading-snug text-neutral-100 truncate">{p.productName}</p>
-                
-                  href={p.productUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{ flexShrink: 0, fontSize: "10px", fontWeight: "bold", padding: "2px 8px", borderRadius: "6px", background: "rgba(16,185,129,0.15)", color: "#34d399", border: "1px solid rgba(16,185,129,0.3)", whiteSpace: "nowrap", textDecoration: "none" }}
-                >
-                  바로가기 →
-                </a>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {p.isRocket && (
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30">
-                    🚀 로켓
-                  </span>
-                )}
-                <span className="text-xs text-neutral-600">추정 {estSales.toLocaleString()}개/월</span>
-              </div>
-            </div>
-            <div className="text-right shrink-0">
-              <p className="text-lg font-extrabold text-emerald-400 tracking-tight">{p.productPrice.toLocaleString()}원</p>
-              <p className="text-xs text-neutral-600 mt-1">월매출 ≈ {Math.round(estRevenue / 10000).toLocaleString()}만원</p>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function StrategyPanel({ products }: { products: CoupangProduct[] }) {
-  const strategies = deriveStrategies(products);
-  const checklist = buildChecklist(products);
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {strategies.map((s) => (
-          <div key={s.title} className="bg-white/[0.03] border border-white/[0.07] rounded-xl p-5" style={{ borderLeftColor: s.color, borderLeftWidth: 3 }}>
-            <div className="text-2xl mb-2">{s.icon}</div>
-            <p className="text-sm font-bold mb-2" style={{ color: s.color }}>{s.title}</p>
-            <p className="text-xs text-neutral-400 leading-relaxed">{s.desc}</p>
-          </div>
-        ))}
-      </div>
-      <div className="bg-blue-500/[0.08] border border-blue-500/20 rounded-xl p-5">
-        <p className="text-sm font-bold text-blue-400 mb-4">📋 권장 진입 체크리스트</p>
-        <ul className="flex flex-col gap-2">
-          {checklist.map((item, idx) => (
-            <li key={idx} className="flex gap-3 text-xs text-neutral-400 leading-relaxed">
-              <span className="text-blue-500 font-bold shrink-0">·</span>{item}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-function PriceChart({ products }: { products: CoupangProduct[] }) {
-  const { max } = getPriceRange(products);
-  return (
-    <div className="bg-white/[0.03] border border-white/[0.07] rounded-xl p-6">
-      <p className="text-xs font-semibold text-neutral-500 mb-6 uppercase tracking-wide">상품별 가격 분포 (순위 기준)</p>
-      <div className="flex items-end gap-2 h-48">
-        {products.map((p, i) => {
-          const barH = Math.max(12, (p.productPrice / max) * 160);
-          const isTop3 = i < 3;
-          return (
-            <div key={p.productId} className="flex-1 flex flex-col items-center gap-1">
-              <span className="text-[10px] text-neutral-600">{Math.round(p.productPrice / 1000)}K</span>
-              <div className="w-full relative" style={{ height: barH }}>
-                <div className={"w-full h-full rounded-t-md " + (isTop3 ? "bg-gradient-to-t from-red-700 to-red-400" : "bg-white/[0.08]")} />
-                {p.isRocket && <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px]">🚀</span>}
-              </div>
-              <span className="text-[10px] text-neutral-600">{i + 1}위</span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-5 flex gap-4 text-xs text-neutral-600">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-500 inline-block" />Top 3</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-white/20 inline-block" />일반 상품</span>
-        <span>🚀 로켓배송</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
-type Tab = "products" | "strategy" | "chart";
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "products", label: "📦 상품 목록" },
-  { id: "strategy", label: "🎯 전략 분석" },
-  { id: "chart",    label: "📊 가격 분포" },
-];
+type ActiveTab = "products" | "strategy" | "chart";
 
 export default function CoupangResearch() {
-  const [keyword,   setKeyword]   = useState("");
-  const [results,   setResults]   = useState<SearchResult | null>(null);
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState("");
-  const [activeTab, setActiveTab] = useState<Tab>("products");
+  const [keyword, setKeyword] = useState("");
+  const [results, setResults] = useState<SearchResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<ActiveTab>("products");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function handleKey(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") handleSearch();
+  }
 
   async function handleSearch() {
     if (!keyword.trim()) return;
@@ -257,11 +101,10 @@ export default function CoupangResearch() {
     setError("");
     setResults(null);
     try {
-      const encodedKeyword = encodeURIComponent(keyword);
-      const res = await fetch("/api/coupang-search?keyword=" + encodedKeyword + "&limit=10");
+      const res = await fetch("/api/coupang-search?keyword=" + encodeURIComponent(keyword) + "&limit=10");
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      setResults({ products: data.products, keyword, isMock: false });
+      setResults({ products: data.products, keyword: keyword });
     } catch (err) {
       setError("검색 중 오류가 발생했습니다. 다시 시도해주세요.");
     } finally {
@@ -269,58 +112,202 @@ export default function CoupangResearch() {
     }
   }
 
+  const priceRange = results ? getPriceRange(results.products) : null;
+  const rocketCount = results ? results.products.filter(function(p) { return p.isRocket; }).length : 0;
+  const totalEstSales = results ? results.products.reduce(function(a, p, i) {
+    return a + estimateMonthlySales(p.salesRank != null ? p.salesRank : i + 1, p.productPrice);
+  }, 0) : 0;
+
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-neutral-100" style={{ fontFamily: "'DM Sans', 'Apple SD Gothic Neo', sans-serif" }}>
-      <header className="border-b border-white/[0.06] bg-white/[0.02]">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-600 to-red-400 flex items-center justify-center text-lg font-extrabold">쿠</div>
+    <div style={{ minHeight: "100vh", background: "#0a0a0f", color: "#f5f5f5", fontFamily: "Apple SD Gothic Neo, sans-serif" }}>
+      <div style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}>
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: "16px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#dc2626,#f87171)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 14 }}>쿠</div>
             <div>
-              <p className="text-sm font-bold tracking-tight">쿠팡 시장 분석기</p>
-              <p className="text-[10px] text-neutral-600 mt-0.5">Powered by Coupang Partners API</p>
+              <p style={{ fontWeight: 700, fontSize: 14, margin: 0 }}>쿠팡 시장 분석기</p>
+              <p style={{ fontSize: 10, color: "#525252", margin: 0 }}>Powered by Coupang Partners API</p>
             </div>
           </div>
-          <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">BETA</span>
+          <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(16,185,129,0.1)", color: "#10b981", border: "1px solid rgba(16,185,129,0.2)" }}>BETA</span>
         </div>
-      </header>
+      </div>
 
-      <main className="max-w-4xl mx-auto px-6 py-8">
-        <SearchBar keyword={keyword} onChange={setKeyword} onSearch={handleSearch} loading={loading} />
+      <div style={{ maxWidth: 900, margin: "0 auto", padding: "32px 24px" }}>
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 24, marginBottom: 28 }}>
+          <p style={{ fontSize: 11, fontWeight: 600, color: "#737373", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>키워드로 시장 분석</p>
+          <div style={{ display: "flex", gap: 12 }}>
+            <input
+              ref={inputRef}
+              value={keyword}
+              onChange={function(e) { setKeyword(e.target.value); }}
+              onKeyDown={handleKey}
+              placeholder="예: 무선이어폰, 캠핑의자, 프로틴 쉐이커..."
+              style={{ flex: 1, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: "12px 16px", color: "#f5f5f5", fontSize: 14, outline: "none" }}
+            />
+            <button
+              onClick={handleSearch}
+              disabled={loading || !keyword.trim()}
+              style={{ padding: "12px 28px", borderRadius: 12, fontWeight: 700, fontSize: 14, color: "#fff", background: "linear-gradient(to right, #dc2626, #f87171)", border: "none", cursor: loading || !keyword.trim() ? "not-allowed" : "pointer", opacity: loading || !keyword.trim() ? 0.4 : 1, whiteSpace: "nowrap" }}
+            >
+              {loading ? "분석 중..." : "검색"}
+            </button>
+          </div>
+        </div>
 
-        {error && <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 mb-5 text-sm text-red-300">{error}</div>}
+        {error && (
+          <div style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 12, padding: "12px 16px", marginBottom: 20, fontSize: 14, color: "#fca5a5" }}>
+            {error}
+          </div>
+        )}
 
         {loading && (
-          <div className="text-center py-20">
-            <div className="text-4xl mb-4 animate-spin inline-block">⏳</div>
-            <p className="text-sm text-neutral-500">쿠팡 데이터 분석 중…</p>
+          <div style={{ textAlign: "center", padding: "80px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 16 }}>⏳</div>
+            <p style={{ fontSize: 14, color: "#737373" }}>쿠팡 데이터 분석 중...</p>
           </div>
         )}
 
         {results && !loading && (
-          <>
-            <SummaryCards products={results.products} />
-            <div className="flex gap-1.5 mb-5">
-              {TABS.map((t) => (
-                <button key={t.id} onClick={() => setActiveTab(t.id)}
-                  className={"px-4 py-2 rounded-lg text-xs font-semibold border transition " + (activeTab === t.id ? "bg-red-500/20 text-red-400 border-red-500/40" : "bg-white/[0.04] text-neutral-500 border-white/[0.06] hover:text-neutral-300")}>
-                  {t.label}
-                </button>
-              ))}
+          <div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
+              {[
+                { label: "검색 상품 수", value: results.products.length + "개", sub: "조회된 상품", color: "#60a5fa" },
+                { label: "평균 가격", value: priceRange ? priceRange.avg.toLocaleString() + "원" : "-", sub: priceRange ? priceRange.min.toLocaleString() + " ~ " + priceRange.max.toLocaleString() : "", color: "#34d399" },
+                { label: "로켓배송 비율", value: Math.round((rocketCount / results.products.length) * 100) + "%", sub: rocketCount + "/" + results.products.length + "개", color: "#f87171" },
+                { label: "월 추정 판매량", value: totalEstSales.toLocaleString() + "개", sub: "순위 기반 추정", color: "#fbbf24" },
+              ].map(function(m) {
+                return (
+                  <div key={m.label} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 16 }}>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: "#737373", marginBottom: 8 }}>{m.label}</p>
+                    <p style={{ fontSize: 22, fontWeight: 900, color: m.color, margin: 0 }}>{m.value}</p>
+                    <p style={{ fontSize: 11, color: "#525252", marginTop: 4 }}>{m.sub}</p>
+                  </div>
+                );
+              })}
             </div>
-            {activeTab === "products" && <ProductList   products={results.products} />}
-            {activeTab === "strategy" && <StrategyPanel products={results.products} />}
-            {activeTab === "chart"    && <PriceChart    products={results.products} />}
-          </>
+
+            <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+              {(["products", "strategy", "chart"] as ActiveTab[]).map(function(t) {
+                const labels: Record<ActiveTab, string> = { products: "📦 상품 목록", strategy: "🎯 전략 분석", chart: "📊 가격 분포" };
+                const isActive = activeTab === t;
+                return (
+                  <button
+                    key={t}
+                    onClick={function() { setActiveTab(t); }}
+                    style={{ padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: isActive ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(255,255,255,0.06)", background: isActive ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.04)", color: isActive ? "#f87171" : "#737373", cursor: "pointer" }}
+                  >
+                    {labels[t]}
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeTab === "products" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {results.products.map(function(p, i) {
+                  const rank = p.salesRank != null ? p.salesRank : i + 1;
+                  const estSales = estimateMonthlySales(rank, p.productPrice);
+                  const estRevenue = estSales * p.productPrice;
+                  const isTop3 = i < 3;
+                  return (
+                    <div key={p.productId} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px", display: "grid", gridTemplateColumns: "32px 1fr auto", gap: 16, alignItems: "center" }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 900, background: isTop3 ? "linear-gradient(135deg,#dc2626,#f87171)" : "rgba(255,255,255,0.06)", color: isTop3 ? "#fff" : "#737373" }}>
+                        {i + 1}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                          <p style={{ fontSize: 14, fontWeight: 500, color: "#f5f5f5", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.productName}</p>
+                          <a href={p.productUrl} target="_blank" rel="noopener noreferrer" style={{ flexShrink: 0, fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: "rgba(16,185,129,0.15)", color: "#34d399", border: "1px solid rgba(16,185,129,0.3)", textDecoration: "none", whiteSpace: "nowrap" }}>
+                            바로가기
+                          </a>
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                          {p.isRocket && (
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)" }}>🚀 로켓</span>
+                          )}
+                          <span style={{ fontSize: 12, color: "#525252" }}>추정 {estSales.toLocaleString()}개/월</span>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <p style={{ fontSize: 18, fontWeight: 900, color: "#34d399", margin: 0 }}>{p.productPrice.toLocaleString()}원</p>
+                        <p style={{ fontSize: 11, color: "#525252", marginTop: 4 }}>월매출 약 {Math.round(estRevenue / 10000).toLocaleString()}만원</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {activeTab === "strategy" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  {deriveStrategies(results.products).map(function(s) {
+                    return (
+                      <div key={s.title} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderLeft: "3px solid " + s.color, borderRadius: 12, padding: 20 }}>
+                        <div style={{ fontSize: 24, marginBottom: 8 }}>{s.icon}</div>
+                        <p style={{ fontSize: 13, fontWeight: 700, color: s.color, marginBottom: 8 }}>{s.title}</p>
+                        <p style={{ fontSize: 12, color: "#a3a3a3", lineHeight: 1.6 }}>{s.desc}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ background: "rgba(59,130,246,0.08)", border: "1px solid rgba(59,130,246,0.2)", borderRadius: 12, padding: 20 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: "#60a5fa", marginBottom: 16 }}>📋 권장 진입 체크리스트</p>
+                  <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+                    {buildChecklist(results.products).map(function(item, idx) {
+                      return (
+                        <li key={idx} style={{ display: "flex", gap: 12, fontSize: 12, color: "#a3a3a3", lineHeight: 1.6 }}>
+                          <span style={{ color: "#3b82f6", fontWeight: 700, flexShrink: 0 }}>·</span>{item}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "chart" && (
+              <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 24 }}>
+                <p style={{ fontSize: 11, fontWeight: 600, color: "#737373", marginBottom: 24, textTransform: "uppercase", letterSpacing: 1 }}>상품별 가격 분포 (순위 기준)</p>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 192 }}>
+                  {results.products.map(function(p, i) {
+                    const maxPrice = priceRange ? priceRange.max : 1;
+                    const barH = Math.max(12, (p.productPrice / maxPrice) * 160);
+                    const isTop3 = i < 3;
+                    return (
+                      <div key={p.productId} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 10, color: "#525252" }}>{Math.round(p.productPrice / 1000)}K</span>
+                        <div style={{ width: "100%", height: barH, borderRadius: "4px 4px 0 0", background: isTop3 ? "linear-gradient(to top, #7f1d1d, #f87171)" : "rgba(255,255,255,0.08)", position: "relative" }}>
+                          {p.isRocket && <span style={{ position: "absolute", top: -16, left: "50%", transform: "translateX(-50%)", fontSize: 10 }}>🚀</span>}
+                        </div>
+                        <span style={{ fontSize: 10, color: "#525252" }}>{i + 1}위</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: 20, display: "flex", gap: 16, fontSize: 12, color: "#525252" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 12, height: 12, borderRadius: 2, background: "#ef4444", display: "inline-block" }}></span>Top 3
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ width: 12, height: 12, borderRadius: 2, background: "rgba(255,255,255,0.2)", display: "inline-block" }}></span>일반 상품
+                  </span>
+                  <span>🚀 로켓배송</span>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {!results && !loading && (
-          <div className="text-center py-20 text-neutral-700">
-            <div className="text-5xl mb-4 opacity-30">🔍</div>
-            <p className="text-sm mb-1">키워드를 입력해서 시장을 분석해보세요</p>
-            <p className="text-xs text-neutral-800">무선이어폰, 캠핑의자, 프로틴 쉐이커 등</p>
+          <div style={{ textAlign: "center", padding: "80px 0", color: "#404040" }}>
+            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>🔍</div>
+            <p style={{ fontSize: 14, marginBottom: 4 }}>키워드를 입력해서 시장을 분석해보세요</p>
+            <p style={{ fontSize: 12, color: "#262626" }}>무선이어폰, 캠핑의자, 프로틴 쉐이커 등</p>
           </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
