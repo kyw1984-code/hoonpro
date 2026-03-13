@@ -7,56 +7,44 @@ const generateSizeChartImage = (gender: 'women' | 'men', data: Record<string, Re
     canvas.width = 800;
     canvas.height = 1422;
     const ctx = canvas.getContext('2d')!;
-    
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    
     const sizes = gender === 'women' ? ['55', '66', '77', '88'] : ['85', '100', '105', '110'];
     const columns = ['사이즈', '어깨넓이', '가슴넓이', '소매길이', '총장'];
-    
     const startX = 50;
     const rowHeight = 80;
     const colWidth = 140;
     const tableHeight = rowHeight * (sizes.length + 1);
     const startY = (canvas.height - tableHeight) / 2;
-    
     ctx.fillStyle = '#1e293b';
     ctx.font = 'bold 56px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('SIZE GUIDE', canvas.width / 2, startY - 100);
-    
     ctx.font = '24px sans-serif';
     ctx.fillStyle = '#64748b';
     ctx.fillText('단면 기준(cm)이며, 측정 방법에 따라 1~3cm 오차가 있을 수 있습니다.', canvas.width / 2, startY - 40);
-    
     ctx.fillStyle = '#f8fafc';
     ctx.fillRect(startX, startY, canvas.width - 100, rowHeight);
     ctx.fillStyle = '#334155';
     ctx.font = 'bold 24px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    
     columns.forEach((col, i) => {
         ctx.fillText(col, startX + (i * colWidth) + (colWidth / 2), startY + (rowHeight / 2));
     });
-    
     ctx.font = '24px sans-serif';
     sizes.forEach((size, rowIndex) => {
         const y = startY + rowHeight * (rowIndex + 1);
-        
         ctx.beginPath();
         ctx.moveTo(startX, y);
         ctx.lineTo(canvas.width - 50, y);
         ctx.strokeStyle = '#e2e8f0';
         ctx.lineWidth = 1;
         ctx.stroke();
-        
         const rowData = data[size] || {};
-        
         ctx.fillStyle = '#1e293b';
         ctx.font = 'bold 24px sans-serif';
         ctx.fillText(size, startX + (colWidth / 2), y + (rowHeight / 2));
-        
         ctx.font = '24px sans-serif';
         ctx.fillStyle = '#475569';
         ctx.fillText(rowData.shoulder || '-', startX + colWidth + (colWidth / 2), y + (rowHeight / 2));
@@ -64,22 +52,104 @@ const generateSizeChartImage = (gender: 'women' | 'men', data: Record<string, Re
         ctx.fillText(rowData.sleeve || '-', startX + colWidth * 3 + (colWidth / 2), y + (rowHeight / 2));
         ctx.fillText(rowData.length || '-', startX + colWidth * 4 + (colWidth / 2), y + (rowHeight / 2));
     });
-    
     ctx.beginPath();
     ctx.moveTo(startX, startY + rowHeight * (sizes.length + 1));
     ctx.lineTo(canvas.width - 50, startY + rowHeight * (sizes.length + 1));
     ctx.strokeStyle = '#94a3b8';
     ctx.lineWidth = 2;
     ctx.stroke();
-    
     return canvas.toDataURL('image/png');
+};
+
+// ✅ 핵심: AI 이미지 위에 한글 텍스트를 Canvas로 덧씌우기
+const overlayTextOnImage = (imageUrl: string, keyMessage: string): Promise<string> => {
+    return new Promise((resolve) => {
+        const img = new window.Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d')!;
+
+            // 원본 이미지 그리기
+            ctx.drawImage(img, 0, 0);
+
+            if (!keyMessage.trim()) {
+                resolve(canvas.toDataURL('image/png'));
+                return;
+            }
+
+            const lines = keyMessage.split('\n').filter(l => l.trim());
+            const maxWidth = canvas.width * 0.85;
+
+            // 텍스트 영역 높이 계산
+            const fontSize = Math.max(36, Math.round(canvas.width * 0.055));
+            const lineHeight = fontSize * 1.5;
+            const totalTextHeight = lines.length * lineHeight;
+
+            // 하단 반투명 오버레이
+            const overlayH = totalTextHeight + fontSize * 2;
+            const overlayY = canvas.height - overlayH;
+            const gradient = ctx.createLinearGradient(0, overlayY, 0, canvas.height);
+            gradient.addColorStop(0, 'rgba(0,0,0,0)');
+            gradient.addColorStop(0.3, 'rgba(0,0,0,0.6)');
+            gradient.addColorStop(1, 'rgba(0,0,0,0.85)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, overlayY, canvas.width, overlayH);
+
+            // 텍스트 렌더링
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            lines.forEach((line, i) => {
+                const y = canvas.height - totalTextHeight - fontSize * 0.8 + i * lineHeight;
+
+                // 그림자 (가독성)
+                ctx.shadowColor = 'rgba(0,0,0,0.8)';
+                ctx.shadowBlur = 12;
+                ctx.shadowOffsetX = 2;
+                ctx.shadowOffsetY = 2;
+
+                // 첫 줄은 크게, 나머지는 작게
+                if (i === 0) {
+                    ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
+                    ctx.fillStyle = '#ffffff';
+                } else {
+                    ctx.font = `${Math.round(fontSize * 0.75)}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
+                    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+                }
+
+                // 긴 텍스트 줄바꿈 처리
+                const words = line.split(' ');
+                let currentLine = '';
+                let subY = y;
+                words.forEach((word) => {
+                    const testLine = currentLine ? currentLine + ' ' + word : word;
+                    if (ctx.measureText(testLine).width > maxWidth && currentLine) {
+                        ctx.fillText(currentLine, canvas.width / 2, subY);
+                        currentLine = word;
+                        subY += lineHeight * 0.8;
+                    } else {
+                        currentLine = testLine;
+                    }
+                });
+                if (currentLine) ctx.fillText(currentLine, canvas.width / 2, subY);
+            });
+
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => resolve(imageUrl); // 실패시 원본 반환
+        img.src = imageUrl;
+    });
 };
 
 export const DetailPlanner: React.FC = () => {
     const [step, setStep] = useState<1 | 2 | 3>(1);
     const [loading, setLoading] = useState(false);
-    
-    // Step 1 State
     const [info, setInfo] = useState({
         name: '',
         category: '',
@@ -90,13 +160,9 @@ export const DetailPlanner: React.FC = () => {
     const [length, setLength] = useState<number | 'auto'>('auto');
     const [referenceImages, setReferenceImages] = useState<string[]>([]);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    
-    // Size Chart State
     const [includeSizeChart, setIncludeSizeChart] = useState(false);
     const [sizeGender, setSizeGender] = useState<'women' | 'men'>('women');
     const [sizeData, setSizeData] = useState<Record<string, Record<string, string>>>({});
-
-    // Step 2 State
     const [segments, setSegments] = useState<any[]>([]);
 
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -127,7 +193,6 @@ export const DetailPlanner: React.FC = () => {
         setLoading(true);
         try {
             const plannedSegments = await planDetail({ ...info, length });
-            
             if (includeSizeChart) {
                 const sizeChartUrl = generateSizeChartImage(sizeGender, sizeData);
                 plannedSegments.push({
@@ -140,7 +205,6 @@ export const DetailPlanner: React.FC = () => {
                     isGenerating: false
                 });
             }
-            
             setSegments(plannedSegments);
             setStep(2);
         } catch (e) {
@@ -153,19 +217,22 @@ export const DetailPlanner: React.FC = () => {
 
     const handleGenerateAll = async () => {
         setStep(3);
-        
         for (let i = 0; i < segments.length; i++) {
             if (segments[i].imageUrl) continue;
-
             setSegments(prev => {
                 const newSegs = [...prev];
                 newSegs[i] = { ...newSegs[i], isGenerating: true };
                 return newSegs;
             });
-            
             try {
-                const prompt = `High quality e-commerce web banner. Visual description: ${segments[i].visualPrompt}. Render the following Korean text clearly and aesthetically on the image: "${segments[i].keyMessage}". ${info.imageInstruction ? `CRITICAL INSTRUCTION: ${info.imageInstruction}` : ''}`;
-                const imageUrl = await generateImage(prompt, referenceImages, "9:16");
+                // ✅ 프롬프트에서 한글 텍스트 제거 — 배경/비주얼만 요청
+                const prompt = `High quality e-commerce product banner image, NO TEXT, NO WORDS, NO LETTERS anywhere in the image. Visual only: ${segments[i].visualPrompt}. ${info.imageInstruction ? `CRITICAL: ${info.imageInstruction}` : ''} Clean background, professional product photography style.`;
+
+                const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
+
+                // ✅ Canvas로 한글 텍스트 덧씌우기
+                const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage);
+
                 setSegments(prev => {
                     const newSegs = [...prev];
                     newSegs[i] = { ...newSegs[i], imageUrl, isGenerating: false };
@@ -236,13 +303,9 @@ export const DetailPlanner: React.FC = () => {
                             <label className="block text-sm font-medium text-slate-700 mb-1">이미지 생성 추가 요청사항 <span className="text-slate-400 font-normal">(선택)</span></label>
                             <input type="text" value={info.imageInstruction} onChange={e => setInfo({...info, imageInstruction: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 사진에 있는 색상만 이미지를 만들어줘" />
                         </div>
-
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-2">레퍼런스 이미지 (최소 2장 필수)</label>
-                            <div 
-                                onClick={() => fileInputRef.current?.click()}
-                                className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:bg-slate-50 transition-colors"
-                            >
+                            <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:bg-slate-50 transition-colors">
                                 <div className="flex flex-col items-center text-slate-500">
                                     <Upload className="w-8 h-8 mb-2 text-slate-400" />
                                     <p className="font-medium">클릭하여 제품 사진 업로드 (다중 선택 가능)</p>
@@ -250,16 +313,12 @@ export const DetailPlanner: React.FC = () => {
                                 </div>
                                 <input type="file" multiple ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
                             </div>
-                            
                             {referenceImages.length > 0 && (
                                 <div className="grid grid-cols-4 md:grid-cols-6 gap-4 mt-4">
                                     {referenceImages.map((img, idx) => (
                                         <div key={idx} className="relative aspect-square rounded-xl border border-slate-200 overflow-hidden group">
                                             <img src={img} alt={`Ref ${idx}`} className="w-full h-full object-cover" />
-                                            <button 
-                                                onClick={() => removeImage(idx)}
-                                                className="absolute top-1 right-1 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                                            >
+                                            <button onClick={() => removeImage(idx)} className="absolute top-1 right-1 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <X className="w-4 h-4" />
                                             </button>
                                         </div>
@@ -267,7 +326,6 @@ export const DetailPlanner: React.FC = () => {
                                 </div>
                             )}
                         </div>
-
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-2">상세페이지 길이 (구조)</label>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -277,31 +335,20 @@ export const DetailPlanner: React.FC = () => {
                                     { val: 7, label: '7장 (Standard)', desc: '일반적인 구성' },
                                     { val: 9, label: '9장 (Long)', desc: '고관여/스토리텔링' }
                                 ].map(opt => (
-                                    <div 
-                                        key={opt.val}
-                                        onClick={() => setLength(opt.val as any)}
-                                        className={`p-4 rounded-xl border cursor-pointer transition-all ${length === opt.val ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300'}`}
-                                    >
+                                    <div key={opt.val} onClick={() => setLength(opt.val as any)} className={`p-4 rounded-xl border cursor-pointer transition-all ${length === opt.val ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300'}`}>
                                         <div className="font-medium text-slate-800 mb-1">{opt.label}</div>
                                         <div className="text-xs text-slate-500">{opt.desc}</div>
                                     </div>
                                 ))}
                             </div>
                         </div>
-
                         <div className="md:col-span-2 border-t border-slate-200 pt-6 mt-2">
                             <div className="flex items-center justify-between mb-4">
                                 <label className="flex items-center text-sm font-bold text-slate-800 cursor-pointer">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={includeSizeChart} 
-                                        onChange={(e) => setIncludeSizeChart(e.target.checked)}
-                                        className="mr-2 w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-                                    />
+                                    <input type="checkbox" checked={includeSizeChart} onChange={(e) => setIncludeSizeChart(e.target.checked)} className="mr-2 w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
                                     사이즈표 추가하기
                                 </label>
                             </div>
-
                             {includeSizeChart && (
                                 <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
                                     <div className="flex gap-6 mb-4">
@@ -314,7 +361,6 @@ export const DetailPlanner: React.FC = () => {
                                             <span className="font-medium text-slate-700">남성 (85, 100, 105, 110)</span>
                                         </label>
                                     </div>
-
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-sm text-left text-slate-600">
                                             <thead className="text-xs text-slate-700 uppercase bg-slate-200 rounded-t-lg">
@@ -332,21 +378,7 @@ export const DetailPlanner: React.FC = () => {
                                                         <td className="px-4 py-3 font-bold text-slate-900 text-center">{size}</td>
                                                         {['shoulder', 'chest', 'sleeve', 'length'].map((field) => (
                                                             <td key={field} className="px-4 py-2">
-                                                                <input 
-                                                                    type="text" 
-                                                                    placeholder="cm"
-                                                                    value={sizeData[size]?.[field] || ''}
-                                                                    onChange={(e) => {
-                                                                        setSizeData(prev => ({
-                                                                            ...prev,
-                                                                            [size]: {
-                                                                                ...(prev[size] || {}),
-                                                                                [field]: e.target.value
-                                                                            }
-                                                                        }));
-                                                                    }}
-                                                                    className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-center"
-                                                                />
+                                                                <input type="text" placeholder="cm" value={sizeData[size]?.[field] || ''} onChange={(e) => { setSizeData(prev => ({ ...prev, [size]: { ...(prev[size] || {}), [field]: e.target.value } })); }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-center" />
                                                             </td>
                                                         ))}
                                                     </tr>
@@ -358,13 +390,8 @@ export const DetailPlanner: React.FC = () => {
                             )}
                         </div>
                     </div>
-
                     <div className="mt-8 flex justify-end">
-                        <button 
-                            onClick={handlePlan} 
-                            disabled={loading || referenceImages.length < 2}
-                            className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors"
-                        >
+                        <button onClick={handlePlan} disabled={loading || referenceImages.length < 2} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
                             {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Wand2 className="w-5 h-5 mr-2" />}
                             AI 기획 시작하기
                         </button>
@@ -379,15 +406,11 @@ export const DetailPlanner: React.FC = () => {
                             <h2 className="text-2xl font-bold text-slate-800">AI 기획안 검토</h2>
                             <p className="text-slate-500 mt-1">AI가 작성한 기획안을 확인하고 필요시 수정하세요. (총 {segments.length}장)</p>
                         </div>
-                        <button 
-                            onClick={handleGenerateAll}
-                            className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors"
-                        >
+                        <button onClick={handleGenerateAll} className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
                             <ImageIcon className="w-5 h-5 mr-2" />
                             이미지 일괄 생성
                         </button>
                     </div>
-
                     <div className="grid grid-cols-1 gap-6">
                         {segments.map((seg, idx) => (
                             <div key={seg.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6">
@@ -403,29 +426,11 @@ export const DetailPlanner: React.FC = () => {
                                 <div className="w-full md:w-3/4 space-y-4">
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Key Message (이미지에 들어갈 카피)</label>
-                                        <textarea 
-                                            value={seg.keyMessage}
-                                            onChange={(e) => {
-                                                const newSegs = [...segments];
-                                                newSegs[idx].keyMessage = e.target.value;
-                                                setSegments(newSegs);
-                                            }}
-                                            rows={2}
-                                            className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none font-medium"
-                                        />
+                                        <textarea value={seg.keyMessage} onChange={(e) => { const newSegs = [...segments]; newSegs[idx].keyMessage = e.target.value; setSegments(newSegs); }} rows={2} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none font-medium" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Visual Prompt (이미지 연출 지시)</label>
-                                        <textarea 
-                                            value={seg.visualPrompt}
-                                            onChange={(e) => {
-                                                const newSegs = [...segments];
-                                                newSegs[idx].visualPrompt = e.target.value;
-                                                setSegments(newSegs);
-                                            }}
-                                            rows={2}
-                                            className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm text-slate-600"
-                                        />
+                                        <textarea value={seg.visualPrompt} onChange={(e) => { const newSegs = [...segments]; newSegs[idx].visualPrompt = e.target.value; setSegments(newSegs); }} rows={2} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none text-sm text-slate-600" />
                                     </div>
                                 </div>
                             </div>
@@ -441,15 +446,11 @@ export const DetailPlanner: React.FC = () => {
                             <h2 className="text-2xl font-bold text-slate-800">상세페이지 결과물</h2>
                             <p className="text-slate-500 mt-1">생성된 이미지를 확인하고 다운로드하세요.</p>
                         </div>
-                        <button 
-                            onClick={handleDownloadAll}
-                            className="bg-slate-800 hover:bg-slate-900 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors"
-                        >
+                        <button onClick={handleDownloadAll} className="bg-slate-800 hover:bg-slate-900 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
                             <Download className="w-5 h-5 mr-2" />
                             전체 다운로드
                         </button>
                     </div>
-
                     <div className="flex justify-center">
                         <div className="w-full max-w-md bg-white shadow-2xl overflow-hidden">
                             {segments.map((seg, idx) => (
