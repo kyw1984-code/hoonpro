@@ -30,25 +30,6 @@ interface Strategy {
   color: string;
 }
 
-function getBundleCount(name: string): number {
-  if (name.includes("1+1+1+1+1")) return 5;
-  if (name.includes("1+1+1+1")) return 4;
-  if (name.includes("1+1+1")) return 3;
-  if (name.includes("4+1") || name.includes("1+4") || name.includes("5장묶음") || name.includes("5장 묶음")) return 5;
-  if (name.includes("3+1") || name.includes("1+3") || name.includes("4장묶음") || name.includes("4장 묶음")) return 4;
-  if (name.includes("2+1") || name.includes("1+2") || name.includes("3장묶음") || name.includes("3장 묶음")) return 3;
-  if (name.includes("1+1") || name.includes("2장묶음") || name.includes("2장 묶음")) return 2;
-  return 1;
-}
-
-function getUnitPrice(product: CoupangProduct): { price: number; isBundle: boolean; bundleCount: number } {
-  const count = getBundleCount(product.productName);
-  if (count > 1) {
-    return { price: Math.round(product.productPrice / count), isBundle: true, bundleCount: count };
-  }
-  return { price: product.productPrice, isBundle: false, bundleCount: 1 };
-}
-
 function estimateMonthlySales(rank: number, price: number): number {
   const base = Math.max(0, (10 - rank) * 250);
   const multiplier = price < 20000 ? 1.3 : price < 40000 ? 1.0 : 0.75;
@@ -56,7 +37,7 @@ function estimateMonthlySales(rank: number, price: number): number {
 }
 
 function getPriceRange(products: CoupangProduct[]): PriceRange {
-  const prices = products.map(function(p) { return getUnitPrice(p).price; });
+  const prices = products.map(function(p) { return p.productPrice; });
   return {
     min: Math.min.apply(null, prices),
     max: Math.max.apply(null, prices),
@@ -68,7 +49,7 @@ function deriveStrategies(products: CoupangProduct[]): Strategy[] {
   const rocketRatio = products.filter(function(p) { return p.isRocket; }).length / products.length;
   const priceRange = getPriceRange(products);
   const totalEstSales = products.reduce(function(a, p, i) {
-    return a + estimateMonthlySales(p.salesRank != null ? p.salesRank : i + 1, getUnitPrice(p).price);
+    return a + estimateMonthlySales(p.salesRank != null ? p.salesRank : i + 1, p.productPrice);
   }, 0);
   const strategies: Strategy[] = [];
 
@@ -134,7 +115,7 @@ export default function CoupangResearch() {
   const priceRange = results ? getPriceRange(results.products) : null;
   const rocketCount = results ? results.products.filter(function(p) { return p.isRocket; }).length : 0;
   const totalEstSales = results ? results.products.reduce(function(a, p, i) {
-    return a + estimateMonthlySales(p.salesRank != null ? p.salesRank : i + 1, getUnitPrice(p).price);
+    return a + estimateMonthlySales(p.salesRank != null ? p.salesRank : i + 1, p.productPrice);
   }, 0) : 0;
 
   return (
@@ -191,7 +172,7 @@ export default function CoupangResearch() {
           <div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, marginBottom: 24 }}>
               {[
-                { label: "검색 상품 수", value: results.products.length + "개", sub: "조회된 상품", color: "#60a5fa" },
+                { label: "검색 상품 수", value: results.products.length + "개", sub: "단품 기준", color: "#60a5fa" },
                 { label: "평균 가격", value: priceRange ? priceRange.avg.toLocaleString() + "원" : "-", sub: priceRange ? priceRange.min.toLocaleString() + " ~ " + priceRange.max.toLocaleString() : "", color: "#34d399" },
                 { label: "로켓배송 비율", value: Math.round((rocketCount / results.products.length) * 100) + "%", sub: rocketCount + "/" + results.products.length + "개", color: "#f87171" },
                 { label: "월 추정 판매량", value: totalEstSales.toLocaleString() + "개", sub: "순위 기반 추정", color: "#fbbf24" },
@@ -226,9 +207,8 @@ export default function CoupangResearch() {
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {results.products.map(function(p, i) {
                   const rank = p.salesRank != null ? p.salesRank : i + 1;
-                  const unitInfo = getUnitPrice(p);
-                  const estSales = estimateMonthlySales(rank, unitInfo.price);
-                  const estRevenue = estSales * unitInfo.price;
+                  const estSales = estimateMonthlySales(rank, p.productPrice);
+                  const estRevenue = estSales * p.productPrice;
                   const isTop3 = i < 3;
                   return (
                     <div key={p.productId} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px", display: "grid", gridTemplateColumns: "32px 1fr auto", gap: 16, alignItems: "center" }}>
@@ -250,10 +230,7 @@ export default function CoupangResearch() {
                         </div>
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <p style={{ fontSize: 18, fontWeight: 900, color: "#34d399", margin: 0 }}>{unitInfo.price.toLocaleString()}원</p>
-                        {unitInfo.isBundle && (
-                          <p style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", marginTop: 3 }}>⚠️ 가격 부정확</p>
-                        )}
+                        <p style={{ fontSize: 18, fontWeight: 900, color: "#34d399", margin: 0 }}>{p.productPrice.toLocaleString()}원</p>
                         <p style={{ fontSize: 11, color: "#8a8a8a", marginTop: 4 }}>월매출 약 {Math.round(estRevenue / 10000).toLocaleString()}만원</p>
                       </div>
                     </div>
@@ -296,12 +273,11 @@ export default function CoupangResearch() {
                 <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 192 }}>
                   {results.products.map(function(p, i) {
                     const maxPrice = priceRange ? priceRange.max : 1;
-                    const unitInfo = getUnitPrice(p);
-                    const barH = Math.max(12, (unitInfo.price / maxPrice) * 160);
+                    const barH = Math.max(12, (p.productPrice / maxPrice) * 160);
                     const isTop3 = i < 3;
                     return (
                       <div key={p.productId} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 10, color: "#8a8a8a" }}>{Math.round(unitInfo.price / 1000)}K</span>
+                        <span style={{ fontSize: 10, color: "#8a8a8a" }}>{Math.round(p.productPrice / 1000)}K</span>
                         <div style={{ width: "100%", height: barH, borderRadius: "4px 4px 0 0", background: isTop3 ? "linear-gradient(to top, #7f1d1d, #f87171)" : "rgba(255,255,255,0.08)", position: "relative" }}>
                           {p.isRocket && <span style={{ position: "absolute", top: -16, left: "50%", transform: "translateX(-50%)", fontSize: 10 }}>🚀</span>}
                         </div>
