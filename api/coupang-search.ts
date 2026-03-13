@@ -58,6 +58,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const data = await apiRes.json();
 
+    // 응답 데이터 구조 확인용 로그
+    console.log("쿠팡 API 응답:", JSON.stringify(data).slice(0, 500));
+
     if (data.rCode !== "0") {
       return res.status(400).json({ error: data.rMessage ?? "Coupang API error", rCode: data.rCode });
     }
