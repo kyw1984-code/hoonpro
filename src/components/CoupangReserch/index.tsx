@@ -89,13 +89,13 @@ function buildChecklist(products: CoupangProduct[]): string[] {
 // ─── 목업 데이터 ──────────────────────────────────────────────────────────────
 const MOCK_PRODUCTS: CoupangProduct[] = [
   { productId: "1001", productName: "무선 블루투스 이어폰 노이즈캔슬링 프리미엄", productPrice: 45900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 1 },
-  { productId: "1002", productName: "TWS 완전무선 이어폰 저지연 게이밍",           productPrice: 29900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 2 },
-  { productId: "1003", productName: "오픈형 무선 이어폰 골전도 스포츠",            productPrice: 38000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 3 },
-  { productId: "1004", productName: "USB-C 유선 이어폰 고음질 Hi-Fi",             productPrice: 15900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 4 },
-  { productId: "1005", productName: "네크밴드 블루투스 이어폰 장시간 배터리",       productPrice: 22000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 5 },
-  { productId: "1006", productName: "어린이용 무선 이어폰 음량제한 안전설계",       productPrice: 18500, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 6 },
-  { productId: "1007", productName: "ANC 노이즈캔슬링 이어폰 통화품질 우수",       productPrice: 59000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 7 },
-  { productId: "1008", productName: "방수 스포츠 이어폰 IPX7 달리기용",            productPrice: 32000, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 8 },
+  { productId: "1002", productName: "TWS 완전무선 이어폰 저지연 게이밍",            productPrice: 29900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 2 },
+  { productId: "1003", productName: "오픈형 무선 이어폰 골전도 스포츠",             productPrice: 38000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 3 },
+  { productId: "1004", productName: "USB-C 유선 이어폰 고음질 Hi-Fi",              productPrice: 15900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 4 },
+  { productId: "1005", productName: "네크밴드 블루투스 이어폰 장시간 배터리",        productPrice: 22000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 5 },
+  { productId: "1006", productName: "어린이용 무선 이어폰 음량제한 안전설계",        productPrice: 18500, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 6 },
+  { productId: "1007", productName: "ANC 노이즈캔슬링 이어폰 통화품질 우수",        productPrice: 59000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 7 },
+  { productId: "1008", productName: "방수 스포츠 이어폰 IPX7 달리기용",             productPrice: 32000, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 8 },
 ];
 
 // ─── 서브 컴포넌트 ────────────────────────────────────────────────────────────
@@ -124,8 +124,8 @@ function SummaryCards({ products }: { products: CoupangProduct[] }) {
   const rocketCount = products.filter((p) => p.isRocket).length;
   const totalEstSales = products.reduce((a, p, i) => a + estimateMonthlySales(p.salesRank ?? i + 1, p.productPrice), 0);
   const metrics = [
-    { label: "검색 상품 수",   value: products.length + "개",                                  sub: "조회된 상품",    color: "text-blue-400"    },
-    { label: "평균 가격",      value: priceRange.avg.toLocaleString() + "원",                  sub: priceRange.min.toLocaleString() + " ~ " + priceRange.max.toLocaleString(), color: "text-emerald-400" },
+    { label: "검색 상품 수",   value: products.length + "개",                               sub: "조회된 상품",    color: "text-blue-400"    },
+    { label: "평균 가격",      value: priceRange.avg.toLocaleString() + "원",                 sub: priceRange.min.toLocaleString() + " ~ " + priceRange.max.toLocaleString(), color: "text-emerald-400" },
     { label: "로켓배송 비율",  value: Math.round((rocketCount / products.length) * 100) + "%", sub: rocketCount + "/" + products.length + "개", color: "text-red-400" },
     { label: "월 추정 판매량", value: totalEstSales.toLocaleString() + "개",                   sub: "순위 기반 추정",  color: "text-amber-400"   },
   ];
@@ -157,7 +157,7 @@ function ProductList({ products }: { products: CoupangProduct[] }) {
               <div className="flex items-center gap-2 mb-2">
                 <p className="text-sm font-medium leading-snug text-neutral-100 truncate">{p.productName}</p>
                 {p.productUrl && p.productUrl !== "#" && (
-                  
+                  <a // <-- 수정된 부분: <a> 태그가 정상적으로 추가되었습니다.
                     href={p.productUrl}
                     target="_blank"
                     rel="noopener noreferrer"
