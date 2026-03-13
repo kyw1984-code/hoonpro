@@ -34,8 +34,8 @@ interface Strategy {
 }
 
 // ─── 유틸 함수 ────────────────────────────────────────────────────────────────
-function estimateMonthlySales(rank: number, reviewCount: number, price: number): number {
-  const base = Math.max(0, (10 - rank) * 180 + reviewCount * 0.4);
+function estimateMonthlySales(rank: number, price: number): number {
+  const base = Math.max(0, (10 - rank) * 250);
   const multiplier = price < 20000 ? 1.3 : price < 40000 ? 1.0 : 0.75;
   return Math.round(base * multiplier);
 }
@@ -52,9 +52,8 @@ function getPriceRange(products: CoupangProduct[]): PriceRange {
 function deriveStrategies(products: CoupangProduct[]): Strategy[] {
   const rocketRatio = products.filter((p) => p.isRocket).length / products.length;
   const priceRange = getPriceRange(products);
-  const topAvgReviews = products.slice(0, 3).reduce((a, p) => a + p.reviewCount, 0) / 3;
   const totalEstSales = products.reduce(
-    (a, p, i) => a + estimateMonthlySales(p.salesRank ?? i + 1, p.reviewCount, p.productPrice), 0
+    (a, p, i) => a + estimateMonthlySales(p.salesRank ?? i + 1, p.productPrice), 0
   );
   const strategies: Strategy[] = [];
 
@@ -70,39 +69,33 @@ function deriveStrategies(products: CoupangProduct[]): Strategy[] {
     strategies.push({ icon: "🎯", title: "프리미엄 포지셔닝 가능", desc: "평균가 " + priceRange.avg.toLocaleString() + "원. 고품질 이미지·브랜드 스토리 강조가 핵심입니다.", color: "#a855f7" });
   }
 
-  if (topAvgReviews < 500) {
-    strategies.push({ icon: "⭐", title: "리뷰 선점 기회 존재", desc: "상위권 평균 리뷰 " + Math.round(topAvgReviews) + "개로 적습니다. 초기 리뷰 100개 확보 시 상위 노출 가능합니다.", color: "#22c55e" });
-  } else {
-    strategies.push({ icon: "📦", title: "리뷰 진입장벽 높음", desc: "상위권 평균 " + Math.round(topAvgReviews) + "개. 틈새 키워드·서브카테고리 우선 진입을 추천합니다.", color: "#f97316" });
-  }
-
   strategies.push({ icon: "📊", title: "시장 규모 추정", desc: "상위 상품 월 추정 판매량 " + totalEstSales.toLocaleString() + "개, 거래액 약 " + Math.round((totalEstSales * priceRange.avg) / 10000).toLocaleString() + "만원 규모입니다.", color: "#3b82f6" });
+
   return strategies;
 }
 
 function buildChecklist(products: CoupangProduct[]): string[] {
   const priceRange = getPriceRange(products);
   const rocketCount = products.filter((p) => p.isRocket).length;
-  const topAvgReviews = products.slice(0, 3).reduce((a, p) => a + p.reviewCount, 0) / 3;
   return [
     "가격대: " + priceRange.min.toLocaleString() + "원 이하 or " + Math.round(priceRange.avg * 1.2).toLocaleString() + "원 이상 프리미엄 포지셔닝",
-    "초기 리뷰 최소 " + Math.round(topAvgReviews * 0.1) + "개 확보 후 광고 집행 권장",
     rocketCount > products.length / 2 ? "로켓그로스 입점 검토 필수" : "일반 판매 우선 진입 가능",
     "상품 썸네일·상세페이지 차별화 (상위 상품 대비 시각 우위 확보)",
     "롱테일 키워드 변형으로 검색 노출 다각화",
+    "초기 광고 집행 시 키워드 입찰가 경쟁 강도 사전 확인 필요",
   ];
 }
 
 // ─── 목업 데이터 ──────────────────────────────────────────────────────────────
 const MOCK_PRODUCTS: CoupangProduct[] = [
-  { productId: "1001", productName: "무선 블루투스 이어폰 노이즈캔슬링 프리미엄", productPrice: 45900, productImage: "", productUrl: "#", isRocket: true,  rating: 4.7, reviewCount: 3821, salesRank: 1 },
-  { productId: "1002", productName: "TWS 완전무선 이어폰 저지연 게이밍",           productPrice: 29900, productImage: "", productUrl: "#", isRocket: true,  rating: 4.3, reviewCount: 1542, salesRank: 2 },
-  { productId: "1003", productName: "오픈형 무선 이어폰 골전도 스포츠",            productPrice: 38000, productImage: "", productUrl: "#", isRocket: false, rating: 4.1, reviewCount:  876, salesRank: 3 },
-  { productId: "1004", productName: "USB-C 유선 이어폰 고음질 Hi-Fi",             productPrice: 15900, productImage: "", productUrl: "#", isRocket: true,  rating: 4.5, reviewCount: 2103, salesRank: 4 },
-  { productId: "1005", productName: "네크밴드 블루투스 이어폰 장시간 배터리",       productPrice: 22000, productImage: "", productUrl: "#", isRocket: false, rating: 3.9, reviewCount:  654, salesRank: 5 },
-  { productId: "1006", productName: "어린이용 무선 이어폰 음량제한 안전설계",       productPrice: 18500, productImage: "", productUrl: "#", isRocket: true,  rating: 4.6, reviewCount: 1287, salesRank: 6 },
-  { productId: "1007", productName: "ANC 노이즈캔슬링 이어폰 통화품질 우수",       productPrice: 59000, productImage: "", productUrl: "#", isRocket: false, rating: 4.4, reviewCount:  932, salesRank: 7 },
-  { productId: "1008", productName: "방수 스포츠 이어폰 IPX7 달리기용",            productPrice: 32000, productImage: "", productUrl: "#", isRocket: true,  rating: 4.2, reviewCount: 1678, salesRank: 8 },
+  { productId: "1001", productName: "무선 블루투스 이어폰 노이즈캔슬링 프리미엄", productPrice: 45900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 1 },
+  { productId: "1002", productName: "TWS 완전무선 이어폰 저지연 게이밍",           productPrice: 29900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 2 },
+  { productId: "1003", productName: "오픈형 무선 이어폰 골전도 스포츠",            productPrice: 38000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 3 },
+  { productId: "1004", productName: "USB-C 유선 이어폰 고음질 Hi-Fi",             productPrice: 15900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 4 },
+  { productId: "1005", productName: "네크밴드 블루투스 이어폰 장시간 배터리",       productPrice: 22000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 5 },
+  { productId: "1006", productName: "어린이용 무선 이어폰 음량제한 안전설계",       productPrice: 18500, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 6 },
+  { productId: "1007", productName: "ANC 노이즈캔슬링 이어폰 통화품질 우수",       productPrice: 59000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 7 },
+  { productId: "1008", productName: "방수 스포츠 이어폰 IPX7 달리기용",            productPrice: 32000, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 8 },
 ];
 
 // ─── 서브 컴포넌트 ────────────────────────────────────────────────────────────
@@ -129,12 +122,12 @@ function SearchBar({ keyword, onChange, onSearch, loading }: { keyword: string; 
 function SummaryCards({ products }: { products: CoupangProduct[] }) {
   const priceRange = getPriceRange(products);
   const rocketCount = products.filter((p) => p.isRocket).length;
-  const topAvgReviews = Math.round(products.slice(0, 5).reduce((a, p) => a + p.reviewCount, 0) / 5);
+  const totalEstSales = products.reduce((a, p, i) => a + estimateMonthlySales(p.salesRank ?? i + 1, p.productPrice), 0);
   const metrics = [
-    { label: "검색 상품 수", value: products.length + "개", sub: "조회된 상품", color: "text-blue-400" },
-    { label: "평균 가격", value: priceRange.avg.toLocaleString() + "원", sub: priceRange.min.toLocaleString() + " ~ " + priceRange.max.toLocaleString(), color: "text-emerald-400" },
-    { label: "로켓배송 비율", value: Math.round((rocketCount / products.length) * 100) + "%", sub: rocketCount + "/" + products.length + "개", color: "text-red-400" },
-    { label: "상위 평균 리뷰", value: topAvgReviews.toLocaleString() + "개", sub: "Top 5 기준", color: "text-amber-400" },
+    { label: "검색 상품 수",   value: products.length + "개",                                  sub: "조회된 상품",    color: "text-blue-400"    },
+    { label: "평균 가격",      value: priceRange.avg.toLocaleString() + "원",                  sub: priceRange.min.toLocaleString() + " ~ " + priceRange.max.toLocaleString(), color: "text-emerald-400" },
+    { label: "로켓배송 비율",  value: Math.round((rocketCount / products.length) * 100) + "%", sub: rocketCount + "/" + products.length + "개", color: "text-red-400" },
+    { label: "월 추정 판매량", value: totalEstSales.toLocaleString() + "개",                   sub: "순위 기반 추정",  color: "text-amber-400"   },
   ];
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
@@ -149,36 +142,35 @@ function SummaryCards({ products }: { products: CoupangProduct[] }) {
   );
 }
 
-function RatingBar({ value }: { value: number }) {
-  return (
-    <div className="flex items-center gap-2 mt-1.5">
-      <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-        <div className="h-full bg-gradient-to-r from-amber-400 to-orange-400 rounded-full transition-all duration-700" style={{ width: (value / 5) * 100 + "%" }} />
-      </div>
-      <span className="text-xs text-neutral-500 min-w-[24px]">{value}</span>
-    </div>
-  );
-}
-
 function ProductList({ products }: { products: CoupangProduct[] }) {
   return (
     <div className="flex flex-col gap-2">
       {products.map((p, i) => {
         const rank = p.salesRank ?? i + 1;
-        const estSales = estimateMonthlySales(rank, p.reviewCount, p.productPrice);
+        const estSales = estimateMonthlySales(rank, p.productPrice);
         const estRevenue = estSales * p.productPrice;
         const isTop3 = i < 3;
         return (
           <div key={p.productId} className="bg-white/[0.03] border border-white/[0.07] rounded-xl px-4 py-4 grid grid-cols-[32px_1fr_auto] gap-4 items-center hover:border-white/[0.15] transition">
             <div className={"w-8 h-8 rounded-lg flex items-center justify-center text-sm font-extrabold " + (isTop3 ? "bg-gradient-to-br from-red-600 to-red-400 text-white" : "bg-white/[0.06] text-neutral-500")}>{i + 1}</div>
             <div className="min-w-0">
-              <p className="text-sm font-medium leading-snug mb-2 text-neutral-100 truncate">{p.productName}</p>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-sm font-medium leading-snug text-neutral-100 truncate">{p.productName}</p>
+                {p.productUrl && p.productUrl !== "#" && (
+                  
+                    href={p.productUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition whitespace-nowrap"
+                  >
+                    바로가기 →
+                  </a>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 {p.isRocket && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30">🚀 로켓</span>}
-                <span className="text-xs text-neutral-500">⭐ {p.rating} ({p.reviewCount.toLocaleString()}개)</span>
                 <span className="text-xs text-neutral-600">추정 {estSales.toLocaleString()}개/월</span>
               </div>
-              <RatingBar value={p.rating} />
             </div>
             <div className="text-right shrink-0">
               <p className="text-lg font-extrabold text-emerald-400 tracking-tight">{p.productPrice.toLocaleString()}원</p>
