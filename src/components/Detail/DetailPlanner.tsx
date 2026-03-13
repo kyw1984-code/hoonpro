@@ -217,10 +217,11 @@ export const DetailPlanner: React.FC = () => {
         }
     };
 
-    const handleGenerateAll = async () => {
+    const handleGenerateAll = async (regenerate = false) => {
         setStep(3);
         for (let i = 0; i < segments.length; i++) {
-            if (segments[i].imageUrl) continue;
+            // regenerate=false면 기존 이미지 있는 건 스킵, true면 전체 재생성
+            if (!regenerate && segments[i].imageUrl) continue;
             setSegments(prev => {
                 const newSegs = [...prev];
                 newSegs[i] = { ...newSegs[i], isGenerating: true };
@@ -268,13 +269,26 @@ export const DetailPlanner: React.FC = () => {
             <div className="flex items-center justify-between mb-8">
                 {[1, 2, 3].map((s) => (
                     <div key={s} className="flex items-center">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold ${step >= s ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+                        <div
+                            onClick={() => {
+                                // 이미 방문한 단계만 클릭 가능
+                                if (s === 1 && step > 1) setStep(1);
+                                if (s === 2 && step > 2) setStep(2);
+                            }}
+                            className={`w-10 h-10 rounded-full flex items-center justify-center font-bold transition-all
+                                ${step >= s ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}
+                                ${(s === 1 && step > 1) || (s === 2 && step > 2) ? 'cursor-pointer hover:bg-blue-700 hover:scale-105' : 'cursor-default'}
+                            `}
+                        >
                             {s}
                         </div>
                         <div className="ml-3">
                             <p className={`text-sm font-medium ${step >= s ? 'text-slate-900' : 'text-slate-500'}`}>
                                 {s === 1 ? '정보 입력' : s === 2 ? '전략 기획' : '이미지 생성'}
                             </p>
+                            {(s === 1 && step > 1) || (s === 2 && step > 2) ? (
+                                <p className="text-xs text-blue-500">클릭해서 수정</p>
+                            ) : null}
                         </div>
                         {s < 3 && <ChevronRight className="w-5 h-5 mx-4 text-slate-300" />}
                     </div>
@@ -408,10 +422,18 @@ export const DetailPlanner: React.FC = () => {
                             <h2 className="text-2xl font-bold text-slate-800">AI 기획안 검토</h2>
                             <p className="text-slate-500 mt-1">AI가 작성한 기획안을 확인하고 필요시 수정하세요. (총 {segments.length}장)</p>
                         </div>
-                        <button onClick={handleGenerateAll} className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
-                            <ImageIcon className="w-5 h-5 mr-2" />
-                            이미지 일괄 생성
-                        </button>
+                        <div className="flex gap-3">
+                            <button onClick={() => handleGenerateAll(false)} className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
+                                <ImageIcon className="w-5 h-5 mr-2" />
+                                이미지 생성
+                            </button>
+                            {segments.some(s => s.imageUrl) && (
+                                <button onClick={() => handleGenerateAll(true)} className="bg-orange-500 hover:bg-orange-600 text-white font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
+                                    <ImageIcon className="w-5 h-5 mr-2" />
+                                    전체 재생성
+                                </button>
+                            )}
+                        </div>
                     </div>
                     <div className="grid grid-cols-1 gap-6">
                         {segments.map((seg, idx) => (
@@ -438,6 +460,9 @@ export const DetailPlanner: React.FC = () => {
                             </div>
                         ))}
                     </div>
+                    <div className="flex justify-end mt-2">
+                        <p className="text-xs text-slate-400">💡 수정 후 이미지 일괄 생성을 눌러 새로 만들어보세요.</p>
+                    </div>
                 </div>
             )}
 
@@ -448,10 +473,20 @@ export const DetailPlanner: React.FC = () => {
                             <h2 className="text-2xl font-bold text-slate-800">상세페이지 결과물</h2>
                             <p className="text-slate-500 mt-1">생성된 이미지를 확인하고 다운로드하세요.</p>
                         </div>
-                        <button onClick={handleDownloadAll} className="bg-slate-800 hover:bg-slate-900 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
-                            <Download className="w-5 h-5 mr-2" />
-                            전체 다운로드
-                        </button>
+                        <div className="flex gap-3">
+                            <button onClick={() => {
+                                // 기존 이미지 초기화해서 수정 후 재생성 가능하게
+                                setSegments(prev => prev.map(s => ({ ...s, imageUrl: undefined, isGenerating: false })));
+                                setStep(2);
+                            }} className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
+                                <ChevronRight className="w-5 h-5 mr-2 rotate-180" />
+                                기획안 수정
+                            </button>
+                            <button onClick={handleDownloadAll} className="bg-slate-800 hover:bg-slate-900 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
+                                <Download className="w-5 h-5 mr-2" />
+                                전체 다운로드
+                            </button>
+                        </div>
                     </div>
                     <div className="flex justify-center">
                         <div className="w-full max-w-md bg-white shadow-2xl overflow-hidden">
