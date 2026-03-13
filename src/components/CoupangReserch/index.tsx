@@ -137,23 +137,32 @@ function ProductList({ products }: { products: CoupangProduct[] }) {
         const estSales = estimateMonthlySales(rank, p.productPrice);
         const estRevenue = estSales * p.productPrice;
         const isTop3 = i < 3;
+        const badgeClass = isTop3
+          ? "bg-gradient-to-br from-red-600 to-red-400 text-white"
+          : "bg-white/[0.06] text-neutral-500";
         return (
           <div key={p.productId} className="bg-white/[0.03] border border-white/[0.07] rounded-xl px-4 py-4 grid grid-cols-[32px_1fr_auto] gap-4 items-center hover:border-white/[0.15] transition">
-            <div className={"w-8 h-8 rounded-lg flex items-center justify-center text-sm font-extrabold " + (isTop3 ? "bg-gradient-to-br from-red-600 to-red-400 text-white" : "bg-white/[0.06] text-neutral-500")}>{i + 1}</div>
+            <div className={"w-8 h-8 rounded-lg flex items-center justify-center text-sm font-extrabold " + badgeClass}>
+              {i + 1}
+            </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", flexWrap: "wrap" }}>
                 <p className="text-sm font-medium leading-snug text-neutral-100 truncate">{p.productName}</p>
                 
                   href={p.productUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition whitespace-nowrap"
+                  style={{ flexShrink: 0, fontSize: "10px", fontWeight: "bold", padding: "2px 8px", borderRadius: "6px", background: "rgba(16,185,129,0.15)", color: "#34d399", border: "1px solid rgba(16,185,129,0.3)", whiteSpace: "nowrap", textDecoration: "none" }}
                 >
                   바로가기 →
                 </a>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {p.isRocket && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30">🚀 로켓</span>}
+                {p.isRocket && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30">
+                    🚀 로켓
+                  </span>
+                )}
                 <span className="text-xs text-neutral-600">추정 {estSales.toLocaleString()}개/월</span>
               </div>
             </div>
