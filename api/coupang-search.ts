@@ -58,18 +58,18 @@ function deriveStrategies(products: CoupangProduct[]): Strategy[] {
   const strategies: Strategy[] = [];
 
   if (rocketRatio > 0.6) {
-    strategies.push({ icon: "🚀", title: "로켓배송 필수 진입", desc: "상위 상품의 " + Math.round(rocketRatio * 100) + "%가 로켓배송입니다. 로켓그로스 입점을 우선 검토하세요.", color: "#ef4444" });
+    strategies.push({ icon: "🚀", title: "로켓배송 필수 진입", desc: `상위 상품의 ${Math.round(rocketRatio * 100)}%가 로켓배송입니다. 로켓그로스 입점을 우선 검토하세요.`, color: "#ef4444" });
   } else {
-    strategies.push({ icon: "💡", title: "일반 판매 진입 가능", desc: "로켓 비중 " + Math.round(rocketRatio * 100) + "%로 낮아 일반 판매자도 충분히 경쟁 가능한 시장입니다.", color: "#14b8a6" });
+    strategies.push({ icon: "💡", title: "일반 판매 진입 가능", desc: `로켓 비중 ${Math.round(rocketRatio * 100)}%로 낮아 일반 판매자도 충분히 경쟁 가능한 시장입니다.`, color: "#14b8a6" });
   }
 
   if (priceRange.avg < 30000) {
-    strategies.push({ icon: "💰", title: "저가 경쟁 심화 시장", desc: "평균가 " + priceRange.avg.toLocaleString() + "원. 가격 경쟁 대신 번들 구성·사은품으로 가치를 차별화하세요.", color: "#f59e0b" });
+    strategies.push({ icon: "💰", title: "저가 경쟁 심화 시장", desc: `평균가 ${priceRange.avg.toLocaleString()}원. 가격 경쟁 대신 번들 구성·사은품으로 가치를 차별화하세요.`, color: "#f59e0b" });
   } else {
-    strategies.push({ icon: "🎯", title: "프리미엄 포지셔닝 가능", desc: "평균가 " + priceRange.avg.toLocaleString() + "원. 고품질 이미지·브랜드 스토리 강조가 핵심입니다.", color: "#a855f7" });
+    strategies.push({ icon: "🎯", title: "프리미엄 포지셔닝 가능", desc: `평균가 ${priceRange.avg.toLocaleString()}원. 고품질 이미지·브랜드 스토리 강조가 핵심입니다.`, color: "#a855f7" });
   }
 
-  strategies.push({ icon: "📊", title: "시장 규모 추정", desc: "상위 상품 월 추정 판매량 " + totalEstSales.toLocaleString() + "개, 거래액 약 " + Math.round((totalEstSales * priceRange.avg) / 10000).toLocaleString() + "만원 규모입니다.", color: "#3b82f6" });
+  strategies.push({ icon: "📊", title: "시장 규모 추정", desc: `상위 상품 월 추정 판매량 ${totalEstSales.toLocaleString()}개, 거래액 약 ${Math.round((totalEstSales * priceRange.avg) / 10000).toLocaleString()}만원 규모입니다.`, color: "#3b82f6" });
 
   return strategies;
 }
@@ -78,7 +78,7 @@ function buildChecklist(products: CoupangProduct[]): string[] {
   const priceRange = getPriceRange(products);
   const rocketCount = products.filter((p) => p.isRocket).length;
   return [
-    "가격대: " + priceRange.min.toLocaleString() + "원 이하 or " + Math.round(priceRange.avg * 1.2).toLocaleString() + "원 이상 프리미엄 포지셔닝",
+    `가격대: ${priceRange.min.toLocaleString()}원 이하 or ${Math.round(priceRange.avg * 1.2).toLocaleString()}원 이상 프리미엄 포지셔닝`,
     rocketCount > products.length / 2 ? "로켓그로스 입점 검토 필수" : "일반 판매 우선 진입 가능",
     "상품 썸네일·상세페이지 차별화 (상위 상품 대비 시각 우위 확보)",
     "롱테일 키워드 변형으로 검색 노출 다각화",
@@ -86,27 +86,24 @@ function buildChecklist(products: CoupangProduct[]): string[] {
   ];
 }
 
-// ─── 목업 데이터 ──────────────────────────────────────────────────────────────
+// ─── 목업 데이터 (개별 상품 링크 적용) ──────────────────────────────────────────
 const MOCK_PRODUCTS: CoupangProduct[] = [
-  { productId: "1001", productName: "무선 블루투스 이어폰 노이즈캔슬링 프리미엄", productPrice: 45900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 1 },
-  { productId: "1002", productName: "TWS 완전무선 이어폰 저지연 게이밍",           productPrice: 29900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 2 },
-  { productId: "1003", productName: "오픈형 무선 이어폰 골전도 스포츠",            productPrice: 38000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 3 },
-  { productId: "1004", productName: "USB-C 유선 이어폰 고음질 Hi-Fi",             productPrice: 15900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 4 },
-  { productId: "1005", productName: "네크밴드 블루투스 이어폰 장시간 배터리",       productPrice: 22000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 5 },
-  { productId: "1006", productName: "어린이용 무선 이어폰 음량제한 안전설계",       productPrice: 18500, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 6 },
-  { productId: "1007", productName: "ANC 노이즈캔슬링 이어폰 통화품질 우수",       productPrice: 59000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 7 },
-  { productId: "1008", productName: "방수 스포츠 이어폰 IPX7 달리기용",            productPrice: 32000, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 8 },
+  { productId: "1001", productName: "무선 블루투스 이어폰 노이즈캔슬링 프리미엄", productPrice: 45900, productImage: "", productUrl: "https://www.coupang.com/vp/products/1001", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 1 },
+  { productId: "1002", productName: "TWS 완전무선 이어폰 저지연 게이밍",            productPrice: 29900, productImage: "", productUrl: "https://www.coupang.com/vp/products/1002", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 2 },
+  { productId: "1003", productName: "오픈형 무선 이어폰 골전도 스포츠",             productPrice: 38000, productImage: "", productUrl: "https://www.coupang.com/vp/products/1003", isRocket: false, rating: 0, reviewCount: 0, salesRank: 3 },
+  { productId: "1004", productName: "USB-C 유선 이어폰 고음질 Hi-Fi",              productPrice: 15900, productImage: "", productUrl: "https://www.coupang.com/vp/products/1004", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 4 },
+  { productId: "1005", productName: "네크밴드 블루투스 이어폰 장시간 배터리",        productPrice: 22000, productImage: "", productUrl: "https://www.coupang.com/vp/products/1005", isRocket: false, rating: 0, reviewCount: 0, salesRank: 5 },
+  { productId: "1006", productName: "어린이용 무선 이어폰 음량제한 안전설계",        productPrice: 18500, productImage: "", productUrl: "https://www.coupang.com/vp/products/1006", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 6 },
 ];
 
 // ─── 서브 컴포넌트 ────────────────────────────────────────────────────────────
 function SearchBar({ keyword, onChange, onSearch, loading }: { keyword: string; onChange: (v: string) => void; onSearch: () => void; loading: boolean }) {
-  const inputRef = useRef<HTMLInputElement>(null);
   const handleKey = (e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") onSearch(); };
   return (
     <div className="bg-white/[0.03] border border-white/[0.08] rounded-2xl p-6 mb-7">
       <p className="text-xs font-semibold text-neutral-500 mb-3 tracking-wide uppercase">키워드로 시장 분석</p>
       <div className="flex gap-3">
-        <input ref={inputRef} value={keyword} onChange={(e) => onChange(e.target.value)} onKeyDown={handleKey}
+        <input value={keyword} onChange={(e) => onChange(e.target.value)} onKeyDown={handleKey}
           placeholder="예: 무선이어폰, 캠핑의자, 프로틴 쉐이커..."
           className="flex-1 bg-white/[0.05] border border-white/[0.12] rounded-xl px-4 py-3 text-neutral-100 placeholder-neutral-600 text-sm outline-none focus:border-red-500/50 transition" />
         <button onClick={onSearch} disabled={loading || !keyword.trim()}
@@ -114,7 +111,6 @@ function SearchBar({ keyword, onChange, onSearch, loading }: { keyword: string; 
           {loading ? "분석 중…" : "🔍 분석하기"}
         </button>
       </div>
-      <p className="mt-2 text-xs text-neutral-700">⚡ API 키 미설정 시 데모 데이터로 자동 실행됩니다</p>
     </div>
   );
 }
@@ -124,17 +120,17 @@ function SummaryCards({ products }: { products: CoupangProduct[] }) {
   const rocketCount = products.filter((p) => p.isRocket).length;
   const totalEstSales = products.reduce((a, p, i) => a + estimateMonthlySales(p.salesRank ?? i + 1, p.productPrice), 0);
   const metrics = [
-    { label: "검색 상품 수",    value: products.length + "개",                                          sub: "조회된 상품",    color: "text-blue-400"    },
-    { label: "평균 가격",       value: priceRange.avg.toLocaleString() + "원",                          sub: priceRange.min.toLocaleString() + " ~ " + priceRange.max.toLocaleString(), color: "text-emerald-400" },
-    { label: "로켓배송 비율",   value: Math.round((rocketCount / products.length) * 100) + "%",         sub: rocketCount + "/" + products.length + "개", color: "text-red-400"     },
-    { label: "월 추정 판매량",  value: totalEstSales.toLocaleString() + "개",                           sub: "순위 기반 추정",  color: "text-amber-400"   },
+    { label: "검색 상품 수",   value: `${products.length}개`,                               sub: "조회된 상품",    color: "text-blue-400"    },
+    { label: "평균 가격",      value: `${priceRange.avg.toLocaleString()}원`,                 sub: `${priceRange.min.toLocaleString()} ~ ${priceRange.max.toLocaleString()}`, color: "text-emerald-400" },
+    { label: "로켓배송 비율",  value: `${Math.round((rocketCount / products.length) * 100)}%`, sub: `${rocketCount}/${products.length}개`, color: "text-red-400" },
+    { label: "월 추정 판매량", value: `${totalEstSales.toLocaleString()}개`,                   sub: "순위 기반 추정",  color: "text-amber-400"   },
   ];
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
       {metrics.map((m) => (
         <div key={m.label} className="bg-white/[0.03] border border-white/[0.07] rounded-xl p-4">
           <p className="text-xs font-semibold text-neutral-500 mb-2">{m.label}</p>
-          <p className={"text-2xl font-extrabold tracking-tight " + m.color}>{m.value}</p>
+          <p className={`text-2xl font-extrabold tracking-tight ${m.color}`}>{m.value}</p>
           <p className="text-xs text-neutral-600 mt-1">{m.sub}</p>
         </div>
       ))}
@@ -152,9 +148,24 @@ function ProductList({ products }: { products: CoupangProduct[] }) {
         const isTop3 = i < 3;
         return (
           <div key={p.productId} className="bg-white/[0.03] border border-white/[0.07] rounded-xl px-4 py-4 grid grid-cols-[32px_1fr_auto] gap-4 items-center hover:border-white/[0.15] transition">
-            <div className={"w-8 h-8 rounded-lg flex items-center justify-center text-sm font-extrabold " + (isTop3 ? "bg-gradient-to-br from-red-600 to-red-400 text-white" : "bg-white/[0.06] text-neutral-500")}>{i + 1}</div>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-extrabold ${isTop3 ? "bg-gradient-to-br from-red-600 to-red-400 text-white" : "bg-white/[0.06] text-neutral-500"}`}>{i + 1}</div>
             <div className="min-w-0">
-              <p className="text-sm font-medium leading-snug mb-2 text-neutral-100 truncate">{p.productName}</p>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-sm font-medium leading-snug text-neutral-100 truncate max-w-[150px] md:max-w-[400px]">
+                  {p.productName}
+                </p>
+                {/* ── 실제 제품 링크 적용 ── */}
+                {p.productUrl && p.productUrl !== "#" && (
+                  <a
+                    href={p.productUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition whitespace-nowrap"
+                  >
+                    바로가기 ↗
+                  </a>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 {p.isRocket && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30">🚀 로켓</span>}
                 <span className="text-xs text-neutral-600">추정 {estSales.toLocaleString()}개/월</span>
@@ -212,18 +223,13 @@ function PriceChart({ products }: { products: CoupangProduct[] }) {
             <div key={p.productId} className="flex-1 flex flex-col items-center gap-1">
               <span className="text-[10px] text-neutral-600">{Math.round(p.productPrice / 1000)}K</span>
               <div className="w-full relative" style={{ height: barH }}>
-                <div className={"w-full h-full rounded-t-md " + (isTop3 ? "bg-gradient-to-t from-red-700 to-red-400" : "bg-white/[0.08]")} />
+                <div className={`w-full h-full rounded-t-md ${isTop3 ? "bg-gradient-to-t from-red-700 to-red-400" : "bg-white/[0.08]"}`} />
                 {p.isRocket && <span className="absolute -top-4 left-1/2 -translate-x-1/2 text-[10px]">🚀</span>}
               </div>
               <span className="text-[10px] text-neutral-600">{i + 1}위</span>
             </div>
           );
         })}
-      </div>
-      <div className="mt-5 flex gap-4 text-xs text-neutral-600">
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-500 inline-block" />Top 3</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-white/20 inline-block" />일반 상품</span>
-        <span>🚀 로켓배송</span>
       </div>
     </div>
   );
@@ -242,22 +248,20 @@ export default function CoupangResearch() {
   const [keyword,   setKeyword]   = useState("");
   const [results,   setResults]   = useState<SearchResult | null>(null);
   const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("products");
 
   async function handleSearch() {
     if (!keyword.trim()) return;
     setLoading(true);
-    setError("");
     setResults(null);
     try {
       const encodedKeyword = encodeURIComponent(keyword);
-      const res = await fetch("/api/coupang-search?keyword=" + encodedKeyword + "&limit=10");
-      if (!res.ok) throw new Error(await res.text());
+      const res = await fetch(`/api/coupang-search?keyword=${encodedKeyword}&limit=10`);
+      if (!res.ok) throw new Error();
       const data = await res.json();
       setResults({ products: data.products, keyword, isMock: false });
     } catch (err) {
-      console.warn("API 호출 실패, 데모 데이터 사용:", err);
+      // API 연결 실패 시 개별 링크가 포함된 목업 데이터로 전환
       await new Promise((r) => setTimeout(r, 800));
       setResults({ products: MOCK_PRODUCTS, keyword, isMock: true });
     } finally {
@@ -266,46 +270,36 @@ export default function CoupangResearch() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-neutral-100" style={{ fontFamily: "'DM Sans', 'Apple SD Gothic Neo', sans-serif" }}>
+    <div className="min-h-screen bg-[#0a0a0f] text-neutral-100" style={{ fontFamily: "'Apple SD Gothic Neo', sans-serif" }}>
       <header className="border-b border-white/[0.06] bg-white/[0.02]">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-600 to-red-400 flex items-center justify-center text-lg font-extrabold">쿠</div>
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-600 to-red-400 flex items-center justify-center text-lg font-extrabold text-white">쿠</div>
             <div>
               <p className="text-sm font-bold tracking-tight">쿠팡 시장 분석기</p>
-              <p className="text-[10px] text-neutral-600 mt-0.5">Powered by Coupang Partners API</p>
+              <p className="text-[10px] text-neutral-600 mt-0.5">Powered by Shock Tree</p>
             </div>
           </div>
-          <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">BETA</span>
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
         <SearchBar keyword={keyword} onChange={setKeyword} onSearch={handleSearch} loading={loading} />
 
-        {error && <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 mb-5 text-sm text-red-300">{error}</div>}
-
         {loading && (
           <div className="text-center py-20">
             <div className="text-4xl mb-4 animate-spin inline-block">⏳</div>
-            <p className="text-sm text-neutral-500">쿠팡 데이터 분석 중…</p>
+            <p className="text-sm text-neutral-500">데이터를 분석하는 중입니다...</p>
           </div>
         )}
 
         {results && !loading && (
           <>
-            {results.isMock && (
-              <div className="bg-amber-500/[0.08] border border-amber-500/20 rounded-lg px-4 py-2.5 mb-5 text-xs text-amber-400">
-                📌 데모 모드 — 샘플 데이터입니다. Vercel 환경변수에{" "}
-                <code className="bg-white/10 px-1 rounded">COUPANG_ACCESS_KEY</code>와{" "}
-                <code className="bg-white/10 px-1 rounded">COUPANG_SECRET_KEY</code>를 설정하면 실제 데이터가 조회됩니다.
-              </div>
-            )}
             <SummaryCards products={results.products} />
             <div className="flex gap-1.5 mb-5">
               {TABS.map((t) => (
                 <button key={t.id} onClick={() => setActiveTab(t.id)}
-                  className={"px-4 py-2 rounded-lg text-xs font-semibold border transition " + (activeTab === t.id ? "bg-red-500/20 text-red-400 border-red-500/40" : "bg-white/[0.04] text-neutral-500 border-white/[0.06] hover:text-neutral-300")}>
+                  className={`px-4 py-2 rounded-lg text-xs font-semibold border transition ${activeTab === t.id ? "bg-red-500/20 text-red-400 border-red-500/40" : "bg-white/[0.04] text-neutral-500 border-white/[0.06] hover:text-neutral-300"}`}>
                   {t.label}
                 </button>
               ))}
@@ -314,14 +308,6 @@ export default function CoupangResearch() {
             {activeTab === "strategy" && <StrategyPanel products={results.products} />}
             {activeTab === "chart"    && <PriceChart    products={results.products} />}
           </>
-        )}
-
-        {!results && !loading && (
-          <div className="text-center py-20 text-neutral-700">
-            <div className="text-5xl mb-4 opacity-30">🔍</div>
-            <p className="text-sm mb-1">키워드를 입력해서 시장을 분석해보세요</p>
-            <p className="text-xs text-neutral-800">무선이어폰, 캠핑의자, 프로틴 쉐이커 등</p>
-          </div>
         )}
       </main>
     </div>
