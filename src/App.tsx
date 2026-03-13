@@ -7,6 +7,7 @@ import { DetailPlanner } from './components/Detail/DetailPlanner';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { ProductNameGenerator } from './components/ProductName/ProductNameGenerator';
+import CoupangResearch from './components/CoupangResearch';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, Lock, Search } from 'lucide-react';
@@ -59,7 +60,7 @@ function PasswordGate({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
-type Tab = 'thumbnail' | 'detail' | 'analyzer' | 'productname';
+type Tab = 'thumbnail' | 'detail' | 'analyzer' | 'productname' | 'coupang';
 
 export default function App() {
   const [authed, setAuthed] = useState(sessionStorage.getItem('auth') === 'true');
@@ -115,6 +116,15 @@ export default function App() {
                 <Tag className="w-4 h-4 mr-2" />
                 상품명 제조기
               </button>
+              <button
+                onClick={() => setActiveTab('coupang')}
+                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'coupang' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Search className="w-4 h-4 mr-2" />
+                시장 분석기
+              </button>
             </div>
           </div>
         </header>
@@ -124,6 +134,7 @@ export default function App() {
           {activeTab === 'detail' && <DetailPlanner />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
           {activeTab === 'productname' && <ProductNameGenerator />}
+          {activeTab === 'coupang' && <CoupangResearch />}
         </main>
 
         <Footer />
