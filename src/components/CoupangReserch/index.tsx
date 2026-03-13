@@ -88,12 +88,14 @@ function buildChecklist(products: CoupangProduct[]): string[] {
 
 // ─── 목업 데이터 ──────────────────────────────────────────────────────────────
 const MOCK_PRODUCTS: CoupangProduct[] = [
-  { productId: "1001", productName: "무선 블루투스 이어폰 노이즈캔슬링 프리미엄", productPrice: 45900, productImage: "", productUrl: "https://www.coupang.com", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 1 },
-  { productId: "1002", productName: "TWS 완전무선 이어폰 저지연 게이밍",            productPrice: 29900, productImage: "", productUrl: "https://www.coupang.com", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 2 },
-  { productId: "1003", productName: "오픈형 무선 이어폰 골전도 스포츠",             productPrice: 38000, productImage: "", productUrl: "https://www.coupang.com", isRocket: false, rating: 0, reviewCount: 0, salesRank: 3 },
-  { productId: "1004", productName: "USB-C 유선 이어폰 고음질 Hi-Fi",              productPrice: 15900, productImage: "", productUrl: "https://www.coupang.com", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 4 },
-  { productId: "1005", productName: "네크밴드 블루투스 이어폰 장시간 배터리",        productPrice: 22000, productImage: "", productUrl: "https://www.coupang.com", isRocket: false, rating: 0, reviewCount: 0, salesRank: 5 },
-  { productId: "1006", productName: "어린이용 무선 이어폰 음량제한 안전설계",        productPrice: 18500, productImage: "", productUrl: "https://www.coupang.com", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 6 },
+  { productId: "1001", productName: "무선 블루투스 이어폰 노이즈캔슬링 프리미엄", productPrice: 45900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 1 },
+  { productId: "1002", productName: "TWS 완전무선 이어폰 저지연 게이밍",            productPrice: 29900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 2 },
+  { productId: "1003", productName: "오픈형 무선 이어폰 골전도 스포츠",             productPrice: 38000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 3 },
+  { productId: "1004", productName: "USB-C 유선 이어폰 고음질 Hi-Fi",              productPrice: 15900, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 4 },
+  { productId: "1005", productName: "네크밴드 블루투스 이어폰 장시간 배터리",        productPrice: 22000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 5 },
+  { productId: "1006", productName: "어린이용 무선 이어폰 음량제한 안전설계",        productPrice: 18500, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 6 },
+  { productId: "1007", productName: "ANC 노이즈캔슬링 이어폰 통화품질 우수",        productPrice: 59000, productImage: "", productUrl: "#", isRocket: false, rating: 0, reviewCount: 0, salesRank: 7 },
+  { productId: "1008", productName: "방수 스포츠 이어폰 IPX7 달리기용",             productPrice: 32000, productImage: "", productUrl: "#", isRocket: true,  rating: 0, reviewCount: 0, salesRank: 8 },
 ];
 
 // ─── 서브 컴포넌트 ────────────────────────────────────────────────────────────
@@ -112,6 +114,7 @@ function SearchBar({ keyword, onChange, onSearch, loading }: { keyword: string; 
           {loading ? "분석 중…" : "🔍 분석하기"}
         </button>
       </div>
+      <p className="mt-2 text-xs text-neutral-700">⚡ API 키 미설정 시 데모 데이터로 자동 실행됩니다</p>
     </div>
   );
 }
@@ -152,18 +155,15 @@ function ProductList({ products }: { products: CoupangProduct[] }) {
             <div className={"w-8 h-8 rounded-lg flex items-center justify-center text-sm font-extrabold " + (isTop3 ? "bg-gradient-to-br from-red-600 to-red-400 text-white" : "bg-white/[0.06] text-neutral-500")}>{i + 1}</div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 mb-2">
-                <p className="text-sm font-medium leading-snug text-neutral-100 truncate max-w-[200px] md:max-w-[400px]">
-                  {p.productName}
-                </p>
-                {/* ── 바로가기 버튼 구현 부분 ── */}
+                <p className="text-sm font-medium leading-snug text-neutral-100 truncate">{p.productName}</p>
                 {p.productUrl && p.productUrl !== "#" && (
-                  <a
+                  <a // <-- 수정된 부분: <a> 태그가 정상적으로 추가되었습니다.
                     href={p.productUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-md bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition whitespace-nowrap"
+                    className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition whitespace-nowrap"
                   >
-                    바로가기 ↗
+                    바로가기 →
                   </a>
                 )}
               </div>
@@ -232,6 +232,11 @@ function PriceChart({ products }: { products: CoupangProduct[] }) {
           );
         })}
       </div>
+      <div className="mt-5 flex gap-4 text-xs text-neutral-600">
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-500 inline-block" />Top 3</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-white/20 inline-block" />일반 상품</span>
+        <span>🚀 로켓배송</span>
+      </div>
     </div>
   );
 }
@@ -249,19 +254,22 @@ export default function CoupangResearch() {
   const [keyword,   setKeyword]   = useState("");
   const [results,   setResults]   = useState<SearchResult | null>(null);
   const [loading,   setLoading]   = useState(false);
+  const [error,     setError]     = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("products");
 
   async function handleSearch() {
     if (!keyword.trim()) return;
     setLoading(true);
+    setError("");
     setResults(null);
     try {
       const encodedKeyword = encodeURIComponent(keyword);
       const res = await fetch("/api/coupang-search?keyword=" + encodedKeyword + "&limit=10");
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setResults({ products: data.products, keyword, isMock: false });
     } catch (err) {
+      console.warn("API 호출 실패, 데모 데이터 사용:", err);
       await new Promise((r) => setTimeout(r, 800));
       setResults({ products: MOCK_PRODUCTS, keyword, isMock: true });
     } finally {
@@ -270,21 +278,24 @@ export default function CoupangResearch() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] text-neutral-100" style={{ fontFamily: "'Apple SD Gothic Neo', sans-serif" }}>
+    <div className="min-h-screen bg-[#0a0a0f] text-neutral-100" style={{ fontFamily: "'DM Sans', 'Apple SD Gothic Neo', sans-serif" }}>
       <header className="border-b border-white/[0.06] bg-white/[0.02]">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-600 to-red-400 flex items-center justify-center text-lg font-extrabold text-white">쿠</div>
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-600 to-red-400 flex items-center justify-center text-lg font-extrabold">쿠</div>
             <div>
               <p className="text-sm font-bold tracking-tight">쿠팡 시장 분석기</p>
               <p className="text-[10px] text-neutral-600 mt-0.5">Powered by Coupang Partners API</p>
             </div>
           </div>
+          <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">BETA</span>
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-8">
         <SearchBar keyword={keyword} onChange={setKeyword} onSearch={handleSearch} loading={loading} />
+
+        {error && <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 mb-5 text-sm text-red-300">{error}</div>}
 
         {loading && (
           <div className="text-center py-20">
@@ -295,6 +306,13 @@ export default function CoupangResearch() {
 
         {results && !loading && (
           <>
+            {results.isMock && (
+              <div className="bg-amber-500/[0.08] border border-amber-500/20 rounded-lg px-4 py-2.5 mb-5 text-xs text-amber-400">
+                📌 데모 모드 — 샘플 데이터입니다. Vercel 환경변수에{" "}
+                <code className="bg-white/10 px-1 rounded">COUPANG_ACCESS_KEY</code>와{" "}
+                <code className="bg-white/10 px-1 rounded">COUPANG_SECRET_KEY</code>를 설정하면 실제 데이터가 조회됩니다.
+              </div>
+            )}
             <SummaryCards products={results.products} />
             <div className="flex gap-1.5 mb-5">
               {TABS.map((t) => (
@@ -308,6 +326,14 @@ export default function CoupangResearch() {
             {activeTab === "strategy" && <StrategyPanel products={results.products} />}
             {activeTab === "chart"    && <PriceChart    products={results.products} />}
           </>
+        )}
+
+        {!results && !loading && (
+          <div className="text-center py-20 text-neutral-700">
+            <div className="text-5xl mb-4 opacity-30">🔍</div>
+            <p className="text-sm mb-1">키워드를 입력해서 시장을 분석해보세요</p>
+            <p className="text-xs text-neutral-800">무선이어폰, 캠핑의자, 프로틴 쉐이커 등</p>
+          </div>
         )}
       </main>
     </div>
