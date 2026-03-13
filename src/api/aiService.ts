@@ -13,7 +13,6 @@ const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 export const removeBackground = async (image: string) => image;
 
-// ✅ 텍스트 생성 - DetailPlanner.tsx 필드명에 맞게 JSON 반환
 export const planDetail = async (data: any) => {
   try {
     const lengthGuide = data.length === 'auto'
@@ -38,11 +37,16 @@ export const planDetail = async (data: any) => {
 반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
 각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt 필드를 포함해야 합니다.
 
+keyMessage 작성 규칙:
+- 반드시 1줄, 20자 이내의 짧고 강렬한 핵심 카피만 작성
+- 예시: "잠이 달라집니다", "피부가 숨을 쉰다", "하루 10분, 평생 건강"
+- 절대 문장을 길게 쓰지 말 것
+
 [
   {
     "title": "섹션 제목 (예: 메인 비주얼, 제품 특징, 사용 방법, 후기 등)",
     "logicalSections": ["태그1", "태그2"],
-    "keyMessage": "이미지에 들어갈 핵심 카피 문구 (한국어)",
+    "keyMessage": "핵심 카피 1줄 (20자 이내)",
     "visualPrompt": "This section should show [detailed English description of the visual scene, composition, mood, and styling for an e-commerce banner image]"
   }
 ]
@@ -53,7 +57,6 @@ export const planDetail = async (data: any) => {
     const cleanJson = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleanJson);
 
-    // 배열 방어 처리
     let arr: any[] = [];
     if (Array.isArray(parsed)) {
       arr = parsed;
@@ -65,10 +68,10 @@ export const planDetail = async (data: any) => {
     return arr.map((item: any) => ({
       ...item,
       id: Math.random().toString(36).substring(7),
-      // 혹시 필드가 누락된 경우 기본값 보장
       title: item.title ?? "섹션",
       logicalSections: Array.isArray(item.logicalSections) ? item.logicalSections : ["기본"],
-      keyMessage: item.keyMessage ?? "",
+      // keyMessage 20자 초과 시 강제 자르기
+      keyMessage: (item.keyMessage ?? "").slice(0, 20),
       visualPrompt: item.visualPrompt ?? "",
     }));
   } catch (error) {
@@ -77,7 +80,6 @@ export const planDetail = async (data: any) => {
   }
 };
 
-// ✅ 이미지 생성 - gemini-2.5-flash-image
 export const generateImage = async (
   prompt: string,
   base64Images: string[] = [],
