@@ -479,13 +479,14 @@ export function AnalyzerDashboard() {
                 </div>
               </div>
 
-              {/* Products Analysis */}
+              {/* Products Analysis — stacked layout */}
               {processedData.productSummary && (
                 <div>
                   <h3 className="text-lg font-bold text-slate-900 mb-4">
                     🛍️ 옵션별 성과 분석
                   </h3>
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="flex flex-col gap-6">
+                    {/* 효자 옵션 */}
                     <div>
                       <h4 className="font-semibold text-slate-800 mb-3 flex items-center">
                         <span className="text-xl mr-2">🏆</span> 효자 옵션
@@ -512,10 +513,7 @@ export function AnalyzerDashboard() {
                                   key={idx}
                                   className="bg-white border-b border-slate-100 hover:bg-slate-50"
                                 >
-                                  <td
-                                    className="px-4 py-3 font-medium text-slate-900 truncate max-w-[150px]"
-                                    title={row.상품명}
-                                  >
+                                  <td className="px-4 py-3 font-medium text-slate-900 whitespace-normal break-words">
                                     {row.상품명}
                                   </td>
                                   <td className="px-4 py-3 text-right">
@@ -535,6 +533,8 @@ export function AnalyzerDashboard() {
                         </table>
                       </div>
                     </div>
+
+                    {/* 돈만 쓰는 옵션 */}
                     <div>
                       <h4 className="font-semibold text-slate-800 mb-3 flex items-center">
                         <span className="text-xl mr-2">💸</span> 돈만 쓰는 옵션
@@ -558,10 +558,7 @@ export function AnalyzerDashboard() {
                                   key={idx}
                                   className="bg-white border-b border-slate-100 hover:bg-slate-50"
                                 >
-                                  <td
-                                    className="px-4 py-3 font-medium text-slate-900 truncate max-w-[150px]"
-                                    title={row.상품명}
-                                  >
+                                  <td className="px-4 py-3 font-medium text-slate-900 whitespace-normal break-words">
                                     {row.상품명}
                                   </td>
                                   <td className="px-4 py-3 text-right text-red-500 font-medium">
