@@ -68,26 +68,24 @@ const TARGET_HEIGHT = 1000;
 const overlayTextOnImage = (imageUrl: string, keyMessage: string): Promise<string> => {
     return new Promise((resolve) => {
         const img = new window.Image();
-        img.crossOrigin = 'anonymous';
+        // base64 이미지는 crossOrigin 불필요 - 오히려 깨짐 원인
         img.onload = () => {
-            // 고정 사이즈 860×1000
             const canvas = document.createElement('canvas');
             canvas.width = TARGET_WIDTH;
             canvas.height = TARGET_HEIGHT;
             const ctx = canvas.getContext('2d')!;
 
-            // 이미지를 860×1000에 꽉 차게 그리기 (cover 방식)
-            const imgRatio = img.width / img.height;
-            const canvasRatio = TARGET_WIDTH / TARGET_HEIGHT;
-            let sx = 0, sy = 0, sw = img.width, sh = img.height;
-            if (imgRatio > canvasRatio) {
-                sw = img.height * canvasRatio;
-                sx = (img.width - sw) / 2;
-            } else {
-                sh = img.width / canvasRatio;
-                sy = (img.height - sh) / 2;
-            }
-            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
+            // 배경 검정으로 초기화
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, TARGET_WIDTH, TARGET_HEIGHT);
+
+            // 이미지를 860×1000에 contain 방식으로 그리기 (잘리지 않게 전체 표시)
+            const scale = Math.min(TARGET_WIDTH / img.width, TARGET_HEIGHT / img.height);
+            const drawW = img.width * scale;
+            const drawH = img.height * scale;
+            const drawX = (TARGET_WIDTH - drawW) / 2;
+            const drawY = (TARGET_HEIGHT - drawH) / 2;
+            ctx.drawImage(img, drawX, drawY, drawW, drawH);
 
             if (!keyMessage.trim()) {
                 resolve(canvas.toDataURL('image/png'));
@@ -95,7 +93,7 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string): Promise<strin
             }
 
             const fontSize = 42;
-            const lineHeight = fontSize * 1.5;
+            const lineHeight = fontSize * 1.6;
             const lines = keyMessage.split('\n').filter(l => l.trim());
             const totalTextHeight = lines.length * lineHeight;
 
@@ -128,7 +126,20 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string): Promise<strin
             ctx.shadowBlur = 0;
             resolve(canvas.toDataURL('image/png'));
         };
-        img.onerror = () => resolve(imageUrl);
+        img.onerror = () => {
+            // 오류시 빈 캔버스라도 반환
+            const canvas = document.createElement('canvas');
+            canvas.width = TARGET_WIDTH;
+            canvas.height = TARGET_HEIGHT;
+            const ctx = canvas.getContext('2d')!;
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(0, 0, TARGET_WIDTH, TARGET_HEIGHT);
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 32px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('이미지 로드 실패', TARGET_WIDTH / 2, TARGET_HEIGHT / 2);
+            resolve(canvas.toDataURL('image/png'));
+        };
         img.src = imageUrl;
     });
 };
