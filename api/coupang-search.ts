@@ -1,60 +1,85 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
-import crypto from 'crypto';
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createHmac } from "crypto";
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const { keyword } = req.query;
+const ACCESS_KEY = process.env.COUPANG_ACCESS_KEY ?? "";
+const SECRET_KEY = process.env.COUPANG_SECRET_KEY ?? "";
+
+function buildDatetime(): string {
+  const now = new Date();
+  const yy = String(now.getUTCFullYear()).slice(2);
+  const MM = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const HH = String(now.getUTCHours()).padStart(2, "0");
+  const mm = String(now.getUTCMinutes()).padStart(2, "0");
+  const ss = String(now.getUTCSeconds()).padStart(2, "0");
+  return yy + MM + dd + "T" + HH + mm + ss + "Z";
+}
+
+function generateSignature(secretKey: string, message: string): string {
+  return createHmac("sha256", secretKey).update(message).digest("hex");
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+
+  const keyword = typeof req.query.keyword === "string" ? req.query.keyword : "";
+  const limit   = typeof req.query.limit   === "string" ? req.query.limit   : "10";
 
   if (!keyword) {
-    return res.status(400).json({ error: '키워드가 필요합니다.' });
+    return res.status(400).json({ error: "keyword is required" });
   }
-
-  const ACCESS_KEY = process.env.COUPANG_ACCESS_KEY;
-  const SECRET_KEY = process.env.COUPANG_SECRET_KEY;
 
   if (!ACCESS_KEY || !SECRET_KEY) {
-    return res.status(500).json({ error: '서버 API 키 설정이 되어있지 않습니다.' });
+    return res.status(500).json({ error: "API keys not configured on server" });
   }
 
-  const method = "GET";
-  const path = `/v2/providers/openapi/apis/api/v4/products/search?keyword=${encodeURIComponent(keyword as string)}&limit=10`;
-  const timestamp = new Date().toISOString().replace(/[:\-]|\.\d{3}/g, "").replace("Z", "K");
-  
-  const algorithm = 'sha256';
-  const signature = crypto.createHmac(algorithm, SECRET_KEY)
-    .update(timestamp + method + path)
-    .digest('hex');
-
-  const authorization = `CEA algorithm=HmacSHA256, access-key=${ACCESS_KEY}, signed-date=${timestamp}, signature=${signature}`;
-
   try {
-    const response = await fetch(`https://api-gateway.coupang.com${path}`, {
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": authorization,
-        "x-requested-with": "OPENAPI",
+    const method    = "GET";
+    const path      = "/v2/providers/affiliate_open_api/apis/openapi/products/search";
+    const query     = "keyword=" + encodeURIComponent(keyword) + "&limit=" + limit;
+    const datetime  = buildDatetime();
+    const message   = datetime + method + path + query;
+    const signature = generateSignature(SECRET_KEY, message);
+
+    const apiRes = await fetch(
+      "https://api-gateway.coupang.com" + path + "?" + query,
+      {
+        headers: {
+          Authorization: "CEA algorithm=HmacSHA256, access-key=" + ACCESS_KEY + ", signed-date=" + datetime + ", signature=" + signature,
+          "Content-Type": "application/json;charset=UTF-8",
+        },
       }
+    );
+
+    const data = await apiRes.json();
+
+    console.log("쿠팡 API 응답 샘플:", JSON.stringify(data?.data?.productData?.[0] ?? data).slice(0, 800));
+
+    if (data.rCode !== "0") {
+      return res.status(400).json({ error: data.rMessage ?? "Coupang API error", rCode: data.rCode });
+    }
+
+    return res.status(200).json({
+      products: (data.data?.productData ?? []).map((p: any) => ({
+        productId:    String(p.productId),
+        productName:  p.productName  ?? "",
+        productPrice: p.productPrice ?? 0,
+        productImage: p.productImage ?? "",
+        productUrl:   p.landingUrl   ?? p.productUrl ?? "#",
+        isRocket:     p.isRocket     ?? p.rocketBadge ?? false,
+        rating:       p.rating       ?? p.starRating  ?? 0,
+        reviewCount:  p.reviewCount  ?? p.review      ?? 0,
+        salesRank:    p.salesRank    ?? null,
+      }))
     });
 
-    const result = await response.json();
-
-    if (result.data && result.data.productEntities) {
-      // 프론트엔드에서 사용할 필드들을 정확히 매핑하여 전달합니다.
-      const products = result.data.productEntities.map((item: any) => ({
-        productId: item.productId,
-        productName: item.productName,
-        productPrice: item.productPrice,
-        productImage: item.productImage,
-        productUrl: item.productUrl, // 이 주소가 링크 생성의 핵심입니다.
-        isRocket: item.isRocket,
-        rating: item.rating,
-        reviewCount: item.reviewCount,
-      }));
-
-      return res.status(200).json({ products });
-    } else {
-      return res.status(200).json({ products: [], message: '검색 결과가 없습니다.' });
-    }
-  } catch (error) {
-    return res.status(500).json({ error: '쿠팡 API 연결 실패' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return res.status(500).json({ error: message });
   }
 }
