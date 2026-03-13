@@ -126,7 +126,7 @@ export default function CoupangResearch() {
             <div style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#dc2626,#f87171)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900, fontSize: 14 }}>쿠</div>
             <div>
               <p style={{ fontWeight: 700, fontSize: 14, margin: 0 }}>쿠팡 시장 분석기</p>
-              <p style={{ fontSize: 10, color: "#525252", margin: 0 }}>Powered by Coupang Partners API</p>
+              <p style={{ fontSize: 10, color: "#a3a3a3", margin: 0 }}>Powered by Coupang Partners API</p>
             </div>
           </div>
           <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: "rgba(16,185,129,0.1)", color: "#10b981", border: "1px solid rgba(16,185,129,0.2)" }}>BETA</span>
@@ -135,7 +135,7 @@ export default function CoupangResearch() {
 
       <div style={{ maxWidth: 900, margin: "0 auto", padding: "32px 24px" }}>
         <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 24, marginBottom: 28 }}>
-          <p style={{ fontSize: 11, fontWeight: 600, color: "#737373", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>키워드로 시장 분석</p>
+          <p style={{ fontSize: 11, fontWeight: 600, color: "#a3a3a3", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>키워드로 시장 분석</p>
           <div style={{ display: "flex", gap: 12 }}>
             <input
               ref={inputRef}
@@ -164,7 +164,7 @@ export default function CoupangResearch() {
         {loading && (
           <div style={{ textAlign: "center", padding: "80px 0" }}>
             <div style={{ fontSize: 36, marginBottom: 16 }}>⏳</div>
-            <p style={{ fontSize: 14, color: "#737373" }}>쿠팡 데이터 분석 중...</p>
+            <p style={{ fontSize: 14, color: "#a3a3a3" }}>쿠팡 데이터 분석 중...</p>
           </div>
         )}
 
@@ -179,9 +179,9 @@ export default function CoupangResearch() {
               ].map(function(m) {
                 return (
                   <div key={m.label} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 16 }}>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: "#737373", marginBottom: 8 }}>{m.label}</p>
+                    <p style={{ fontSize: 11, fontWeight: 600, color: "#a3a3a3", marginBottom: 8 }}>{m.label}</p>
                     <p style={{ fontSize: 22, fontWeight: 900, color: m.color, margin: 0 }}>{m.value}</p>
-                    <p style={{ fontSize: 11, color: "#525252", marginTop: 4 }}>{m.sub}</p>
+                    <p style={{ fontSize: 11, color: "#8a8a8a", marginTop: 4 }}>{m.sub}</p>
                   </div>
                 );
               })}
@@ -195,7 +195,7 @@ export default function CoupangResearch() {
                   <button
                     key={t}
                     onClick={function() { setActiveTab(t); }}
-                    style={{ padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: isActive ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(255,255,255,0.06)", background: isActive ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.04)", color: isActive ? "#f87171" : "#737373", cursor: "pointer" }}
+                    style={{ padding: "8px 16px", borderRadius: 8, fontSize: 12, fontWeight: 600, border: isActive ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(255,255,255,0.06)", background: isActive ? "rgba(239,68,68,0.2)" : "rgba(255,255,255,0.04)", color: isActive ? "#f87171" : "#b3b3b3", cursor: "pointer" }}
                   >
                     {labels[t]}
                   </button>
@@ -212,7 +212,7 @@ export default function CoupangResearch() {
                   const isTop3 = i < 3;
                   return (
                     <div key={p.productId} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px", display: "grid", gridTemplateColumns: "32px 1fr auto", gap: 16, alignItems: "center" }}>
-                      <div style={{ width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 900, background: isTop3 ? "linear-gradient(135deg,#dc2626,#f87171)" : "rgba(255,255,255,0.06)", color: isTop3 ? "#fff" : "#737373" }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 900, background: isTop3 ? "linear-gradient(135deg,#dc2626,#f87171)" : "rgba(255,255,255,0.06)", color: isTop3 ? "#fff" : "#a3a3a3" }}>
                         {i + 1}
                       </div>
                       <div style={{ minWidth: 0 }}>
@@ -226,12 +226,12 @@ export default function CoupangResearch() {
                           {p.isRocket && (
                             <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: "rgba(239,68,68,0.15)", color: "#f87171", border: "1px solid rgba(239,68,68,0.3)" }}>🚀 로켓</span>
                           )}
-                          <span style={{ fontSize: 12, color: "#525252" }}>추정 {estSales.toLocaleString()}개/월</span>
+                          <span style={{ fontSize: 12, color: "#8a8a8a" }}>추정 {estSales.toLocaleString()}개/월</span>
                         </div>
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
                         <p style={{ fontSize: 18, fontWeight: 900, color: "#34d399", margin: 0 }}>{p.productPrice.toLocaleString()}원</p>
-                        <p style={{ fontSize: 11, color: "#525252", marginTop: 4 }}>월매출 약 {Math.round(estRevenue / 10000).toLocaleString()}만원</p>
+                        <p style={{ fontSize: 11, color: "#8a8a8a", marginTop: 4 }}>월매출 약 {Math.round(estRevenue / 10000).toLocaleString()}만원</p>
                       </div>
                     </div>
                   );
@@ -247,7 +247,7 @@ export default function CoupangResearch() {
                       <div key={s.title} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderLeft: "3px solid " + s.color, borderRadius: 12, padding: 20 }}>
                         <div style={{ fontSize: 24, marginBottom: 8 }}>{s.icon}</div>
                         <p style={{ fontSize: 13, fontWeight: 700, color: s.color, marginBottom: 8 }}>{s.title}</p>
-                        <p style={{ fontSize: 12, color: "#a3a3a3", lineHeight: 1.6 }}>{s.desc}</p>
+                        <p style={{ fontSize: 12, color: "#c3c3c3", lineHeight: 1.6 }}>{s.desc}</p>
                       </div>
                     );
                   })}
@@ -257,7 +257,7 @@ export default function CoupangResearch() {
                   <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
                     {buildChecklist(results.products).map(function(item, idx) {
                       return (
-                        <li key={idx} style={{ display: "flex", gap: 12, fontSize: 12, color: "#a3a3a3", lineHeight: 1.6 }}>
+                        <li key={idx} style={{ display: "flex", gap: 12, fontSize: 12, color: "#c3c3c3", lineHeight: 1.6 }}>
                           <span style={{ color: "#3b82f6", fontWeight: 700, flexShrink: 0 }}>·</span>{item}
                         </li>
                       );
@@ -269,7 +269,7 @@ export default function CoupangResearch() {
 
             {activeTab === "chart" && (
               <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 24 }}>
-                <p style={{ fontSize: 11, fontWeight: 600, color: "#737373", marginBottom: 24, textTransform: "uppercase", letterSpacing: 1 }}>상품별 가격 분포 (순위 기준)</p>
+                <p style={{ fontSize: 11, fontWeight: 600, color: "#a3a3a3", marginBottom: 24, textTransform: "uppercase", letterSpacing: 1 }}>상품별 가격 분포 (순위 기준)</p>
                 <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 192 }}>
                   {results.products.map(function(p, i) {
                     const maxPrice = priceRange ? priceRange.max : 1;
@@ -277,16 +277,16 @@ export default function CoupangResearch() {
                     const isTop3 = i < 3;
                     return (
                       <div key={p.productId} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 10, color: "#525252" }}>{Math.round(p.productPrice / 1000)}K</span>
+                        <span style={{ fontSize: 10, color: "#8a8a8a" }}>{Math.round(p.productPrice / 1000)}K</span>
                         <div style={{ width: "100%", height: barH, borderRadius: "4px 4px 0 0", background: isTop3 ? "linear-gradient(to top, #7f1d1d, #f87171)" : "rgba(255,255,255,0.08)", position: "relative" }}>
                           {p.isRocket && <span style={{ position: "absolute", top: -16, left: "50%", transform: "translateX(-50%)", fontSize: 10 }}>🚀</span>}
                         </div>
-                        <span style={{ fontSize: 10, color: "#525252" }}>{i + 1}위</span>
+                        <span style={{ fontSize: 10, color: "#8a8a8a" }}>{i + 1}위</span>
                       </div>
                     );
                   })}
                 </div>
-                <div style={{ marginTop: 20, display: "flex", gap: 16, fontSize: 12, color: "#525252" }}>
+                <div style={{ marginTop: 20, display: "flex", gap: 16, fontSize: 12, color: "#8a8a8a" }}>
                   <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ width: 12, height: 12, borderRadius: 2, background: "#ef4444", display: "inline-block" }}></span>Top 3
                   </span>
@@ -301,10 +301,10 @@ export default function CoupangResearch() {
         )}
 
         {!results && !loading && (
-          <div style={{ textAlign: "center", padding: "80px 0", color: "#404040" }}>
+          <div style={{ textAlign: "center", padding: "80px 0", color: "#8a8a8a" }}>
             <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.3 }}>🔍</div>
             <p style={{ fontSize: 14, marginBottom: 4 }}>키워드를 입력해서 시장을 분석해보세요</p>
-            <p style={{ fontSize: 12, color: "#262626" }}>무선이어폰, 캠핑의자, 프로틴 쉐이커 등</p>
+            <p style={{ fontSize: 12, color: "#6b6b6b" }}>무선이어폰, 캠핑의자, 프로틴 쉐이커 등</p>
           </div>
         )}
       </div>
