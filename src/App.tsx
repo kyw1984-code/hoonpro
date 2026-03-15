@@ -122,9 +122,9 @@ export default function App() {
                   activeTab === 'coupang' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <Search className="w-4 h-4 mr-2" />
-                시장 분석기
-              </button>
+                ##<Search className="w-4 h-4 mr-2" />
+                ##시장 분석기
+              ##</button>
             </div>
           </div>
         </header>
