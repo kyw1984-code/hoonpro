@@ -116,15 +116,18 @@ export default function App() {
                 <Tag className="w-4 h-4 mr-2" />
                 상품명 제조기
               </button>
+              
+              {/* [시장 분석기 탭 버튼 주석 처리]
               <button
                 onClick={() => setActiveTab('coupang')}
                 className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                   activeTab === 'coupang' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                ##<Search className="w-4 h-4 mr-2" />
-                ##시장 분석기
-              ##</button>
+                <Search className="w-4 h-4 mr-2" />
+                시장 분석기
+              </button>
+              */}
             </div>
           </div>
         </header>
@@ -134,7 +137,8 @@ export default function App() {
           {activeTab === 'detail' && <DetailPlanner />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
           {activeTab === 'productname' && <ProductNameGenerator />}
-          {activeTab === 'coupang' && <CoupangResearch />}
+          {/* [시장 분석기 컴포넌트 주석 처리] */}
+          {/* {activeTab === 'coupang' && <CoupangResearch />} */}
         </main>
 
         <Footer />
