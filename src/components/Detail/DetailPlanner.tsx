@@ -2,6 +2,143 @@ import React, { useState, useRef } from 'react';
 import { planDetail, generateImage } from '../../api/aiService';
 import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X } from 'lucide-react';
 
+// ✅ 인증서 이미지 생성 함수
+const generateCertificateImage = (certType: string, certNumber: string, certDate: string): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 860;
+    canvas.height = 1000;
+    const ctx = canvas.getContext('2d')!;
+
+    // 배경 그라디언트
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#f8fafc');
+    gradient.addColorStop(1, '#e2e8f0');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 테두리
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(40, 40, canvas.width - 80, canvas.height - 80);
+
+    // 인증 아이콘 (체크마크)
+    ctx.fillStyle = '#10b981';
+    ctx.beginPath();
+    ctx.arc(canvas.width / 2, 200, 60, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(canvas.width / 2 - 30, 200);
+    ctx.lineTo(canvas.width / 2 - 10, 220);
+    ctx.lineTo(canvas.width / 2 + 30, 180);
+    ctx.stroke();
+
+    // 제목
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 48px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('품질 인증서', canvas.width / 2, 320);
+
+    // 인증 타입
+    ctx.font = 'bold 38px "Noto Sans KR", sans-serif';
+    ctx.fillStyle = '#334155';
+    ctx.fillText(certType, canvas.width / 2, 420);
+
+    // 인증 정보
+    ctx.font = '28px "Noto Sans KR", sans-serif';
+    ctx.fillStyle = '#64748b';
+    ctx.fillText(`인증번호: ${certNumber}`, canvas.width / 2, 520);
+    ctx.fillText(`발급일자: ${certDate}`, canvas.width / 2, 580);
+
+    // 설명
+    ctx.font = '24px "Noto Sans KR", sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    const desc = '본 제품은 엄격한 품질 기준을 통과한';
+    const desc2 = '안전하고 신뢰할 수 있는 제품입니다.';
+    ctx.fillText(desc, canvas.width / 2, 700);
+    ctx.fillText(desc2, canvas.width / 2, 750);
+
+    return canvas.toDataURL('image/png');
+};
+
+// ✅ 고객 후기 이미지 생성 함수
+const generateReviewImage = (reviews: Array<{ rating: number; text: string; author: string }>): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 860;
+    canvas.height = 1000;
+    const ctx = canvas.getContext('2d')!;
+
+    // 배경
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 제목
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 42px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('고객 후기', canvas.width / 2, 80);
+
+    // 평점 표시
+    ctx.font = 'bold 32px sans-serif';
+    ctx.fillStyle = '#fbbf24';
+    const avgRating = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
+    ctx.fillText('★'.repeat(Math.round(avgRating)), canvas.width / 2, 140);
+
+    // 후기 카드들
+    let yOffset = 200;
+    reviews.forEach((review, idx) => {
+        if (idx >= 3) return; // 최대 3개만
+
+        // 카드 배경
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(60, yOffset, canvas.width - 120, 200);
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(60, yOffset, canvas.width - 120, 200);
+
+        // 별점
+        ctx.font = 'bold 24px sans-serif';
+        ctx.fillStyle = '#fbbf24';
+        ctx.textAlign = 'left';
+        ctx.fillText('★'.repeat(review.rating), 80, yOffset + 40);
+
+        // 후기 텍스트
+        ctx.font = '22px "Noto Sans KR", sans-serif';
+        ctx.fillStyle = '#334155';
+        const maxWidth = canvas.width - 160;
+        const words = review.text.split(' ');
+        let line = '';
+        let lineY = yOffset + 85;
+
+        for (let i = 0; i < words.length; i++) {
+            const testLine = line + words[i] + ' ';
+            const metrics = ctx.measureText(testLine);
+            if (metrics.width > maxWidth && i > 0) {
+                ctx.fillText(line, 80, lineY);
+                line = words[i] + ' ';
+                lineY += 30;
+                if (lineY > yOffset + 150) break; // 최대 3줄
+            } else {
+                line = testLine;
+            }
+        }
+        ctx.fillText(line, 80, lineY);
+
+        // 작성자
+        ctx.font = 'bold 20px "Noto Sans KR", sans-serif';
+        ctx.fillStyle = '#64748b';
+        ctx.textAlign = 'right';
+        ctx.fillText(`- ${review.author}`, canvas.width - 80, yOffset + 170);
+
+        yOffset += 240;
+    });
+
+    return canvas.toDataURL('image/png');
+};
+
 const generateSizeChartImage = (gender: 'women' | 'men', data: Record<string, Record<string, string>>): string => {
     const canvas = document.createElement('canvas');
     canvas.width = 800;
@@ -61,6 +198,75 @@ const generateSizeChartImage = (gender: 'women' | 'men', data: Record<string, Re
     return canvas.toDataURL('image/png');
 };
 
+// ✅ 이미지 품질 검증 함수
+const validateImageQuality = (imageUrl: string): Promise<{ isValid: boolean; reason?: string }> => {
+    return new Promise((resolve) => {
+        if (!imageUrl || imageUrl === 'undefined') {
+            resolve({ isValid: false, reason: '이미지 URL이 유효하지 않습니다.' });
+            return;
+        }
+
+        const img = new window.Image();
+        img.onload = () => {
+            // 최소 크기 검증 (너무 작은 이미지 방지)
+            if (img.width < 400 || img.height < 400) {
+                resolve({ isValid: false, reason: `이미지 크기가 너무 작습니다 (${img.width}x${img.height})` });
+                return;
+            }
+
+            // 비율 검증 (너무 극단적인 비율 방지)
+            const ratio = img.width / img.height;
+            if (ratio < 0.3 || ratio > 3) {
+                resolve({ isValid: false, reason: `이미지 비율이 비정상적입니다 (${ratio.toFixed(2)})` });
+                return;
+            }
+
+            // Canvas로 이미지 데이터 분석
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.min(img.width, 200);
+            canvas.height = Math.min(img.height, 200);
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+            try {
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const pixels = imageData.data;
+
+                // 완전히 검은색/흰색만 있는 이미지 체크
+                let allBlack = true;
+                let allWhite = true;
+                for (let i = 0; i < pixels.length; i += 4) {
+                    const r = pixels[i];
+                    const g = pixels[i + 1];
+                    const b = pixels[i + 2];
+                    if (r > 10 || g > 10 || b > 10) allBlack = false;
+                    if (r < 245 || g < 245 || b < 245) allWhite = false;
+                }
+
+                if (allBlack) {
+                    resolve({ isValid: false, reason: '이미지가 완전히 검은색입니다.' });
+                    return;
+                }
+                if (allWhite) {
+                    resolve({ isValid: false, reason: '이미지가 완전히 흰색입니다.' });
+                    return;
+                }
+
+                resolve({ isValid: true });
+            } catch (e) {
+                // Canvas 데이터 분석 실패시에도 기본적으로 통과
+                resolve({ isValid: true });
+            }
+        };
+
+        img.onerror = () => {
+            resolve({ isValid: false, reason: '이미지 로드에 실패했습니다.' });
+        };
+
+        img.src = imageUrl;
+    });
+};
+
 // ✅ AI 이미지를 860×1000으로 리사이즈 후 한글 텍스트 Canvas 덧씌우기
 const TARGET_WIDTH = 860;
 const TARGET_HEIGHT = 1000;
@@ -97,34 +303,53 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string): Promise<strin
                 return;
             }
 
-            const fontSize = 42;
-            const lineHeight = fontSize * 1.6;
             const lines = keyMessage.split('\n').filter(l => l.trim());
+
+            // 줄 수에 따라 폰트 크기 조정 (더 많은 줄 = 작은 폰트)
+            let fontSize = lines.length === 1 ? 48 : lines.length === 2 ? 42 : 36;
+            const lineHeight = fontSize * 1.5;
             const totalTextHeight = lines.length * lineHeight;
 
-            // 하단 그라디언트 오버레이
-            const overlayH = totalTextHeight + fontSize * 2.5;
+            // 하단 그라디언트 오버레이 (여유 공간 확보)
+            const overlayH = totalTextHeight + fontSize * 3;
             const overlayY = TARGET_HEIGHT - overlayH;
             const gradient = ctx.createLinearGradient(0, overlayY, 0, TARGET_HEIGHT);
             gradient.addColorStop(0, 'rgba(0,0,0,0)');
-            gradient.addColorStop(0.4, 'rgba(0,0,0,0.65)');
-            gradient.addColorStop(1, 'rgba(0,0,0,0.88)');
+            gradient.addColorStop(0.3, 'rgba(0,0,0,0.7)');
+            gradient.addColorStop(1, 'rgba(0,0,0,0.9)');
             ctx.fillStyle = gradient;
             ctx.fillRect(0, overlayY, TARGET_WIDTH, overlayH);
 
             // 텍스트 렌더링
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.shadowColor = 'rgba(0,0,0,0.9)';
-            ctx.shadowBlur = 10;
-            ctx.shadowOffsetX = 1;
-            ctx.shadowOffsetY = 2;
+            ctx.shadowColor = 'rgba(0,0,0,0.95)';
+            ctx.shadowBlur = 12;
+            ctx.shadowOffsetX = 2;
+            ctx.shadowOffsetY = 3;
+
+            // 시작 Y 위치 계산 (중앙 정렬)
+            const startY = TARGET_HEIGHT - overlayH / 2 - (totalTextHeight / 2) + (fontSize / 2);
 
             lines.forEach((line, i) => {
-                const y = TARGET_HEIGHT - totalTextHeight - fontSize * 0.9 + i * lineHeight;
+                const y = startY + i * lineHeight;
                 ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
                 ctx.fillStyle = '#ffffff';
-                ctx.fillText(line, TARGET_WIDTH / 2, y);
+
+                // 텍스트가 너무 길면 줄임표 처리
+                let displayText = line;
+                const maxWidth = TARGET_WIDTH - 80; // 좌우 여백
+                let textWidth = ctx.measureText(displayText).width;
+
+                if (textWidth > maxWidth) {
+                    while (textWidth > maxWidth && displayText.length > 0) {
+                        displayText = displayText.slice(0, -1);
+                        textWidth = ctx.measureText(displayText + '...').width;
+                    }
+                    displayText += '...';
+                }
+
+                ctx.fillText(displayText, TARGET_WIDTH / 2, y);
             });
 
             ctx.shadowColor = 'transparent';
@@ -165,6 +390,14 @@ export const DetailPlanner: React.FC = () => {
     const [includeSizeChart, setIncludeSizeChart] = useState(false);
     const [sizeGender, setSizeGender] = useState<'women' | 'men'>('women');
     const [sizeData, setSizeData] = useState<Record<string, Record<string, string>>>({});
+    const [includeCertificate, setIncludeCertificate] = useState(false);
+    const [certData, setCertData] = useState({ type: 'KC 안전인증', number: '', date: '' });
+    const [includeReviews, setIncludeReviews] = useState(false);
+    const [reviewsData, setReviewsData] = useState([
+        { rating: 5, text: '품질이 정말 좋아요!', author: '김**' },
+        { rating: 5, text: '가격 대비 만족스럽습니다', author: '이**' },
+        { rating: 4, text: '재구매 의사 있어요', author: '박**' }
+    ]);
     const [segments, setSegments] = useState<any[]>([]);
 
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -195,6 +428,8 @@ export const DetailPlanner: React.FC = () => {
         setLoading(true);
         try {
             const plannedSegments = await planDetail({ ...info, length });
+
+            // 사이즈표 추가
             if (includeSizeChart) {
                 const sizeChartUrl = generateSizeChartImage(sizeGender, sizeData);
                 plannedSegments.push({
@@ -207,6 +442,39 @@ export const DetailPlanner: React.FC = () => {
                     isGenerating: false
                 });
             }
+
+            // 인증서 추가
+            if (includeCertificate) {
+                const certUrl = generateCertificateImage(
+                    certData.type,
+                    certData.number || 'CB-XXX-XXXXXX',
+                    certData.date || new Date().toISOString().split('T')[0]
+                );
+                plannedSegments.push({
+                    id: 'certificate-' + Date.now(),
+                    title: '품질 인증',
+                    logicalSections: ['신뢰', '인증서'],
+                    keyMessage: '안전하고 검증된 제품',
+                    visualPrompt: 'Certificate generated automatically.',
+                    imageUrl: certUrl,
+                    isGenerating: false
+                });
+            }
+
+            // 고객 후기 추가
+            if (includeReviews) {
+                const reviewUrl = generateReviewImage(reviewsData);
+                plannedSegments.push({
+                    id: 'reviews-' + Date.now(),
+                    title: '고객 후기',
+                    logicalSections: ['신뢰', '리뷰'],
+                    keyMessage: '실제 고객들의 생생한 후기',
+                    visualPrompt: 'Customer reviews generated automatically.',
+                    imageUrl: reviewUrl,
+                    isGenerating: false
+                });
+            }
+
             setSegments(plannedSegments);
             setStep(2);
         } catch (e) {
@@ -219,37 +487,78 @@ export const DetailPlanner: React.FC = () => {
 
     const handleGenerateAll = async (regenerate = false) => {
         setStep(3);
-        for (let i = 0; i < segments.length; i++) {
-            // regenerate=false면 기존 이미지 있는 건 스킵, true면 전체 재생성
-            if (!regenerate && segments[i].imageUrl) continue;
-            setSegments(prev => {
-                const newSegs = [...prev];
+
+        // 병렬 생성을 위한 인덱스 배열 생성
+        const indicesToGenerate = segments
+            .map((seg, idx) => ({ seg, idx }))
+            .filter(({ seg }) => regenerate || !seg.imageUrl)
+            .map(({ idx }) => idx);
+
+        // 모든 생성할 이미지를 isGenerating true로 설정
+        setSegments(prev => {
+            const newSegs = [...prev];
+            indicesToGenerate.forEach(i => {
                 newSegs[i] = { ...newSegs[i], isGenerating: true };
-                return newSegs;
             });
-            try {
-                // ✅ 프롬프트에서 한글 텍스트 제거 — 배경/비주얼만 요청
-                const prompt = `High quality e-commerce product banner image, NO TEXT, NO WORDS, NO LETTERS anywhere in the image. Visual only: ${segments[i].visualPrompt}. ${info.imageInstruction ? `CRITICAL: ${info.imageInstruction}` : ''} Clean background, professional product photography style.`;
+            return newSegs;
+        });
 
-                const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
+        // 병렬로 모든 이미지 생성
+        const generatePromises = indicesToGenerate.map(async (i) => {
+            const MAX_RETRY = 2; // 최대 재시도 횟수
+            let attempt = 0;
 
-                // ✅ Canvas로 한글 텍스트 덧씌우기
-                const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage);
+            while (attempt <= MAX_RETRY) {
+                try {
+                    // ✅ 프롬프트에서 한글 텍스트 제거 — 배경/비주얼만 요청, 제품 로고 보존
+                    const prompt = `High quality e-commerce product banner image. IMPORTANT RULES:
+- NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
+- If the reference product has logos or brand marks, preserve them exactly as they appear
+- DO NOT add any new logos, watermarks, or brand marks
+- Focus on visual composition only: ${segments[i].visualPrompt}
+${info.imageInstruction ? `CRITICAL USER REQUIREMENT: ${info.imageInstruction}` : ''}
+Clean background, professional product photography style, maintain original product details including any existing logos.`;
 
-                setSegments(prev => {
-                    const newSegs = [...prev];
-                    newSegs[i] = { ...newSegs[i], imageUrl, isGenerating: false };
-                    return newSegs;
-                });
-            } catch (e) {
-                console.error(e);
-                setSegments(prev => {
-                    const newSegs = [...prev];
-                    newSegs[i] = { ...newSegs[i], isGenerating: false };
-                    return newSegs;
-                });
+                    const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
+
+                    // ✅ 이미지 품질 검증
+                    const validation = await validateImageQuality(rawImageUrl);
+                    if (!validation.isValid) {
+                        console.warn(`이미지 ${i + 1} 품질 검증 실패 (시도 ${attempt + 1}/${MAX_RETRY + 1}): ${validation.reason}`);
+                        if (attempt < MAX_RETRY) {
+                            attempt++;
+                            continue; // 재시도
+                        } else {
+                            throw new Error(`품질 검증 실패: ${validation.reason}`);
+                        }
+                    }
+
+                    // ✅ Canvas로 한글 텍스트 덧씌우기
+                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage);
+
+                    // 개별 이미지 생성 완료 시 즉시 업데이트
+                    setSegments(prev => {
+                        const newSegs = [...prev];
+                        newSegs[i] = { ...newSegs[i], imageUrl, isGenerating: false, error: false };
+                        return newSegs;
+                    });
+                    break; // 성공하면 루프 탈출
+                } catch (e) {
+                    console.error(`이미지 ${i + 1} 생성 실패 (시도 ${attempt + 1}/${MAX_RETRY + 1}):`, e);
+                    if (attempt >= MAX_RETRY) {
+                        setSegments(prev => {
+                            const newSegs = [...prev];
+                            newSegs[i] = { ...newSegs[i], isGenerating: false, error: true, errorMessage: String(e) };
+                            return newSegs;
+                        });
+                    }
+                    attempt++;
+                }
             }
-        }
+        });
+
+        // 모든 이미지 생성 완료 대기
+        await Promise.all(generatePromises);
     };
 
     const handleDownloadAll = () => {
@@ -297,7 +606,9 @@ export const DetailPlanner: React.FC = () => {
 
             {step === 1 && (
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-                    <h2 className="text-2xl font-bold text-slate-800 mb-6">상품 정보 입력</h2>
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold text-slate-800">상품 정보 입력</h2>
+                    </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">상품명 *</label>
@@ -359,12 +670,14 @@ export const DetailPlanner: React.FC = () => {
                             </div>
                         </div>
                         <div className="md:col-span-2 border-t border-slate-200 pt-6 mt-2">
-                            <div className="flex items-center justify-between mb-4">
-                                <label className="flex items-center text-sm font-bold text-slate-800 cursor-pointer">
+                            <h3 className="text-lg font-bold text-slate-800 mb-4">추가 템플릿 옵션</h3>
+
+                            {/* 사이즈표 */}
+                            <div className="mb-6">
+                                <label className="flex items-center text-sm font-bold text-slate-800 cursor-pointer mb-3">
                                     <input type="checkbox" checked={includeSizeChart} onChange={(e) => setIncludeSizeChart(e.target.checked)} className="mr-2 w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
                                     사이즈표 추가하기
                                 </label>
-                            </div>
                             {includeSizeChart && (
                                 <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
                                     <div className="flex gap-6 mb-4">
@@ -404,6 +717,75 @@ export const DetailPlanner: React.FC = () => {
                                     </div>
                                 </div>
                             )}
+                            </div>
+
+                            {/* 인증서 */}
+                            <div className="mb-6">
+                                <label className="flex items-center text-sm font-bold text-slate-800 cursor-pointer mb-3">
+                                    <input type="checkbox" checked={includeCertificate} onChange={(e) => setIncludeCertificate(e.target.checked)} className="mr-2 w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
+                                    품질 인증서 추가하기
+                                </label>
+                                {includeCertificate && (
+                                    <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">인증 타입</label>
+                                            <input type="text" value={certData.type} onChange={(e) => setCertData({...certData, type: e.target.value})} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: KC 안전인증" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">인증번호</label>
+                                            <input type="text" value={certData.number} onChange={(e) => setCertData({...certData, number: e.target.value})} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: CB-XXX-XXXXXX" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">발급일자</label>
+                                            <input type="date" value={certData.date} onChange={(e) => setCertData({...certData, date: e.target.value})} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* 고객 후기 */}
+                            <div className="mb-6">
+                                <label className="flex items-center text-sm font-bold text-slate-800 cursor-pointer mb-3">
+                                    <input type="checkbox" checked={includeReviews} onChange={(e) => setIncludeReviews(e.target.checked)} className="mr-2 w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
+                                    고객 후기 추가하기
+                                </label>
+                                {includeReviews && (
+                                    <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
+                                        {reviewsData.map((review, idx) => (
+                                            <div key={idx} className="bg-white p-4 rounded-lg border border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-3">
+                                                <div className="md:col-span-2">
+                                                    <label className="block text-xs font-medium text-slate-700 mb-1">별점</label>
+                                                    <select value={review.rating} onChange={(e) => {
+                                                        const newReviews = [...reviewsData];
+                                                        newReviews[idx].rating = Number(e.target.value);
+                                                        setReviewsData(newReviews);
+                                                    }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none">
+                                                        <option value={5}>⭐⭐⭐⭐⭐</option>
+                                                        <option value={4}>⭐⭐⭐⭐</option>
+                                                        <option value={3}>⭐⭐⭐</option>
+                                                    </select>
+                                                </div>
+                                                <div className="md:col-span-8">
+                                                    <label className="block text-xs font-medium text-slate-700 mb-1">후기 내용</label>
+                                                    <input type="text" value={review.text} onChange={(e) => {
+                                                        const newReviews = [...reviewsData];
+                                                        newReviews[idx].text = e.target.value;
+                                                        setReviewsData(newReviews);
+                                                    }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                                                </div>
+                                                <div className="md:col-span-2">
+                                                    <label className="block text-xs font-medium text-slate-700 mb-1">작성자</label>
+                                                    <input type="text" value={review.author} onChange={(e) => {
+                                                        const newReviews = [...reviewsData];
+                                                        newReviews[idx].author = e.target.value;
+                                                        setReviewsData(newReviews);
+                                                    }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                     <div className="mt-8 flex justify-end">
@@ -423,6 +805,10 @@ export const DetailPlanner: React.FC = () => {
                             <p className="text-slate-500 mt-1">AI가 작성한 기획안을 확인하고 필요시 수정하세요. (총 {segments.length}장)</p>
                         </div>
                         <div className="flex gap-3">
+                            <button onClick={() => setStep(1)} className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
+                                <ChevronRight className="w-5 h-5 mr-2 rotate-180" />
+                                이전 단계
+                            </button>
                             <button onClick={() => handleGenerateAll(false)} className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
                                 <ImageIcon className="w-5 h-5 mr-2" />
                                 이미지 생성
@@ -474,13 +860,9 @@ export const DetailPlanner: React.FC = () => {
                             <p className="text-slate-500 mt-1">생성된 이미지를 확인하고 다운로드하세요.</p>
                         </div>
                         <div className="flex gap-3">
-                            <button onClick={() => {
-                                // 기존 이미지 초기화해서 수정 후 재생성 가능하게
-                                setSegments(prev => prev.map(s => ({ ...s, imageUrl: undefined, isGenerating: false })));
-                                setStep(2);
-                            }} className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
+                            <button onClick={() => setStep(2)} className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
                                 <ChevronRight className="w-5 h-5 mr-2 rotate-180" />
-                                기획안 수정
+                                이전 단계
                             </button>
                             <button onClick={handleDownloadAll} className="bg-slate-800 hover:bg-slate-900 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
                                 <Download className="w-5 h-5 mr-2" />

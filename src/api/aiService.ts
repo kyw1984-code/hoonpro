@@ -38,15 +38,17 @@ export const planDetail = async (data: any) => {
 각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt 필드를 포함해야 합니다.
 
 keyMessage 작성 규칙:
-- 반드시 1줄, 20자 이내의 짧고 강렬한 핵심 카피만 작성
-- 예시: "잠이 달라집니다", "피부가 숨을 쉰다", "하루 10분, 평생 건강"
-- 절대 문장을 길게 쓰지 말 것
+- 고객의 흥미를 끌고 감성을 자극하는 자연스러운 카피 작성
+- 1~3줄로 작성 가능하며, 각 줄은 25자 이내로 제한
+- 줄바꿈이 필요한 경우 \n 사용
+- 예시: "매일 밤 꿀잠을 약속합니다\n당신의 숙면을 위한 최고의 선택", "민감한 피부도 안심\n자연에서 온 순한 케어", "하루 10분의 투자로\n평생 건강을 지켜보세요"
+- 제품의 핵심 가치와 고객 혜택을 명확히 전달할 것
 
 [
   {
     "title": "섹션 제목 (예: 메인 비주얼, 제품 특징, 사용 방법, 후기 등)",
     "logicalSections": ["태그1", "태그2"],
-    "keyMessage": "핵심 카피 1줄 (20자 이내)",
+    "keyMessage": "흥미를 끄는 자연스러운 카피\n필요시 2-3줄로 작성 (각 줄 25자 이내)",
     "visualPrompt": "This section should show [detailed English description of the visual scene, composition, mood, and styling for an e-commerce banner image]"
   }
 ]
@@ -70,8 +72,8 @@ keyMessage 작성 규칙:
       id: Math.random().toString(36).substring(7),
       title: item.title ?? "섹션",
       logicalSections: Array.isArray(item.logicalSections) ? item.logicalSections : ["기본"],
-      // keyMessage 20자 초과 시 강제 자르기
-      keyMessage: (item.keyMessage ?? "").slice(0, 20),
+      // keyMessage 검증 - 각 줄이 25자를 초과하지 않도록 체크
+      keyMessage: (item.keyMessage ?? "").split('\n').map(line => line.slice(0, 25)).join('\n').slice(0, 100),
       visualPrompt: item.visualPrompt ?? "",
     }));
   } catch (error) {
