@@ -37,21 +37,35 @@ export const planDetail = async (data: any) => {
 반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
 각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt 필드를 포함해야 합니다.
 
+상세페이지 구성 가이드:
+- 반드시 제품의 디테일(질감, 소재, 마감, 봉제선, 버튼, 지퍼 등)을 보여주는 세그먼트를 포함할 것
+- 디테일 컷 섹션에서는 클로즈업 샷을 요청하여 제품의 품질을 강조
+
 keyMessage 작성 규칙:
 - 고객의 흥미를 끌고 감성을 자극하는 자연스러운 카피 작성
+- 반드시 존댓말(~세요, ~습니다)로 작성할 것
 - 1~3줄로 작성 가능하며, 각 줄은 25자 이내로 제한
 - 줄바꿈이 필요한 경우 \n 사용
-- 예시: "매일 밤 꿀잠을 약속합니다\n당신의 숙면을 위한 최고의 선택", "민감한 피부도 안심\n자연에서 온 순한 케어", "하루 10분의 투자로\n평생 건강을 지켜보세요"
+- 예시: "매일 밤 꿀잠을 약속합니다\n당신의 숙면을 위한 최고의 선택", "민감한 피부도 안심하세요\n자연에서 온 순한 케어", "나만의 트렌디함을 뽐내보세요\n스타일을 완성하는 특별함"
 - 제품의 핵심 가치와 고객 혜택을 명확히 전달할 것
+- 반말(~해, ~봐) 절대 사용 금지
 
 [
   {
-    "title": "섹션 제목 (예: 메인 비주얼, 제품 특징, 사용 방법, 후기 등)",
+    "title": "섹션 제목 (예: 메인 비주얼, 제품 특징, 디테일 컷, 사용 방법 등)",
     "logicalSections": ["태그1", "태그2"],
     "keyMessage": "흥미를 끄는 자연스러운 카피\n필요시 2-3줄로 작성 (각 줄 25자 이내)",
-    "visualPrompt": "This section should show [detailed English description of the visual scene, composition, mood, and styling for an e-commerce banner image]"
+    "visualPrompt": "This section should show [detailed English description]. For detail shots: extreme close-up of product material, texture, stitching, buttons, zippers, or craftsmanship. Show fine details clearly to emphasize quality."
   }
 ]
+
+예시 - 디테일 컷 섹션:
+{
+  "title": "프리미엄 디테일",
+  "logicalSections": ["품질", "디테일"],
+  "keyMessage": "세심한 마감으로\n완성된 프리미엄 품질",
+  "visualPrompt": "Extreme close-up macro shot of the product showing fine details: fabric texture, stitching quality, button or zipper details, material finish. Professional lighting to highlight craftsmanship and premium quality. Sharp focus on texture and details."
+}
       `.trim(),
     });
 

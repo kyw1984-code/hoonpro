@@ -105,27 +105,40 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
         ctx.textAlign = 'left';
         ctx.fillText('★'.repeat(review.rating), 80, yOffset + 40);
 
-        // 후기 텍스트
-        ctx.font = '22px "Noto Sans KR", sans-serif';
+        // 후기 텍스트 (한 글자씩 처리하여 한글도 잘 줄바꿈)
+        ctx.font = '20px "Noto Sans KR", sans-serif';
         ctx.fillStyle = '#334155';
         const maxWidth = canvas.width - 160;
-        const words = review.text.split(' ');
+        const chars = review.text.split('');
         let line = '';
-        let lineY = yOffset + 85;
+        let lineY = yOffset + 75;
+        const lineHeight = 28;
+        let lineCount = 0;
+        const maxLines = 3;
 
-        for (let i = 0; i < words.length; i++) {
-            const testLine = line + words[i] + ' ';
+        for (let i = 0; i < chars.length; i++) {
+            const testLine = line + chars[i];
             const metrics = ctx.measureText(testLine);
-            if (metrics.width > maxWidth && i > 0) {
+            if (metrics.width > maxWidth && line.length > 0) {
                 ctx.fillText(line, 80, lineY);
-                line = words[i] + ' ';
-                lineY += 30;
-                if (lineY > yOffset + 150) break; // 최대 3줄
+                line = chars[i];
+                lineY += lineHeight;
+                lineCount++;
+                if (lineCount >= maxLines) {
+                    // 마지막 줄에 ... 추가
+                    const remaining = chars.slice(i).join('');
+                    if (remaining.length > 0) {
+                        line = line.slice(0, -3) + '...';
+                    }
+                    break;
+                }
             } else {
                 line = testLine;
             }
         }
-        ctx.fillText(line, 80, lineY);
+        if (lineCount < maxLines) {
+            ctx.fillText(line, 80, lineY);
+        }
 
         // 작성자
         ctx.font = 'bold 20px "Noto Sans KR", sans-serif';
@@ -271,7 +284,7 @@ const validateImageQuality = (imageUrl: string): Promise<{ isValid: boolean; rea
 const TARGET_WIDTH = 860;
 const TARGET_HEIGHT = 1000;
 
-const overlayTextOnImage = (imageUrl: string, keyMessage: string): Promise<string> => {
+const overlayTextOnImage = (imageUrl: string, keyMessage: string, sectionTitle?: string): Promise<string> => {
     return new Promise((resolve) => {
         const img = new window.Image();
         // base64 이미지는 crossOrigin 불필요 - 오히려 깨짐 원인
@@ -305,52 +318,103 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string): Promise<strin
 
             const lines = keyMessage.split('\n').filter(l => l.trim());
 
-            // 줄 수에 따라 폰트 크기 조정 (더 많은 줄 = 작은 폰트)
-            let fontSize = lines.length === 1 ? 48 : lines.length === 2 ? 42 : 36;
+            // 스타일링/코디/연출 관련 섹션인지 확인 (문구를 작게, 상단에 배치)
+            const isStyleSection = sectionTitle && (
+                sectionTitle.includes('스타일') ||
+                sectionTitle.includes('코디') ||
+                sectionTitle.includes('연출') ||
+                sectionTitle.includes('매치') ||
+                sectionTitle.toLowerCase().includes('styling')
+            );
+
+            // 줄 수에 따라 폰트 크기 조정
+            let fontSize = isStyleSection
+                ? (lines.length === 1 ? 32 : lines.length === 2 ? 28 : 24)
+                : (lines.length === 1 ? 48 : lines.length === 2 ? 42 : 36);
             const lineHeight = fontSize * 1.5;
             const totalTextHeight = lines.length * lineHeight;
 
-            // 하단 그라디언트 오버레이 (여유 공간 확보)
-            const overlayH = totalTextHeight + fontSize * 3;
-            const overlayY = TARGET_HEIGHT - overlayH;
-            const gradient = ctx.createLinearGradient(0, overlayY, 0, TARGET_HEIGHT);
-            gradient.addColorStop(0, 'rgba(0,0,0,0)');
-            gradient.addColorStop(0.3, 'rgba(0,0,0,0.7)');
-            gradient.addColorStop(1, 'rgba(0,0,0,0.9)');
-            ctx.fillStyle = gradient;
-            ctx.fillRect(0, overlayY, TARGET_WIDTH, overlayH);
+            // 스타일 섹션은 상단, 일반 섹션은 하단에 텍스트 배치
+            if (isStyleSection) {
+                // 상단 그라디언트 오버레이
+                const overlayH = totalTextHeight + fontSize * 2;
+                const gradient = ctx.createLinearGradient(0, 0, 0, overlayH);
+                gradient.addColorStop(0, 'rgba(0,0,0,0.75)');
+                gradient.addColorStop(0.7, 'rgba(0,0,0,0.4)');
+                gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, TARGET_WIDTH, overlayH);
 
-            // 텍스트 렌더링
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.shadowColor = 'rgba(0,0,0,0.95)';
-            ctx.shadowBlur = 12;
-            ctx.shadowOffsetX = 2;
-            ctx.shadowOffsetY = 3;
+                // 텍스트 렌더링
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.shadowColor = 'rgba(0,0,0,0.9)';
+                ctx.shadowBlur = 10;
+                ctx.shadowOffsetX = 1;
+                ctx.shadowOffsetY = 2;
 
-            // 시작 Y 위치 계산 (중앙 정렬)
-            const startY = TARGET_HEIGHT - overlayH / 2 - (totalTextHeight / 2) + (fontSize / 2);
+                const startY = fontSize + 20;
 
-            lines.forEach((line, i) => {
-                const y = startY + i * lineHeight;
-                ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
-                ctx.fillStyle = '#ffffff';
+                lines.forEach((line, i) => {
+                    const y = startY + i * lineHeight;
+                    ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
+                    ctx.fillStyle = '#ffffff';
 
-                // 텍스트가 너무 길면 줄임표 처리
-                let displayText = line;
-                const maxWidth = TARGET_WIDTH - 80; // 좌우 여백
-                let textWidth = ctx.measureText(displayText).width;
+                    let displayText = line;
+                    const maxWidth = TARGET_WIDTH - 80;
+                    let textWidth = ctx.measureText(displayText).width;
 
-                if (textWidth > maxWidth) {
-                    while (textWidth > maxWidth && displayText.length > 0) {
-                        displayText = displayText.slice(0, -1);
-                        textWidth = ctx.measureText(displayText + '...').width;
+                    if (textWidth > maxWidth) {
+                        while (textWidth > maxWidth && displayText.length > 0) {
+                            displayText = displayText.slice(0, -1);
+                            textWidth = ctx.measureText(displayText + '...').width;
+                        }
+                        displayText += '...';
                     }
-                    displayText += '...';
-                }
 
-                ctx.fillText(displayText, TARGET_WIDTH / 2, y);
-            });
+                    ctx.fillText(displayText, TARGET_WIDTH / 2, y);
+                });
+            } else {
+                // 하단 그라디언트 오버레이
+                const overlayH = totalTextHeight + fontSize * 3;
+                const overlayY = TARGET_HEIGHT - overlayH;
+                const gradient = ctx.createLinearGradient(0, overlayY, 0, TARGET_HEIGHT);
+                gradient.addColorStop(0, 'rgba(0,0,0,0)');
+                gradient.addColorStop(0.3, 'rgba(0,0,0,0.7)');
+                gradient.addColorStop(1, 'rgba(0,0,0,0.9)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, overlayY, TARGET_WIDTH, overlayH);
+
+                // 텍스트 렌더링
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.shadowColor = 'rgba(0,0,0,0.95)';
+                ctx.shadowBlur = 12;
+                ctx.shadowOffsetX = 2;
+                ctx.shadowOffsetY = 3;
+
+                const startY = TARGET_HEIGHT - overlayH / 2 - (totalTextHeight / 2) + (fontSize / 2);
+
+                lines.forEach((line, i) => {
+                    const y = startY + i * lineHeight;
+                    ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
+                    ctx.fillStyle = '#ffffff';
+
+                    let displayText = line;
+                    const maxWidth = TARGET_WIDTH - 80;
+                    let textWidth = ctx.measureText(displayText).width;
+
+                    if (textWidth > maxWidth) {
+                        while (textWidth > maxWidth && displayText.length > 0) {
+                            displayText = displayText.slice(0, -1);
+                            textWidth = ctx.measureText(displayText + '...').width;
+                        }
+                        displayText += '...';
+                    }
+
+                    ctx.fillText(displayText, TARGET_WIDTH / 2, y);
+                });
+            }
 
             ctx.shadowColor = 'transparent';
             ctx.shadowBlur = 0;
@@ -394,9 +458,9 @@ export const DetailPlanner: React.FC = () => {
     const [certData, setCertData] = useState({ type: 'KC 안전인증', number: '', date: '' });
     const [includeReviews, setIncludeReviews] = useState(false);
     const [reviewsData, setReviewsData] = useState([
-        { rating: 5, text: '품질이 정말 좋아요!', author: '김**' },
-        { rating: 5, text: '가격 대비 만족스럽습니다', author: '이**' },
-        { rating: 4, text: '재구매 의사 있어요', author: '박**' }
+        { rating: 5, text: '일주일 사용해봤는데 정말 만족스러워요. 품질이 기대 이상입니다.', author: '김**' },
+        { rating: 5, text: '배송도 빠르고 실물이 사진보다 더 예뻐요. 가격 대비 훌륭합니다.', author: '이**' },
+        { rating: 4, text: '사용감이 좋아서 가족들에게도 추천했어요. 재구매 의사 100%입니다.', author: '박**' }
     ]);
     const [segments, setSegments] = useState<any[]>([]);
 
@@ -510,14 +574,19 @@ export const DetailPlanner: React.FC = () => {
 
             while (attempt <= MAX_RETRY) {
                 try {
-                    // ✅ 프롬프트에서 한글 텍스트 제거 — 배경/비주얼만 요청, 제품 로고 보존
-                    const prompt = `High quality e-commerce product banner image. IMPORTANT RULES:
+                    // ✅ 프롬프트에서 한글 텍스트 제거 — 배경/비주얼만 요청, 제품 로고 및 색상 보존
+                    const colorInstruction = info.imageInstruction
+                        ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
+                        : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
+
+                    const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
+- Preserve the EXACT colors from the reference product images - do not alter or add colors unless specifically requested
 - If the reference product has logos or brand marks, preserve them exactly as they appear
 - DO NOT add any new logos, watermarks, or brand marks
 - Focus on visual composition only: ${segments[i].visualPrompt}
-${info.imageInstruction ? `CRITICAL USER REQUIREMENT: ${info.imageInstruction}` : ''}
-Clean background, professional product photography style, maintain original product details including any existing logos.`;
+${colorInstruction}
+Clean background, professional product photography style, maintain original product details including logos and colors.`;
 
                     const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
 
@@ -533,8 +602,8 @@ Clean background, professional product photography style, maintain original prod
                         }
                     }
 
-                    // ✅ Canvas로 한글 텍스트 덧씌우기
-                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage);
+                    // ✅ Canvas로 한글 텍스트 덧씌우기 (섹션 제목 전달)
+                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage, segments[i].title);
 
                     // 개별 이미지 생성 완료 시 즉시 업데이트
                     setSegments(prev => {
@@ -627,8 +696,17 @@ Clean background, professional product photography style, maintain original prod
                             <input type="text" value={info.target} onChange={e => setInfo({...info, target: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 20-30대 직장인 여성" />
                         </div>
                         <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-700 mb-1">이미지 생성 추가 요청사항 <span className="text-slate-400 font-normal">(선택)</span></label>
-                            <input type="text" value={info.imageInstruction} onChange={e => setInfo({...info, imageInstruction: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 사진에 있는 색상만 이미지를 만들어줘" />
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                추가 색상 요청 <span className="text-slate-400 font-normal">(선택 - 입력하지 않으면 원본 색상만 유지)</span>
+                            </label>
+                            <input
+                                type="text"
+                                value={info.imageInstruction}
+                                onChange={e => setInfo({...info, imageInstruction: e.target.value})}
+                                className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                                placeholder="예: 블루 색상도 추가해주세요 (입력 안하면 사진의 원본 색상만 사용)"
+                            />
+                            <p className="text-xs text-slate-500 mt-1">💡 빈칸으로 두면 업로드한 제품 사진의 색상만 그대로 유지됩니다.</p>
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-2">레퍼런스 이미지 (최소 2장 필수)</label>
