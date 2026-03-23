@@ -13,6 +13,31 @@ const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 export const removeBackground = async (image: string) => image;
 
+// 상품명 기반 핵심 특징 자동 생성
+export const generateFeatures = async (productName: string, category: string): Promise<string> => {
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `
+상품명: ${productName}
+카테고리: ${category}
+
+위 상품의 핵심 특징 3-5가지를 간결하게 작성해주세요.
+각 특징은 한 줄로, 구체적이고 설득력 있게 작성하세요.
+반드시 텍스트만 반환하고, 불릿 포인트나 번호 없이 쉼표로 구분하세요.
+
+예시: "프리미엄 메모리폼 소재로 목과 어깨 압력 분산, 통기성 좋은 3D 메쉬 커버, 세탁 가능한 분리형 커버, 인체공학적 디자인"
+      `.trim(),
+    });
+
+    const text = response.text ?? "";
+    return text.trim();
+  } catch (error) {
+    console.error("Feature generation error:", error);
+    return ""; // 실패시 빈 문자열 반환
+  }
+};
+
 export const planDetail = async (data: any) => {
   try {
     const lengthGuide = data.length === 'auto'

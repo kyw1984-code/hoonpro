@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { planDetail, generateImage } from '../../api/aiService';
+import { planDetail, generateImage, generateFeatures } from '../../api/aiService';
 import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X } from 'lucide-react';
 
 // ✅ 인증서 이미지 생성 함수
@@ -491,7 +491,14 @@ export const DetailPlanner: React.FC = () => {
         }
         setLoading(true);
         try {
-            const plannedSegments = await planDetail({ ...info, length });
+            // 핵심 특징이 비어있으면 자동 생성
+            let features = info.features;
+            if (!features.trim()) {
+                features = await generateFeatures(info.name, info.category);
+                setInfo(prev => ({ ...prev, features }));
+            }
+
+            const plannedSegments = await planDetail({ ...info, features, length });
 
             // 사이즈표 추가
             if (includeSizeChart) {
@@ -581,12 +588,14 @@ export const DetailPlanner: React.FC = () => {
 
                     const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
-- Preserve the EXACT colors from the reference product images - do not alter or add colors unless specifically requested
-- If the reference product has logos or brand marks, preserve them exactly as they appear
-- DO NOT add any new logos, watermarks, or brand marks
+- Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
+- CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
+- If generating a back view and the reference back image has a logo, include that logo exactly
+- If generating a front view and the reference front image has a logo, include that logo exactly
+- DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
 - Focus on visual composition only: ${segments[i].visualPrompt}
 ${colorInstruction}
-Clean background, professional product photography style, maintain original product details including logos and colors.`;
+Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
 
                     const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
 
@@ -688,8 +697,10 @@ Clean background, professional product photography style, maintain original prod
                             <input type="text" value={info.category} onChange={e => setInfo({...info, category: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 리빙/침구" />
                         </div>
                         <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-700 mb-1">핵심 특징 (USP)</label>
-                            <textarea value={info.features} onChange={e => setInfo({...info, features: e.target.value})} rows={3} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="상품의 주요 장점을 입력하세요." />
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                핵심 특징 <span className="text-slate-400 font-normal">(비워두면 상품명 기반 자동 생성)</span>
+                            </label>
+                            <textarea value={info.features} onChange={e => setInfo({...info, features: e.target.value})} rows={3} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="상품의 주요 장점을 입력하세요. (빈칸으로 두면 자동 생성됩니다)" />
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">타겟 고객</label>
@@ -935,7 +946,7 @@ Clean background, professional product photography style, maintain original prod
                     <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                         <div>
                             <h2 className="text-2xl font-bold text-slate-800">상세페이지 결과물</h2>
-                            <p className="text-slate-500 mt-1">생성된 이미지를 확인하고 다운로드하세요.</p>
+                            <p className="text-slate-500 mt-1">생성된 이미지를 확인하고 다운로드하세요. 문구를 수정하면 해당 이미지만 재생성됩니다.</p>
                         </div>
                         <div className="flex gap-3">
                             <button onClick={() => setStep(2)} className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
@@ -948,25 +959,122 @@ Clean background, professional product photography style, maintain original prod
                             </button>
                         </div>
                     </div>
-                    <div className="flex justify-center">
-                        <div className="w-full max-w-md bg-white shadow-2xl overflow-hidden">
-                            {segments.map((seg, idx) => (
-                                <div key={seg.id} className="relative w-full bg-slate-100 border-b border-slate-200 flex items-center justify-center">
-                                    {seg.imageUrl ? (
-                                        <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-auto object-contain" />
-                                    ) : seg.isGenerating ? (
-                                        <div className="flex flex-col items-center text-slate-500 py-20">
-                                            <Loader2 className="w-8 h-8 animate-spin mb-2 text-blue-500" />
-                                            <p className="font-medium">이미지 생성 중...</p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* 왼쪽: 이미지 미리보기 */}
+                        <div className="flex justify-center">
+                            <div className="w-full max-w-md bg-white shadow-2xl overflow-hidden sticky top-6">
+                                {segments.map((seg, idx) => (
+                                    <div key={seg.id} className="relative w-full bg-slate-100 border-b border-slate-200 flex items-center justify-center">
+                                        {seg.imageUrl ? (
+                                            <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-auto object-contain" />
+                                        ) : seg.isGenerating ? (
+                                            <div className="flex flex-col items-center text-slate-500 py-20">
+                                                <Loader2 className="w-8 h-8 animate-spin mb-2 text-blue-500" />
+                                                <p className="font-medium">이미지 생성 중...</p>
+                                            </div>
+                                        ) : (
+                                            <div className="text-slate-400 py-20">대기 중...</div>
+                                        )}
+                                        <div className="absolute top-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
+                                            {idx + 1}. {seg.title}
                                         </div>
-                                    ) : (
-                                        <div className="text-slate-400 py-20">대기 중...</div>
-                                    )}
-                                    <div className="absolute top-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
-                                        {idx + 1}. {seg.title}
                                     </div>
-                                </div>
-                            ))}
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* 오른쪽: 문구 수정 패널 */}
+                        <div className="space-y-4">
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                                <h3 className="text-lg font-bold text-slate-800 mb-4">문구 수정 및 재생성</h3>
+                                {segments.map((seg, idx) => (
+                                    <div key={seg.id} className="mb-6 pb-6 border-b border-slate-200 last:border-0 last:mb-0 last:pb-0">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-sm font-bold text-slate-600">#{idx + 1}</span>
+                                                <span className="text-sm font-medium text-slate-800">{seg.title}</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-600 mb-1">카피 문구</label>
+                                            <textarea
+                                                value={seg.keyMessage}
+                                                onChange={(e) => {
+                                                    const newSegs = [...segments];
+                                                    newSegs[idx].keyMessage = e.target.value;
+                                                    setSegments(newSegs);
+                                                }}
+                                                rows={2}
+                                                className="w-full p-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={async () => {
+                                                // 해당 이미지만 재생성
+                                                setSegments(prev => {
+                                                    const newSegs = [...prev];
+                                                    newSegs[idx] = { ...newSegs[idx], isGenerating: true, error: false };
+                                                    return newSegs;
+                                                });
+
+                                                try {
+                                                    const colorInstruction = info.imageInstruction
+                                                        ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
+                                                        : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
+
+                                                    const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
+- NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
+- Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
+- CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
+- If generating a back view and the reference back image has a logo, include that logo exactly
+- If generating a front view and the reference front image has a logo, include that logo exactly
+- DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
+- Focus on visual composition only: ${segments[idx].visualPrompt}
+${colorInstruction}
+Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
+
+                                                    const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
+                                                    const validation = await validateImageQuality(rawImageUrl);
+
+                                                    if (!validation.isValid) {
+                                                        throw new Error(`품질 검증 실패: ${validation.reason}`);
+                                                    }
+
+                                                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[idx].keyMessage, segments[idx].title);
+
+                                                    setSegments(prev => {
+                                                        const newSegs = [...prev];
+                                                        newSegs[idx] = { ...newSegs[idx], imageUrl, isGenerating: false, error: false };
+                                                        return newSegs;
+                                                    });
+                                                } catch (e) {
+                                                    console.error(`이미지 ${idx + 1} 재생성 실패:`, e);
+                                                    alert(`이미지 재생성에 실패했습니다: ${e}`);
+                                                    setSegments(prev => {
+                                                        const newSegs = [...prev];
+                                                        newSegs[idx] = { ...newSegs[idx], isGenerating: false, error: true };
+                                                        return newSegs;
+                                                    });
+                                                }
+                                            }}
+                                            disabled={seg.isGenerating}
+                                            className="mt-2 w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-xs font-medium py-2 px-4 rounded-lg flex items-center justify-center transition-colors"
+                                        >
+                                            {seg.isGenerating ? (
+                                                <>
+                                                    <Loader2 className="w-3 h-3 animate-spin mr-1" />
+                                                    재생성 중...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <ImageIcon className="w-3 h-3 mr-1" />
+                                                    이미지 재생성
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 </div>
