@@ -50,53 +50,42 @@ export const planDetail = async (data: any) => {
         responseMimeType: "application/json",
       },
       contents: `
-당신은 한국 이커머스 전문 상세페이지 기획자입니다.
-아래 상품의 상세페이지 기획안을 JSON 배열로 작성해주세요.
+ 당신은 한국 이커머스 전문 상세페이지 기획자입니다.
+ 아래 상품의 상세페이지 기획안을 JSON 배열로 작성해주세요.
 
-상품명: ${data.name}
-카테고리: ${data.category}
-핵심 특징: ${data.features || '없음'}
-타겟 고객: ${data.target || '없음'}
-페이지 길이: ${lengthGuide}
+ 상품명: ${data.name}
+ 카테고리: ${data.category}
+ 핵심 특징: ${data.features || '없음'}
+ 타겟 고객: ${data.target || '없음'}
+ 페이지 길이: ${lengthGuide}
 
-반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
-각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt 필드를 포함해야 합니다.
+ 반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
+ 각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt 필드를 포함해야 합니다.
 
-상세페이지 구성 가이드:
-- 반드시 제품의 디테일(질감, 소재, 마감, 봉제선, 버튼, 지퍼 등)을 보여주는 세그먼트를 포함할 것
-- 디테일 컷 섹션에서는 클로즈업 샷을 요청하여 제품의 품질을 강조
+ 중요 규칙 및 절대 금지 사항 (MUST FOLLOW):
+ 1. 반드시 제품의 시각적 가치(디테일, 소재, 착용샷, 연출샷 등)를 보여주는 '이미지 중심'의 섹션으로만 구성하세요.
+ 2. **다음 섹션들은 시스템에서 별도로 추가하므로 AI는 절대 생성하면 안 됩니다 (생성 시 오류 처리됨):**
+    - '사이즈 가이드', '사이즈 조언', '실측 사이즈' 등 모든 사이즈 관련 섹션
+    - '세탁 방법', '관리 방법', '보관 방법', '주의사항' 등 모든 관리 정보 섹션
+    - '제품 상세 정보', '상품 기본 정보', '고객 센터' 관련 섹션
+ 3. 위 금지 항목 대신 다음 내용을 포함하세요:
+    - 제품의 핵심 문제를 해결하는 첫인상 메인 섹션
+    - 소재의 질감과 마감을 강조하는 클로즈업 섹션 (Extreme close-up)
+    - 일상 생활에서의 자연스러운 사용/착용 연출 섹션 (Lifestyle shot)
+    - 제품의 신뢰도를 높이는 브랜드 철학이나 품질 강조 섹션
 
-절대 생성하지 말 것 (별도 템플릿 옵션으로 제공):
-- 사이즈 관련 섹션: "사이즈 가이드", "사이즈 선택", "당신에게 맞는 사이즈" 등
-- 제품 정보 및 관리 섹션: "세탁 방법", "관리 방법", "보관 방법", "제품 정보" 등
-- 위 내용은 별도 추가 옵션으로 제공되므로 AI 이미지 생성 세그먼트에서 제외
+ keyMessage 작성 규칙:
+ - 고객의 감성을 자극하는 전문 카피라이터 톤앤매너 유지
+ - 반드시 존댓말(~세요, ~습니다)로 작성 (반말 금지)
+ - 1~2줄로 작성하되, 한 줄당 25자 이내로 제한 (줄바꿈 \n 사용)
+ - 예시: "매일 아침이 기다려지는\n부드러운 실크의 감촉을 느껴보세요"
 
-keyMessage 작성 규칙:
-- 고객의 흥미를 끌고 감성을 자극하는 자연스러운 카피 작성
-- 반드시 존댓말(~세요, ~습니다)로 작성할 것
-- 1~3줄로 작성 가능하며, 각 줄은 25자 이내로 제한
-- 줄바꿈이 필요한 경우 \n 사용
-- 예시: "매일 밤 꿀잠을 약속합니다\n당신의 숙면을 위한 최고의 선택", "민감한 피부도 안심하세요\n자연에서 온 순한 케어", "나만의 트렌디함을 뽐내보세요\n스타일을 완성하는 특별함"
-- 제품의 핵심 가치와 고객 혜택을 명확히 전달할 것
-- 반말(~해, ~봐) 절대 사용 금지
+ 시각적 프롬프트(visualPrompt) 작성 규칙:
+ - 영어로 작성하며, AI 이미지 생성기가 이해하기 쉬운 구체적인 묘사 포함
+ - "A high-quality professional product photography of..."로 시작
+ - 조명, 배경, 각도, 질감 등을 사실적으로 기술
 
-[
-  {
-    "title": "섹션 제목 (예: 메인 비주얼, 제품 특징, 디테일 컷, 사용 방법, 스타일링, 보관 방법 등)",
-    "logicalSections": ["태그1", "태그2"],
-    "keyMessage": "흥미를 끄는 자연스러운 카피\n필요시 2-3줄로 작성 (각 줄 25자 이내)",
-    "visualPrompt": "This section should show [detailed English description]. For detail shots: extreme close-up of product material, texture, stitching, buttons, zippers, or craftsmanship. Show fine details clearly to emphasize quality."
-  }
-]
-
-추천 섹션 예시:
-1. 메인 비주얼: 제품의 전체적인 모습
-2. 핵심 특징: 제품의 주요 장점
-3. 디테일 컷: 소재, 질감, 마감 클로즈업
-4. 사용 방법 / 활용법
-5. 스타일링 제안 / 코디 팁
-6. 브랜드 스토리 / 제품 개발 배경
-7. 고객 혜택 / 차별화 포인트
+ 배열 예시: [ {"title": "오감으로 느끼는 편안함", "logicalSections": ["메인", "시각화"], "keyMessage": "몸에 닿는 순간 느껴지는\n천연 소재의 압도적인 부드러움", "visualPrompt": "A high-quality professional product photography of the product in a minimalist studio background with soft natural lighting, showing its elegant design."} ]
       `.trim(),
     });
 
