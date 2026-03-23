@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { removeBackground, generateImage } from '../../api/aiService';
 import { Loader2, Upload, Image as ImageIcon, Download, Wand2, Scissors, X } from 'lucide-react';
 
@@ -11,6 +11,9 @@ export const ThumbnailGenerator: React.FC = () => {
     const [shotType, setShotType] = useState<'product' | 'model'>('product');
     const [referenceImages, setReferenceImages] = useState<string[]>([]);
     const [resultImage, setResultImage] = useState<string>('');
+    const [baseImage, setBaseImage] = useState<string>('');
+    const [overlayText, setOverlayText] = useState('');
+    const [textPosition, setTextPosition] = useState<'top' | 'middle' | 'bottom'>('top');
     
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -51,6 +54,52 @@ export const ThumbnailGenerator: React.FC = () => {
         }
     };
 
+    const applyTextOverlay = (imageSrc: string, text: string, position: 'top' | 'middle' | 'bottom') => {
+        if (!imageSrc) return;
+        
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1000;
+            canvas.height = 1000;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+
+            // Draw background image
+            ctx.drawImage(img, 0, 0, 1000, 1000);
+
+            if (text) {
+                // Text settings
+                ctx.fillStyle = 'white';
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 12;
+                ctx.lineJoin = 'round';
+                ctx.textAlign = 'center';
+                ctx.font = 'bold 80px "Inter", sans-serif';
+
+                let y = 0;
+                if (position === 'top') y = 150;
+                else if (position === 'middle') y = 500;
+                else if (position === 'bottom') y = 850;
+
+                // Draw stroke first
+                ctx.strokeText(text, 500, y);
+                // Draw fill
+                ctx.fillText(text, 500, y);
+            }
+
+            setResultImage(canvas.toDataURL('image/png'));
+        };
+        img.src = imageSrc;
+    };
+
+    useEffect(() => {
+        if (baseImage) {
+            applyTextOverlay(baseImage, overlayText, textPosition);
+        }
+    }, [overlayText, textPosition, baseImage]);
+
     const handleGenerate = async () => {
         setLoading(true);
         try {
@@ -80,10 +129,11 @@ export const ThumbnailGenerator: React.FC = () => {
                 }
             }
 
-            const imageUrl = await generateImage(prompt, referenceImages, "1:1", true);
+            const imageUrl = await generateImage(prompt, referenceImages, "1:1");
             if (imageUrl) {
                 const resizedUrl = await new Promise<string>((resolve) => {
                     const img = new Image();
+                    img.crossOrigin = "anonymous";
                     img.onload = () => {
                         const canvas = document.createElement('canvas');
                         canvas.width = 1000;
@@ -105,7 +155,7 @@ export const ThumbnailGenerator: React.FC = () => {
                     };
                     img.src = imageUrl;
                 });
-                setResultImage(resizedUrl);
+                setBaseImage(resizedUrl);
             }
         } catch (e) {
             console.error(e);
@@ -148,6 +198,28 @@ export const ThumbnailGenerator: React.FC = () => {
                             >
                                 모델컷 (Model)
                             </button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">상단/하단 문구 (선택 사항)</label>
+                        <input 
+                            type="text" 
+                            value={overlayText} 
+                            onChange={e => setOverlayText(e.target.value)} 
+                            className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none mb-3" 
+                            placeholder="이미지 위에 표시할 문구를 입력하세요" 
+                        />
+                        <div className="grid grid-cols-3 gap-2">
+                            {(['top', 'middle', 'bottom'] as const).map((pos) => (
+                                <button
+                                    key={pos}
+                                    onClick={() => setTextPosition(pos)}
+                                    className={`py-2 px-3 rounded-lg border text-sm font-medium transition-all ${textPosition === pos ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}
+                                >
+                                    {pos === 'top' ? '상단' : pos === 'middle' ? '중간' : '하단'}
+                                </button>
+                            ))}
                         </div>
                     </div>
 
