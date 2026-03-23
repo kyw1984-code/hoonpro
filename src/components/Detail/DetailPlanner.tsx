@@ -64,16 +64,66 @@ const generateCertificateImage = (certType: string, certNumber: string, certDate
     return canvas.toDataURL('image/png');
 };
 
-// ✅ 고객 후기 이미지 생성 함수
-const generateReviewImage = (reviews: Array<{ rating: number; text: string; author: string }>): string => {
+// ✅ 고객 후기 배경 이미지를 AI로 생성하는 함수
+const generateReviewImageWithAI = async (
+    reviews: Array<{ rating: number; text: string; author: string }>,
+    productName: string,
+    category: string,
+    referenceImages: string[]
+): Promise<string> => {
+    try {
+        // AI로 후기 배경 이미지 생성
+        const prompt = `Create a soft, elegant background image for customer reviews section of an e-commerce product detail page.
+Product: ${productName}
+Category: ${category}
+
+REQUIREMENTS:
+- Subtle, professional background that doesn't distract from text
+- Use soft pastel colors or gentle gradients
+- Include minimal decorative elements (subtle patterns, soft shapes, or textures)
+- Maintain the product's color scheme from reference images
+- NO text, NO words, NO letters
+- Clean, modern, premium feel
+- Aspect ratio 9:16
+- Leave plenty of clean space for text overlay
+
+Style: Minimalist, elegant, e-commerce professional`;
+
+        const bgImageUrl = await generateImage(prompt, referenceImages, "9:16");
+        return bgImageUrl;
+    } catch (error) {
+        console.error("Review background generation failed:", error);
+        // 실패 시 기본 배경 반환
+        return '';
+    }
+};
+
+// ✅ 고객 후기 이미지 생성 함수 (Canvas + AI 배경)
+const generateReviewImage = (reviews: Array<{ rating: number; text: string; author: string }>, bgImageUrl?: string): string => {
     const canvas = document.createElement('canvas');
     canvas.width = 860;
     canvas.height = 1000;
     const ctx = canvas.getContext('2d')!;
 
-    // 배경
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // 배경 이미지가 있으면 사용, 없으면 단순 흰색
+    if (bgImageUrl) {
+        const img = new window.Image();
+        img.src = bgImageUrl;
+        // 동기적으로 그리기 위해 즉시 반환하지 않음
+        try {
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            // 반투명 오버레이로 가독성 향상
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        } catch (e) {
+            // 이미지 로드 실패 시 기본 배경
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+    } else {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
     // 제목
     ctx.fillStyle = '#1e293b';
@@ -159,7 +209,7 @@ const generateSizeChartImage = (gender: 'women' | 'men', data: Record<string, Re
     const ctx = canvas.getContext('2d')!;
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const sizes = gender === 'women' ? ['55', '66', '77', '88'] : ['85', '100', '105', '110'];
+    const sizes = gender === 'women' ? ['55', '66', '77', '88'] : ['95', '100', '105', '110'];
     const columns = ['사이즈', '어깨넓이', '가슴넓이', '소매길이', '총장'];
     const startX = 50;
     const rowHeight = 80;
@@ -532,9 +582,31 @@ export const DetailPlanner: React.FC = () => {
                 });
             }
 
-            // 고객 후기 추가
+            // 고객 후기 추가 (AI 배경 생성)
             if (includeReviews) {
-                const reviewUrl = generateReviewImage(reviewsData);
+                // AI로 배경 이미지 생성
+                const reviewBgUrl = await generateReviewImageWithAI(reviewsData, info.name, info.category, referenceImages);
+
+                // 배경과 후기를 합성
+                const reviewUrl = await new Promise<string>((resolve) => {
+                    if (reviewBgUrl) {
+                        const img = new window.Image();
+                        img.onload = () => {
+                            const finalUrl = generateReviewImage(reviewsData, reviewBgUrl);
+                            resolve(finalUrl);
+                        };
+                        img.onerror = () => {
+                            // 배경 로드 실패 시 기본 배경 사용
+                            const finalUrl = generateReviewImage(reviewsData);
+                            resolve(finalUrl);
+                        };
+                        img.src = reviewBgUrl;
+                    } else {
+                        const finalUrl = generateReviewImage(reviewsData);
+                        resolve(finalUrl);
+                    }
+                });
+
                 plannedSegments.push({
                     id: 'reviews-' + Date.now(),
                     title: '고객 후기',
@@ -776,7 +848,7 @@ Clean background, professional product photography style, maintain ALL original 
                                         </label>
                                         <label className="flex items-center cursor-pointer">
                                             <input type="radio" name="gender" checked={sizeGender === 'men'} onChange={() => setSizeGender('men')} className="mr-2 w-4 h-4 text-blue-600" />
-                                            <span className="font-medium text-slate-700">남성 (85, 100, 105, 110)</span>
+                                            <span className="font-medium text-slate-700">남성 (95, 100, 105, 110)</span>
                                         </label>
                                     </div>
                                     <div className="overflow-x-auto">
@@ -791,7 +863,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {(sizeGender === 'women' ? ['55', '66', '77', '88'] : ['85', '100', '105', '110']).map((size) => (
+                                                {(sizeGender === 'women' ? ['55', '66', '77', '88'] : ['95', '100', '105', '110']).map((size) => (
                                                     <tr key={size} className="bg-white border-b border-slate-200">
                                                         <td className="px-4 py-3 font-bold text-slate-900 text-center">{size}</td>
                                                         {['shoulder', 'chest', 'sleeve', 'length'].map((field) => (
@@ -841,37 +913,60 @@ Clean background, professional product photography style, maintain ALL original 
                                 {includeReviews && (
                                     <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
                                         {reviewsData.map((review, idx) => (
-                                            <div key={idx} className="bg-white p-4 rounded-lg border border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-3">
-                                                <div className="md:col-span-2">
-                                                    <label className="block text-xs font-medium text-slate-700 mb-1">별점</label>
-                                                    <select value={review.rating} onChange={(e) => {
-                                                        const newReviews = [...reviewsData];
-                                                        newReviews[idx].rating = Number(e.target.value);
-                                                        setReviewsData(newReviews);
-                                                    }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none">
-                                                        <option value={5}>⭐⭐⭐⭐⭐</option>
-                                                        <option value={4}>⭐⭐⭐⭐</option>
-                                                        <option value={3}>⭐⭐⭐</option>
-                                                    </select>
+                                            <div key={idx} className="bg-white p-4 rounded-lg border border-slate-200">
+                                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 mb-2">
+                                                    <div className="md:col-span-2">
+                                                        <label className="block text-xs font-medium text-slate-700 mb-1">별점</label>
+                                                        <select value={review.rating} onChange={(e) => {
+                                                            const newReviews = [...reviewsData];
+                                                            newReviews[idx].rating = Number(e.target.value);
+                                                            setReviewsData(newReviews);
+                                                        }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none">
+                                                            <option value={5}>⭐⭐⭐⭐⭐</option>
+                                                            <option value={4}>⭐⭐⭐⭐</option>
+                                                            <option value={3}>⭐⭐⭐</option>
+                                                        </select>
+                                                    </div>
+                                                    <div className="md:col-span-8">
+                                                        <label className="block text-xs font-medium text-slate-700 mb-1">후기 내용</label>
+                                                        <input type="text" value={review.text} onChange={(e) => {
+                                                            const newReviews = [...reviewsData];
+                                                            newReviews[idx].text = e.target.value;
+                                                            setReviewsData(newReviews);
+                                                        }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                                                    </div>
+                                                    <div className="md:col-span-2">
+                                                        <label className="block text-xs font-medium text-slate-700 mb-1">작성자</label>
+                                                        <input type="text" value={review.author} onChange={(e) => {
+                                                            const newReviews = [...reviewsData];
+                                                            newReviews[idx].author = e.target.value;
+                                                            setReviewsData(newReviews);
+                                                        }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                                                    </div>
                                                 </div>
-                                                <div className="md:col-span-8">
-                                                    <label className="block text-xs font-medium text-slate-700 mb-1">후기 내용</label>
-                                                    <input type="text" value={review.text} onChange={(e) => {
-                                                        const newReviews = [...reviewsData];
-                                                        newReviews[idx].text = e.target.value;
-                                                        setReviewsData(newReviews);
-                                                    }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
-                                                </div>
-                                                <div className="md:col-span-2">
-                                                    <label className="block text-xs font-medium text-slate-700 mb-1">작성자</label>
-                                                    <input type="text" value={review.author} onChange={(e) => {
-                                                        const newReviews = [...reviewsData];
-                                                        newReviews[idx].author = e.target.value;
-                                                        setReviewsData(newReviews);
-                                                    }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
-                                                </div>
+                                                {reviewsData.length > 1 && (
+                                                    <button
+                                                        onClick={() => {
+                                                            const newReviews = reviewsData.filter((_, i) => i !== idx);
+                                                            setReviewsData(newReviews);
+                                                        }}
+                                                        className="text-red-600 hover:text-red-700 text-xs font-medium flex items-center gap-1"
+                                                    >
+                                                        <X className="w-3 h-3" />
+                                                        이 후기 삭제
+                                                    </button>
+                                                )}
                                             </div>
                                         ))}
+                                        <button
+                                            onClick={() => {
+                                                setReviewsData([...reviewsData, { rating: 5, text: '', author: '고객**' }]);
+                                            }}
+                                            className="w-full p-3 border-2 border-dashed border-slate-300 rounded-lg text-slate-600 hover:border-blue-500 hover:text-blue-600 font-medium transition-colors flex items-center justify-center gap-2"
+                                        >
+                                            <Upload className="w-4 h-4" />
+                                            후기 추가하기
+                                        </button>
                                     </div>
                                 )}
                             </div>
