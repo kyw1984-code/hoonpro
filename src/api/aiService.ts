@@ -65,6 +65,8 @@ export const planDetail = async (data: any) => {
 상세페이지 구성 가이드:
 - 반드시 제품의 디테일(질감, 소재, 마감, 봉제선, 버튼, 지퍼 등)을 보여주는 세그먼트를 포함할 것
 - 디테일 컷 섹션에서는 클로즈업 샷을 요청하여 제품의 품질을 강조
+- 사이즈 관련 섹션은 절대 생성하지 말 것 (사이즈표는 별도 옵션으로 제공됨)
+- "당신에게 맞는 사이즈", "사이즈 가이드", "사이즈 선택" 등의 제목 사용 금지
 
 keyMessage 작성 규칙:
 - 고객의 흥미를 끌고 감성을 자극하는 자연스러운 카피 작성
@@ -77,20 +79,23 @@ keyMessage 작성 규칙:
 
 [
   {
-    "title": "섹션 제목 (예: 메인 비주얼, 제품 특징, 디테일 컷, 사용 방법 등)",
+    "title": "섹션 제목 (예: 메인 비주얼, 제품 특징, 디테일 컷, 사용 방법, 스타일링, 보관 방법 등)",
     "logicalSections": ["태그1", "태그2"],
     "keyMessage": "흥미를 끄는 자연스러운 카피\n필요시 2-3줄로 작성 (각 줄 25자 이내)",
     "visualPrompt": "This section should show [detailed English description]. For detail shots: extreme close-up of product material, texture, stitching, buttons, zippers, or craftsmanship. Show fine details clearly to emphasize quality."
   }
 ]
 
-예시 - 디테일 컷 섹션:
-{
-  "title": "프리미엄 디테일",
-  "logicalSections": ["품질", "디테일"],
-  "keyMessage": "세심한 마감으로\n완성된 프리미엄 품질",
-  "visualPrompt": "Extreme close-up macro shot of the product showing fine details: fabric texture, stitching quality, button or zipper details, material finish. Professional lighting to highlight craftsmanship and premium quality. Sharp focus on texture and details."
-}
+추천 섹션 예시:
+1. 메인 비주얼: 제품의 전체적인 모습
+2. 핵심 특징: 제품의 주요 장점
+3. 디테일 컷: 소재, 질감, 마감 클로즈업
+4. 사용 방법 / 활용법
+5. 스타일링 제안 / 코디 팁
+6. 보관 및 관리 방법
+7. 브랜드 스토리 / 제품 개발 배경
+
+절대 생성하지 말 것: 사이즈 관련 섹션 (사이즈표, 사이즈 가이드 등)
       `.trim(),
     });
 
