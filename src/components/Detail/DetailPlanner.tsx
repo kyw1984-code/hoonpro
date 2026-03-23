@@ -202,6 +202,94 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
     return canvas.toDataURL('image/png');
 };
 
+// ✅ 제품 정보 및 관리방법 이미지 생성 함수
+const generateProductInfoImage = (data: {
+    material: string;
+    origin: string;
+    manufacturer: string;
+    washingMethod: string;
+    precautions: string;
+}): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 860;
+    canvas.height = 1000;
+    const ctx = canvas.getContext('2d')!;
+
+    // 배경 그라디언트
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#f8fafc');
+    gradient.addColorStop(1, '#e2e8f0');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 제목
+    ctx.fillStyle = '#1e293b';
+    ctx.font = 'bold 40px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('제품 정보 및 관리방법', canvas.width / 2, 80);
+
+    // 구분선
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(100, 120);
+    ctx.lineTo(canvas.width - 100, 120);
+    ctx.stroke();
+
+    let yPos = 180;
+    const lineHeight = 45;
+    const sectionGap = 60;
+
+    // 정보 항목 그리기 함수
+    const drawInfoItem = (label: string, value: string, y: number) => {
+        if (!value.trim()) return y;
+
+        // 레이블
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 26px "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${label}:`, 100, y);
+
+        // 값 (여러 줄 처리)
+        ctx.fillStyle = '#1e293b';
+        ctx.font = '24px "Noto Sans KR", sans-serif';
+        const maxWidth = canvas.width - 250;
+        const lines = value.split('\n');
+        let currentY = y;
+
+        lines.forEach((line, idx) => {
+            // 긴 텍스트 줄바꿈 처리
+            const words = line.split('');
+            let currentLine = '';
+            let lineY = idx === 0 ? currentY : currentY + lineHeight;
+
+            for (let i = 0; i < words.length; i++) {
+                const testLine = currentLine + words[i];
+                const metrics = ctx.measureText(testLine);
+                if (metrics.width > maxWidth && currentLine.length > 0) {
+                    ctx.fillText(currentLine, 250, lineY);
+                    currentLine = words[i];
+                    lineY += lineHeight;
+                } else {
+                    currentLine = testLine;
+                }
+            }
+            ctx.fillText(currentLine, 250, lineY);
+            currentY = lineY;
+        });
+
+        return currentY + sectionGap;
+    };
+
+    yPos = drawInfoItem('소재', data.material, yPos);
+    yPos = drawInfoItem('원산지', data.origin, yPos);
+    yPos = drawInfoItem('제조사', data.manufacturer, yPos);
+    yPos = drawInfoItem('세탁방법', data.washingMethod, yPos);
+    yPos = drawInfoItem('주의사항', data.precautions, yPos);
+
+    return canvas.toDataURL('image/png');
+};
+
 const generateSizeChartImage = (gender: 'women' | 'men', data: Record<string, Record<string, string>>): string => {
     const canvas = document.createElement('canvas');
     canvas.width = 800;
@@ -504,6 +592,14 @@ export const DetailPlanner: React.FC = () => {
     const [includeSizeChart, setIncludeSizeChart] = useState(false);
     const [sizeGender, setSizeGender] = useState<'women' | 'men'>('women');
     const [sizeData, setSizeData] = useState<Record<string, Record<string, string>>>({});
+    const [includeProductInfo, setIncludeProductInfo] = useState(false);
+    const [productInfoData, setProductInfoData] = useState({
+        material: '',
+        origin: '',
+        manufacturer: '',
+        washingMethod: '',
+        precautions: ''
+    });
     const [includeCertificate, setIncludeCertificate] = useState(false);
     const [certData, setCertData] = useState({ type: 'KC 안전인증', number: '', date: '' });
     const [includeReviews, setIncludeReviews] = useState(false);
@@ -560,6 +656,20 @@ export const DetailPlanner: React.FC = () => {
                     keyMessage: '상세 사이즈를 확인하세요.',
                     visualPrompt: 'Size chart generated automatically.',
                     imageUrl: sizeChartUrl,
+                    isGenerating: false
+                });
+            }
+
+            // 제품 정보 및 관리방법 추가
+            if (includeProductInfo) {
+                const productInfoUrl = generateProductInfoImage(productInfoData);
+                plannedSegments.push({
+                    id: 'product-info-' + Date.now(),
+                    title: '제품 정보 및 관리방법',
+                    logicalSections: ['정보 제공', '관리'],
+                    keyMessage: '제품 정보를 확인하세요',
+                    visualPrompt: 'Product information generated automatically.',
+                    imageUrl: productInfoUrl,
                     isGenerating: false
                 });
             }
@@ -878,6 +988,38 @@ Clean background, professional product photography style, maintain ALL original 
                                     </div>
                                 </div>
                             )}
+                            </div>
+
+                            {/* 제품 정보 및 관리방법 */}
+                            <div className="mb-6">
+                                <label className="flex items-center text-sm font-bold text-slate-800 cursor-pointer mb-3">
+                                    <input type="checkbox" checked={includeProductInfo} onChange={(e) => setIncludeProductInfo(e.target.checked)} className="mr-2 w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500" />
+                                    제품 정보 및 관리방법 추가하기
+                                </label>
+                                {includeProductInfo && (
+                                    <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">소재</label>
+                                            <input type="text" value={productInfoData.material} onChange={(e) => setProductInfoData({...productInfoData, material: e.target.value})} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 면 100%" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">원산지</label>
+                                            <input type="text" value={productInfoData.origin} onChange={(e) => setProductInfoData({...productInfoData, origin: e.target.value})} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 대한민국" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">제조사</label>
+                                            <input type="text" value={productInfoData.manufacturer} onChange={(e) => setProductInfoData({...productInfoData, manufacturer: e.target.value})} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: (주)ABC 컴퍼니" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">세탁방법</label>
+                                            <textarea value={productInfoData.washingMethod} onChange={(e) => setProductInfoData({...productInfoData, washingMethod: e.target.value})} rows={2} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none resize-none" placeholder="예: 손세탁 권장, 세탁기 사용 시 세탁망 필수" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">주의사항</label>
+                                            <textarea value={productInfoData.precautions} onChange={(e) => setProductInfoData({...productInfoData, precautions: e.target.value})} rows={2} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none resize-none" placeholder="예: 드라이클리닝 금지, 표백제 사용 금지" />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* 인증서 */}
