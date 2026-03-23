@@ -422,7 +422,7 @@ const validateImageQuality = (imageUrl: string): Promise<{ isValid: boolean; rea
 const TARGET_WIDTH = 860;
 const TARGET_HEIGHT = 1000;
 
-const overlayTextOnImage = (imageUrl: string, keyMessage: string, sectionTitle?: string): Promise<string> => {
+const overlayTextOnImage = (imageUrl: string, keyMessage: string, position: 'top' | 'middle' | 'bottom'): Promise<string> => {
     return new Promise((resolve) => {
         const img = new window.Image();
         // base64 이미지는 crossOrigin 불필요 - 오히려 깨짐 원인
@@ -456,25 +456,15 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string, sectionTitle?:
 
             const lines = keyMessage.split('\n').filter(l => l.trim());
 
-            // 스타일링/코디/연출 관련 섹션인지 확인 (문구를 작게, 상단에 배치)
-            const isStyleSection = sectionTitle && (
-                sectionTitle.includes('스타일') ||
-                sectionTitle.includes('코디') ||
-                sectionTitle.includes('연출') ||
-                sectionTitle.includes('매치') ||
-                sectionTitle.toLowerCase().includes('styling')
-            );
-
             // 줄 수에 따라 폰트 크기 조정
-            let fontSize = isStyleSection
+            let fontSize = position === 'top'
                 ? (lines.length === 1 ? 32 : lines.length === 2 ? 28 : 24)
                 : (lines.length === 1 ? 48 : lines.length === 2 ? 42 : 36);
             const lineHeight = fontSize * 1.5;
             const totalTextHeight = lines.length * lineHeight;
 
-            // 스타일 섹션은 상단, 일반 섹션은 하단에 텍스트 배치
-            if (isStyleSection) {
-                // 상단 그라디언트 오버레이
+            // 그라디언트 설정
+            if (position === 'top') {
                 const overlayH = totalTextHeight + fontSize * 2;
                 const gradient = ctx.createLinearGradient(0, 0, 0, overlayH);
                 gradient.addColorStop(0, 'rgba(0,0,0,0.75)');
@@ -482,38 +472,16 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string, sectionTitle?:
                 gradient.addColorStop(1, 'rgba(0,0,0,0)');
                 ctx.fillStyle = gradient;
                 ctx.fillRect(0, 0, TARGET_WIDTH, overlayH);
-
-                // 텍스트 렌더링
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.shadowColor = 'rgba(0,0,0,0.9)';
-                ctx.shadowBlur = 10;
-                ctx.shadowOffsetX = 1;
-                ctx.shadowOffsetY = 2;
-
-                const startY = fontSize + 20;
-
-                lines.forEach((line, i) => {
-                    const y = startY + i * lineHeight;
-                    ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
-                    ctx.fillStyle = '#ffffff';
-
-                    let displayText = line;
-                    const maxWidth = TARGET_WIDTH - 80;
-                    let textWidth = ctx.measureText(displayText).width;
-
-                    if (textWidth > maxWidth) {
-                        while (textWidth > maxWidth && displayText.length > 0) {
-                            displayText = displayText.slice(0, -1);
-                            textWidth = ctx.measureText(displayText + '...').width;
-                        }
-                        displayText += '...';
-                    }
-
-                    ctx.fillText(displayText, TARGET_WIDTH / 2, y);
-                });
+            } else if (position === 'middle') {
+                const overlayH = totalTextHeight + fontSize * 4;
+                const overlayY = (TARGET_HEIGHT - overlayH) / 2;
+                const gradient = ctx.createLinearGradient(0, overlayY, 0, overlayY + overlayH);
+                gradient.addColorStop(0, 'rgba(0,0,0,0)');
+                gradient.addColorStop(0.5, 'rgba(0,0,0,0.6)');
+                gradient.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, overlayY, TARGET_WIDTH, overlayH);
             } else {
-                // 하단 그라디언트 오버레이
                 const overlayH = totalTextHeight + fontSize * 3;
                 const overlayY = TARGET_HEIGHT - overlayH;
                 const gradient = ctx.createLinearGradient(0, overlayY, 0, TARGET_HEIGHT);
@@ -522,44 +490,46 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string, sectionTitle?:
                 gradient.addColorStop(1, 'rgba(0,0,0,0.9)');
                 ctx.fillStyle = gradient;
                 ctx.fillRect(0, overlayY, TARGET_WIDTH, overlayH);
-
-                // 텍스트 렌더링
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.shadowColor = 'rgba(0,0,0,0.95)';
-                ctx.shadowBlur = 12;
-                ctx.shadowOffsetX = 2;
-                ctx.shadowOffsetY = 3;
-
-                const startY = TARGET_HEIGHT - overlayH / 2 - (totalTextHeight / 2) + (fontSize / 2);
-
-                lines.forEach((line, i) => {
-                    const y = startY + i * lineHeight;
-                    ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
-                    ctx.fillStyle = '#ffffff';
-
-                    let displayText = line;
-                    const maxWidth = TARGET_WIDTH - 80;
-                    let textWidth = ctx.measureText(displayText).width;
-
-                    if (textWidth > maxWidth) {
-                        while (textWidth > maxWidth && displayText.length > 0) {
-                            displayText = displayText.slice(0, -1);
-                            textWidth = ctx.measureText(displayText + '...').width;
-                        }
-                        displayText += '...';
-                    }
-
-                    ctx.fillText(displayText, TARGET_WIDTH / 2, y);
-                });
             }
+
+            // 텍스트 렌더링 세팅
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(0,0,0,0.95)';
+            ctx.shadowBlur = position === 'top' ? 10 : 12;
+            ctx.shadowOffsetX = position === 'top' ? 1 : 2;
+            ctx.shadowOffsetY = position === 'top' ? 2 : 3;
+
+            let startY = 0;
+            if (position === 'top') startY = fontSize + 20;
+            else if (position === 'middle') startY = (TARGET_HEIGHT / 2) - (totalTextHeight / 2) + (lineHeight / 2);
+            else startY = TARGET_HEIGHT - (totalTextHeight + fontSize) + (lineHeight / 2);
+
+            lines.forEach((line, i) => {
+                const y = startY + i * lineHeight;
+                ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
+                ctx.fillStyle = '#ffffff';
+
+                let displayText = line;
+                const maxWidth = TARGET_WIDTH - 80;
+                let textWidth = ctx.measureText(displayText).width;
+
+                if (textWidth > maxWidth) {
+                    while (textWidth > maxWidth && displayText.length > 0) {
+                        displayText = displayText.slice(0, -1);
+                        textWidth = ctx.measureText(displayText + '...').width;
+                    }
+                    displayText += '...';
+                }
+
+                ctx.fillText(displayText, TARGET_WIDTH / 2, y);
+            });
 
             ctx.shadowColor = 'transparent';
             ctx.shadowBlur = 0;
             resolve(canvas.toDataURL('image/png'));
         };
         img.onerror = () => {
-            // 오류시 빈 캔버스라도 반환
             const canvas = document.createElement('canvas');
             canvas.width = TARGET_WIDTH;
             canvas.height = TARGET_HEIGHT;
@@ -645,17 +615,31 @@ export const DetailPlanner: React.FC = () => {
             }
 
             const plannedSegments = await planDetail({ ...info, features, length });
+            
+            // 각 세그먼트에 텍스트 위치 기본값 설정
+            const mappedSegments = plannedSegments.map((seg: any) => {
+                const isStyleSection = seg.title.includes('스타일') || 
+                                     seg.title.includes('코디') || 
+                                     seg.title.includes('연출');
+                return {
+                    ...seg,
+                    textPosition: isStyleSection ? 'top' : 'bottom',
+                    rawImageUrl: ''
+                };
+            });
 
             // 사이즈표 추가
             if (includeSizeChart) {
                 const sizeChartUrl = generateSizeChartImage(sizeGender, sizeData);
-                plannedSegments.push({
+                mappedSegments.push({
                     id: 'size-chart-' + Date.now(),
                     title: '사이즈 가이드',
                     logicalSections: ['정보 제공', '사이즈표'],
                     keyMessage: '상세 사이즈를 확인하세요.',
                     visualPrompt: 'Size chart generated automatically.',
                     imageUrl: sizeChartUrl,
+                    rawImageUrl: sizeChartUrl,
+                    textPosition: 'bottom',
                     isGenerating: false
                 });
             }
@@ -663,13 +647,15 @@ export const DetailPlanner: React.FC = () => {
             // 제품 정보 및 관리방법 추가
             if (includeProductInfo) {
                 const productInfoUrl = generateProductInfoImage(productInfoData);
-                plannedSegments.push({
+                mappedSegments.push({
                     id: 'product-info-' + Date.now(),
                     title: '제품 정보 및 관리방법',
                     logicalSections: ['정보 제공', '관리'],
                     keyMessage: '제품 정보를 확인하세요',
                     visualPrompt: 'Product information generated automatically.',
                     imageUrl: productInfoUrl,
+                    rawImageUrl: productInfoUrl,
+                    textPosition: 'bottom',
                     isGenerating: false
                 });
             }
@@ -681,13 +667,15 @@ export const DetailPlanner: React.FC = () => {
                     certData.number || 'CB-XXX-XXXXXX',
                     certData.date || new Date().toISOString().split('T')[0]
                 );
-                plannedSegments.push({
+                mappedSegments.push({
                     id: 'certificate-' + Date.now(),
                     title: '품질 인증',
                     logicalSections: ['신뢰', '인증서'],
                     keyMessage: '안전하고 검증된 제품',
                     visualPrompt: 'Certificate generated automatically.',
                     imageUrl: certUrl,
+                    rawImageUrl: certUrl,
+                    textPosition: 'bottom',
                     isGenerating: false
                 });
             }
@@ -717,18 +705,20 @@ export const DetailPlanner: React.FC = () => {
                     }
                 });
 
-                plannedSegments.push({
+                mappedSegments.push({
                     id: 'reviews-' + Date.now(),
                     title: '고객 후기',
                     logicalSections: ['신뢰', '리뷰'],
                     keyMessage: '실제 고객들의 생생한 후기',
                     visualPrompt: 'Customer reviews generated automatically.',
                     imageUrl: reviewUrl,
+                    rawImageUrl: reviewUrl,
+                    textPosition: 'bottom',
                     isGenerating: false
                 });
             }
 
-            setSegments(plannedSegments);
+            setSegments(mappedSegments);
             setStep(2);
         } catch (e) {
             console.error(e);
@@ -793,13 +783,12 @@ Clean background, professional product photography style, maintain ALL original 
                         }
                     }
 
-                    // ✅ Canvas로 한글 텍스트 덧씌우기 (섹션 제목 전달)
-                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage, segments[i].title);
+                    // ✅ Canvas로 한글 텍스트 덧씌우기 (위치 정보 포함)
+                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage, segments[i].textPosition || 'bottom');
 
-                    // 개별 이미지 생성 완료 시 즉시 업데이트
                     setSegments(prev => {
                         const newSegs = [...prev];
-                        newSegs[i] = { ...newSegs[i], imageUrl, isGenerating: false, error: false };
+                        newSegs[i] = { ...newSegs[i], imageUrl, rawImageUrl, isGenerating: false, error: false };
                         return newSegs;
                     });
                     break; // 성공하면 루프 탈출
@@ -1232,34 +1221,78 @@ Clean background, professional product photography style, maintain ALL original 
                                                 <span className="text-sm font-medium text-slate-800">{seg.title}</span>
                                             </div>
                                         </div>
-                                        <div>
-                                            <label className="block text-xs font-medium text-slate-600 mb-1">카피 문구</label>
-                                            <textarea
-                                                value={seg.keyMessage}
-                                                onChange={(e) => {
-                                                    const newSegs = [...segments];
-                                                    newSegs[idx].keyMessage = e.target.value;
-                                                    setSegments(newSegs);
-                                                }}
-                                                rows={2}
-                                                className="w-full p-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                                            />
+                                        <div className="flex flex-col gap-2">
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">카피 문구</label>
+                                                <textarea
+                                                    value={seg.keyMessage}
+                                                    onChange={(e) => {
+                                                        const newSegs = [...segments];
+                                                        newSegs[idx].keyMessage = e.target.value;
+                                                        setSegments(newSegs);
+                                                    }}
+                                                    rows={2}
+                                                    className="w-full p-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">문구 위치</label>
+                                                <div className="grid grid-cols-3 gap-1">
+                                                    {(['top', 'middle', 'bottom'] as const).map((pos) => (
+                                                        <button
+                                                            key={pos}
+                                                            onClick={async () => {
+                                                                const newSegs = [...segments];
+                                                                newSegs[idx].textPosition = pos;
+                                                                if (newSegs[idx].rawImageUrl) {
+                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(newSegs[idx].rawImageUrl, newSegs[idx].keyMessage, pos);
+                                                                }
+                                                                setSegments(newSegs);
+                                                            }}
+                                                            className={`py-1 px-2 rounded-md border text-[10px] font-bold transition-all ${seg.textPosition === pos ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500 hover:border-blue-300'}`}
+                                                        >
+                                                            {pos === 'top' ? '상단' : pos === 'middle' ? '중간' : '하단'}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
                                         </div>
-                                        <button
-                                            onClick={async () => {
-                                                // 해당 이미지만 재생성
-                                                setSegments(prev => {
-                                                    const newSegs = [...prev];
-                                                    newSegs[idx] = { ...newSegs[idx], isGenerating: true, error: false };
-                                                    return newSegs;
-                                                });
+                                        <div className="grid grid-cols-2 gap-2 mt-3">
+                                            <button
+                                                onClick={async () => {
+                                                    if (!seg.rawImageUrl) return;
+                                                    setSegments(prev => {
+                                                        const newSegs = [...prev];
+                                                        newSegs[idx] = { ...newSegs[idx], isGenerating: true };
+                                                        return newSegs;
+                                                    });
+                                                    const imageUrl = await overlayTextOnImage(seg.rawImageUrl, seg.keyMessage, seg.textPosition || 'bottom');
+                                                    setSegments(prev => {
+                                                        const newSegs = [...prev];
+                                                        newSegs[idx] = { ...newSegs[idx], imageUrl, isGenerating: false };
+                                                        return newSegs;
+                                                    });
+                                                }}
+                                                disabled={!seg.rawImageUrl || seg.isGenerating}
+                                                className="bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 text-slate-700 text-[10px] font-bold py-2 px-3 rounded-lg flex items-center justify-center transition-colors"
+                                            >
+                                                문구만 적용
+                                            </button>
+                                            <button
+                                                onClick={async () => {
+                                                    // 해당 이미지 AI 재생성
+                                                    setSegments(prev => {
+                                                        const newSegs = [...prev];
+                                                        newSegs[idx] = { ...newSegs[idx], isGenerating: true, error: false };
+                                                        return newSegs;
+                                                    });
 
-                                                try {
-                                                    const colorInstruction = info.imageInstruction
-                                                        ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
-                                                        : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
+                                                    try {
+                                                        const colorInstruction = info.imageInstruction
+                                                            ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
+                                                            : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
 
-                                                    const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
+                                                        const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
 - Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
 - CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
@@ -1270,45 +1303,36 @@ Clean background, professional product photography style, maintain ALL original 
 ${colorInstruction}
 Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
 
-                                                    const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
-                                                    const validation = await validateImageQuality(rawImageUrl);
+                                                        const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
+                                                        const validation = await validateImageQuality(rawImageUrl);
 
-                                                    if (!validation.isValid) {
-                                                        throw new Error(`품질 검증 실패: ${validation.reason}`);
+                                                        if (!validation.isValid) {
+                                                            throw new Error(`품질 검증 실패: ${validation.reason}`);
+                                                        }
+
+                                                        const imageUrl = await overlayTextOnImage(rawImageUrl, segments[idx].keyMessage, segments[idx].textPosition || 'bottom');
+
+                                                        setSegments(prev => {
+                                                            const newSegs = [...prev];
+                                                            newSegs[idx] = { ...newSegs[idx], imageUrl, rawImageUrl, isGenerating: false, error: false };
+                                                            return newSegs;
+                                                        });
+                                                    } catch (e) {
+                                                        console.error(`이미지 ${idx + 1} 재생성 실패:`, e);
+                                                        alert(`이미지 재생성에 실패했습니다: ${e}`);
+                                                        setSegments(prev => {
+                                                            const newSegs = [...prev];
+                                                            newSegs[idx] = { ...newSegs[idx], isGenerating: false, error: true };
+                                                            return newSegs;
+                                                        });
                                                     }
-
-                                                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[idx].keyMessage, segments[idx].title);
-
-                                                    setSegments(prev => {
-                                                        const newSegs = [...prev];
-                                                        newSegs[idx] = { ...newSegs[idx], imageUrl, isGenerating: false, error: false };
-                                                        return newSegs;
-                                                    });
-                                                } catch (e) {
-                                                    console.error(`이미지 ${idx + 1} 재생성 실패:`, e);
-                                                    alert(`이미지 재생성에 실패했습니다: ${e}`);
-                                                    setSegments(prev => {
-                                                        const newSegs = [...prev];
-                                                        newSegs[idx] = { ...newSegs[idx], isGenerating: false, error: true };
-                                                        return newSegs;
-                                                    });
-                                                }
-                                            }}
-                                            disabled={seg.isGenerating}
-                                            className="mt-2 w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-xs font-medium py-2 px-4 rounded-lg flex items-center justify-center transition-colors"
-                                        >
-                                            {seg.isGenerating ? (
-                                                <>
-                                                    <Loader2 className="w-3 h-3 animate-spin mr-1" />
-                                                    재생성 중...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <ImageIcon className="w-3 h-3 mr-1" />
-                                                    이미지 재생성
-                                                </>
-                                            )}
-                                        </button>
+                                                }}
+                                                disabled={seg.isGenerating}
+                                                className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-[10px] font-bold py-2 px-3 rounded-lg flex items-center justify-center transition-colors"
+                                            >
+                                                AI 전체 재생성
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                             </div>
