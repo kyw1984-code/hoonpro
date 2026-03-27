@@ -127,10 +127,12 @@ export const ThumbnailGenerator: React.FC = () => {
             prompt += " All subjects/models MUST be centered within the middle 1:1 square area to ensure they are fully visible.";
 
             if (productName) {
-                prompt += ` Product: ${productName}. Do not include any text or typography in the image.`;
+                prompt += ` CRITICAL PRODUCT IDENTITY: The subject is ${productName}. You MUST generate this EXACT category of item. DO NOT change it into anything else.`;
             } else {
-                prompt += " Emotional and aesthetic product shot. Do not include any text or typography in the image.";
+                prompt += " CRITICAL PRODUCT IDENTITY: You MUST identify the EXACT category and shape of the main object in the reference images and replicate its identity perfectly. DO NOT transform the product into a different object (e.g. do not turn a device into clothing).";
             }
+
+            prompt += " Maintain the original geometry, material texture, and functional details exactly as shown in the references.";
 
             if (customPrompt) {
                 prompt += ` User specific instructions: ${customPrompt}.`;
