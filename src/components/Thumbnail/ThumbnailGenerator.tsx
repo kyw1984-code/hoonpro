@@ -106,7 +106,7 @@ export const ThumbnailGenerator: React.FC = () => {
             let prompt = "High quality e-commerce product thumbnail. Clean and professional style.";
             
             if (shotType === 'model') {
-                prompt += " A professional model posing with the product on a pure white background.";
+                prompt += " A NEW and DIFFERENT professional fashion model (with a unique face and appearance, different from the reference images) posing elegantly with the product on a pure white background. CRITICAL: Do NOT use the exact same person from the attached reference images. Generate a completely FRESH and UNIQUE face and body.";
             } else {
                 prompt += " A full shot of the product clearly visible on a pure white background, with absolutely no people or hands.";
             }
@@ -123,9 +123,9 @@ export const ThumbnailGenerator: React.FC = () => {
 
             if (referenceImages.length > 0) {
                 if (referenceImages.length > 1) {
-                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract the subjects from ALL attached images and place them together (e.g., side-by-side or composed naturally) in this single generated image. Ensure every single referenced item is clearly visible.`;
+                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract ONLY the product/item subjects from ALL attached images and place them together (e.g., side-by-side or composed naturally) in this single generated image. If there are people in the reference, DO NOT copy their faces. Generate a NEW person instead. Ensure every single referenced item is clearly visible.`;
                 } else {
-                    prompt += " Use the attached image as the main product reference.";
+                    prompt += " Use the attached image ONLY as the product detail reference. If there is a person in the reference, please generate a DIFFERENT, NEW model for the result.";
                 }
             }
 
@@ -169,7 +169,7 @@ export const ThumbnailGenerator: React.FC = () => {
         <div className="max-w-6xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Input Form */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-                <h2 className="text-2xl font-bold text-slate-800 mb-6">썸네일 설정</h2>
+                <h2 className="text-2xl font-bold text-slate-800 mb-6">썸네일 제작</h2>
                 
                 <div className="space-y-5">
                     <div>
