@@ -124,7 +124,11 @@ export const ThumbnailGenerator: React.FC = () => {
                 prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT natural background. Ensure the scene occupies the FULL 1:1 SQUARE frame from edge to edge with NO EMPTY EDGES.";
             }
 
-            prompt += " All subjects/models MUST be centered and ZOOMED IN to fill 80-90% of the square frame. The product must DOMINATE the image. If a model is holding a product, maintain REALISTIC PROPORTIONS—ensure the product size is natural relative to the model's hand and body (DO NOT make the handheld item unnaturally large).";
+            if (shotType === 'product') {
+                prompt += " All subjects MUST be centered and ZOOMED IN to fill 80-90% of the square frame. The product must DOMINATE the image.";
+            } else {
+                prompt += " Maintain a natural portrait scale (half-body or full-body). The product size MUST be SMALL and REALISTIC relative to the model's hand and body. DO NOT enlarge the product; keep it in a natural human-scale proportion.";
+            }
 
             if (productName) {
                 prompt += ` CRITICAL PRODUCT IDENTITY: The subject is ${productName}. You MUST generate this EXACT category of item. DO NOT change it into anything else.`;
