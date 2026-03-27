@@ -119,12 +119,12 @@ export const ThumbnailGenerator: React.FC = () => {
             }
 
             if (backgroundType === 'white') {
-                prompt += " CRITICAL: The background MUST be PURE SOLID HEX CODE #FFFFFF WHITE. Absolutely NO SHADOWS, NO GRAY TONES, NO GRADIENTS, and NO STUDIO LIGHTING EFFECTS on the background. It must be as clean as a vector background. The subject must BLEND PERFECTLY with a white webpage (#FFFFFF).";
+                prompt += " CRITICAL: The background MUST be a FLAT BLANK WHITE PAPER STYLE (#FFFFFF) with ABSOLUTELY NO SHADOWS, NO GRADIENTS, NO STUDIO DEPTH, and NO FLOOR LINES. The product should look like it's floating in a pure white vacuum.";
             } else {
-                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT aesthetic background (e.g., minimalist interior or natural lighting). Ensure it fills the entire frame.";
+                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT natural background. Ensure the scene occupies the FULL 1:1 SQUARE frame from edge to edge with NO EMPTY EDGES or white borders.";
             }
 
-            prompt += " Composition must be a SQUARE (1:1 aspect ratio) and the subject should fill at least 80% of the frame (Zoomed in appropriately).";
+            prompt += " All subjects/models MUST be centered within the middle 1:1 square area to ensure they are fully visible.";
 
             if (productName) {
                 prompt += ` Product: ${productName}. Do not include any text or typography in the image.`;
@@ -158,7 +158,10 @@ export const ThumbnailGenerator: React.FC = () => {
                             ctx.fillStyle = '#FFFFFF';
                             ctx.fillRect(0, 0, 1000, 1000);
                             
-                            const scale = Math.min(1000 / img.width, 1000 / img.height);
+                             const scale = backgroundType === 'natural' 
+                                ? Math.max(1000 / img.width, 1000 / img.height)
+                                : Math.min(1000 / img.width, 1000 / img.height);
+                            
                             const x = (1000 / 2) - (img.width / 2) * scale;
                             const y = (1000 / 2) - (img.height / 2) * scale;
                             
