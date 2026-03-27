@@ -14,6 +14,7 @@ export const ThumbnailGenerator: React.FC = () => {
     const [baseImage, setBaseImage] = useState<string>('');
     const [overlayText, setOverlayText] = useState('');
     const [textPosition, setTextPosition] = useState<'top' | 'middle' | 'bottom'>('top');
+    const [backgroundType, setBackgroundType] = useState<'white' | 'natural'>('white');
     
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -106,9 +107,15 @@ export const ThumbnailGenerator: React.FC = () => {
             let prompt = "High quality e-commerce product thumbnail. Clean and professional style.";
             
             if (shotType === 'model') {
-                prompt += " A NEW and DIFFERENT professional fashion model (with a unique face and appearance, different from the reference images) posing elegantly with the product on a pure white background. CRITICAL: Do NOT use the exact same person from the attached reference images. Generate a completely FRESH and UNIQUE face and body.";
+                prompt += " A NEW and DIFFERENT professional fashion model with RANDOMLY CHOSEN unique facial features and hairstyle (e.g. diverse ethnicity, age, or look). CRITICAL: Do NOT copy the model from the reference images. Use a completely FRESH person.";
             } else {
-                prompt += " A full shot of the product clearly visible on a pure white background, with absolutely no people or hands.";
+                prompt += " A full shot of the product clearly visible, with absolutely no people or hands.";
+            }
+
+            if (backgroundType === 'white') {
+                prompt += " The background MUST be PURE SOLID WHITE (#FFFFFF) with no shadows, no gray tones, and no gradient. COMPLETELY CLEAN WHITE.";
+            } else {
+                prompt += " The background should be an AESTHETIC and SUITABLE NATURAL SETTING (e.g., minimalist interior, elegant store, or natural lighting) that perfectly matches the product.";
             }
 
             if (productName) {
@@ -123,9 +130,9 @@ export const ThumbnailGenerator: React.FC = () => {
 
             if (referenceImages.length > 0) {
                 if (referenceImages.length > 1) {
-                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract ONLY the product/item subjects from ALL attached images and place them together (e.g., side-by-side or composed naturally) in this single generated image. If there are people in the reference, DO NOT copy their faces. Generate a NEW person instead. Ensure every single referenced item is clearly visible.`;
+                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract ONLY the product/item subjects from ALL attached images and place them together in this single generated image. If there are people in the reference, DO NOT copy their faces. Generate a NEW person instead. Ensure every single referenced item is clearly visible.`;
                 } else {
-                    prompt += " Use the attached image ONLY as the product detail reference. If there is a person in the reference, please generate a DIFFERENT, NEW model for the result.";
+                    prompt += " Use the attached image ONLY as the product detail reference. Focus on the product's shape, texture, and color. If there is a person in the reference, DO NOT use their likeness. Generate a NEW face.";
                 }
             }
 
@@ -181,6 +188,24 @@ export const ThumbnailGenerator: React.FC = () => {
                             className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" 
                             placeholder="상품명을 입력해주세요" 
                         />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">배경 선택</label>
+                        <div className="grid grid-cols-2 gap-3 mb-5">
+                            <button
+                                onClick={() => setBackgroundType('white')}
+                                className={`p-3 rounded-xl border font-medium transition-all ${backgroundType === 'white' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}
+                            >
+                                화이트 배경
+                            </button>
+                            <button
+                                onClick={() => setBackgroundType('natural')}
+                                className={`p-3 rounded-xl border font-medium transition-all ${backgroundType === 'natural' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}
+                            >
+                                자연스러운 배경
+                            </button>
+                        </div>
                     </div>
 
                     <div>
