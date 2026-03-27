@@ -119,12 +119,12 @@ export const ThumbnailGenerator: React.FC = () => {
             }
 
             if (backgroundType === 'white') {
-                prompt += " CRITICAL: The background MUST be a FLAT BLANK WHITE PAPER STYLE (#FFFFFF) with ABSOLUTELY NO SHADOWS, NO GRADIENTS, NO STUDIO DEPTH, and NO FLOOR LINES. The product should look like it's floating in a pure white vacuum.";
+                prompt += " CRITICAL: The background MUST be a FLAT BLANK WHITE PAPER STYLE (#FFFFFF) with ABSOLUTELY NO SHADOWS, NO GRADIENTS, NO STUDIO DEPTH, and NO FLOOR LINES. The subject should look like it's floating in a pure white vacuum. This applies to both product and model shots.";
             } else {
-                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT natural background. Ensure the scene occupies the FULL 1:1 SQUARE frame from edge to edge with NO EMPTY EDGES or white borders.";
+                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT natural background. Ensure the scene occupies the FULL 1:1 SQUARE frame from edge to edge with NO EMPTY EDGES.";
             }
 
-            prompt += " All subjects/models MUST be centered within the middle 1:1 square area to ensure they are fully visible.";
+            prompt += " All subjects/models MUST be centered and ZOOMED IN to fill 80-90% of the square frame. The product must DOMINATE the image. If a model is holding a product, maintain REALISTIC PROPORTIONS—ensure the product size is natural relative to the model's hand and body (DO NOT make the handheld item unnaturally large).";
 
             if (productName) {
                 prompt += ` CRITICAL PRODUCT IDENTITY: The subject is ${productName}. You MUST generate this EXACT category of item. DO NOT change it into anything else.`;
