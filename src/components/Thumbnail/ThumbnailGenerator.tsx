@@ -15,6 +15,8 @@ export const ThumbnailGenerator: React.FC = () => {
     const [overlayText, setOverlayText] = useState('');
     const [textPosition, setTextPosition] = useState<'top' | 'middle' | 'bottom'>('top');
     const [backgroundType, setBackgroundType] = useState<'white' | 'natural'>('white');
+    const [modelEthnicity, setModelEthnicity] = useState<'asian' | 'western'>('asian');
+    const [modelGender, setModelGender] = useState<'male' | 'female'>('female');
     
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -107,15 +109,15 @@ export const ThumbnailGenerator: React.FC = () => {
             let prompt = "High quality e-commerce product thumbnail. Clean and professional style.";
             
             if (shotType === 'model') {
-                prompt += " A NEW and DIFFERENT professional fashion model with RANDOMLY CHOSEN unique facial features and hairstyle (e.g. diverse ethnicity, age, or look). CRITICAL: Do NOT copy the model from the reference images. Use a completely FRESH person.";
+                prompt += ` A professional ${modelEthnicity === 'asian' ? 'Asian' : 'Western'} ${modelGender} fashion model posing elegantly with the product. The model should have a UNIQUE and NEW face.`;
             } else {
-                prompt += " A full shot of the product clearly visible, with absolutely no people or hands.";
+                prompt += " A professional product shot. CRITICAL: NO mannequins, NO hangers, NO hands, NO stands, and NO human limbs. The product should be displayed as a clean flat lay or naturally draped in the scene.";
             }
 
             if (backgroundType === 'white') {
                 prompt += " The background MUST be PURE SOLID WHITE (#FFFFFF) with no shadows, no gray tones, and no gradient. COMPLETELY CLEAN WHITE.";
             } else {
-                prompt += " The background should be an AESTHETIC and SUITABLE NATURAL SETTING (e.g., minimalist interior, elegant store, or natural lighting) that perfectly matches the product.";
+                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT background (e.g., minimalist interior, elegant store, or natural lighting) that matches the product perfectly. DO NOT split the image into multiple background sections.";
             }
 
             if (productName) {
@@ -130,9 +132,9 @@ export const ThumbnailGenerator: React.FC = () => {
 
             if (referenceImages.length > 0) {
                 if (referenceImages.length > 1) {
-                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract ONLY the product/item subjects from ALL attached images and place them together in this single generated image. If there are people in the reference, DO NOT copy their faces. Generate a NEW person instead. Ensure every single referenced item is clearly visible.`;
+                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract ALL items (front, back, or different colors) and place them BOTH together in A SINGLE UNIFIED COMPOSITION within the SAME environment. Ensure every single referenced item is clearly visible and naturally arranged.`;
                 } else {
-                    prompt += " Use the attached image ONLY as the product detail reference. Focus on the product's shape, texture, and color. If there is a person in the reference, DO NOT use their likeness. Generate a NEW face.";
+                    prompt += " Use the attached image ONLY as the product detail reference. Focus on the product's shape, texture, and color. If there is a person in the reference, DO NOT use their likeness. Generate a NEW person.";
                 }
             }
 
@@ -191,6 +193,63 @@ export const ThumbnailGenerator: React.FC = () => {
                     </div>
 
                     <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-2">컷 타입 선택</label>
+                        <div className="grid grid-cols-2 gap-3 mb-5">
+                            <button
+                                onClick={() => setShotType('product')}
+                                className={`p-3 rounded-xl border font-medium transition-all ${shotType === 'product' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}
+                            >
+                                제품컷 (Product)
+                            </button>
+                            <button
+                                onClick={() => setShotType('model')}
+                                className={`p-3 rounded-xl border font-medium transition-all ${shotType === 'model' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}
+                            >
+                                모델컷 (Model)
+                            </button>
+                        </div>
+                    </div>
+
+                    {shotType === 'model' && (
+                        <div className="space-y-4 mb-5 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">모델 인종</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        onClick={() => setModelEthnicity('asian')}
+                                        className={`p-2 rounded-lg border text-sm transition-all ${modelEthnicity === 'asian' ? 'bg-white border-blue-500 text-blue-600' : 'bg-transparent border-slate-200 text-slate-500'}`}
+                                    >
+                                        동양인
+                                    </button>
+                                    <button
+                                        onClick={() => setModelEthnicity('western')}
+                                        className={`p-2 rounded-lg border text-sm transition-all ${modelEthnicity === 'western' ? 'bg-white border-blue-500 text-blue-600' : 'bg-transparent border-slate-200 text-slate-500'}`}
+                                    >
+                                        서양인
+                                    </button>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-2">모델 성별</label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                        onClick={() => setModelGender('female')}
+                                        className={`p-2 rounded-lg border text-sm transition-all ${modelGender === 'female' ? 'bg-white border-blue-500 text-blue-600' : 'bg-transparent border-slate-200 text-slate-500'}`}
+                                    >
+                                        여성
+                                    </button>
+                                    <button
+                                        onClick={() => setModelGender('male')}
+                                        className={`p-2 rounded-lg border text-sm transition-all ${modelGender === 'male' ? 'bg-white border-blue-500 text-blue-600' : 'bg-transparent border-slate-200 text-slate-500'}`}
+                                    >
+                                        남성
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">배경 선택</label>
                         <div className="grid grid-cols-2 gap-3 mb-5">
                             <button
@@ -204,24 +263,6 @@ export const ThumbnailGenerator: React.FC = () => {
                                 className={`p-3 rounded-xl border font-medium transition-all ${backgroundType === 'natural' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}
                             >
                                 자연스러운 배경
-                            </button>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">컷 타입 선택</label>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button
-                                onClick={() => setShotType('product')}
-                                className={`p-3 rounded-xl border font-medium transition-all ${shotType === 'product' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}
-                            >
-                                제품컷 (Product)
-                            </button>
-                            <button
-                                onClick={() => setShotType('model')}
-                                className={`p-3 rounded-xl border font-medium transition-all ${shotType === 'model' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 text-slate-600 hover:border-blue-300'}`}
-                            >
-                                모델컷 (Model)
                             </button>
                         </div>
                     </div>
