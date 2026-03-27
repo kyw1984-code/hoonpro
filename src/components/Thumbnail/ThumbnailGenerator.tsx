@@ -109,7 +109,11 @@ export const ThumbnailGenerator: React.FC = () => {
             let prompt = "High quality e-commerce product thumbnail. Clean and professional style.";
             
             if (shotType === 'model') {
-                prompt += ` A professional ${modelEthnicity === 'asian' ? 'Asian' : 'Western'} ${modelGender} fashion model posing elegantly with the product. The model should have a UNIQUE and NEW face.`;
+                prompt += ` A professional ${modelEthnicity === 'asian' ? 'Asian' : 'Western'} ${modelGender} fashion model posing elegantly with the product. 
+                CRITICAL INSTRUCTIONS: 
+                1. The model must have a COMPLETELY UNIQUE and FRESH face with ZERO resemblance to any person in the attached reference images. 
+                2. Every generation MUST use a DIFFERENT facial structure, hairstyle, and appearance to ensure variety. 
+                3. If multiple products are referenced, PLEASE GENERATE TWO SEPARATE MODELS in the same scene, with each model wearing one of the products respectively.`;
             } else {
                 prompt += " A professional product shot. CRITICAL: NO mannequins, NO hangers, NO hands, NO stands, and NO human limbs. The product should be displayed as a clean flat lay or naturally draped in the scene.";
             }
@@ -132,9 +136,9 @@ export const ThumbnailGenerator: React.FC = () => {
 
             if (referenceImages.length > 0) {
                 if (referenceImages.length > 1) {
-                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract ALL items (front, back, or different colors) and place them BOTH together in A SINGLE UNIFIED COMPOSITION within the SAME environment. Ensure every single referenced item is clearly visible and naturally arranged.`;
+                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract ALL items (front, back, or different colors) and place them BOTH together in A SINGLE UNIFIED COMPOSITION. If shotType is 'model', generate TWO DIFFERENT models, one for each product. Ensure they are in a SINGLE unified scene with a CONSISTENT background. Every model MUST have a NEW, UNIQUE face.`;
                 } else {
-                    prompt += " Use the attached image ONLY as the product detail reference. Focus on the product's shape, texture, and color. If there is a person in the reference, DO NOT use their likeness. Generate a NEW person.";
+                    prompt += " Use the attached image ONLY as the product detail reference. Focus on the product's shape, texture, and color. If there is a person in the reference, DO NOT use their likeness. Generate a COMPLETELY NEW face and person.";
                 }
             }
 
