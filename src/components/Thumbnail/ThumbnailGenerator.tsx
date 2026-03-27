@@ -119,10 +119,12 @@ export const ThumbnailGenerator: React.FC = () => {
             }
 
             if (backgroundType === 'white') {
-                prompt += " The background MUST be PURE SOLID WHITE (#FFFFFF) with no shadows, no gray tones, and no gradient. COMPLETELY CLEAN WHITE.";
+                prompt += " CRITICAL: The background MUST be PURE SOLID HEX CODE #FFFFFF WHITE. Absolutely NO SHADOWS, NO GRAY TONES, NO GRADIENTS, and NO STUDIO LIGHTING EFFECTS on the background. It must be as clean as a vector background. The subject must BLEND PERFECTLY with a white webpage (#FFFFFF).";
             } else {
-                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT background (e.g., minimalist interior, elegant store, or natural lighting) that matches the product perfectly. DO NOT split the image into multiple background sections.";
+                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT aesthetic background (e.g., minimalist interior or natural lighting). Ensure it fills the entire frame.";
             }
+
+            prompt += " Composition must be a SQUARE (1:1 aspect ratio) and the subject should fill at least 80% of the frame (Zoomed in appropriately).";
 
             if (productName) {
                 prompt += ` Product: ${productName}. Do not include any text or typography in the image.`;
