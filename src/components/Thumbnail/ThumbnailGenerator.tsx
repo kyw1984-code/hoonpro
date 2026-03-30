@@ -119,15 +119,15 @@ export const ThumbnailGenerator: React.FC = () => {
             }
 
             if (backgroundType === 'white') {
-                prompt += " CRITICAL: The background MUST be a FLAT BLANK WHITE PAPER STYLE (#FFFFFF) with ABSOLUTELY NO SHADOWS, NO GRADIENTS, NO STUDIO DEPTH, and NO FLOOR LINES. The subject should look like it's floating in a pure white vacuum. This applies to both product and model shots.";
+                prompt += " CRITICAL: The background MUST be a PURE SOLID WHITE (#FFFFFF) EMPTY SPACE. ABSOLUTELY NO SHADOWS, NO GRAY TONES, NO GRADIENTS, NO STUDIO WALLS, and NO FLOOR LINES. The subject must float in a pure white vacuum. The background must be 100% flat white hex #FFFFFF.";
             } else {
-                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT natural background. Ensure the scene occupies the FULL 1:1 SQUARE frame from edge to edge with NO EMPTY EDGES.";
+                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT natural background. DO NOT use a split-screen, collage, or multi-panel layout. Both models/items must be in the EXACT SAME environmental space. Ensure the scene occupies the FULL 1:1 SQUARE frame from edge to edge with NO EMPTY EDGES.";
             }
 
             if (shotType === 'product') {
                 prompt += " All subjects MUST be centered and ZOOMED IN to fill 80-90% of the square frame. The product must DOMINATE the image.";
             } else {
-                prompt += " Maintain a natural portrait scale (half-body or full-body). The product size MUST be SMALL and REALISTIC relative to the model's hand and body. DO NOT enlarge the product; keep it in a natural human-scale proportion.";
+                prompt += " Maintain a tight portrait scale (waist-up or half-body portrait). The product size MUST be SMALL and REALISTIC relative to the model's hand and body. DO NOT enlarge the product; keep it in a natural human-scale proportion.";
             }
 
             if (productName) {
