@@ -106,7 +106,7 @@ export const ThumbnailGenerator: React.FC = () => {
             if (shotType === 'product') {
                 prompt += " All subjects MUST be centered and occupy 70-80% of the square frame. Maintain a 10% safety margin from the edges. DO NOT CROP any part of the product (sleeves, collar, etc.). Ensure the ENTIRE product is visible.";
             } else {
-                prompt += " Maintain a tight portrait scale (waist-up or half-body portrait). The product size MUST be SMALL and REALISTIC relative to the model's hand and body. DO NOT enlarge the product; keep it in a natural human-scale proportion.";
+                prompt += " Maintain a tight portrait scale (waist-up or half-body portrait). The product size MUST be SMALL and REALISTIC relative to the model's hand and body. DO NOT enlarge the product. CRITICAL: The FRONT FACE and key features of the product must be ORIENTED TOWARD THE CAMERA for maximum visibility. Ensure the product is shown from its BEST HERO ANGLE.";
             }
 
             if (productName) {
