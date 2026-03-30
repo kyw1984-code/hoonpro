@@ -100,7 +100,7 @@ export const ThumbnailGenerator: React.FC = () => {
             if (backgroundType === 'white') {
                 prompt += " CRITICAL: The background MUST be a PURE SOLID WHITE (#FFFFFF) EMPTY SPACE. ABSOLUTELY NO SHADOWS, NO GRAY TONES, NO GRADIENTS, NO STUDIO WALLS, and NO FLOOR LINES. The subject must float in a pure white vacuum. The background must be 100% flat white hex #FFFFFF.";
             } else {
-                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT natural background captured in A SINGLE CAMERA SHOT. ABSOLUTELY NO COLLAGE, NO SPLIT-SCREEN, and NO SIDE-BY-SIDE PANELS. Both models/items must be in the EXACT SAME environmental space. Ensure the scene occupies the FULL 1:1 SQUARE frame from edge to edge with NO EMPTY EDGES.";
+                prompt += " Create a SINGLE UNIFIED SCENE with a SEAMLESS CONSISTENT natural background captured in A SINGLE CONTINUOUS PHOTOGRAPH. ABSOLUTELY NO COLLAGE, NO SPLIT-SCREEN, NO SIDE-BY-SIDE PANELS, and NO VERTICAL DIVIDER LINES IN THE CENTER. Both models/items must coexist naturally in the EXACT SAME 3D environmental space with continuous flooring and walls.";
             }
 
             if (shotType === 'product') {
