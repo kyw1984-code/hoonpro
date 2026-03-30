@@ -1,10 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { removeBackground, generateImage } from '../../api/aiService';
-import { Loader2, Upload, Image as ImageIcon, Download, Wand2, Scissors, X } from 'lucide-react';
+import { generateImage } from '../../api/aiService';
+import { Loader2, Upload, Image as ImageIcon, Download, Wand2, X } from 'lucide-react';
 
 export const ThumbnailGenerator: React.FC = () => {
     const [loading, setLoading] = useState(false);
-    const [removingBg, setRemovingBg] = useState(false);
     
     const [productName, setProductName] = useState('');
     const [customPrompt, setCustomPrompt] = useState('');
@@ -36,26 +35,6 @@ export const ThumbnailGenerator: React.FC = () => {
         setReferenceImages(prev => prev.filter((_, i) => i !== index));
     };
 
-    const handleRemoveBg = async () => {
-        if (referenceImages.length === 0) {
-            alert("이미지를 먼저 업로드해주세요.");
-            return;
-        }
-        setRemovingBg(true);
-        try {
-            // Remove background for the first image as an example, or all if needed.
-            // Here we'll just process the first one for simplicity, or we can map over all.
-            const updatedImages = [...referenceImages];
-            updatedImages[0] = await removeBackground(referenceImages[0]);
-            setReferenceImages(updatedImages);
-            alert("첫 번째 이미지의 배경이 제거되었습니다.");
-        } catch (e) {
-            console.error(e);
-            alert("배경 제거에 실패했습니다. API 키를 확인해주세요.");
-        } finally {
-            setRemovingBg(false);
-        }
-    };
 
     const applyTextOverlay = (imageSrc: string, text: string, position: 'top' | 'middle' | 'bottom') => {
         if (!imageSrc) return;
@@ -121,11 +100,11 @@ export const ThumbnailGenerator: React.FC = () => {
             if (backgroundType === 'white') {
                 prompt += " CRITICAL: The background MUST be a PURE SOLID WHITE (#FFFFFF) EMPTY SPACE. ABSOLUTELY NO SHADOWS, NO GRAY TONES, NO GRADIENTS, NO STUDIO WALLS, and NO FLOOR LINES. The subject must float in a pure white vacuum. The background must be 100% flat white hex #FFFFFF.";
             } else {
-                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT natural background. DO NOT use a split-screen, collage, or multi-panel layout. Both models/items must be in the EXACT SAME environmental space. Ensure the scene occupies the FULL 1:1 SQUARE frame from edge to edge with NO EMPTY EDGES.";
+                prompt += " Create a SINGLE UNIFIED SCENE with a CONSISTENT natural background captured in A SINGLE CAMERA SHOT. ABSOLUTELY NO COLLAGE, NO SPLIT-SCREEN, and NO SIDE-BY-SIDE PANELS. Both models/items must be in the EXACT SAME environmental space. Ensure the scene occupies the FULL 1:1 SQUARE frame from edge to edge with NO EMPTY EDGES.";
             }
 
             if (shotType === 'product') {
-                prompt += " All subjects MUST be centered and ZOOMED IN to fill 80-90% of the square frame. The product must DOMINATE the image.";
+                prompt += " All subjects MUST be centered and occupy 70-80% of the square frame. Maintain a 10% safety margin from the edges. DO NOT CROP any part of the product (sleeves, collar, etc.). Ensure the ENTIRE product is visible.";
             } else {
                 prompt += " Maintain a tight portrait scale (waist-up or half-body portrait). The product size MUST be SMALL and REALISTIC relative to the model's hand and body. DO NOT enlarge the product; keep it in a natural human-scale proportion.";
             }
@@ -343,17 +322,6 @@ export const ThumbnailGenerator: React.FC = () => {
                                         </div>
                                     ))}
                                 </div>
-                            )}
-                            
-                            {referenceImages.length > 0 && (
-                                <button 
-                                    onClick={handleRemoveBg}
-                                    disabled={removingBg}
-                                    className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2 px-4 rounded-xl flex items-center justify-center transition-colors border border-slate-200 mt-2"
-                                >
-                                    {removingBg ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Scissors className="w-4 h-4 mr-2" />}
-                                    첫 번째 이미지 누끼 따기
-                                </button>
                             )}
                         </div>
                     </div>
