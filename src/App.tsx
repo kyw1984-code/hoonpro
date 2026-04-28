@@ -12,7 +12,7 @@ import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, Lock, Search } from 'lucide-react';
 
-const PASSWORD = '202603';
+const PASSWORD = '052026';
 
 function PasswordGate({ onSuccess }: { onSuccess: () => void }) {
   const [input, setInput] = useState('');
