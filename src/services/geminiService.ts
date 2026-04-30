@@ -11,7 +11,7 @@ const getAiInstance = () => {
 export const recommendFeatures = async (productName: string, category: string): Promise<string> => {
     const ai = getAiInstance();
     const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-2.5-flash",
         contents: `Suggest 3-5 compelling selling features (USPs) for a product named "${productName}" in the "${category}" category. Return only the features as a bulleted list in Korean.`,
     });
     return response.text || "";
@@ -53,7 +53,7 @@ Return the result as a JSON array.
 `;
 
     const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-2.5-flash",
         contents: prompt,
         config: {
             responseMimeType: "application/json",
@@ -111,7 +111,7 @@ Render the following Korean text clearly and aesthetically on the image: "${segm
     });
 
     const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-image-preview",
+        model: "gemini-2.5-flash-image",
         contents: { parts },
         config: {
             imageConfig: {
@@ -155,7 +155,7 @@ Render the following Korean text clearly on the image: "${textOverlay}".`
     });
 
     const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-image-preview",
+        model: "gemini-2.5-flash-image",
         contents: { parts },
         config: {
             imageConfig: {
