@@ -29,7 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error.code === '23505') {
       return res.status(409).json({ error: '이미 등록된 이메일입니다.' });
     }
-    return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+    return res.status(500).json({ error: `서버 오류: ${error.message} (code: ${error.code})` });
   }
 
   return res.status(201).json({ message: '가입 신청이 완료됐습니다. 관리자 승인 후 이용 가능합니다.' });
