@@ -1,4 +1,5 @@
 import { GoogleGenAI, Modality } from "@google/genai";
+import { trackUsage } from "../lib/auth";
 
 const getApiKey = () => {
   return (
@@ -16,6 +17,7 @@ export const removeBackground = async (image: string) => image;
 // 상품명 기반 핵심 특징 자동 생성
 export const generateFeatures = async (productName: string, category: string): Promise<string> => {
   try {
+    await trackUsage();
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: `
@@ -40,6 +42,7 @@ export const generateFeatures = async (productName: string, category: string): P
 
 export const planDetail = async (data: any) => {
   try {
+    await trackUsage();
     const lengthGuide = data.length === 'auto'
       ? '상품 특성에 맞게 5~9장 사이로 최적 구성'
       : `정확히 ${data.length}장으로 구성`;
@@ -122,6 +125,7 @@ export const generateImage = async (
   aspectRatio: string = "9:16"
 ) => {
   try {
+    await trackUsage();
     const parts: any[] = [];
 
     if (base64Images.length > 0) {

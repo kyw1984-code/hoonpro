@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductInfo, PageLength, DetailImageSegment } from "../types";
+import { trackUsage } from "../lib/auth";
 
 const getAiInstance = () => {
     // The platform injects the selected key into process.env.API_KEY
@@ -9,6 +10,7 @@ const getAiInstance = () => {
 };
 
 export const recommendFeatures = async (productName: string, category: string): Promise<string> => {
+    await trackUsage();
     const ai = getAiInstance();
     const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -18,6 +20,7 @@ export const recommendFeatures = async (productName: string, category: string): 
 };
 
 export const planDetailPage = async (info: ProductInfo, length: PageLength): Promise<DetailImageSegment[]> => {
+    await trackUsage();
     const ai = getAiInstance();
     
     let lengthInstruction = "";
@@ -88,6 +91,7 @@ Return the result as a JSON array.
 };
 
 export const generateSectionImage = async (segment: DetailImageSegment, referenceImage?: string): Promise<string | undefined> => {
+    await trackUsage();
     const ai = getAiInstance();
     
     const parts: any[] = [];
@@ -130,6 +134,7 @@ Render the following Korean text clearly and aesthetically on the image: "${segm
 };
 
 export const generateThumbnailImage = async (productName: string, features: string, style: string, elements: string, textOverlay: string, referenceImage?: string): Promise<string | undefined> => {
+    await trackUsage();
     const ai = getAiInstance();
     
     const parts: any[] = [];

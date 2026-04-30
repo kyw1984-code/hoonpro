@@ -2,71 +2,42 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DetailPlanner } from './components/Detail/DetailPlanner';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { ProductNameGenerator } from './components/ProductName/ProductNameGenerator';
-import CoupangResearch from './components/CoupangReserch';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, Lock, Search } from 'lucide-react';
+import { AuthGate } from './components/Auth/AuthGate';
+import { AdminPanel } from './components/Admin/AdminPanel';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap } from 'lucide-react';
+import { getUser, removeToken, type AuthUser } from './lib/auth';
 
-const PASSWORD = '052026';
-
-function PasswordGate({ onSuccess }: { onSuccess: () => void }) {
-  const [input, setInput] = useState('');
-  const [error, setError] = useState(false);
-
-  const handleSubmit = () => {
-    if (input === PASSWORD) {
-      sessionStorage.setItem('auth', 'true');
-      onSuccess();
-    } else {
-      setError(true);
-      setInput('');
-      setTimeout(() => setError(false), 2000);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-10 w-full max-w-sm flex flex-col items-center">
-        <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center mb-4">
-          <Lock className="w-7 h-7 text-white" />
-        </div>
-        <h1 className="text-xl font-bold text-slate-900 mb-1">쇼크트리 훈프로</h1>
-        <p className="text-sm text-slate-500 mb-8">접속하려면 비밀번호를 입력하세요.</p>
-        <input
-          type="password"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-          placeholder="비밀번호 입력"
-          className={`w-full p-3 border rounded-xl text-center text-lg tracking-widest outline-none focus:ring-2 transition-all ${
-            error ? 'border-red-400 ring-2 ring-red-200 bg-red-50' : 'border-slate-300 focus:ring-blue-500'
-          }`}
-          autoFocus
-        />
-        {error && <p className="text-red-500 text-sm mt-2">비밀번호가 틀렸습니다.</p>}
-        <button
-          onClick={handleSubmit}
-          className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded-xl transition-colors"
-        >
-          입장하기
-        </button>
-      </div>
-    </div>
-  );
-}
-
-type Tab = 'thumbnail' | 'detail' | 'analyzer' | 'productname' | 'coupang';
+type Tab = 'thumbnail' | 'detail' | 'analyzer' | 'productname' | 'admin';
 
 export default function App() {
-  const [authed, setAuthed] = useState(sessionStorage.getItem('auth') === 'true');
+  const [user, setUser] = useState<AuthUser | null>(getUser);
   const [activeTab, setActiveTab] = useState<Tab>('thumbnail');
+  const [remainingCalls, setRemainingCalls] = useState<number | null>(null);
 
-  if (!authed) return <PasswordGate onSuccess={() => setAuthed(true)} />;
+  useEffect(() => {
+    const handler = (e: Event) => {
+      setRemainingCalls((e as CustomEvent).detail.remaining);
+    };
+    window.addEventListener('usage-updated', handler);
+    return () => window.removeEventListener('usage-updated', handler);
+  }, []);
+
+  const handleLogout = () => {
+    removeToken();
+    setUser(null);
+    setRemainingCalls(null);
+  };
+
+  if (!user) {
+    return <AuthGate onSuccess={() => setUser(getUser())} />;
+  }
 
   return (
     <ApiKeyCheck>
@@ -79,55 +50,60 @@ export default function App() {
               </div>
               <h1 className="text-xl font-bold text-slate-900 tracking-tight">쇼크트리 훈프로 AI 자동화 프로그램</h1>
             </div>
-            <div className="flex bg-slate-100 p-1 rounded-xl">
-              <button
-                onClick={() => setActiveTab('thumbnail')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'thumbnail' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <ImageIcon className="w-4 h-4 mr-2" />
-                썸네일 제작
-              </button>
-              <button
-                onClick={() => setActiveTab('detail')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'detail' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <LayoutTemplate className="w-4 h-4 mr-2" />
-                상세페이지 제작
-              </button>
-              <button
-                onClick={() => setActiveTab('analyzer')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'analyzer' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <BarChart3 className="w-4 h-4 mr-2" />
-                광고 성과 분석
-              </button>
-              <button
-                onClick={() => setActiveTab('productname')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'productname' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Tag className="w-4 h-4 mr-2" />
-                상품명 제조기
-              </button>
-              
-              {/* [시장 분석기 탭 버튼 주석 처리]
-              <button
-                onClick={() => setActiveTab('coupang')}
-                className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'coupang' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Search className="w-4 h-4 mr-2" />
-                시장 분석기
-              </button>
-              */}
+
+            <div className="flex items-center gap-4">
+              {/* 탭 네비게이션 */}
+              <div className="flex bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setActiveTab('thumbnail')}
+                  className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'thumbnail' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  <ImageIcon className="w-4 h-4 mr-2" />썸네일 제작
+                </button>
+                <button
+                  onClick={() => setActiveTab('detail')}
+                  className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'detail' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  <LayoutTemplate className="w-4 h-4 mr-2" />상세페이지 제작
+                </button>
+                <button
+                  onClick={() => setActiveTab('analyzer')}
+                  className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'analyzer' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  <BarChart3 className="w-4 h-4 mr-2" />광고 성과 분석
+                </button>
+                <button
+                  onClick={() => setActiveTab('productname')}
+                  className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'productname' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  <Tag className="w-4 h-4 mr-2" />상품명 제조기
+                </button>
+                {user.isAdmin && (
+                  <button
+                    onClick={() => setActiveTab('admin')}
+                    className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'admin' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    <ShieldCheck className="w-4 h-4 mr-2" />관리자
+                  </button>
+                )}
+              </div>
+
+              {/* 사용자 정보 */}
+              <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
+                {!user.isAdmin && remainingCalls !== null && (
+                  <div className="flex items-center gap-1 text-xs text-slate-500">
+                    <Zap className="w-3.5 h-3.5 text-amber-500" />
+                    <span>오늘 {remainingCalls}회 남음</span>
+                  </div>
+                )}
+                <span className="text-sm text-slate-700 font-medium">{user.name}</span>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 transition-colors"
+                >
+                  <LogOut className="w-3.5 h-3.5" />로그아웃
+                </button>
+              </div>
             </div>
           </div>
         </header>
@@ -137,8 +113,7 @@ export default function App() {
           {activeTab === 'detail' && <DetailPlanner />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
           {activeTab === 'productname' && <ProductNameGenerator />}
-          {/* [시장 분석기 컴포넌트 주석 처리] */}
-          {/* {activeTab === 'coupang' && <CoupangResearch />} */}
+          {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
         </main>
 
         <Footer />
