@@ -131,7 +131,7 @@ export function AdminPanel() {
                       {STATUS_LABEL[user.status]}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{user.today_calls} / 10</td>
+                  <td className="px-4 py-3 text-slate-600">{user.today_calls} / 30</td>
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {new Date(user.created_at).toLocaleDateString('ko-KR')}
                   </td>
