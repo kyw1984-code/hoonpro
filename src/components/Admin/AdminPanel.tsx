@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 
 interface UserRow {
@@ -68,6 +68,24 @@ export function AdminPanel() {
     }
   };
 
+  const handleBulkApprove = async () => {
+    if (counts.pending === 0) return showToast('승인 대기 중인 회원이 없습니다.');
+    if (!confirm(`승인 대기 중인 ${counts.pending}명을 일괄 승인하시겠습니까?`)) return;
+    setActionLoading('bulk-approve');
+    try {
+      const res = await fetch('/api/admin/bulk-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.error);
+      showToast(data.message);
+      await fetchUsers();
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleReset = async (userId: string, userName: string) => {
     if (!confirm(`${userName}님의 오늘 사용 횟수를 리셋하시겠습니까?`)) return;
     setActionLoading(userId + 'reset');
@@ -107,18 +125,28 @@ export function AdminPanel() {
       </div>
 
       {/* 필터 탭 */}
-      <div className="flex gap-2 mb-5">
-        {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              filter === f ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {f === 'all' ? '전체' : STATUS_LABEL[f]} ({counts[f]})
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2 mb-5 flex-wrap">
+        <div className="flex gap-2 flex-wrap">
+          {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                filter === f ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {f === 'all' ? '전체' : STATUS_LABEL[f]} ({counts[f]})
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={handleBulkApprove}
+          disabled={actionLoading === 'bulk-approve' || counts.pending === 0}
+          className="flex items-center gap-1.5 px-4 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-full transition-colors"
+        >
+          <CheckCheck className="w-4 h-4" />
+          대기 회원 일괄 승인 ({counts.pending})
+        </button>
       </div>
 
       {loading ? (
