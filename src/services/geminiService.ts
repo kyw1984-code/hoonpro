@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProductInfo, PageLength, DetailImageSegment } from "../types";
-import { trackUsage } from "../lib/auth";
+import { trackUsage, logApiCall } from "../lib/auth";
 
 const getAiInstance = () => {
     // The platform injects the selected key into process.env.API_KEY
@@ -16,6 +16,7 @@ export const recommendFeatures = async (productName: string, category: string): 
         model: "gemini-2.5-flash",
         contents: `Suggest 3-5 compelling selling features (USPs) for a product named "${productName}" in the "${category}" category. Return only the features as a bulleted list in Korean.`,
     });
+    await logApiCall('features-recommend', 'gemini-2.5-flash', response);
     return response.text || "";
 };
 
@@ -75,6 +76,7 @@ Return the result as a JSON array.
             }
         }
     });
+    await logApiCall('detail-plan', 'gemini-2.5-flash', response);
 
     const text = response.text;
     if (!text) return [];
@@ -124,6 +126,7 @@ Render the following Korean text clearly and aesthetically on the image: "${segm
             }
         }
     });
+    await logApiCall('detail-image', 'gemini-2.5-flash-image', response);
 
     for (const part of response.candidates?.[0]?.content?.parts || []) {
         if (part.inlineData) {
@@ -169,6 +172,7 @@ Render the following Korean text clearly on the image: "${textOverlay}".`
             }
         }
     });
+    await logApiCall('thumbnail-image', 'gemini-2.5-flash-image', response);
 
     for (const part of response.candidates?.[0]?.content?.parts || []) {
         if (part.inlineData) {

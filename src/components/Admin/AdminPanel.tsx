@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3 } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { UsageStats } from './UsageStats';
 
 interface UserRow {
   id: string;
@@ -25,6 +26,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export function AdminPanel() {
+  const [tab, setTab] = useState<'users' | 'stats'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -68,6 +70,42 @@ export function AdminPanel() {
     }
   };
 
+  const handleBulkApprove = async () => {
+    if (counts.pending === 0) return showToast('승인 대기 중인 회원이 없습니다.');
+    if (!confirm(`승인 대기 중인 ${counts.pending}명을 일괄 승인하시겠습니까?`)) return;
+    setActionLoading('bulk-approve');
+    try {
+      const res = await fetch('/api/admin/bulk-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.error);
+      showToast(data.message);
+      await fetchUsers();
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReset = async (userId: string, userName: string) => {
+    if (!confirm(`${userName}님의 오늘 사용 횟수를 리셋하시겠습니까?`)) return;
+    setActionLoading(userId + 'reset');
+    try {
+      const res = await fetch('/api/admin/reset-usage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.error);
+      showToast(data.message);
+      await fetchUsers();
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const filtered = filter === 'all' ? users : users.filter(u => u.status === filter);
   const counts = {
     all: users.length,
@@ -78,10 +116,70 @@ export function AdminPanel() {
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
+      {/* 탭 네비게이션 */}
+      <div className="flex gap-1 mb-6 border-b border-slate-200">
+        <button
+          onClick={() => setTab('users')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'users' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Users className="w-4 h-4" /> 회원 관리
+        </button>
+        <button
+          onClick={() => setTab('stats')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'stats' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" /> API 사용량 통계
+        </button>
+      </div>
+
+      {tab === 'stats' ? <UsageStats /> : <UsersTab
+        users={users}
+        loading={loading}
+        filter={filter}
+        setFilter={setFilter}
+        counts={counts}
+        filtered={filtered}
+        actionLoading={actionLoading}
+        fetchUsers={fetchUsers}
+        handleAction={handleAction}
+        handleBulkApprove={handleBulkApprove}
+        handleReset={handleReset}
+      />}
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm px-5 py-3 rounded-xl shadow-lg z-50">
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface UsersTabProps {
+  users: UserRow[];
+  loading: boolean;
+  filter: 'all' | 'pending' | 'approved' | 'rejected';
+  setFilter: (f: 'all' | 'pending' | 'approved' | 'rejected') => void;
+  counts: { all: number; pending: number; approved: number; rejected: number };
+  filtered: UserRow[];
+  actionLoading: string | null;
+  fetchUsers: () => void;
+  handleAction: (userId: string, action: 'approve' | 'reject') => void;
+  handleBulkApprove: () => void;
+  handleReset: (userId: string, userName: string) => void;
+}
+
+function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionLoading, fetchUsers, handleAction, handleBulkApprove, handleReset }: UsersTabProps) {
+  return (
+    <div>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-blue-600" />
-          <h2 className="text-lg font-bold text-slate-900">회원 관리</h2>
+          <h2 className="text-lg font-bold text-slate-900">회원 관리 ({users.length})</h2>
         </div>
         <button onClick={fetchUsers} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors">
           <RefreshCw className="w-4 h-4" /> 새로고침
@@ -89,18 +187,28 @@ export function AdminPanel() {
       </div>
 
       {/* 필터 탭 */}
-      <div className="flex gap-2 mb-5">
-        {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              filter === f ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {f === 'all' ? '전체' : STATUS_LABEL[f]} ({counts[f]})
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2 mb-5 flex-wrap">
+        <div className="flex gap-2 flex-wrap">
+          {(['all', 'pending', 'approved', 'rejected'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                filter === f ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {f === 'all' ? '전체' : STATUS_LABEL[f]} ({counts[f]})
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={handleBulkApprove}
+          disabled={actionLoading === 'bulk-approve' || counts.pending === 0}
+          className="flex items-center gap-1.5 px-4 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-full transition-colors"
+        >
+          <CheckCheck className="w-4 h-4" />
+          대기 회원 일괄 승인 ({counts.pending})
+        </button>
       </div>
 
       {loading ? (
@@ -131,7 +239,19 @@ export function AdminPanel() {
                       {STATUS_LABEL[user.status]}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{user.today_calls} / 10</td>
+                  <td className="px-4 py-3 text-slate-600">
+                    <div className="flex items-center gap-2">
+                      <span>{user.today_calls} / 40</span>
+                      <button
+                        onClick={() => handleReset(user.id, user.name)}
+                        disabled={actionLoading === user.id + 'reset' || user.today_calls === 0}
+                        className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 text-xs rounded-md transition-colors"
+                        title="오늘 사용 횟수 리셋"
+                      >
+                        리셋
+                      </button>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {new Date(user.created_at).toLocaleDateString('ko-KR')}
                   </td>
@@ -161,12 +281,6 @@ export function AdminPanel() {
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm px-5 py-3 rounded-xl shadow-lg z-50">
-          {toast}
         </div>
       )}
     </div>

@@ -54,3 +54,36 @@ export async function trackUsage(): Promise<void> {
 
   window.dispatchEvent(new CustomEvent('usage-updated', { detail: { remaining: data.remaining } }));
 }
+
+interface UsageMetadataLike {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  totalTokenCount?: number;
+}
+
+interface GeminiResponseLike {
+  usageMetadata?: UsageMetadataLike;
+}
+
+export async function logApiCall(
+  feature: string,
+  model: string,
+  response: GeminiResponseLike | null | undefined,
+): Promise<void> {
+  const token = getToken();
+  if (!token) return;
+
+  const meta = response?.usageMetadata ?? {};
+  const inputTokens = meta.promptTokenCount ?? 0;
+  const outputTokens = meta.candidatesTokenCount ?? 0;
+
+  try {
+    await fetch('/api/usage/log-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ feature, model, inputTokens, outputTokens }),
+    });
+  } catch {
+    // 로깅 실패는 사용자 흐름을 막지 않음
+  }
+}

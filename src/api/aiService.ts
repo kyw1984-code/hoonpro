@@ -1,5 +1,5 @@
 import { GoogleGenAI, Modality } from "@google/genai";
-import { trackUsage } from "../lib/auth";
+import { trackUsage, logApiCall } from "../lib/auth";
 
 const getApiKey = () => {
   return (
@@ -31,6 +31,7 @@ export const generateFeatures = async (productName: string, category: string): P
 예시: "프리미엄 메모리폼 소재로 목과 어깨 압력 분산, 통기성 좋은 3D 메쉬 커버, 세탁 가능한 분리형 커버, 인체공학적 디자인"
       `.trim(),
     });
+    await logApiCall('features-recommend', 'gemini-2.5-flash', response);
 
     const text = response.text ?? "";
     return text.trim();
@@ -91,6 +92,7 @@ export const planDetail = async (data: any) => {
  배열 예시: [ {"title": "오감으로 느끼는 편안함", "logicalSections": ["메인", "시각화"], "keyMessage": "몸에 닿는 순간 느껴지는\n천연 소재의 압도적인 부드러움", "visualPrompt": "A high-quality professional product photography of the product in a minimalist studio background with soft natural lighting, showing its elegant design."} ]
       `.trim(),
     });
+    await logApiCall('detail-plan', 'gemini-2.5-flash', response);
 
     const text = response.text ?? "";
     const cleanJson = text.replace(/```json|```/g, "").trim();
@@ -150,6 +152,8 @@ export const generateImage = async (
         responseModalities: [Modality.IMAGE, Modality.TEXT],
       },
     });
+    const feature = aspectRatio === '1:1' ? 'thumbnail-image' : 'detail-image';
+    await logApiCall(feature, 'gemini-2.5-flash-image', response);
 
     for (const part of response.candidates?.[0]?.content?.parts ?? []) {
       if (part.inlineData) {

@@ -4,6 +4,7 @@ import {
   Loader2, TrendingUp, ShoppingCart, Plus, Trash2,
   BarChart2, Wand2, Sparkles
 } from 'lucide-react';
+import { trackUsage, logApiCall } from '../../lib/auth';
 
 const getApiKey = () =>
   import.meta.env.VITE_GOOGLE_API_KEY ||
@@ -66,6 +67,7 @@ export const CompetitorAnalyzer: React.FC = () => {
     setCompetitors(prev => prev.map(c => c.id === id ? { ...c, loading: true } : c));
 
     try {
+      await trackUsage();
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         config: { responseMimeType: 'application/json' },
@@ -87,6 +89,7 @@ export const CompetitorAnalyzer: React.FC = () => {
         `.trim(),
       });
 
+      await logApiCall('competitor-estimate', 'gemini-2.5-flash', response);
       const text = response.text ?? '{}';
       const parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
 
@@ -146,6 +149,7 @@ ${(c as any).marketComment ? `- 시장 특성: ${(c as any).marketComment}` : ''
         ? `\n내 상품 정보:\n- 상품명: ${myProduct.name}\n- 판매 희망가: ${myProduct.price}원\n- 특징/강점: ${myProduct.features}`
         : '';
 
+      await trackUsage();
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         config: { responseMimeType: 'text/plain' },
@@ -165,6 +169,7 @@ ${myInfo}
 한국어로 구체적이고 실용적으로 작성해주세요.
         `.trim(),
       });
+      await logApiCall('competitor-analyze', 'gemini-2.5-flash', response);
 
       setAnalysis(response.text ?? '');
     } catch (e) {
