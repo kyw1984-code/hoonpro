@@ -51,3 +51,22 @@ $$;
 -- 4. Row Level Security 비활성화 (서비스 키로만 접근)
 alter table users disable row level security;
 alter table api_usage disable row level security;
+
+-- 5. 상세 API 호출 로그 (기능/모델/토큰/비용 추적)
+create table if not exists api_calls (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references users(id) on delete cascade,
+  feature text not null,
+  model text not null,
+  input_tokens integer default 0,
+  output_tokens integer default 0,
+  cost_usd numeric(12, 6) default 0,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_api_calls_user_id on api_calls(user_id);
+create index if not exists idx_api_calls_created_at on api_calls(created_at);
+create index if not exists idx_api_calls_feature on api_calls(feature);
+create index if not exists idx_api_calls_model on api_calls(model);
+
+alter table api_calls disable row level security;

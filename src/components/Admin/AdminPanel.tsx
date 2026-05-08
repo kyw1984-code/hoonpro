@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3 } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { UsageStats } from './UsageStats';
 
 interface UserRow {
   id: string;
@@ -25,6 +26,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export function AdminPanel() {
+  const [tab, setTab] = useState<'users' | 'stats'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -114,10 +116,70 @@ export function AdminPanel() {
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
+      {/* 탭 네비게이션 */}
+      <div className="flex gap-1 mb-6 border-b border-slate-200">
+        <button
+          onClick={() => setTab('users')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'users' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <Users className="w-4 h-4" /> 회원 관리
+        </button>
+        <button
+          onClick={() => setTab('stats')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'stats' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" /> API 사용량 통계
+        </button>
+      </div>
+
+      {tab === 'stats' ? <UsageStats /> : <UsersTab
+        users={users}
+        loading={loading}
+        filter={filter}
+        setFilter={setFilter}
+        counts={counts}
+        filtered={filtered}
+        actionLoading={actionLoading}
+        fetchUsers={fetchUsers}
+        handleAction={handleAction}
+        handleBulkApprove={handleBulkApprove}
+        handleReset={handleReset}
+      />}
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm px-5 py-3 rounded-xl shadow-lg z-50">
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface UsersTabProps {
+  users: UserRow[];
+  loading: boolean;
+  filter: 'all' | 'pending' | 'approved' | 'rejected';
+  setFilter: (f: 'all' | 'pending' | 'approved' | 'rejected') => void;
+  counts: { all: number; pending: number; approved: number; rejected: number };
+  filtered: UserRow[];
+  actionLoading: string | null;
+  fetchUsers: () => void;
+  handleAction: (userId: string, action: 'approve' | 'reject') => void;
+  handleBulkApprove: () => void;
+  handleReset: (userId: string, userName: string) => void;
+}
+
+function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionLoading, fetchUsers, handleAction, handleBulkApprove, handleReset }: UsersTabProps) {
+  return (
+    <div>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-blue-600" />
-          <h2 className="text-lg font-bold text-slate-900">회원 관리</h2>
+          <h2 className="text-lg font-bold text-slate-900">회원 관리 ({users.length})</h2>
         </div>
         <button onClick={fetchUsers} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors">
           <RefreshCw className="w-4 h-4" /> 새로고침
@@ -219,12 +281,6 @@ export function AdminPanel() {
               ))}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm px-5 py-3 rounded-xl shadow-lg z-50">
-          {toast}
         </div>
       )}
     </div>
