@@ -68,6 +68,24 @@ export function AdminPanel() {
     }
   };
 
+  const handleReset = async (userId: string, userName: string) => {
+    if (!confirm(`${userName}님의 오늘 사용 횟수를 리셋하시겠습니까?`)) return;
+    setActionLoading(userId + 'reset');
+    try {
+      const res = await fetch('/api/admin/reset-usage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.error);
+      showToast(data.message);
+      await fetchUsers();
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const filtered = filter === 'all' ? users : users.filter(u => u.status === filter);
   const counts = {
     all: users.length,
@@ -131,7 +149,19 @@ export function AdminPanel() {
                       {STATUS_LABEL[user.status]}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{user.today_calls} / 10</td>
+                  <td className="px-4 py-3 text-slate-600">
+                    <div className="flex items-center gap-2">
+                      <span>{user.today_calls} / 40</span>
+                      <button
+                        onClick={() => handleReset(user.id, user.name)}
+                        disabled={actionLoading === user.id + 'reset' || user.today_calls === 0}
+                        className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 text-xs rounded-md transition-colors"
+                        title="오늘 사용 횟수 리셋"
+                      >
+                        리셋
+                      </button>
+                    </div>
+                  </td>
                   <td className="px-4 py-3 text-slate-500 text-xs">
                     {new Date(user.created_at).toLocaleDateString('ko-KR')}
                   </td>
