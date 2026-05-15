@@ -463,42 +463,9 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string, position: 'top
             const lineHeight = fontSize * 1.5;
             const totalTextHeight = lines.length * lineHeight;
 
-            // 그라디언트 설정
-            if (position === 'top') {
-                const overlayH = totalTextHeight + fontSize * 2;
-                const gradient = ctx.createLinearGradient(0, 0, 0, overlayH);
-                gradient.addColorStop(0, 'rgba(0,0,0,0.75)');
-                gradient.addColorStop(0.7, 'rgba(0,0,0,0.4)');
-                gradient.addColorStop(1, 'rgba(0,0,0,0)');
-                ctx.fillStyle = gradient;
-                ctx.fillRect(0, 0, TARGET_WIDTH, overlayH);
-            } else if (position === 'middle') {
-                const overlayH = totalTextHeight + fontSize * 4;
-                const overlayY = (TARGET_HEIGHT - overlayH) / 2;
-                const gradient = ctx.createLinearGradient(0, overlayY, 0, overlayY + overlayH);
-                gradient.addColorStop(0, 'rgba(0,0,0,0)');
-                gradient.addColorStop(0.5, 'rgba(0,0,0,0.6)');
-                gradient.addColorStop(1, 'rgba(0,0,0,0)');
-                ctx.fillStyle = gradient;
-                ctx.fillRect(0, overlayY, TARGET_WIDTH, overlayH);
-            } else {
-                const overlayH = totalTextHeight + fontSize * 3;
-                const overlayY = TARGET_HEIGHT - overlayH;
-                const gradient = ctx.createLinearGradient(0, overlayY, 0, TARGET_HEIGHT);
-                gradient.addColorStop(0, 'rgba(0,0,0,0)');
-                gradient.addColorStop(0.3, 'rgba(0,0,0,0.7)');
-                gradient.addColorStop(1, 'rgba(0,0,0,0.9)');
-                ctx.fillStyle = gradient;
-                ctx.fillRect(0, overlayY, TARGET_WIDTH, overlayH);
-            }
-
             // 텍스트 렌더링 세팅
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.shadowColor = 'rgba(0,0,0,0.95)';
-            ctx.shadowBlur = position === 'top' ? 10 : 12;
-            ctx.shadowOffsetX = position === 'top' ? 1 : 2;
-            ctx.shadowOffsetY = position === 'top' ? 2 : 3;
 
             let startY = 0;
             if (position === 'top') startY = fontSize + 20;
@@ -508,7 +475,6 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string, position: 'top
             lines.forEach((line, i) => {
                 const y = startY + i * lineHeight;
                 ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
-                ctx.fillStyle = '#ffffff';
 
                 let displayText = line;
                 const maxWidth = TARGET_WIDTH - 80;
@@ -522,11 +488,16 @@ const overlayTextOnImage = (imageUrl: string, keyMessage: string, position: 'top
                     displayText += '...';
                 }
 
+                // 흰색 외곽선(stroke) → 진한 검정 채우기 순서로 그려 어떤 배경에서도 가독성 확보
+                ctx.lineJoin = 'round';
+                ctx.miterLimit = 2;
+                ctx.lineWidth = Math.max(4, fontSize * 0.18);
+                ctx.strokeStyle = '#ffffff';
+                ctx.strokeText(displayText, TARGET_WIDTH / 2, y);
+
+                ctx.fillStyle = '#1a1a1a';
                 ctx.fillText(displayText, TARGET_WIDTH / 2, y);
             });
-
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
             resolve(canvas.toDataURL('image/png'));
         };
         img.onerror = () => {
