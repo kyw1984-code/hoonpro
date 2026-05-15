@@ -445,11 +445,20 @@ const getContrastStroke = (hexColor: string): string => {
     return luminance > 0.6 ? '#1a1a1a' : '#ffffff';
 };
 
+// 자동 계산되는 기본 크기에 곱할 배율 프리셋
+export const FONT_SCALE_OPTIONS = [
+    { key: 'sm', label: '작게',     value: 0.8 },
+    { key: 'md', label: '보통',     value: 1.0 },
+    { key: 'lg', label: '크게',     value: 1.2 },
+    { key: 'xl', label: '아주크게', value: 1.4 },
+] as const;
+
 const overlayTextOnImage = (
     imageUrl: string,
     keyMessage: string,
     position: 'top' | 'middle' | 'bottom',
-    textColor: string = '#1a1a1a'
+    textColor: string = '#1a1a1a',
+    fontScale: number = 1.0
 ): Promise<string> => {
     return new Promise((resolve) => {
         const img = new window.Image();
@@ -484,10 +493,11 @@ const overlayTextOnImage = (
 
             const lines = keyMessage.split('\n').filter(l => l.trim());
 
-            // 줄 수에 따라 폰트 크기 조정
-            let fontSize = position === 'top'
+            // 줄 수에 따라 폰트 크기 자동 결정 후 사용자 배율 적용
+            const baseFontSize = position === 'top'
                 ? (lines.length === 1 ? 32 : lines.length === 2 ? 28 : 24)
                 : (lines.length === 1 ? 48 : lines.length === 2 ? 42 : 36);
+            let fontSize = Math.round(baseFontSize * fontScale);
             const lineHeight = fontSize * 1.5;
             const totalTextHeight = lines.length * lineHeight;
 
@@ -625,6 +635,7 @@ export const DetailPlanner: React.FC = () => {
                     ...seg,
                     textPosition: isStyleSection ? 'top' : 'bottom',
                     textColor: '#1a1a1a',
+                    fontScale: 1.0,
                     rawImageUrl: ''
                 };
             });
@@ -642,6 +653,7 @@ export const DetailPlanner: React.FC = () => {
                     rawImageUrl: sizeChartUrl,
                     textPosition: 'bottom',
                     textColor: '#1a1a1a',
+                    fontScale: 1.0,
                     isGenerating: false
                 });
             }
@@ -659,6 +671,7 @@ export const DetailPlanner: React.FC = () => {
                     rawImageUrl: productInfoUrl,
                     textPosition: 'bottom',
                     textColor: '#1a1a1a',
+                    fontScale: 1.0,
                     isGenerating: false
                 });
             }
@@ -680,6 +693,7 @@ export const DetailPlanner: React.FC = () => {
                     rawImageUrl: certUrl,
                     textPosition: 'bottom',
                     textColor: '#1a1a1a',
+                    fontScale: 1.0,
                     isGenerating: false
                 });
             }
@@ -719,6 +733,7 @@ export const DetailPlanner: React.FC = () => {
                     rawImageUrl: reviewUrl,
                     textPosition: 'bottom',
                     textColor: '#1a1a1a',
+                    fontScale: 1.0,
                     isGenerating: false
                 });
             }
@@ -789,7 +804,7 @@ Clean background, professional product photography style, maintain ALL original 
                     }
 
                     // ✅ Canvas로 한글 텍스트 덧씌우기 (위치 정보 포함)
-                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage, segments[i].textPosition || 'bottom', segments[i].textColor || '#1a1a1a');
+                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage, segments[i].textPosition || 'bottom', segments[i].textColor || '#1a1a1a', segments[i].fontScale ?? 1.0);
 
                     setSegments(prev => {
                         const newSegs = [...prev];
@@ -1250,7 +1265,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                                 const newSegs = [...segments];
                                                                 newSegs[idx].textPosition = pos;
                                                                 if (newSegs[idx].rawImageUrl) {
-                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(newSegs[idx].rawImageUrl, newSegs[idx].keyMessage, pos, newSegs[idx].textColor || '#1a1a1a');
+                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(newSegs[idx].rawImageUrl, newSegs[idx].keyMessage, pos, newSegs[idx].textColor || '#1a1a1a', newSegs[idx].fontScale ?? 1.0);
                                                                 }
                                                                 setSegments(newSegs);
                                                             }}
@@ -1278,7 +1293,8 @@ Clean background, professional product photography style, maintain ALL original 
                                                                             newSegs[idx].rawImageUrl,
                                                                             newSegs[idx].keyMessage,
                                                                             newSegs[idx].textPosition || 'bottom',
-                                                                            opt.fill
+                                                                            opt.fill,
+                                                                            newSegs[idx].fontScale ?? 1.0
                                                                         );
                                                                     }
                                                                     setSegments(newSegs);
@@ -1287,6 +1303,37 @@ Clean background, professional product photography style, maintain ALL original 
                                                                 style={{ backgroundColor: opt.fill }}
                                                                 aria-label={`문구 색상 ${opt.label}`}
                                                             />
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">문구 크기</label>
+                                                <div className="grid grid-cols-4 gap-1">
+                                                    {FONT_SCALE_OPTIONS.map((opt) => {
+                                                        const current = seg.fontScale ?? 1.0;
+                                                        const selected = current === opt.value;
+                                                        return (
+                                                            <button
+                                                                key={opt.key}
+                                                                onClick={async () => {
+                                                                    const newSegs = [...segments];
+                                                                    newSegs[idx].fontScale = opt.value;
+                                                                    if (newSegs[idx].rawImageUrl) {
+                                                                        newSegs[idx].imageUrl = await overlayTextOnImage(
+                                                                            newSegs[idx].rawImageUrl,
+                                                                            newSegs[idx].keyMessage,
+                                                                            newSegs[idx].textPosition || 'bottom',
+                                                                            newSegs[idx].textColor || '#1a1a1a',
+                                                                            opt.value
+                                                                        );
+                                                                    }
+                                                                    setSegments(newSegs);
+                                                                }}
+                                                                className={`py-1 px-2 rounded-md border text-[10px] font-bold transition-all ${selected ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500 hover:border-blue-300'}`}
+                                                            >
+                                                                {opt.label}
+                                                            </button>
                                                         );
                                                     })}
                                                 </div>
@@ -1301,7 +1348,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                         newSegs[idx] = { ...newSegs[idx], isGenerating: true };
                                                         return newSegs;
                                                     });
-                                                    const imageUrl = await overlayTextOnImage(seg.rawImageUrl, seg.keyMessage, seg.textPosition || 'bottom', seg.textColor || '#1a1a1a');
+                                                    const imageUrl = await overlayTextOnImage(seg.rawImageUrl, seg.keyMessage, seg.textPosition || 'bottom', seg.textColor || '#1a1a1a', seg.fontScale ?? 1.0);
                                                     setSegments(prev => {
                                                         const newSegs = [...prev];
                                                         newSegs[idx] = { ...newSegs[idx], imageUrl, isGenerating: false };
@@ -1345,7 +1392,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                             throw new Error(`품질 검증 실패: ${validation.reason}`);
                                                         }
 
-                                                        const imageUrl = await overlayTextOnImage(rawImageUrl, segments[idx].keyMessage, segments[idx].textPosition || 'bottom', segments[idx].textColor || '#1a1a1a');
+                                                        const imageUrl = await overlayTextOnImage(rawImageUrl, segments[idx].keyMessage, segments[idx].textPosition || 'bottom', segments[idx].textColor || '#1a1a1a', segments[idx].fontScale ?? 1.0);
 
                                                         setSegments(prev => {
                                                             const newSegs = [...prev];
