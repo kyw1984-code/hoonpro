@@ -5,15 +5,38 @@
 
 ## 배포 (Vercel)
 
-1. **New Project** 생성 후 이 저장소(`kyw1984-code/hoonpro`) 선택
-2. **Root Directory**: `sourcing` 지정
-3. Build/Output 설정은 기본값 사용 (Vite 자동 감지)
-4. **Domains** 에 `hoonproad.vercel.app` 추가
-5. **Environment Variables** 등록:
-   - `SUPABASE_URL` — 기존 hoonpro 와 동일한 값
-   - `SUPABASE_SERVICE_KEY` — 기존 hoonpro 와 동일한 값
-   - `JWT_SECRET` — 임의의 긴 문자열 (hoonpro 와 달라도 무방)
-6. Supabase SQL Editor 에서 `supabase-schema.sql` 한 번 실행 (sourcing_users 테이블 생성)
+### 방법 A — 자동화 스크립트 (권장)
+
+본인 노트북 터미널에서 한 줄만 실행:
+
+```bash
+git pull
+bash sourcing/scripts/setup-vercel.sh
+```
+
+스크립트가 묻는 값:
+- Vercel Token — https://vercel.com/account/tokens 에서 발급 (1 day 만료 권장)
+- SUPABASE_URL / SUPABASE_SERVICE_KEY — 기존 hoonpro Vercel 프로젝트와 동일
+- JWT_SECRET — 엔터 치면 자동 생성
+
+스크립트가 자동으로 처리하는 것:
+- Vercel 프로젝트 `hoonproad` 생성 (Root Directory = `sourcing`, Framework = Vite)
+- GitHub 저장소 `kyw1984-code/hoonpro` 연결
+- 환경변수 3종 등록
+- main 브랜치로 프로덕션 배포 트리거
+
+### 방법 B — 원클릭 Deploy Button
+
+다음 링크를 클릭하면 Vercel 가져오기 화면이 열립니다.
+환경변수는 자동 프롬프트되며, **Root Directory만 수동으로 `sourcing` 입력 필요**.
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fkyw1984-code%2Fhoonpro&project-name=hoonproad&env=SUPABASE_URL,SUPABASE_SERVICE_KEY,JWT_SECRET&envDescription=hoonpro%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8%EC%99%80%20%EB%8F%99%EC%9D%BC%ED%95%9C%20%EA%B0%92%20%EC%82%AC%EC%9A%A9)
+
+### 모든 방법 공통 — Supabase 테이블 생성
+
+배포 후 한 번만 실행:
+- https://supabase.com/dashboard → 기존 hoonpro 프로젝트 → SQL Editor
+- `sourcing/supabase-schema.sql` 내용 복붙 → Run
 
 ## 로컬 실행
 
