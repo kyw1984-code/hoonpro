@@ -4,6 +4,7 @@ export interface AuthUser {
   name: string;
   trialStartedAt: number; // ms epoch
   trialExpiresAt: number; // ms epoch
+  isAdmin: boolean;
 }
 
 const TOKEN_KEY = 'sourcing_token';
@@ -36,6 +37,7 @@ export function getUser(): AuthUser | null {
       name: payload.name,
       trialStartedAt: payload.trialStartedAt,
       trialExpiresAt: payload.trialExpiresAt,
+      isAdmin: payload.isAdmin ?? false,
     };
   } catch {
     removeToken();

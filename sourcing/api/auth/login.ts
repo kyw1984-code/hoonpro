@@ -36,13 +36,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const trialStartedMs = new Date(user.trial_started_at).getTime();
   const trialExpiresMs = trialStartedMs + TRIAL_DAYS * 24 * 60 * 60 * 1000;
-  if (trialExpiresMs <= Date.now()) {
+  const isAdmin = !!process.env.ADMIN_EMAIL && user.email === process.env.ADMIN_EMAIL.toLowerCase();
+
+  // 관리자는 만료 무시, 일반은 체험 만료 시 차단
+  if (!isAdmin && trialExpiresMs <= Date.now()) {
     return res.status(403).json({
       error: '7일 무료 체험이 만료됐습니다. 연장은 운영자에게 문의해주세요.',
     });
   }
 
-  const expiresInSec = Math.max(60, Math.floor((trialExpiresMs - Date.now()) / 1000));
+  const expiresInSec = isAdmin
+    ? 30 * 24 * 60 * 60
+    : Math.max(60, Math.floor((trialExpiresMs - Date.now()) / 1000));
 
   const token = jwt.sign(
     {
@@ -51,6 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       name: user.name,
       trialStartedAt: trialStartedMs,
       trialExpiresAt: trialExpiresMs,
+      isAdmin,
     },
     jwtSecret,
     { expiresIn: expiresInSec }
@@ -58,7 +64,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   return res.status(200).json({
     token,
-    user: { id: user.id, name: user.name, email: user.email },
+    user: { id: user.id, name: user.name, email: user.email, isAdmin },
     trialExpiresAt: trialExpiresMs,
   });
 }
