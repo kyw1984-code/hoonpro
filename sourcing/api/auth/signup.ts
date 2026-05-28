@@ -48,7 +48,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const trialStartedMs = new Date(user.trial_started_at).getTime();
   const trialExpiresMs = trialStartedMs + TRIAL_DAYS * 24 * 60 * 60 * 1000;
-  const expiresInSec = Math.max(60, Math.floor((trialExpiresMs - Date.now()) / 1000));
+  const isAdmin = !!process.env.ADMIN_EMAIL && user.email === process.env.ADMIN_EMAIL.toLowerCase();
+  // 관리자는 만료 없이 30일 토큰, 일반은 체험 만료까지
+  const expiresInSec = isAdmin
+    ? 30 * 24 * 60 * 60
+    : Math.max(60, Math.floor((trialExpiresMs - Date.now()) / 1000));
 
   const token = jwt.sign(
     {
@@ -57,6 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       name: user.name,
       trialStartedAt: trialStartedMs,
       trialExpiresAt: trialExpiresMs,
+      isAdmin,
     },
     jwtSecret,
     { expiresIn: expiresInSec }
@@ -64,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   return res.status(201).json({
     token,
-    user: { id: user.id, name: user.name, email: user.email },
+    user: { id: user.id, name: user.name, email: user.email, isAdmin },
     trialExpiresAt: trialExpiresMs,
   });
 }
