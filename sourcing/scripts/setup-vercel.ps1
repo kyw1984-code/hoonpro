@@ -1,4 +1,4 @@
-# Sourcing(광고 성과 분석기) Vercel 프로젝트 자동 셋업 (Windows PowerShell 버전)
+﻿# Sourcing(광고 성과 분석기) Vercel 프로젝트 자동 셋업 (Windows PowerShell 버전)
 #
 # 사용법 (PowerShell 에서):
 #   irm https://raw.githubusercontent.com/kyw1984-code/hoonpro/main/sourcing/scripts/setup-vercel.ps1 -OutFile setup-vercel.ps1
