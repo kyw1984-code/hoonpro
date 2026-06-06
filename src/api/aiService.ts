@@ -117,7 +117,7 @@ export const planDetail = async (data: any) => {
     }));
   } catch (error) {
     console.error("Plan Error:", error);
-    return [];
+    throw error;
   }
 };
 

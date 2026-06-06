@@ -615,7 +615,12 @@ export const DetailPlanner: React.FC = () => {
             }
 
             const plannedSegments = await planDetail({ ...info, features, length });
-            
+
+            if (!plannedSegments || plannedSegments.length === 0) {
+                alert("기획안 생성에 실패했습니다. 잠시 후 다시 시도해주세요.");
+                return;
+            }
+
             // 각 세그먼트에 텍스트 위치 기본값 설정
             const mappedSegments = plannedSegments.map((seg: any) => {
                 const isStyleSection = seg.title.includes('스타일') || 
