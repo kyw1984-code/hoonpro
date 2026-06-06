@@ -725,9 +725,14 @@ export const DetailPlanner: React.FC = () => {
 
             setSegments(mappedSegments);
             setStep(2);
-        } catch (e) {
+        } catch (e: any) {
             console.error(e);
-            alert("기획 생성에 실패했습니다.");
+            const msg = (e?.message || JSON.stringify(e) || "").toString();
+            if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("prepayment") || msg.includes("quota")) {
+                alert("API 사용 한도 또는 결제 잔액을 초과했습니다.\n\nGoogle Cloud 결제(선불 크레딧 충전 또는 후불 전환)를 확인해주세요.\nhttps://ai.studio/projects");
+            } else {
+                alert("기획 생성에 실패했습니다.\n\n" + msg);
+            }
         } finally {
             setLoading(false);
         }
