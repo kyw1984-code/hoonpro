@@ -4,7 +4,8 @@ import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X }
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
 
-const DEFAULT_DETAIL_FONT_SCALE = 1.8;
+const DEFAULT_DETAIL_FONT_SCALE = 1.0;
+const INTRO_DETAIL_FONT_SCALE = 1.8;
 
 const COMBINATION_OPTIONS: Array<{ value: CombinationType; label: string; desc: string }> = [
     { value: 'single', label: '일반 상품', desc: '단품 중심 상세페이지' },
@@ -33,14 +34,16 @@ const buildCombinationIntroSegment = (combinationType: CombinationType, productN
         title: `${combinationType} 조합 인트로`,
         logicalSections: ['인트로', '조합 혜택'],
         keyMessage: `${combinationType} 구성\n${countLabel}를 한 번에`,
-        visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Show ${count} fictional fashion models or ${count} model-cut panels in one balanced composition, each wearing or naturally using one product unit from the reference images. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and leave enough negative space for Korean overlay copy. Do not include any text, numbers, labels, badges, or typography in the image.`,
+        visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Reserve a clean empty copy-safe band in the top 25% of the frame, and place the ${count} fictional fashion models or ${count} model-cut panels below that band so their heads, bodies, and products are not cropped by overlay text. Each model should wear or naturally use one product unit from the reference images. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and do not include any text, numbers, labels, badges, or typography in the image.`,
     };
 };
 
 const buildModelCutInstruction = (combinationType: CombinationType, segmentIndex: number): string => {
     const count = getCombinationCount(combinationType);
     const bundleIntro = combinationType !== 'single' && segmentIndex === 0
-        ? `- For the intro, create a bundle model cut with exactly ${count} visible product-wearing/using model cuts in one vertical page.`
+        ? `- For the intro, create a bundle model cut with exactly ${count} visible product-wearing/using model cuts in one vertical page.
+- Reserve the top 25% of the image as clean negative space for large Korean overlay copy.
+- Place models and products below that copy-safe area and keep faces, heads, outfits, and products fully visible without top cropping.`
         : '';
 
     return `
@@ -60,7 +63,8 @@ const buildCombinationImageInstruction = (combinationType: CombinationType, segm
 
     const count = getCombinationCount(combinationType);
     const introInstruction = segmentIndex === 0
-        ? `- INTRO SECTION: Show exactly ${count} model-cut product presentations together in one vertical frame, using the reference images as the product source.`
+        ? `- INTRO SECTION: Show exactly ${count} model-cut product presentations together in one vertical frame, using the reference images as the product source.
+- Keep the top area visually open for the app's oversized copy overlay; do not place important model faces or product details in the top 25% of the frame.`
         : `- Keep the bundle context visible where natural; use multiple units together when it supports the section concept.`;
 
     return `
@@ -173,81 +177,43 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
     canvas.width = 860;
     canvas.height = 1000;
     const ctx = canvas.getContext('2d')!;
+    const safeReviews = reviews.length > 0 ? reviews : [{ rating: 5, text: '만족스러운 품질과 사용감이 인상적입니다.', author: '고객**' }];
 
-    // 배경 이미지가 있으면 사용, 없으면 단순 흰색
-    if (bgImageUrl) {
-        const img = new window.Image();
-        img.src = bgImageUrl;
-        // 동기적으로 그리기 위해 즉시 반환하지 않음
-        try {
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            // 반투명 오버레이로 가독성 향상
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-        } catch (e) {
-            // 이미지 로드 실패 시 기본 배경
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-        }
-    } else {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
+    const drawRoundRect = (x: number, y: number, width: number, height: number, radius: number) => {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + width - r, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+        ctx.lineTo(x + width, y + height - r);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        ctx.lineTo(x + r, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    };
 
-    // 제목
-    ctx.fillStyle = '#1e293b';
-    ctx.font = 'bold 42px "Noto Sans KR", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('고객 후기', canvas.width / 2, 80);
-
-    // 평점 표시
-    ctx.font = 'bold 32px sans-serif';
-    ctx.fillStyle = '#fbbf24';
-    const avgRating = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
-    ctx.fillText('★'.repeat(Math.round(avgRating)), canvas.width / 2, 140);
-
-    // 후기 카드들
-    let yOffset = 200;
-    reviews.forEach((review, idx) => {
-        if (idx >= 3) return; // 최대 3개만
-
-        // 카드 배경
-        ctx.fillStyle = '#f8fafc';
-        ctx.fillRect(60, yOffset, canvas.width - 120, 200);
-        ctx.strokeStyle = '#e2e8f0';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(60, yOffset, canvas.width - 120, 200);
-
-        // 별점
-        ctx.font = 'bold 24px sans-serif';
-        ctx.fillStyle = '#fbbf24';
-        ctx.textAlign = 'left';
-        ctx.fillText('★'.repeat(review.rating), 80, yOffset + 40);
-
-        // 후기 텍스트 (한 글자씩 처리하여 한글도 잘 줄바꿈)
-        ctx.font = '20px "Noto Sans KR", sans-serif';
-        ctx.fillStyle = '#334155';
-        const maxWidth = canvas.width - 160;
-        const chars = review.text.split('');
+    const drawWrappedText = (text: string, x: number, y: number, maxWidth: number, lineHeight: number, maxLines: number) => {
+        const chars = text.split('');
         let line = '';
-        let lineY = yOffset + 75;
-        const lineHeight = 28;
+        let lineY = y;
         let lineCount = 0;
-        const maxLines = 3;
 
         for (let i = 0; i < chars.length; i++) {
             const testLine = line + chars[i];
-            const metrics = ctx.measureText(testLine);
-            if (metrics.width > maxWidth && line.length > 0) {
-                ctx.fillText(line, 80, lineY);
+            if (ctx.measureText(testLine).width > maxWidth && line.length > 0) {
+                ctx.fillText(line, x, lineY);
                 line = chars[i];
                 lineY += lineHeight;
                 lineCount++;
-                if (lineCount >= maxLines) {
-                    // 마지막 줄에 ... 추가
-                    const remaining = chars.slice(i).join('');
+                if (lineCount >= maxLines - 1) {
+                    const remaining = chars.slice(i + 1).join('');
                     if (remaining.length > 0) {
-                        line = line.slice(0, -3) + '...';
+                        while (ctx.measureText(line + '...').width > maxWidth && line.length > 0) {
+                            line = line.slice(0, -1);
+                        }
+                        line += '...';
                     }
                     break;
                 }
@@ -255,17 +221,126 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
                 line = testLine;
             }
         }
-        if (lineCount < maxLines) {
-            ctx.fillText(line, 80, lineY);
+
+        ctx.fillText(line, x, lineY);
+    };
+
+    const bgGradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    bgGradient.addColorStop(0, '#f8fafc');
+    bgGradient.addColorStop(0.48, '#eef2ff');
+    bgGradient.addColorStop(1, '#fff7ed');
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    try {
+        if (bgImageUrl) {
+            const img = new window.Image();
+            img.src = bgImageUrl;
+            ctx.globalAlpha = 0.12;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            ctx.globalAlpha = 1;
         }
+    } catch {
+        ctx.globalAlpha = 1;
+    }
 
-        // 작성자
-        ctx.font = 'bold 20px "Noto Sans KR", sans-serif';
-        ctx.fillStyle = '#64748b';
-        ctx.textAlign = 'right';
-        ctx.fillText(`- ${review.author}`, canvas.width - 80, yOffset + 170);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.62)';
+    ctx.beginPath();
+    ctx.arc(735, 145, 170, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(37, 99, 235, 0.08)';
+    ctx.beginPath();
+    ctx.arc(120, 830, 210, 0, Math.PI * 2);
+    ctx.fill();
 
-        yOffset += 240;
+    ctx.fillStyle = '#111827';
+    ctx.font = 'bold 18px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'left';
+    drawRoundRect(64, 58, 138, 42, 21);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('REAL REVIEW', 86, 85);
+
+    ctx.fillStyle = '#111827';
+    ctx.font = 'bold 52px "Noto Sans KR", sans-serif';
+    ctx.fillText('고객이 먼저 알아본', 64, 155);
+    ctx.fillText('만족감의 차이', 64, 218);
+
+    const avgRating = safeReviews.reduce((sum, r) => sum + r.rating, 0) / safeReviews.length;
+    ctx.fillStyle = '#475569';
+    ctx.font = '24px "Noto Sans KR", sans-serif';
+    ctx.fillText(`평균 ${avgRating.toFixed(1)}점 · 실제 사용 후기 ${safeReviews.length}건`, 66, 270);
+
+    ctx.shadowColor = 'rgba(15, 23, 42, 0.12)';
+    ctx.shadowBlur = 28;
+    ctx.shadowOffsetY = 12;
+    drawRoundRect(566, 72, 230, 126, 28);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 42px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(avgRating.toFixed(1), 681, 124);
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillStyle = '#f59e0b';
+    ctx.fillText('★'.repeat(Math.round(avgRating)), 681, 164);
+
+    const cardX = 64;
+    const cardW = canvas.width - 128;
+    const cardH = 178;
+    let yOffset = 335;
+
+    safeReviews.slice(0, 3).forEach((review, idx) => {
+        ctx.shadowColor = 'rgba(15, 23, 42, 0.11)';
+        ctx.shadowBlur = 24;
+        ctx.shadowOffsetY = 12;
+        drawRoundRect(cardX, yOffset, cardW, cardH, 28);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+
+        const accentGradient = ctx.createLinearGradient(cardX, yOffset, cardX, yOffset + cardH);
+        accentGradient.addColorStop(0, '#2563eb');
+        accentGradient.addColorStop(1, '#ec4899');
+        drawRoundRect(cardX, yOffset, 8, cardH, 4);
+        ctx.fillStyle = accentGradient;
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(226, 232, 240, 0.95)';
+        ctx.lineWidth = 1.5;
+        drawRoundRect(cardX, yOffset, cardW, cardH, 28);
+        ctx.stroke();
+
+        ctx.fillStyle = '#f59e0b';
+        ctx.font = 'bold 23px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('★'.repeat(review.rating), cardX + 34, yOffset + 44);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 46px Georgia, serif';
+        ctx.fillText('“', cardX + cardW - 92, yOffset + 58);
+
+        ctx.fillStyle = '#1e293b';
+        ctx.font = 'bold 25px "Noto Sans KR", sans-serif';
+        drawWrappedText(review.text, cardX + 34, yOffset + 88, cardW - 96, 34, 2);
+
+        const authorText = review.author || '고객**';
+        ctx.font = 'bold 19px "Noto Sans KR", sans-serif';
+        const badgeW = Math.max(102, ctx.measureText(authorText).width + 42);
+        drawRoundRect(cardX + cardW - badgeW - 28, yOffset + cardH - 56, badgeW, 34, 17);
+        ctx.fillStyle = '#f1f5f9';
+        ctx.fill();
+        ctx.fillStyle = '#475569';
+        ctx.textAlign = 'center';
+        ctx.fillText(authorText, cardX + cardW - badgeW / 2 - 28, yOffset + cardH - 33);
+
+        yOffset += cardH + 32;
     });
 
     return canvas.toDataURL('image/png');
@@ -520,7 +595,7 @@ export const FONT_SCALE_OPTIONS = [
     { key: 'md', label: '보통',     value: 1.0 },
     { key: 'lg', label: '크게',     value: 1.2 },
     { key: 'xl', label: '아주크게', value: 1.4 },
-    { key: 'xxl', label: '초대형',   value: DEFAULT_DETAIL_FONT_SCALE },
+    { key: 'xxl', label: '초대형',   value: INTRO_DETAIL_FONT_SCALE },
 ] as const;
 
 const overlayTextOnImage = (
@@ -576,7 +651,7 @@ const overlayTextOnImage = (
             ctx.textBaseline = 'middle';
 
             let startY = 0;
-            if (position === 'top') startY = fontSize + 20;
+            if (position === 'top') startY = Math.max(fontSize * 0.9 + 12, 44);
             else if (position === 'middle') startY = (TARGET_HEIGHT / 2) - (totalTextHeight / 2) + (lineHeight / 2);
             else startY = TARGET_HEIGHT - (totalTextHeight + fontSize) + (lineHeight / 2);
 
@@ -720,7 +795,7 @@ export const DetailPlanner: React.FC = () => {
                     ...seg,
                     textPosition: isCombinationIntro || isStyleSection ? 'top' : 'bottom',
                     textColor: '#1a1a1a',
-                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
+                    fontScale: isCombinationIntro ? INTRO_DETAIL_FONT_SCALE : DEFAULT_DETAIL_FONT_SCALE,
                     rawImageUrl: ''
                 };
             });
@@ -1175,58 +1250,81 @@ Clean background, professional product photography style, maintain ALL original 
                                     고객 후기 추가하기
                                 </label>
                                 {includeReviews && (
-                                    <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-4">
-                                        {reviewsData.map((review, idx) => (
-                                            <div key={idx} className="bg-white p-4 rounded-lg border border-slate-200">
-                                                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 mb-2">
-                                                    <div className="md:col-span-2">
-                                                        <label className="block text-xs font-medium text-slate-700 mb-1">별점</label>
-                                                        <select value={review.rating} onChange={(e) => {
-                                                            const newReviews = [...reviewsData];
-                                                            newReviews[idx].rating = Number(e.target.value);
-                                                            setReviewsData(newReviews);
-                                                        }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none">
-                                                            <option value={5}>⭐⭐⭐⭐⭐</option>
-                                                            <option value={4}>⭐⭐⭐⭐</option>
-                                                            <option value={3}>⭐⭐⭐</option>
-                                                        </select>
+                                    <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-white via-slate-50 to-indigo-50/70 p-5 shadow-sm">
+                                        <div className="flex items-start justify-between gap-4 mb-5">
+                                            <div>
+                                                <p className="text-[11px] font-black tracking-[0.18em] text-indigo-600 uppercase">Review Template</p>
+                                                <p className="text-sm text-slate-500 mt-1">생성될 후기 섹션의 문장과 작성자 정보를 정리합니다.</p>
+                                            </div>
+                                            <span className="shrink-0 px-3 py-1.5 rounded-full bg-slate-900 text-white text-xs font-bold shadow-sm">
+                                                {reviewsData.length}개 후기
+                                            </span>
+                                        </div>
+                                        <div className="space-y-3">
+                                            {reviewsData.map((review, idx) => (
+                                                <div key={idx} className="relative rounded-2xl border border-white bg-white/90 p-4 shadow-sm ring-1 ring-slate-100">
+                                                    <div className="flex items-center justify-between mb-4">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-9 h-9 rounded-full bg-slate-900 text-white flex items-center justify-center text-sm font-black">
+                                                                {idx + 1}
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm font-bold text-slate-800">고객 후기 {idx + 1}</p>
+                                                                <p className="text-xs text-slate-400">상세페이지 신뢰도 섹션에 반영됩니다.</p>
+                                                            </div>
+                                                        </div>
+                                                        {reviewsData.length > 1 && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const newReviews = reviewsData.filter((_, i) => i !== idx);
+                                                                    setReviewsData(newReviews);
+                                                                }}
+                                                                className="w-8 h-8 rounded-full border border-slate-200 bg-white text-slate-400 hover:border-red-200 hover:bg-red-50 hover:text-red-600 flex items-center justify-center transition-colors"
+                                                                aria-label="후기 삭제"
+                                                            >
+                                                                <X className="w-4 h-4" />
+                                                            </button>
+                                                        )}
                                                     </div>
-                                                    <div className="md:col-span-8">
-                                                        <label className="block text-xs font-medium text-slate-700 mb-1">후기 내용</label>
-                                                        <input type="text" value={review.text} onChange={(e) => {
-                                                            const newReviews = [...reviewsData];
-                                                            newReviews[idx].text = e.target.value;
-                                                            setReviewsData(newReviews);
-                                                        }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
-                                                    </div>
-                                                    <div className="md:col-span-2">
-                                                        <label className="block text-xs font-medium text-slate-700 mb-1">작성자</label>
-                                                        <input type="text" value={review.author} onChange={(e) => {
-                                                            const newReviews = [...reviewsData];
-                                                            newReviews[idx].author = e.target.value;
-                                                            setReviewsData(newReviews);
-                                                        }} className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" />
+                                                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                                                        <div className="md:col-span-2">
+                                                            <label className="block text-xs font-bold text-slate-600 mb-1.5">별점</label>
+                                                            <select value={review.rating} onChange={(e) => {
+                                                                const newReviews = [...reviewsData];
+                                                                newReviews[idx].rating = Number(e.target.value);
+                                                                setReviewsData(newReviews);
+                                                            }} className="w-full p-3 border border-slate-200 bg-slate-50 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-bold text-slate-800">
+                                                                <option value={5}>5점</option>
+                                                                <option value={4}>4점</option>
+                                                                <option value={3}>3점</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="md:col-span-7">
+                                                            <label className="block text-xs font-bold text-slate-600 mb-1.5">후기 내용</label>
+                                                            <input type="text" value={review.text} onChange={(e) => {
+                                                                const newReviews = [...reviewsData];
+                                                                newReviews[idx].text = e.target.value;
+                                                                setReviewsData(newReviews);
+                                                            }} className="w-full p-3 border border-slate-200 bg-slate-50 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm text-slate-800" />
+                                                        </div>
+                                                        <div className="md:col-span-3">
+                                                            <label className="block text-xs font-bold text-slate-600 mb-1.5">작성자</label>
+                                                            <input type="text" value={review.author} onChange={(e) => {
+                                                                const newReviews = [...reviewsData];
+                                                                newReviews[idx].author = e.target.value;
+                                                                setReviewsData(newReviews);
+                                                            }} className="w-full p-3 border border-slate-200 bg-slate-50 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm text-slate-800" />
+                                                        </div>
                                                     </div>
                                                 </div>
-                                                {reviewsData.length > 1 && (
-                                                    <button
-                                                        onClick={() => {
-                                                            const newReviews = reviewsData.filter((_, i) => i !== idx);
-                                                            setReviewsData(newReviews);
-                                                        }}
-                                                        className="text-red-600 hover:text-red-700 text-xs font-medium flex items-center gap-1"
-                                                    >
-                                                        <X className="w-3 h-3" />
-                                                        이 후기 삭제
-                                                    </button>
-                                                )}
-                                            </div>
-                                        ))}
+                                            ))}
+                                        </div>
                                         <button
                                             onClick={() => {
                                                 setReviewsData([...reviewsData, { rating: 5, text: '', author: '고객**' }]);
                                             }}
-                                            className="w-full p-3 border-2 border-dashed border-slate-300 rounded-lg text-slate-600 hover:border-blue-500 hover:text-blue-600 font-medium transition-colors flex items-center justify-center gap-2"
+                                            className="w-full mt-4 p-3.5 border border-dashed border-slate-300 rounded-xl bg-white/80 text-slate-700 hover:border-slate-900 hover:bg-slate-900 hover:text-white font-bold transition-colors flex items-center justify-center gap-2"
                                         >
                                             <Upload className="w-4 h-4" />
                                             후기 추가하기
