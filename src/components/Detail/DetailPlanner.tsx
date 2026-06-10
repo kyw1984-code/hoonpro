@@ -4,6 +4,10 @@ import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, 
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
 type DesignPresetKey = 'premium' | 'minimal' | 'street' | 'lifestyle' | 'deal' | 'clean';
+type ConversionModeKey = 'auto' | 'premiumTrust' | 'bundleValue' | 'problemSolution' | 'dealFocus';
+type ModelGenderKey = 'auto' | 'female' | 'male' | 'mixed';
+type ModelAgeKey = 'auto' | '20s' | '30s' | '40s';
+type ShotPreferenceKey = 'auto' | 'full' | 'half' | 'closeup' | 'lifestyle';
 
 const DEFAULT_DETAIL_FONT_SCALE = 1.0;
 const INTRO_DETAIL_FONT_SCALE = 1.8;
@@ -33,6 +37,21 @@ interface DesignPreset {
     backgroundGuide: string;
     defaultTextColor: string;
     reviewTheme: ReviewTheme;
+}
+
+interface DetailInputInfo {
+    name: string;
+    category: string;
+    features: string;
+    target: string;
+    imageInstruction: string;
+    combinationType: CombinationType;
+    designPreset: DesignPresetKey;
+    conversionEnabled: boolean;
+    conversionMode: ConversionModeKey;
+    modelGender: ModelGenderKey;
+    modelAge: ModelAgeKey;
+    shotPreference: ShotPreferenceKey;
 }
 
 const DESIGN_PRESETS: Record<DesignPresetKey, DesignPreset> = {
@@ -188,6 +207,36 @@ const COMBINATION_OPTIONS: Array<{ value: CombinationType; label: string; desc: 
     { value: '1+1+1', label: '1+1+1 상품', desc: '인트로에 3개 구성을 강조' },
 ];
 
+const CONVERSION_MODE_OPTIONS: Array<{ value: ConversionModeKey; label: string; desc: string }> = [
+    { value: 'auto', label: '자동 추천', desc: '상품 구성과 디자인 스타일에 맞춰 설득 흐름 자동 선택' },
+    { value: 'premiumTrust', label: '프리미엄 신뢰형', desc: '고급감, 소재, 품질 근거를 중심으로 구성' },
+    { value: 'bundleValue', label: '조합상품 혜택형', desc: '1+1, 1+1+1 구성 가치와 활용성을 강조' },
+    { value: 'problemSolution', label: '문제 해결형', desc: '고객 고민을 먼저 짚고 해결 장면을 강화' },
+    { value: 'dealFocus', label: '세일/혜택형', desc: '검증되지 않은 할인율 없이 구성 가치와 구매 이유 강조' },
+];
+
+const MODEL_GENDER_OPTIONS: Array<{ value: ModelGenderKey; label: string }> = [
+    { value: 'auto', label: '자동' },
+    { value: 'female', label: '여성 모델' },
+    { value: 'male', label: '남성 모델' },
+    { value: 'mixed', label: '혼합 모델' },
+];
+
+const MODEL_AGE_OPTIONS: Array<{ value: ModelAgeKey; label: string }> = [
+    { value: 'auto', label: '자동' },
+    { value: '20s', label: '20대' },
+    { value: '30s', label: '30대' },
+    { value: '40s', label: '40대' },
+];
+
+const SHOT_PREFERENCE_OPTIONS: Array<{ value: ShotPreferenceKey; label: string }> = [
+    { value: 'auto', label: '자동 배정' },
+    { value: 'full', label: '전신컷' },
+    { value: 'half', label: '반신컷' },
+    { value: 'closeup', label: '클로즈업' },
+    { value: 'lifestyle', label: '라이프컷' },
+];
+
 const getCombinationCount = (type: CombinationType): number => {
     if (type === '1+1') return 2;
     if (type === '1+1+1') return 3;
@@ -198,6 +247,140 @@ const getCombinationCountLabel = (count: number): string => {
     if (count === 2) return '두 개';
     if (count === 3) return '세 개';
     return '한 개';
+};
+
+const getEffectiveConversionMode = (
+    enabled: boolean,
+    selectedMode: ConversionModeKey,
+    combinationType: CombinationType,
+    designPreset: DesignPresetKey
+): ConversionModeKey => {
+    if (!enabled) return 'auto';
+    if (selectedMode !== 'auto') return selectedMode;
+    if (combinationType !== 'single') return 'bundleValue';
+    if (designPreset === 'premium') return 'premiumTrust';
+    if (designPreset === 'deal') return 'dealFocus';
+    return 'problemSolution';
+};
+
+const getConversionModeLabel = (mode: ConversionModeKey): string => (
+    CONVERSION_MODE_OPTIONS.find(option => option.value === mode)?.label || '자동 추천'
+);
+
+const getFallbackConversionRole = (index: number, combinationType: CombinationType): string => {
+    if (index === 0) return combinationType === 'single' ? '핵심 오퍼' : '조합 핵심 오퍼';
+    if (index === 1) return '고객 문제/상황';
+    if (index === 2) return '구매 근거';
+    if (index === 3) return '제품 디테일';
+    if (index === 4) return '활용 장면';
+    return '구매 안심';
+};
+
+const getFallbackSectionType = (index: number, combinationType: CombinationType): string => {
+    const role = getFallbackConversionRole(index, combinationType);
+    if (role.includes('오퍼')) return 'offer';
+    if (role.includes('문제')) return 'problem';
+    if (role.includes('근거')) return 'proof';
+    if (role.includes('디테일')) return 'detail';
+    if (role.includes('활용')) return 'lifestyle';
+    return 'trust';
+};
+
+const getAutoShotType = (segment: any, index: number): ShotPreferenceKey => {
+    const text = `${segment.title || ''} ${segment.conversionRole || ''} ${segment.sectionType || ''}`.toLowerCase();
+    if (index === 0) return 'half';
+    if (text.includes('디테일') || text.includes('detail') || text.includes('소재') || text.includes('마감')) return 'closeup';
+    if (text.includes('활용') || text.includes('라이프') || text.includes('상황') || text.includes('lifestyle')) return 'lifestyle';
+    if (text.includes('핏') || text.includes('실루엣') || text.includes('착용')) return 'full';
+    return index % 3 === 0 ? 'full' : index % 3 === 1 ? 'half' : 'closeup';
+};
+
+const buildModelProfileInstruction = (info: DetailInputInfo): string => {
+    const genderText = {
+        auto: 'Choose the model gender that best matches the product category and target customer.',
+        female: 'Use a fictional female Korean model.',
+        male: 'Use a fictional male Korean model.',
+        mixed: 'Use a natural mix of fictional Korean models when multiple models appear.',
+    }[info.modelGender];
+    const ageText = {
+        auto: 'Choose a realistic adult age range that best matches the target customer.',
+        '20s': 'Use a fictional model in their 20s.',
+        '30s': 'Use a fictional model in their 30s.',
+        '40s': 'Use a fictional model in their 40s.',
+    }[info.modelAge];
+
+    return `
+MODEL PROFILE CONTROL:
+- ${genderText}
+- ${ageText}
+- The model must be a newly generated fictional person and must not copy any real person from the reference images.
+`;
+};
+
+const buildShotCompositionInstruction = (segment: any, segmentIndex: number, shotPreference: ShotPreferenceKey): string => {
+    const shotType = shotPreference === 'auto'
+        ? (segment.shotType || getAutoShotType(segment, segmentIndex))
+        : shotPreference;
+    const shotGuide: Record<ShotPreferenceKey, string> = {
+        auto: 'Use the most suitable e-commerce model cut for this section.',
+        full: 'Use a full-body model cut with the whole outfit/product visible and no cropped head or feet.',
+        half: 'Use a waist-up or half-body model cut with the product large and clear.',
+        closeup: 'Use an extreme close-up or detail-focused model cut showing texture, fit, finish, and product details.',
+        lifestyle: 'Use a natural lifestyle model scene that shows how the product is used in daily life.',
+    };
+
+    return `
+SECTION SHOT COMPOSITION:
+- Conversion role: ${segment.conversionRole || getFallbackConversionRole(segmentIndex, 'single')}
+- Required shot type: ${shotType}
+- ${shotGuide[shotType as ShotPreferenceKey] || shotGuide.auto}
+- Keep the overlay copy-safe area clean and avoid placing model faces or critical product details under the text area.
+`;
+};
+
+const buildConversionImageInstruction = (segment: any): string => {
+    if (!segment.conversionRole && !segment.sectionType) return '';
+    return `
+CONVERSION FUNNEL PURPOSE:
+- This image supports: ${segment.conversionRole || 'purchase persuasion'}
+- Section type: ${segment.sectionType || 'conversion'}
+- The image must visually support this selling purpose without adding any text inside the generated image.
+`;
+};
+
+const buildDetailImagePrompt = (
+    segment: any,
+    segmentIndex: number,
+    info: DetailInputInfo,
+    designPreset: DesignPreset
+): string => {
+    const colorInstruction = info.imageInstruction
+        ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
+        : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
+    const modelCutInstruction = buildModelCutInstruction(info.combinationType, segmentIndex);
+    const combinationInstruction = buildCombinationImageInstruction(info.combinationType, segmentIndex);
+    const designPresetInstruction = buildDesignPresetImageInstruction(designPreset);
+    const modelProfileInstruction = buildModelProfileInstruction(info);
+    const shotInstruction = buildShotCompositionInstruction(segment, segmentIndex, info.shotPreference);
+    const conversionInstruction = buildConversionImageInstruction(segment);
+
+    return `High quality e-commerce product banner image. STRICT REQUIREMENTS:
+- NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
+- Use one seamless full-page background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, or hard dividers for overlay copy.
+- Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
+- CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
+- If generating a back view and the reference back image has a logo, include that logo exactly
+- If generating a front view and the reference front image has a logo, include that logo exactly
+- DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
+- Focus on visual composition only: ${segment.visualPrompt}
+${designPresetInstruction}
+${modelCutInstruction}
+${combinationInstruction}
+${modelProfileInstruction}
+${shotInstruction}
+${conversionInstruction}
+${colorInstruction}
+Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
 };
 
 const buildCombinationIntroSegment = (combinationType: CombinationType, productName: string) => {
@@ -260,64 +443,391 @@ DESIGN PRESET (${designPreset.label}):
 - Keep the selected style consistent across all generated sections.
 `;
 
-// ✅ 인증서 이미지 생성 함수
-const generateCertificateImage = (certType: string, certNumber: string, certDate: string): string => {
+const drawCanvasRoundRect = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radius: number
+) => {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    ctx.lineTo(x + r, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+};
+
+const drawCanvasWrappedText = (
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    maxWidth: number,
+    lineHeight: number,
+    maxLines: number
+) => {
+    const chars = text.split('');
+    let line = '';
+    let lineY = y;
+    let lines = 0;
+
+    for (let i = 0; i < chars.length; i++) {
+        const testLine = line + chars[i];
+        if (ctx.measureText(testLine).width > maxWidth && line.length > 0) {
+            ctx.fillText(line, x, lineY);
+            line = chars[i];
+            lineY += lineHeight;
+            lines++;
+            if (lines >= maxLines - 1) {
+                while (ctx.measureText(line + '...').width > maxWidth && line.length > 0) {
+                    line = line.slice(0, -1);
+                }
+                line += '...';
+                break;
+            }
+        } else {
+            line = testLine;
+        }
+    }
+
+    ctx.fillText(line, x, lineY);
+};
+
+const fillPresetBackground = (ctx: CanvasRenderingContext2D, width: number, height: number, designPreset: DesignPreset) => {
+    const theme = designPreset.reviewTheme;
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, theme.bgStart);
+    gradient.addColorStop(0.5, theme.bgMid);
+    gradient.addColorStop(1, theme.bgEnd);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+};
+
+const splitFeaturePhrases = (features: string, fallback: string): string[] => {
+    const phrases = features
+        .split(/[\n,ㆍ·|/]+/)
+        .map(item => item.replace(/^[-*]\s*/, '').trim())
+        .filter(Boolean);
+
+    const base = phrases.length > 0 ? phrases : [fallback, '매일 쓰기 좋은 편안함', '믿고 선택하는 완성도'];
+    return [...base, fallback, '선택이 쉬운 제품력'].slice(0, 3);
+};
+
+const generateConversionTemplateImage = (
+    label: string,
+    title: string,
+    subtitle: string,
+    items: Array<{ label: string; text: string }>,
+    designPreset: DesignPreset
+): string => {
     const canvas = document.createElement('canvas');
     canvas.width = 860;
     canvas.height = 1000;
     const ctx = canvas.getContext('2d')!;
+    const theme = designPreset.reviewTheme;
 
-    // 배경 그라디언트
-    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, '#f8fafc');
-    gradient.addColorStop(1, '#e2e8f0');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    fillPresetBackground(ctx, canvas.width, canvas.height, designPreset);
 
-    // 테두리
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(40, 40, canvas.width - 80, canvas.height - 80);
+    const accent = ctx.createLinearGradient(56, 0, canvas.width - 56, 0);
+    accent.addColorStop(0, theme.accentStart);
+    accent.addColorStop(1, theme.accentEnd);
+    ctx.fillStyle = accent;
+    drawCanvasRoundRect(ctx, 56, 62, canvas.width - 112, 8, 4);
+    ctx.fill();
 
-    // 인증 아이콘 (체크마크)
-    ctx.fillStyle = '#10b981';
-    ctx.beginPath();
-    ctx.arc(canvas.width / 2, 200, 60, 0, Math.PI * 2);
+    ctx.fillStyle = theme.badgeBg;
+    drawCanvasRoundRect(ctx, 62, 112, 178, 42, 21);
+    ctx.fill();
+    ctx.fillStyle = theme.badgeText;
+    ctx.font = 'bold 18px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 151, 133);
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = theme.heading;
+    ctx.font = 'bold 54px "Noto Sans KR", sans-serif';
+    drawCanvasWrappedText(ctx, title, 62, 232, canvas.width - 124, 62, 2);
+
+    ctx.fillStyle = theme.muted;
+    ctx.font = '23px "Noto Sans KR", sans-serif';
+    drawCanvasWrappedText(ctx, subtitle, 64, 332, canvas.width - 128, 34, 2);
+
+    const cardX = 64;
+    const cardW = canvas.width - 128;
+    const cardH = items.length > 3 ? 128 : 154;
+    let y = 420;
+
+    items.slice(0, 4).forEach((item, idx) => {
+        ctx.shadowColor = designPreset.defaultTextColor === '#ffffff' ? 'rgba(0, 0, 0, 0.34)' : 'rgba(15, 23, 42, 0.13)';
+        ctx.shadowBlur = 22;
+        ctx.shadowOffsetY = 12;
+        drawCanvasRoundRect(ctx, cardX, y, cardW, cardH, 26);
+        ctx.fillStyle = theme.cardBg;
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+
+        ctx.fillStyle = accent;
+        drawCanvasRoundRect(ctx, cardX + 26, y + 30, 62, 62, 31);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 24px "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(idx + 1), cardX + 57, y + 61);
+
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillStyle = theme.heading;
+        ctx.font = 'bold 26px "Noto Sans KR", sans-serif';
+        ctx.fillText(item.label, cardX + 112, y + 52);
+        ctx.fillStyle = theme.body;
+        ctx.font = '22px "Noto Sans KR", sans-serif';
+        drawCanvasWrappedText(ctx, item.text, cardX + 112, y + 92, cardW - 150, 32, 2);
+        y += cardH + 24;
+    });
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = theme.muted;
+    ctx.font = '20px "Noto Sans KR", sans-serif';
+    ctx.fillText(`${designPreset.label} 전환형 상세페이지 템플릿`, canvas.width / 2, canvas.height - 72);
+
+    return canvas.toDataURL('image/png');
+};
+
+const buildConversionTemplateSegments = (params: {
+    productName: string;
+    category: string;
+    features: string;
+    target: string;
+    combinationType: CombinationType;
+    designPreset: DesignPreset;
+    mode: ConversionModeKey;
+}) => {
+    const featurePhrases = splitFeaturePhrases(params.features, params.productName || params.category || '상품의 핵심 장점');
+    const targetText = params.target || '고객';
+    const combinationCount = getCombinationCount(params.combinationType);
+    const countLabel = getCombinationCountLabel(combinationCount);
+    const now = Date.now();
+    const afterIntro: any[] = [];
+    const bottom: any[] = [];
+
+    const benefitItems = featurePhrases.map((feature, idx) => ({
+        label: idx === 0 ? '첫 번째 이유' : idx === 1 ? '두 번째 이유' : '세 번째 이유',
+        text: feature,
+    }));
+    const benefitUrl = generateConversionTemplateImage(
+        'WHY BUY',
+        '선택해야 하는 이유',
+        `${targetText}에게 필요한 핵심 장점을 한눈에 정리했습니다.`,
+        benefitItems,
+        params.designPreset
+    );
+    afterIntro.push({
+        id: `conversion-benefits-${now}`,
+        title: '핵심 혜택 요약',
+        logicalSections: ['전환율', '구매 이유'],
+        conversionRole: '구매 근거',
+        sectionType: 'conversion-benefits',
+        keyMessage: '',
+        visualPrompt: 'Conversion benefit summary card generated automatically.',
+        imageUrl: benefitUrl,
+        rawImageUrl: benefitUrl,
+        textPosition: 'bottom',
+        textColor: params.designPreset.defaultTextColor,
+        fontScale: DEFAULT_DETAIL_FONT_SCALE,
+        isGenerating: false,
+        staticImage: true,
+    });
+
+    if (params.combinationType !== 'single' || params.mode === 'bundleValue') {
+        const bundleUrl = generateConversionTemplateImage(
+            'BUNDLE VALUE',
+            `${params.combinationType === 'single' ? '구성 가치' : `${params.combinationType} 구성 가치`}`,
+            `${countLabel}를 함께 준비했을 때 느껴지는 실용성을 강조합니다.`,
+            [
+                { label: '여유분 확보', text: '자주 쓰는 상품을 한 번에 준비해 사용 흐름이 끊기지 않습니다.' },
+                { label: '함께 활용', text: '가족, 파트너, 상황별 예비용으로 나누어 쓰기 좋습니다.' },
+                { label: '선물 가치', text: '실용적인 구성이라 부담 없이 선물하기 좋은 선택입니다.' },
+            ],
+            params.designPreset
+        );
+        afterIntro.push({
+            id: `conversion-bundle-${now}`,
+            title: '조합상품 가치 강조',
+            logicalSections: ['전환율', '조합 혜택'],
+            conversionRole: '조합 가치',
+            sectionType: 'bundle-value',
+            keyMessage: '',
+            visualPrompt: 'Bundle value conversion card generated automatically.',
+            imageUrl: bundleUrl,
+            rawImageUrl: bundleUrl,
+            textPosition: 'bottom',
+            textColor: params.designPreset.defaultTextColor,
+            fontScale: DEFAULT_DETAIL_FONT_SCALE,
+            isGenerating: false,
+            staticImage: true,
+        });
+    }
+
+    const problemUrl = generateConversionTemplateImage(
+        'PROBLEM SOLVED',
+        '고객 고민 해결',
+        `${params.category || '상품'} 선택 전 자주 고민하는 부분을 구매 이유로 바꿉니다.`,
+        [
+            { label: '착용감/사용감', text: '매일 사용해도 부담 없는 편안함을 중심으로 보여줍니다.' },
+            { label: '소재와 마감', text: featurePhrases[0] || '눈으로 확인되는 제품 완성도를 강조합니다.' },
+            { label: '활용 상황', text: '일상 속에서 자연스럽게 쓰이는 장면으로 선택을 돕습니다.' },
+        ],
+        params.designPreset
+    );
+    afterIntro.push({
+        id: `conversion-problem-${now}`,
+        title: '고객 고민 해결',
+        logicalSections: ['전환율', '문제 해결'],
+        conversionRole: '고객 문제/상황',
+        sectionType: 'problem-solution',
+        keyMessage: '',
+        visualPrompt: 'Problem solution conversion card generated automatically.',
+        imageUrl: problemUrl,
+        rawImageUrl: problemUrl,
+        textPosition: 'bottom',
+        textColor: params.designPreset.defaultTextColor,
+        fontScale: DEFAULT_DETAIL_FONT_SCALE,
+        isGenerating: false,
+        staticImage: true,
+    });
+
+    const faqUrl = generateConversionTemplateImage(
+        'BUYING FAQ',
+        '구매 전 확인하세요',
+        '배송/교환 안내가 아닌 제품 선택에 필요한 궁금증만 정리했습니다.',
+        [
+            { label: '어떤 분께 맞나요?', text: `${targetText}이 자연스럽게 쓰기 좋은 상세 구성으로 제안합니다.` },
+            { label: '무엇을 확인하면 좋나요?', text: '실측, 소재, 활용 장면을 함께 비교하면 선택이 쉬워집니다.' },
+            { label: '관리 부담은 어떤가요?', text: '하단 제품 정보 및 관리방법에서 세탁과 주의사항을 확인하세요.' },
+        ],
+        params.designPreset
+    );
+    bottom.push({
+        id: `conversion-faq-${now}`,
+        title: '구매 안심 FAQ',
+        logicalSections: ['전환율', '구매 안심'],
+        conversionRole: '구매 안심 정보',
+        sectionType: 'buying-faq',
+        keyMessage: '',
+        visualPrompt: 'Buying FAQ conversion card generated automatically.',
+        imageUrl: faqUrl,
+        rawImageUrl: faqUrl,
+        textPosition: 'bottom',
+        textColor: params.designPreset.defaultTextColor,
+        fontScale: DEFAULT_DETAIL_FONT_SCALE,
+        isGenerating: false,
+        staticImage: true,
+    });
+
+    return { afterIntro, bottom };
+};
+
+// ✅ 인증서 이미지 생성 함수
+const generateCertificateImage = (certType: string, certNumber: string, certDate: string, designPreset: DesignPreset): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 860;
+    canvas.height = 1000;
+    const ctx = canvas.getContext('2d')!;
+    const theme = designPreset.reviewTheme;
+
+    fillPresetBackground(ctx, canvas.width, canvas.height, designPreset);
+
+    ctx.shadowColor = designPreset.defaultTextColor === '#ffffff' ? 'rgba(0, 0, 0, 0.38)' : 'rgba(15, 23, 42, 0.14)';
+    ctx.shadowBlur = 30;
+    ctx.shadowOffsetY = 18;
+    drawCanvasRoundRect(ctx, 72, 82, canvas.width - 144, canvas.height - 164, 34);
+    ctx.fillStyle = theme.cardBg;
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+
+    const accent = ctx.createLinearGradient(120, 0, canvas.width - 120, 0);
+    accent.addColorStop(0, theme.accentStart);
+    accent.addColorStop(1, theme.accentEnd);
+    ctx.fillStyle = accent;
+    drawCanvasRoundRect(ctx, 142, 140, 140, 140, 70);
     ctx.fill();
 
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 8;
+    ctx.lineWidth = 10;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(canvas.width / 2 - 30, 200);
-    ctx.lineTo(canvas.width / 2 - 10, 220);
-    ctx.lineTo(canvas.width / 2 + 30, 180);
+    ctx.moveTo(178, 210);
+    ctx.lineTo(206, 238);
+    ctx.lineTo(250, 184);
     ctx.stroke();
 
-    // 제목
-    ctx.fillStyle = '#1e293b';
-    ctx.font = 'bold 48px "Noto Sans KR", sans-serif';
+    ctx.fillStyle = theme.badgeBg;
+    drawCanvasRoundRect(ctx, 324, 146, 214, 42, 21);
+    ctx.fill();
+    ctx.fillStyle = theme.badgeText;
+    ctx.font = 'bold 18px "Noto Sans KR", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('품질 인증서', canvas.width / 2, 320);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('QUALITY PROOF', 431, 167);
 
-    // 인증 타입
-    ctx.font = 'bold 38px "Noto Sans KR", sans-serif';
-    ctx.fillStyle = '#334155';
-    ctx.fillText(certType, canvas.width / 2, 420);
+    ctx.fillStyle = theme.heading;
+    ctx.font = 'bold 48px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('품질 인증서', 324, 246);
 
-    // 인증 정보
-    ctx.font = '28px "Noto Sans KR", sans-serif';
-    ctx.fillStyle = '#64748b';
-    ctx.fillText(`인증번호: ${certNumber}`, canvas.width / 2, 520);
-    ctx.fillText(`발급일자: ${certDate}`, canvas.width / 2, 580);
+    ctx.fillStyle = theme.muted;
+    ctx.font = '23px "Noto Sans KR", sans-serif';
+    ctx.fillText(`${designPreset.label} 톤앤매너에 맞춘 신뢰 정보`, 326, 294);
 
-    // 설명
+    const infoItems = [
+        ['인증 타입', certType],
+        ['인증번호', certNumber],
+        ['발급일자', certDate],
+    ];
+
+    let y = 390;
+    infoItems.forEach(([label, value]) => {
+        ctx.fillStyle = designPreset.defaultTextColor === '#ffffff' ? 'rgba(255, 255, 255, 0.07)' : 'rgba(15, 23, 42, 0.045)';
+        drawCanvasRoundRect(ctx, 132, y, canvas.width - 264, 92, 22);
+        ctx.fill();
+        ctx.fillStyle = theme.muted;
+        ctx.font = 'bold 20px "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(label, 168, y + 35);
+        ctx.fillStyle = theme.heading;
+        ctx.font = 'bold 27px "Noto Sans KR", sans-serif';
+        ctx.fillText(value, 168, y + 70);
+        y += 118;
+    });
+
+    ctx.strokeStyle = designPreset.defaultTextColor === '#ffffff' ? 'rgba(255, 255, 255, 0.16)' : 'rgba(15, 23, 42, 0.12)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(132, 770);
+    ctx.lineTo(canvas.width - 132, 770);
+    ctx.stroke();
+
+    ctx.fillStyle = theme.body;
     ctx.font = '24px "Noto Sans KR", sans-serif';
-    ctx.fillStyle = '#94a3b8';
-    const desc = '본 제품은 엄격한 품질 기준을 통과한';
-    const desc2 = '안전하고 신뢰할 수 있는 제품입니다.';
-    ctx.fillText(desc, canvas.width / 2, 700);
-    ctx.fillText(desc2, canvas.width / 2, 750);
+    ctx.textAlign = 'center';
+    ctx.fillText('입력한 인증 정보를 바탕으로 구성된 신뢰 섹션입니다.', canvas.width / 2, 826);
+    ctx.fillStyle = theme.muted;
+    ctx.font = '21px "Noto Sans KR", sans-serif';
+    ctx.fillText('판매 전 실제 인증 정보와 표시 기준을 반드시 확인하세요.', canvas.width / 2, 866);
 
     return canvas.toDataURL('image/png');
 };
@@ -543,83 +1053,88 @@ const generateProductInfoImage = (data: {
     manufacturer: string;
     washingMethod: string;
     precautions: string;
-}): string => {
+}, designPreset: DesignPreset): string => {
     const canvas = document.createElement('canvas');
     canvas.width = 860;
     canvas.height = 1000;
     const ctx = canvas.getContext('2d')!;
+    const theme = designPreset.reviewTheme;
 
-    // 배경 그라디언트
-    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, '#f8fafc');
-    gradient.addColorStop(1, '#e2e8f0');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    fillPresetBackground(ctx, canvas.width, canvas.height, designPreset);
 
-    // 제목
-    ctx.fillStyle = '#1e293b';
-    ctx.font = 'bold 40px "Noto Sans KR", sans-serif';
+    const accent = ctx.createLinearGradient(62, 0, canvas.width - 62, 0);
+    accent.addColorStop(0, theme.accentStart);
+    accent.addColorStop(1, theme.accentEnd);
+    ctx.fillStyle = accent;
+    drawCanvasRoundRect(ctx, 62, 68, canvas.width - 124, 8, 4);
+    ctx.fill();
+
+    ctx.fillStyle = theme.badgeBg;
+    drawCanvasRoundRect(ctx, 66, 118, 184, 42, 21);
+    ctx.fill();
+    ctx.fillStyle = theme.badgeText;
+    ctx.font = 'bold 18px "Noto Sans KR", sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('제품 정보 및 관리방법', canvas.width / 2, 80);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('PRODUCT INFO', 158, 139);
 
-    // 구분선
-    ctx.strokeStyle = '#cbd5e1';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(100, 120);
-    ctx.lineTo(canvas.width - 100, 120);
-    ctx.stroke();
+    ctx.fillStyle = theme.heading;
+    ctx.font = 'bold 48px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('제품 정보 및', 64, 236);
+    ctx.fillText('관리방법', 64, 292);
 
-    let yPos = 180;
-    const lineHeight = 45;
-    const sectionGap = 60;
+    ctx.fillStyle = theme.muted;
+    ctx.font = '23px "Noto Sans KR", sans-serif';
+    ctx.fillText('구매 전 확인이 필요한 기본 정보를 정리했습니다.', 66, 346);
 
-    // 정보 항목 그리기 함수
-    const drawInfoItem = (label: string, value: string, y: number) => {
-        if (!value.trim()) return y;
+    const items = [
+        ['소재', data.material],
+        ['원산지', data.origin],
+        ['제조사', data.manufacturer],
+        ['세탁방법', data.washingMethod],
+        ['주의사항', data.precautions],
+    ].filter(([, value]) => value.trim());
 
-        // 레이블
-        ctx.fillStyle = '#475569';
-        ctx.font = 'bold 26px "Noto Sans KR", sans-serif';
+    const safeItems = items.length > 0
+        ? items
+        : [['안내', '입력된 제품 정보가 없습니다. 필요 정보를 입력한 뒤 다시 생성해 주세요.']];
+
+    let yPos = 420;
+    safeItems.slice(0, 5).forEach(([label, value]) => {
+        const cardH = label === '세탁방법' || label === '주의사항' ? 104 : 86;
+        ctx.shadowColor = designPreset.defaultTextColor === '#ffffff' ? 'rgba(0, 0, 0, 0.30)' : 'rgba(15, 23, 42, 0.10)';
+        ctx.shadowBlur = 18;
+        ctx.shadowOffsetY = 10;
+        drawCanvasRoundRect(ctx, 64, yPos, canvas.width - 128, cardH, 22);
+        ctx.fillStyle = theme.cardBg;
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+
+        ctx.fillStyle = accent;
+        drawCanvasRoundRect(ctx, 92, yPos + 24, 112, 36, 18);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 18px "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, 148, yPos + 42);
+
+        ctx.fillStyle = theme.body;
+        ctx.font = '23px "Noto Sans KR", sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(`${label}:`, 100, y);
+        ctx.textBaseline = 'alphabetic';
+        drawCanvasWrappedText(ctx, value, 232, yPos + 48, canvas.width - 320, 30, cardH > 90 ? 2 : 1);
+        yPos += cardH + 22;
+    });
 
-        // 값 (여러 줄 처리)
-        ctx.fillStyle = '#1e293b';
-        ctx.font = '24px "Noto Sans KR", sans-serif';
-        const maxWidth = canvas.width - 250;
-        const lines = value.split('\n');
-        let currentY = y;
-
-        lines.forEach((line, idx) => {
-            // 긴 텍스트 줄바꿈 처리
-            const words = line.split('');
-            let currentLine = '';
-            let lineY = idx === 0 ? currentY : currentY + lineHeight;
-
-            for (let i = 0; i < words.length; i++) {
-                const testLine = currentLine + words[i];
-                const metrics = ctx.measureText(testLine);
-                if (metrics.width > maxWidth && currentLine.length > 0) {
-                    ctx.fillText(currentLine, 250, lineY);
-                    currentLine = words[i];
-                    lineY += lineHeight;
-                } else {
-                    currentLine = testLine;
-                }
-            }
-            ctx.fillText(currentLine, 250, lineY);
-            currentY = lineY;
-        });
-
-        return currentY + sectionGap;
-    };
-
-    yPos = drawInfoItem('소재', data.material, yPos);
-    yPos = drawInfoItem('원산지', data.origin, yPos);
-    yPos = drawInfoItem('제조사', data.manufacturer, yPos);
-    yPos = drawInfoItem('세탁방법', data.washingMethod, yPos);
-    yPos = drawInfoItem('주의사항', data.precautions, yPos);
+    ctx.fillStyle = theme.muted;
+    ctx.font = '20px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('상품 판매 전 실제 표시 기준과 필수 고지사항을 확인하세요.', canvas.width / 2, canvas.height - 74);
 
     return canvas.toDataURL('image/png');
 };
@@ -1034,7 +1549,7 @@ const overlayTextOnImage = (
 export const DetailPlanner: React.FC = () => {
     const [step, setStep] = useState<1 | 2 | 3>(1);
     const [loading, setLoading] = useState(false);
-    const [info, setInfo] = useState({
+    const [info, setInfo] = useState<DetailInputInfo>({
         name: '',
         category: '',
         features: '',
@@ -1042,6 +1557,11 @@ export const DetailPlanner: React.FC = () => {
         imageInstruction: '',
         combinationType: 'single' as CombinationType,
         designPreset: 'premium' as DesignPresetKey,
+        conversionEnabled: true,
+        conversionMode: 'auto',
+        modelGender: 'auto',
+        modelAge: 'auto',
+        shotPreference: 'auto',
     });
     const [length, setLength] = useState<number | 'auto'>('auto');
     const [referenceImages, setReferenceImages] = useState<string[]>([]);
@@ -1130,6 +1650,12 @@ export const DetailPlanner: React.FC = () => {
         setLoading(true);
         try {
             const selectedPreset = DESIGN_PRESETS[info.designPreset];
+            const effectiveConversionMode = getEffectiveConversionMode(
+                info.conversionEnabled,
+                info.conversionMode,
+                info.combinationType,
+                info.designPreset
+            );
             // 핵심 특징이 비어있으면 자동 생성
             let features = info.features;
             if (!features.trim()) {
@@ -1138,7 +1664,14 @@ export const DetailPlanner: React.FC = () => {
             }
 
             const combinationCount = getCombinationCount(info.combinationType);
-            const plannedSegments = await planDetail({ ...info, features, length, combinationCount, designPreset: selectedPreset });
+            const plannedSegments = await planDetail({
+                ...info,
+                features,
+                length,
+                combinationCount,
+                designPreset: selectedPreset,
+                effectiveConversionMode,
+            });
             const segmentsWithCombinationIntro = info.combinationType === 'single'
                 ? plannedSegments
                 : plannedSegments.length > 0
@@ -1152,13 +1685,18 @@ export const DetailPlanner: React.FC = () => {
                     : [buildCombinationIntroSegment(info.combinationType, info.name)];
             
             // 각 세그먼트에 텍스트 위치 기본값 설정
-            const mappedSegments = segmentsWithCombinationIntro.map((seg: any) => {
+            const mappedSegments = segmentsWithCombinationIntro.map((seg: any, index: number) => {
                 const isStyleSection = seg.title.includes('스타일') || 
                                      seg.title.includes('코디') || 
                                      seg.title.includes('연출');
                 const isCombinationIntro = info.combinationType !== 'single' && seg.title.includes('조합 인트로');
+                const conversionRole = seg.conversionRole || getFallbackConversionRole(index, info.combinationType);
+                const sectionType = seg.sectionType || getFallbackSectionType(index, info.combinationType);
                 return {
                     ...seg,
+                    conversionRole,
+                    sectionType,
+                    shotType: seg.shotType || getAutoShotType({ ...seg, conversionRole, sectionType }, index),
                     textPosition: isCombinationIntro || isStyleSection ? 'top' : 'bottom',
                     textColor: selectedPreset.defaultTextColor,
                     fontScale: isCombinationIntro ? INTRO_DETAIL_FONT_SCALE : DEFAULT_DETAIL_FONT_SCALE,
@@ -1170,6 +1708,17 @@ export const DetailPlanner: React.FC = () => {
             const bodySegments = mappedSegments.slice(1);
             const afterIntroSegments: any[] = [];
             const bottomSegments: any[] = [];
+            const conversionTemplates = info.conversionEnabled
+                ? buildConversionTemplateSegments({
+                    productName: info.name,
+                    category: info.category,
+                    features,
+                    target: info.target,
+                    combinationType: info.combinationType,
+                    designPreset: selectedPreset,
+                    mode: effectiveConversionMode,
+                })
+                : { afterIntro: [], bottom: [] };
 
             // 사이즈표는 옵션 템플릿 중 가장 먼저, 인트로 바로 다음에 배치
             if (includeSizeChart) {
@@ -1185,7 +1734,8 @@ export const DetailPlanner: React.FC = () => {
                     textPosition: 'bottom',
                     textColor: selectedPreset.defaultTextColor,
                     fontScale: DEFAULT_DETAIL_FONT_SCALE,
-                    isGenerating: false
+                    isGenerating: false,
+                    staticImage: true
                 });
             }
 
@@ -1225,16 +1775,21 @@ export const DetailPlanner: React.FC = () => {
                     textPosition: 'bottom',
                     textColor: selectedPreset.defaultTextColor,
                     fontScale: DEFAULT_DETAIL_FONT_SCALE,
-                    isGenerating: false
+                    isGenerating: false,
+                    staticImage: true
                 });
             }
+
+            afterIntroSegments.push(...conversionTemplates.afterIntro);
+            bottomSegments.push(...conversionTemplates.bottom);
 
             // 인증서는 본문 이후에 배치하되, 제품 정보 및 관리방법보다는 위에 둔다
             if (includeCertificate) {
                 const certUrl = generateCertificateImage(
                     certData.type,
                     certData.number || 'CB-XXX-XXXXXX',
-                    certData.date || new Date().toISOString().split('T')[0]
+                    certData.date || new Date().toISOString().split('T')[0],
+                    selectedPreset
                 );
                 bottomSegments.push({
                     id: 'certificate-' + Date.now(),
@@ -1247,13 +1802,14 @@ export const DetailPlanner: React.FC = () => {
                     textPosition: 'bottom',
                     textColor: selectedPreset.defaultTextColor,
                     fontScale: DEFAULT_DETAIL_FONT_SCALE,
-                    isGenerating: false
+                    isGenerating: false,
+                    staticImage: true
                 });
             }
 
             // 제품 정보 및 관리방법은 상세페이지 맨 하단에 고정
             if (includeProductInfo) {
-                const productInfoUrl = generateProductInfoImage(productInfoData);
+                const productInfoUrl = generateProductInfoImage(productInfoData, selectedPreset);
                 bottomSegments.push({
                     id: 'product-info-' + Date.now(),
                     title: '제품 정보 및 관리방법',
@@ -1265,7 +1821,8 @@ export const DetailPlanner: React.FC = () => {
                     textPosition: 'bottom',
                     textColor: selectedPreset.defaultTextColor,
                     fontScale: DEFAULT_DETAIL_FONT_SCALE,
-                    isGenerating: false
+                    isGenerating: false,
+                    staticImage: true
                 });
             }
 
@@ -1286,7 +1843,7 @@ export const DetailPlanner: React.FC = () => {
         // 병렬 생성을 위한 인덱스 배열 생성
         const indicesToGenerate = segments
             .map((seg, idx) => ({ seg, idx }))
-            .filter(({ seg }) => regenerate || !seg.imageUrl)
+            .filter(({ seg }) => !seg.staticImage && (regenerate || !seg.imageUrl))
             .map(({ idx }) => idx);
 
         // 모든 생성할 이미지를 isGenerating true로 설정
@@ -1305,28 +1862,7 @@ export const DetailPlanner: React.FC = () => {
 
             while (attempt <= MAX_RETRY) {
                 try {
-                    // ✅ 프롬프트에서 한글 텍스트 제거 — 배경/비주얼만 요청, 제품 로고 및 색상 보존
-                    const colorInstruction = info.imageInstruction
-                        ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
-                        : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
-                    const modelCutInstruction = buildModelCutInstruction(info.combinationType, i);
-                    const combinationInstruction = buildCombinationImageInstruction(info.combinationType, i);
-                    const designPresetInstruction = buildDesignPresetImageInstruction(selectedPreset);
-
-                    const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
-- NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
-- Use one seamless full-page background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, or hard dividers for overlay copy.
-- Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
-- CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
-- If generating a back view and the reference back image has a logo, include that logo exactly
-- If generating a front view and the reference front image has a logo, include that logo exactly
-- DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
-- Focus on visual composition only: ${segments[i].visualPrompt}
-${designPresetInstruction}
-${modelCutInstruction}
-${combinationInstruction}
-${colorInstruction}
-Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
+                    const prompt = buildDetailImagePrompt(segments[i], i, info, selectedPreset);
 
                     const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
 
@@ -1345,11 +1881,11 @@ Clean background, professional product photography style, maintain ALL original 
                     // ✅ Canvas로 한글 텍스트 덧씌우기 (위치 정보 포함)
                     const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage, segments[i].textPosition || 'bottom', segments[i].textColor || '#1a1a1a', segments[i].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
 
-                    setSegments(prev => {
-                        const newSegs = [...prev];
-                        newSegs[i] = { ...newSegs[i], imageUrl, rawImageUrl, isGenerating: false, error: false };
-                        return newSegs;
-                    });
+                        setSegments(prev => {
+                            const newSegs = [...prev];
+                            newSegs[i] = { ...newSegs[i], imageUrl, rawImageUrl, isGenerating: false, error: false, errorMessage: '' };
+                            return newSegs;
+                        });
                     break; // 성공하면 루프 탈출
                 } catch (e) {
                     console.error(`이미지 ${i + 1} 생성 실패 (시도 ${attempt + 1}/${MAX_RETRY + 1}):`, e);
@@ -1379,6 +1915,13 @@ Clean background, professional product photography style, maintain ALL original 
             }
         });
     };
+
+    const effectiveConversionMode = getEffectiveConversionMode(
+        info.conversionEnabled,
+        info.conversionMode,
+        info.combinationType,
+        info.designPreset
+    );
 
     return (
         <div className="max-w-5xl mx-auto p-6">
@@ -1457,6 +2000,45 @@ Clean background, professional product photography style, maintain ALL original 
                             <p className="text-xs text-slate-500 mt-2">선택한 스타일은 AI 문구, 이미지 분위기, 기본 문구 색상, 고객 후기 템플릿에 함께 적용됩니다.</p>
                         </div>
                         <div className="md:col-span-2">
+                            <div className="flex items-center justify-between gap-4 mb-3">
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-800">전환율 강화 모드</label>
+                                    <p className="text-xs text-slate-500 mt-1">첫인상, 문제 해결, 구매 근거, 제품 디테일, 구매 안심 흐름을 자동으로 잡습니다.</p>
+                                </div>
+                                <label className="inline-flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={info.conversionEnabled}
+                                        onChange={e => setInfo({ ...info, conversionEnabled: e.target.checked })}
+                                        className="w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                                    />
+                                    사용
+                                </label>
+                            </div>
+                            <div className={`grid grid-cols-1 md:grid-cols-5 gap-2 ${info.conversionEnabled ? '' : 'opacity-45 pointer-events-none'}`}>
+                                {CONVERSION_MODE_OPTIONS.map(option => {
+                                    const selected = info.conversionMode === option.value;
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setInfo({ ...info, conversionMode: option.value })}
+                                            className={`text-left p-3 rounded-xl border transition-all ${selected ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300 bg-white'}`}
+                                        >
+                                            <div className={`text-sm font-bold mb-1 ${selected ? 'text-blue-700' : 'text-slate-800'}`}>{option.label}</div>
+                                            <div className="text-[11px] text-slate-500 leading-relaxed">{option.desc}</div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {info.conversionEnabled && (
+                                <p className="text-xs text-blue-600 mt-2">
+                                    현재 적용: {getConversionModeLabel(effectiveConversionMode)}
+                                    {info.conversionMode === 'auto' && info.combinationType !== 'single' ? ' · 조합상품은 혜택형 흐름으로 자동 전환됩니다.' : ''}
+                                </p>
+                            )}
+                        </div>
+                        <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">
                                 추가 색상 요청 <span className="text-slate-400 font-normal">(선택 - 입력하지 않으면 원본 색상만 유지)</span>
                             </label>
@@ -1515,6 +2097,57 @@ Clean background, professional product photography style, maintain ALL original 
                                     ))}
                                 </div>
                             )}
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">모델컷 안정화 옵션</label>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                                <div>
+                                    <p className="text-xs font-bold text-slate-600 mb-2">모델 성별</p>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                        {MODEL_GENDER_OPTIONS.map(option => (
+                                            <button
+                                                key={option.value}
+                                                type="button"
+                                                onClick={() => setInfo({ ...info, modelGender: option.value })}
+                                                className={`py-2 px-2 rounded-lg border text-xs font-bold transition-colors ${info.modelGender === option.value ? 'border-blue-600 bg-white text-blue-700' : 'border-slate-200 bg-white/70 text-slate-500 hover:border-blue-300'}`}
+                                            >
+                                                {option.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-bold text-slate-600 mb-2">연령대</p>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                        {MODEL_AGE_OPTIONS.map(option => (
+                                            <button
+                                                key={option.value}
+                                                type="button"
+                                                onClick={() => setInfo({ ...info, modelAge: option.value })}
+                                                className={`py-2 px-2 rounded-lg border text-xs font-bold transition-colors ${info.modelAge === option.value ? 'border-blue-600 bg-white text-blue-700' : 'border-slate-200 bg-white/70 text-slate-500 hover:border-blue-300'}`}
+                                            >
+                                                {option.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className="text-xs font-bold text-slate-600 mb-2">컷 구도</p>
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                        {SHOT_PREFERENCE_OPTIONS.map(option => (
+                                            <button
+                                                key={option.value}
+                                                type="button"
+                                                onClick={() => setInfo({ ...info, shotPreference: option.value })}
+                                                className={`py-2 px-2 rounded-lg border text-xs font-bold transition-colors ${info.shotPreference === option.value ? 'border-blue-600 bg-white text-blue-700' : 'border-slate-200 bg-white/70 text-slate-500 hover:border-blue-300'}`}
+                                            >
+                                                {option.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                            <p className="text-xs text-slate-500 mt-2">자동 배정은 섹션 목적에 맞춰 전신, 반신, 클로즈업, 라이프스타일 컷을 나눠 지시합니다.</p>
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-2">상세페이지 길이 (구조)</label>
@@ -1754,7 +2387,7 @@ Clean background, professional product photography style, maintain ALL original 
                                 <ImageIcon className="w-5 h-5 mr-2" />
                                 이미지 생성
                             </button>
-                            {segments.some(s => s.imageUrl) && (
+                            {segments.some(s => s.imageUrl && !s.staticImage) && (
                                 <button onClick={() => handleGenerateAll(true)} className="bg-orange-500 hover:bg-orange-600 text-white font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
                                     <ImageIcon className="w-5 h-5 mr-2" />
                                     전체 재생성
@@ -1784,6 +2417,16 @@ Clean background, professional product photography style, maintain ALL original 
                                     </div>
                                     <div className="text-4xl font-black text-slate-200 mb-2">{String(idx + 1).padStart(2, '0')}</div>
                                     <div className="font-bold text-slate-700 text-center">{seg.title}</div>
+                                    {seg.conversionRole && (
+                                        <span className="mt-3 px-2.5 py-1 rounded-full bg-slate-900 text-white text-[11px] font-bold">
+                                            {seg.conversionRole}
+                                        </span>
+                                    )}
+                                    {seg.shotType && !seg.staticImage && (
+                                        <span className="mt-2 px-2 py-1 rounded-md bg-white border border-slate-200 text-slate-500 text-[11px] font-bold">
+                                            {seg.shotType === 'full' ? '전신컷' : seg.shotType === 'half' ? '반신컷' : seg.shotType === 'closeup' ? '클로즈업' : seg.shotType === 'lifestyle' ? '라이프컷' : '자동컷'}
+                                        </span>
+                                    )}
                                     <div className="mt-3 flex flex-wrap gap-1 justify-center">
                                         {seg.logicalSections.map((tag: string) => (
                                             <span key={tag} className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-md font-medium">{tag}</span>
@@ -1794,6 +2437,20 @@ Clean background, professional product photography style, maintain ALL original 
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Key Message (이미지에 들어갈 카피)</label>
                                         <textarea value={seg.keyMessage} onChange={(e) => { const newSegs = [...segments]; newSegs[idx].keyMessage = e.target.value; setSegments(newSegs); }} rows={2} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none font-medium" />
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">전환 역할</label>
+                                            <input value={seg.conversionRole || ''} onChange={(e) => { const newSegs = [...segments]; newSegs[idx].conversionRole = e.target.value; setSegments(newSegs); }} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-slate-700 mb-1">컷 타입</label>
+                                            <select value={seg.shotType || 'auto'} onChange={(e) => { const newSegs = [...segments]; newSegs[idx].shotType = e.target.value; setSegments(newSegs); }} disabled={seg.staticImage} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm disabled:bg-slate-100 disabled:text-slate-400">
+                                                {SHOT_PREFERENCE_OPTIONS.map(option => (
+                                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                                ))}
+                                            </select>
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Visual Prompt (이미지 연출 지시)</label>
@@ -1848,6 +2505,11 @@ Clean background, professional product photography style, maintain ALL original 
                                                 <Loader2 className="w-8 h-8 animate-spin mb-2 text-blue-500" />
                                                 <p className="font-medium">이미지 생성 중...</p>
                                             </div>
+                                        ) : seg.error ? (
+                                            <div className="flex flex-col items-center text-red-500 py-20 px-6 text-center">
+                                                <p className="font-bold mb-2">생성 실패</p>
+                                                <p className="text-xs text-red-400">{seg.errorMessage || '모델 잘림, 제품 미노출, 문구 영역 부족 가능성이 있어 재생성이 필요합니다.'}</p>
+                                            </div>
                                         ) : (
                                             <div className="text-slate-400 py-20">대기 중...</div>
                                         )}
@@ -1886,8 +2548,19 @@ Clean background, professional product photography style, maintain ALL original 
                                                 </span>
                                                 <span className="text-sm font-bold text-slate-600">#{idx + 1}</span>
                                                 <span className="text-sm font-medium text-slate-800">{seg.title}</span>
+                                                {seg.conversionRole && (
+                                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold">{seg.conversionRole}</span>
+                                                )}
+                                                {seg.staticImage && (
+                                                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">템플릿</span>
+                                                )}
                                             </div>
                                         </div>
+                                        {seg.error && (
+                                            <div className="mb-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
+                                                {seg.errorMessage || '생성 품질이 부족합니다. 모델 잘림, 제품 미노출, 문구 영역 부족 여부를 확인하고 AI 재생성을 시도하세요.'}
+                                            </div>
+                                        )}
                                         <div className="flex flex-col gap-2">
                                             <div>
                                                 <label className="block text-xs font-medium text-slate-600 mb-1">카피 문구</label>
@@ -2002,10 +2675,10 @@ Clean background, professional product photography style, maintain ALL original 
                                                         return newSegs;
                                                     });
                                                 }}
-                                                disabled={!seg.rawImageUrl || seg.isGenerating}
+                                                disabled={!seg.rawImageUrl || seg.isGenerating || seg.staticImage}
                                                 className="bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 text-slate-700 text-[10px] font-bold py-2 px-3 rounded-lg flex items-center justify-center transition-colors"
                                             >
-                                                문구만 적용
+                                                {seg.staticImage ? '템플릿 고정' : '문구만 적용'}
                                             </button>
                                             <button
                                                 onClick={async () => {
@@ -2018,27 +2691,7 @@ Clean background, professional product photography style, maintain ALL original 
 
                                                     try {
                                                         const selectedPreset = DESIGN_PRESETS[info.designPreset];
-                                                        const colorInstruction = info.imageInstruction
-                                                            ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
-                                                            : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
-                                                        const modelCutInstruction = buildModelCutInstruction(info.combinationType, idx);
-                                                        const combinationInstruction = buildCombinationImageInstruction(info.combinationType, idx);
-                                                        const designPresetInstruction = buildDesignPresetImageInstruction(selectedPreset);
-
-                                                        const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
-- NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
-- Use one seamless full-page background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, or hard dividers for overlay copy.
-- Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
-- CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
-- If generating a back view and the reference back image has a logo, include that logo exactly
-- If generating a front view and the reference front image has a logo, include that logo exactly
-- DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
-- Focus on visual composition only: ${segments[idx].visualPrompt}
-${designPresetInstruction}
-${modelCutInstruction}
-${combinationInstruction}
-${colorInstruction}
-Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
+                                                        const prompt = buildDetailImagePrompt(segments[idx], idx, info, selectedPreset);
 
                                                         const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
                                                         const validation = await validateImageQuality(rawImageUrl);
@@ -2051,7 +2704,7 @@ Clean background, professional product photography style, maintain ALL original 
 
                                                         setSegments(prev => {
                                                             const newSegs = [...prev];
-                                                            newSegs[idx] = { ...newSegs[idx], imageUrl, rawImageUrl, isGenerating: false, error: false };
+                                                            newSegs[idx] = { ...newSegs[idx], imageUrl, rawImageUrl, isGenerating: false, error: false, errorMessage: '' };
                                                             return newSegs;
                                                         });
                                                     } catch (e) {
@@ -2059,15 +2712,15 @@ Clean background, professional product photography style, maintain ALL original 
                                                         alert(`이미지 재생성에 실패했습니다: ${e}`);
                                                         setSegments(prev => {
                                                             const newSegs = [...prev];
-                                                            newSegs[idx] = { ...newSegs[idx], isGenerating: false, error: true };
+                                                            newSegs[idx] = { ...newSegs[idx], isGenerating: false, error: true, errorMessage: String(e) };
                                                             return newSegs;
                                                         });
                                                     }
                                                 }}
-                                                disabled={seg.isGenerating}
+                                                disabled={seg.isGenerating || seg.staticImage}
                                                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-[10px] font-bold py-2 px-3 rounded-lg flex items-center justify-center transition-colors"
                                             >
-                                                AI 전체 재생성
+                                                {seg.staticImage ? '템플릿 고정' : 'AI 전체 재생성'}
                                             </button>
                                         </div>
                                     </div>

@@ -75,6 +75,29 @@ export const planDetail = async (data: any) => {
  - 모든 섹션의 keyMessage와 visualPrompt는 위 스타일을 일관되게 반영하세요.
 `
       : '';
+    const conversionEnabled = data.conversionEnabled !== false;
+    const conversionMode = data.effectiveConversionMode || data.conversionMode || 'auto';
+    const conversionLabelMap: Record<string, string> = {
+      auto: '자동 추천',
+      premiumTrust: '프리미엄 신뢰형',
+      bundleValue: '조합상품 혜택형',
+      problemSolution: '문제 해결형',
+      dealFocus: '세일/혜택형',
+    };
+    const conversionGuide = conversionEnabled
+      ? `
+ 전환율 강화 모드:
+ - 적용 모드: ${conversionLabelMap[conversionMode] || '자동 추천'}
+ - 전체 흐름은 반드시 첫인상 → 문제 해결 → 근거/후기 → 제품 디테일 → 구매 안심 정보 순서로 설계하세요.
+ - 첫 번째 섹션 conversionRole은 반드시 "핵심 오퍼" 또는 조합상품이면 "조합 핵심 오퍼"로 작성하세요.
+ - 두 번째 섹션 conversionRole은 반드시 "고객 문제/상황"으로 작성하세요.
+ - 세 번째 섹션 conversionRole은 반드시 "구매 근거"로 작성하세요.
+ - 각 항목에 sectionType과 conversionRole을 반드시 포함하세요.
+ - sectionType은 offer, problem, proof, detail, lifestyle, trust 중 하나를 사용하세요.
+ - 실제 후기 수, 판매량, 할인율, 최저가, 인증 여부처럼 검증되지 않은 수치나 사실은 만들지 마세요.
+ - 고객 후기는 사용자가 별도 템플릿으로 입력할 수 있으므로 실제 후기처럼 보이는 허위 리뷰 문장은 생성하지 마세요.
+`
+      : '';
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -93,9 +116,10 @@ export const planDetail = async (data: any) => {
  상품 구성: ${combinationType ? `${combinationType} 조합상품 (${combinationCount}개 구성)` : '일반 상품'}
 ${combinationGuide}
 ${designGuide}
+${conversionGuide}
 
  반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
- 각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt 필드를 포함해야 합니다.
+ 각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt, sectionType, conversionRole 필드를 포함해야 합니다.
 
  중요 규칙 및 절대 금지 사항 (MUST FOLLOW):
  1. 반드시 제품의 시각적 가치(디테일, 소재, 착용샷, 연출샷 등)를 보여주는 '이미지 중심'의 섹션으로만 구성하세요.
@@ -108,6 +132,7 @@ ${designGuide}
     - 소재의 질감과 마감을 강조하는 클로즈업 섹션 (Extreme close-up)
     - 일상 생활에서의 자연스러운 사용/착용 연출 섹션 (Lifestyle shot)
     - 제품의 신뢰도를 높이는 브랜드 철학이나 품질 강조 섹션
+ 4. 검증되지 않은 할인율, 판매량, 리뷰 수, 평점, 인증 문구는 절대 만들지 마세요.
 
  keyMessage 작성 규칙:
  - 고객의 감성을 자극하는 전문 카피라이터 톤앤매너 유지
@@ -123,7 +148,7 @@ ${designGuide}
  - 조명, 배경, 각도, 질감, 모델 포즈를 사실적으로 기술
  - 모델 얼굴은 새롭게 생성된 가상의 인물로 표현하고 레퍼런스 인물의 얼굴을 복제하지 말 것
 
- 배열 예시: [ {"title": "오감으로 느끼는 편안함", "logicalSections": ["메인", "시각화"], "keyMessage": "몸에 닿는 순간 느껴지는\n천연 소재의 압도적인 부드러움", "visualPrompt": "A high-quality professional Korean e-commerce model cut of a fictional model wearing the product in a minimalist studio background with soft natural lighting, clearly showing the product texture, fit, and premium details."} ]
+ 배열 예시: [ {"title": "오감으로 느끼는 편안함", "logicalSections": ["메인", "시각화"], "sectionType": "offer", "conversionRole": "핵심 오퍼", "keyMessage": "몸에 닿는 순간 느껴지는\n천연 소재의 부드러움", "visualPrompt": "A high-quality professional Korean e-commerce model cut of a fictional model wearing the product in a minimalist studio background with soft natural lighting, clearly showing the product texture, fit, and premium details."} ]
       `.trim(),
     });
     await logApiCall('detail-plan', 'gemini-2.5-flash', response);
@@ -140,11 +165,18 @@ ${designGuide}
       arr = firstArray ? (firstArray as any[]) : [parsed];
     }
 
-    return arr.map((item: any) => ({
+    const fallbackRoles = combinationType
+      ? ['조합 핵심 오퍼', '고객 문제/상황', '구매 근거', '제품 디테일', '활용 장면', '구매 안심']
+      : ['핵심 오퍼', '고객 문제/상황', '구매 근거', '제품 디테일', '활용 장면', '구매 안심'];
+    const fallbackTypes = ['offer', 'problem', 'proof', 'detail', 'lifestyle', 'trust'];
+
+    return arr.map((item: any, index: number) => ({
       ...item,
       id: Math.random().toString(36).substring(7),
       title: item.title ?? "섹션",
       logicalSections: Array.isArray(item.logicalSections) ? item.logicalSections : ["기본"],
+      sectionType: item.sectionType || fallbackTypes[Math.min(index, fallbackTypes.length - 1)],
+      conversionRole: item.conversionRole || fallbackRoles[Math.min(index, fallbackRoles.length - 1)],
       // keyMessage 검증 - 각 줄이 25자를 초과하지 않도록 체크
       keyMessage: (item.keyMessage ?? "").split('\n').map(line => line.slice(0, 25)).join('\n').slice(0, 100),
       visualPrompt: item.visualPrompt ?? "",
