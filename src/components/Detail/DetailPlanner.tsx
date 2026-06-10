@@ -2,6 +2,55 @@ import React, { useState, useRef } from 'react';
 import { planDetail, generateImage, generateFeatures } from '../../api/aiService';
 import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X } from 'lucide-react';
 
+type CombinationType = 'single' | '1+1' | '1+1+1';
+
+const COMBINATION_OPTIONS: Array<{ value: CombinationType; label: string; desc: string }> = [
+    { value: 'single', label: '일반 상품', desc: '단품 중심 상세페이지' },
+    { value: '1+1', label: '1+1 상품', desc: '인트로에 2개 구성을 강조' },
+    { value: '1+1+1', label: '1+1+1 상품', desc: '인트로에 3개 구성을 강조' },
+];
+
+const getCombinationCount = (type: CombinationType): number => {
+    if (type === '1+1') return 2;
+    if (type === '1+1+1') return 3;
+    return 1;
+};
+
+const getCombinationCountLabel = (count: number): string => {
+    if (count === 2) return '두 개';
+    if (count === 3) return '세 개';
+    return '한 개';
+};
+
+const buildCombinationIntroSegment = (combinationType: CombinationType, productName: string) => {
+    const count = getCombinationCount(combinationType);
+    const countLabel = getCombinationCountLabel(count);
+
+    return {
+        id: 'combination-intro-' + Date.now(),
+        title: `${combinationType} 조합 인트로`,
+        logicalSections: ['인트로', '조합 혜택'],
+        keyMessage: `${combinationType} 구성\n${countLabel}를 한 번에`,
+        visualPrompt: `A high-quality professional product photography of exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical e-commerce intro page. Show all ${count} product units from the reference images in a balanced side-by-side hero composition, with clean premium lighting, realistic scale, preserved product details, and enough negative space for Korean overlay copy. Do not include any text, numbers, labels, badges, or typography in the image.`,
+    };
+};
+
+const buildCombinationImageInstruction = (combinationType: CombinationType, segmentIndex: number): string => {
+    if (combinationType === 'single') return '';
+
+    const count = getCombinationCount(combinationType);
+    const introInstruction = segmentIndex === 0
+        ? `- INTRO SECTION: Show exactly ${count} separate product units together in one vertical frame, using the reference images as the product source.`
+        : `- Keep the bundle context visible where natural; use multiple units together when it supports the section concept.`;
+
+    return `
+COMBINATION PRODUCT MODE (${combinationType}):
+- This detail page is for a ${combinationType} bundle containing ${count} product units.
+${introInstruction}
+- Do NOT render the text "${combinationType}", numbers, plus signs, sale badges, or any typography inside the generated image. Korean copy will be overlaid by the app.
+`;
+};
+
 // ✅ 인증서 이미지 생성 함수
 const generateCertificateImage = (certType: string, certNumber: string, certDate: string): string => {
     const canvas = document.createElement('canvas');
@@ -565,6 +614,7 @@ export const DetailPlanner: React.FC = () => {
         features: '',
         target: '',
         imageInstruction: '',
+        combinationType: 'single' as CombinationType,
     });
     const [length, setLength] = useState<number | 'auto'>('auto');
     const [referenceImages, setReferenceImages] = useState<string[]>([]);
@@ -611,8 +661,9 @@ export const DetailPlanner: React.FC = () => {
             alert("상품명, 카테고리를 입력해주세요.");
             return;
         }
-        if (referenceImages.length < 2) {
-            alert("최소 2장 이상의 실제 제품 사진을 업로드해주세요.");
+        const requiredImageCount = Math.max(2, getCombinationCount(info.combinationType));
+        if (referenceImages.length < requiredImageCount) {
+            alert(`현재 구성은 최소 ${requiredImageCount}장 이상의 실제 제품 사진이 필요합니다.`);
             return;
         }
         setLoading(true);
@@ -624,16 +675,29 @@ export const DetailPlanner: React.FC = () => {
                 setInfo(prev => ({ ...prev, features }));
             }
 
-            const plannedSegments = await planDetail({ ...info, features, length });
+            const combinationCount = getCombinationCount(info.combinationType);
+            const plannedSegments = await planDetail({ ...info, features, length, combinationCount });
+            const segmentsWithCombinationIntro = info.combinationType === 'single'
+                ? plannedSegments
+                : plannedSegments.length > 0
+                    ? [
+                        {
+                            ...plannedSegments[0],
+                            ...buildCombinationIntroSegment(info.combinationType, info.name),
+                        },
+                        ...plannedSegments.slice(1),
+                    ]
+                    : [buildCombinationIntroSegment(info.combinationType, info.name)];
             
             // 각 세그먼트에 텍스트 위치 기본값 설정
-            const mappedSegments = plannedSegments.map((seg: any) => {
+            const mappedSegments = segmentsWithCombinationIntro.map((seg: any) => {
                 const isStyleSection = seg.title.includes('스타일') || 
                                      seg.title.includes('코디') || 
                                      seg.title.includes('연출');
+                const isCombinationIntro = info.combinationType !== 'single' && seg.title.includes('조합 인트로');
                 return {
                     ...seg,
-                    textPosition: isStyleSection ? 'top' : 'bottom',
+                    textPosition: isCombinationIntro || isStyleSection ? 'top' : 'bottom',
                     textColor: '#1a1a1a',
                     fontScale: 1.0,
                     rawImageUrl: ''
@@ -777,6 +841,7 @@ export const DetailPlanner: React.FC = () => {
                     const colorInstruction = info.imageInstruction
                         ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
                         : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
+                    const combinationInstruction = buildCombinationImageInstruction(info.combinationType, i);
 
                     const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
@@ -786,6 +851,7 @@ export const DetailPlanner: React.FC = () => {
 - If generating a front view and the reference front image has a logo, include that logo exactly
 - DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
 - Focus on visual composition only: ${segments[i].visualPrompt}
+${combinationInstruction}
 ${colorInstruction}
 Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
 
@@ -909,6 +975,30 @@ Clean background, professional product photography style, maintain ALL original 
                                 placeholder="예: 블루 색상도 추가해주세요 (입력 안하면 사진의 원본 색상만 사용)"
                             />
                             <p className="text-xs text-slate-500 mt-1">💡 빈칸으로 두면 업로드한 제품 사진의 색상만 그대로 유지됩니다.</p>
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">상품 구성</label>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                {COMBINATION_OPTIONS.map((option) => {
+                                    const selected = info.combinationType === option.value;
+                                    return (
+                                        <button
+                                            key={option.value}
+                                            type="button"
+                                            onClick={() => setInfo({ ...info, combinationType: option.value })}
+                                            className={`text-left p-4 rounded-xl border transition-all ${selected ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300'}`}
+                                        >
+                                            <div className={`font-bold mb-1 ${selected ? 'text-blue-700' : 'text-slate-800'}`}>{option.label}</div>
+                                            <div className="text-xs text-slate-500">{option.desc}</div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            {info.combinationType !== 'single' && (
+                                <p className="text-xs text-blue-600 mt-2">
+                                    {info.combinationType} 선택 시 첫 장에 {info.combinationType} 문구가 들어가고, 제품 {getCombinationCountLabel(getCombinationCount(info.combinationType))}가 한 페이지에 함께 보이도록 생성합니다.
+                                </p>
+                            )}
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-2">레퍼런스 이미지 (최소 2장 필수)</label>
@@ -1124,7 +1214,7 @@ Clean background, professional product photography style, maintain ALL original 
                         </div>
                     </div>
                     <div className="mt-8 flex justify-end">
-                        <button onClick={handlePlan} disabled={loading || referenceImages.length < 2} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
+                        <button onClick={handlePlan} disabled={loading || referenceImages.length < Math.max(2, getCombinationCount(info.combinationType))} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
                             {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Wand2 className="w-5 h-5 mr-2" />}
                             AI 기획 시작하기
                         </button>
@@ -1373,6 +1463,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                         const colorInstruction = info.imageInstruction
                                                             ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
                                                             : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
+                                                        const combinationInstruction = buildCombinationImageInstruction(info.combinationType, idx);
 
                                                         const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
@@ -1382,6 +1473,7 @@ Clean background, professional product photography style, maintain ALL original 
 - If generating a front view and the reference front image has a logo, include that logo exactly
 - DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
 - Focus on visual composition only: ${segments[idx].visualPrompt}
+${combinationInstruction}
 ${colorInstruction}
 Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
 

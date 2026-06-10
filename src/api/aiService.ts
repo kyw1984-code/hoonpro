@@ -47,6 +47,21 @@ export const planDetail = async (data: any) => {
     const lengthGuide = data.length === 'auto'
       ? '상품 특성에 맞게 5~9장 사이로 최적 구성'
       : `정확히 ${data.length}장으로 구성`;
+    const combinationType = data.combinationType && data.combinationType !== 'single'
+      ? String(data.combinationType)
+      : '';
+    const combinationCount = Number(data.combinationCount) || (combinationType === '1+1+1' ? 3 : combinationType === '1+1' ? 2 : 1);
+    const combinationGuide = combinationType
+      ? `
+ 조합상품 전용 작성 규칙:
+ - 이 상품은 ${combinationType} 조합상품이며 총 ${combinationCount}개 구성입니다.
+ - 첫 번째 항목은 반드시 "${combinationType} 조합 인트로" 섹션으로 작성하세요.
+ - 첫 번째 keyMessage의 첫 줄에는 반드시 "${combinationType} 구성"을 포함하세요.
+ - 첫 번째 visualPrompt는 정확히 ${combinationCount}개의 제품이 한 세로형 페이지에 함께 보이는 구성을 영어로 작성하세요.
+ - 이후 섹션도 단품이 아니라 묶음 구성의 실용성, 여유분, 함께 쓰는 장점, 선물/비축 가치 등을 자연스럽게 반영하세요.
+ - 실제 가격, 할인율, 최저가 같은 검증되지 않은 수치 표현은 만들지 마세요.
+`
+      : ' 상품 구성: 일반 단품 상세페이지로 작성하세요.';
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -62,6 +77,8 @@ export const planDetail = async (data: any) => {
  핵심 특징: ${data.features || '없음'}
  타겟 고객: ${data.target || '없음'}
  페이지 길이: ${lengthGuide}
+ 상품 구성: ${combinationType ? `${combinationType} 조합상품 (${combinationCount}개 구성)` : '일반 상품'}
+${combinationGuide}
 
  반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
  각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt 필드를 포함해야 합니다.

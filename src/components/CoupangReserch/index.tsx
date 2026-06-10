@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, type KeyboardEvent } from "react";
 
 interface CoupangProduct {
   productId: string;
@@ -91,7 +91,7 @@ export default function CoupangResearch() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("products");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  function handleKey(e: React.KeyboardEvent<HTMLInputElement>) {
+  function handleKey(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") handleSearch();
   }
 
