@@ -624,62 +624,202 @@ const generateProductInfoImage = (data: {
     return canvas.toDataURL('image/png');
 };
 
-const generateSizeChartImage = (gender: 'women' | 'men', data: Record<string, Record<string, string>>): string => {
+const generateSizeChartImage = (
+    gender: 'women' | 'men',
+    data: Record<string, Record<string, string>>,
+    designPreset: DesignPreset
+): string => {
     const canvas = document.createElement('canvas');
     canvas.width = 800;
     canvas.height = 1422;
     const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#ffffff';
+    const theme = designPreset.reviewTheme;
+    const isDarkTheme = designPreset.defaultTextColor === '#ffffff';
+    const lineColor = isDarkTheme ? 'rgba(255, 255, 255, 0.16)' : 'rgba(15, 23, 42, 0.12)';
+    const softFill = isDarkTheme ? 'rgba(255, 255, 255, 0.06)' : 'rgba(15, 23, 42, 0.035)';
+    const shadowColor = isDarkTheme ? 'rgba(0, 0, 0, 0.34)' : 'rgba(15, 23, 42, 0.12)';
+
+    const drawRoundRect = (x: number, y: number, width: number, height: number, radius: number) => {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + width - r, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+        ctx.lineTo(x + width, y + height - r);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        ctx.lineTo(x + r, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    };
+
+    const hexToRgb = (hex: string) => {
+        const normalized = hex.replace('#', '');
+        if (normalized.length !== 6) return null;
+        const value = Number.parseInt(normalized, 16);
+        if (Number.isNaN(value)) return null;
+        return {
+            r: (value >> 16) & 255,
+            g: (value >> 8) & 255,
+            b: value & 255,
+        };
+    };
+
+    const getReadableText = (hex: string) => {
+        const rgb = hexToRgb(hex);
+        if (!rgb) return '#ffffff';
+        const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+        return brightness > 174 ? theme.heading : '#ffffff';
+    };
+
+    const background = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    background.addColorStop(0, theme.bgStart);
+    background.addColorStop(0.5, theme.bgMid);
+    background.addColorStop(1, theme.bgEnd);
+    ctx.fillStyle = background;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const topAccent = ctx.createLinearGradient(56, 0, canvas.width - 56, 0);
+    topAccent.addColorStop(0, theme.accentStart);
+    topAccent.addColorStop(1, theme.accentEnd);
+    ctx.fillStyle = topAccent;
+    drawRoundRect(56, 74, canvas.width - 112, 8, 4);
+    ctx.fill();
+
     const sizes = gender === 'women' ? ['55', '66', '77', '88'] : ['95', '100', '105', '110'];
     const columns = ['사이즈', '어깨넓이', '가슴넓이', '소매길이', '총장'];
-    const startX = 50;
-    const rowHeight = 80;
-    const colWidth = 140;
-    const tableHeight = rowHeight * (sizes.length + 1);
-    const startY = (canvas.height - tableHeight) / 2;
-    ctx.fillStyle = '#1e293b';
-    ctx.font = 'bold 56px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('SIZE GUIDE', canvas.width / 2, startY - 100);
-    ctx.font = '24px sans-serif';
-    ctx.fillStyle = '#64748b';
-    ctx.fillText('단면 기준(cm)이며, 측정 방법에 따라 1~3cm 오차가 있을 수 있습니다.', canvas.width / 2, startY - 40);
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(startX, startY, canvas.width - 100, rowHeight);
-    ctx.fillStyle = '#334155';
-    ctx.font = 'bold 24px sans-serif';
+    const startX = 54;
+    const tableWidth = canvas.width - 108;
+    const headerHeight = 82;
+    const rowHeight = 94;
+    const firstColWidth = 118;
+    const dataColWidth = (tableWidth - firstColWidth) / 4;
+    const tableHeight = headerHeight + rowHeight * sizes.length;
+    const startY = 410;
+
+    ctx.fillStyle = theme.badgeBg;
+    drawRoundRect(58, 112, 178, 42, 21);
+    ctx.fill();
+    ctx.fillStyle = theme.badgeText;
+    ctx.font = 'bold 19px "Noto Sans KR", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    columns.forEach((col, i) => {
-        ctx.fillText(col, startX + (i * colWidth) + (colWidth / 2), startY + (rowHeight / 2));
-    });
-    ctx.font = '24px sans-serif';
-    sizes.forEach((size, rowIndex) => {
-        const y = startY + rowHeight * (rowIndex + 1);
-        ctx.beginPath();
-        ctx.moveTo(startX, y);
-        ctx.lineTo(canvas.width - 50, y);
-        ctx.strokeStyle = '#e2e8f0';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-        const rowData = data[size] || {};
-        ctx.fillStyle = '#1e293b';
-        ctx.font = 'bold 24px sans-serif';
-        ctx.fillText(size, startX + (colWidth / 2), y + (rowHeight / 2));
-        ctx.font = '24px sans-serif';
-        ctx.fillStyle = '#475569';
-        ctx.fillText(rowData.shoulder || '-', startX + colWidth + (colWidth / 2), y + (rowHeight / 2));
-        ctx.fillText(rowData.chest || '-', startX + colWidth * 2 + (colWidth / 2), y + (rowHeight / 2));
-        ctx.fillText(rowData.sleeve || '-', startX + colWidth * 3 + (colWidth / 2), y + (rowHeight / 2));
-        ctx.fillText(rowData.length || '-', startX + colWidth * 4 + (colWidth / 2), y + (rowHeight / 2));
-    });
-    ctx.beginPath();
-    ctx.moveTo(startX, startY + rowHeight * (sizes.length + 1));
-    ctx.lineTo(canvas.width - 50, startY + rowHeight * (sizes.length + 1));
-    ctx.strokeStyle = '#94a3b8';
-    ctx.lineWidth = 2;
+    ctx.fillText('SIZE GUIDE', 147, 133);
+
+    ctx.fillStyle = theme.heading;
+    ctx.font = 'bold 62px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('사이즈 가이드', 58, 234);
+
+    ctx.font = '24px "Noto Sans KR", sans-serif';
+    ctx.fillStyle = theme.muted;
+    ctx.fillText(`${gender === 'women' ? '여성' : '남성'} 의류 기준 · 단면 측정(cm)`, 60, 286);
+    ctx.fillText('측정 방법에 따라 1~3cm 오차가 있을 수 있습니다.', 60, 324);
+
+    ctx.shadowColor = shadowColor;
+    ctx.shadowBlur = 28;
+    ctx.shadowOffsetY = 16;
+    drawRoundRect(startX, startY, tableWidth, tableHeight, 30);
+    ctx.fillStyle = theme.cardBg;
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    const headerGradient = ctx.createLinearGradient(startX, startY, startX + tableWidth, startY);
+    headerGradient.addColorStop(0, theme.accentStart);
+    headerGradient.addColorStop(1, theme.accentEnd);
+    drawRoundRect(startX, startY, tableWidth, headerHeight, 30);
+    ctx.fillStyle = headerGradient;
+    ctx.fill();
+    ctx.fillRect(startX, startY + 38, tableWidth, headerHeight - 38);
+
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = 1.5;
+    drawRoundRect(startX, startY, tableWidth, tableHeight, 30);
     ctx.stroke();
+
+    ctx.fillStyle = getReadableText(theme.accentStart);
+    ctx.font = 'bold 22px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    let xOffset = startX;
+    columns.forEach((col, i) => {
+        const width = i === 0 ? firstColWidth : dataColWidth;
+        ctx.fillText(col, xOffset + width / 2, startY + headerHeight / 2);
+        xOffset += width;
+    });
+
+    sizes.forEach((size, rowIndex) => {
+        const y = startY + headerHeight + rowHeight * rowIndex;
+        if (rowIndex % 2 === 1) {
+            ctx.fillStyle = softFill;
+            ctx.fillRect(startX, y, tableWidth, rowHeight);
+        }
+
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(startX + 24, y);
+        ctx.lineTo(startX + tableWidth - 24, y);
+        ctx.stroke();
+
+        const rowData = data[size] || {};
+        const values = [size, rowData.shoulder || '-', rowData.chest || '-', rowData.sleeve || '-', rowData.length || '-'];
+        let cellX = startX;
+        values.forEach((value, idx) => {
+            const width = idx === 0 ? firstColWidth : dataColWidth;
+            ctx.fillStyle = idx === 0 ? theme.heading : theme.body;
+            ctx.font = `${idx === 0 ? 'bold ' : ''}25px "Noto Sans KR", sans-serif`;
+            ctx.fillText(value, cellX + width / 2, y + rowHeight / 2);
+            cellX += width;
+        });
+    });
+
+    const guideY = startY + tableHeight + 72;
+    const guideItems = [
+        ['단면 측정', '상품을 평평하게 놓고 잰 기준입니다.'],
+        ['오차 범위', '원단과 측정 위치에 따라 1~3cm 차이가 날 수 있습니다.'],
+        ['추천 확인', '평소 착용 상품과 실측을 비교해 선택해 주세요.'],
+    ];
+
+    ctx.fillStyle = theme.cardBg;
+    ctx.shadowColor = shadowColor;
+    ctx.shadowBlur = 22;
+    ctx.shadowOffsetY = 12;
+    drawRoundRect(58, guideY, canvas.width - 116, 278, 28);
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+
+    ctx.fillStyle = theme.heading;
+    ctx.font = 'bold 30px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('측정 안내', 96, guideY + 58);
+
+    guideItems.forEach(([label, value], idx) => {
+        const itemY = guideY + 104 + idx * 56;
+        ctx.fillStyle = theme.badgeBg;
+        drawRoundRect(96, itemY - 28, 104, 34, 17);
+        ctx.fill();
+        ctx.fillStyle = theme.badgeText;
+        ctx.font = 'bold 17px "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, 148, itemY - 11);
+        ctx.fillStyle = theme.body;
+        ctx.font = '22px "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(value, 224, itemY - 9);
+    });
+
+    ctx.fillStyle = theme.muted;
+    ctx.font = '20px "Noto Sans KR", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${designPreset.label} 톤앤매너에 맞춘 사이즈 정보`, canvas.width / 2, canvas.height - 92);
+
     return canvas.toDataURL('image/png');
 };
 
@@ -1026,10 +1166,15 @@ export const DetailPlanner: React.FC = () => {
                 };
             });
 
-            // 사이즈표 추가
+            const introSegments = mappedSegments.slice(0, 1);
+            const bodySegments = mappedSegments.slice(1);
+            const afterIntroSegments: any[] = [];
+            const bottomSegments: any[] = [];
+
+            // 사이즈표는 옵션 템플릿 중 가장 먼저, 인트로 바로 다음에 배치
             if (includeSizeChart) {
-                const sizeChartUrl = generateSizeChartImage(sizeGender, sizeData);
-                mappedSegments.push({
+                const sizeChartUrl = generateSizeChartImage(sizeGender, sizeData, selectedPreset);
+                afterIntroSegments.push({
                     id: 'size-chart-' + Date.now(),
                     title: '사이즈 가이드',
                     logicalSections: ['정보 제공', '사이즈표'],
@@ -1044,47 +1189,7 @@ export const DetailPlanner: React.FC = () => {
                 });
             }
 
-            // 제품 정보 및 관리방법 추가
-            if (includeProductInfo) {
-                const productInfoUrl = generateProductInfoImage(productInfoData);
-                mappedSegments.push({
-                    id: 'product-info-' + Date.now(),
-                    title: '제품 정보 및 관리방법',
-                    logicalSections: ['정보 제공', '관리'],
-                    keyMessage: '제품 정보를 확인하세요',
-                    visualPrompt: 'Product information generated automatically.',
-                    imageUrl: productInfoUrl,
-                    rawImageUrl: productInfoUrl,
-                    textPosition: 'bottom',
-                    textColor: selectedPreset.defaultTextColor,
-                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
-                    isGenerating: false
-                });
-            }
-
-            // 인증서 추가
-            if (includeCertificate) {
-                const certUrl = generateCertificateImage(
-                    certData.type,
-                    certData.number || 'CB-XXX-XXXXXX',
-                    certData.date || new Date().toISOString().split('T')[0]
-                );
-                mappedSegments.push({
-                    id: 'certificate-' + Date.now(),
-                    title: '품질 인증',
-                    logicalSections: ['신뢰', '인증서'],
-                    keyMessage: '안전하고 검증된 제품',
-                    visualPrompt: 'Certificate generated automatically.',
-                    imageUrl: certUrl,
-                    rawImageUrl: certUrl,
-                    textPosition: 'bottom',
-                    textColor: selectedPreset.defaultTextColor,
-                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
-                    isGenerating: false
-                });
-            }
-
-            // 고객 후기 추가 (AI 배경 생성)
+            // 고객 후기는 사이즈표 다음, 인트로 영역의 신뢰 요소로 고정 배치
             if (includeReviews) {
                 // AI로 배경 이미지 생성
                 const reviewBgUrl = await generateReviewImageWithAI(reviewsData, info.name, info.category, referenceImages, selectedPreset);
@@ -1109,7 +1214,7 @@ export const DetailPlanner: React.FC = () => {
                     }
                 });
 
-                mappedSegments.push({
+                afterIntroSegments.push({
                     id: 'reviews-' + Date.now(),
                     title: '고객 후기',
                     logicalSections: ['신뢰', '리뷰'],
@@ -1124,7 +1229,47 @@ export const DetailPlanner: React.FC = () => {
                 });
             }
 
-            setSegments(mappedSegments);
+            // 인증서는 본문 이후에 배치하되, 제품 정보 및 관리방법보다는 위에 둔다
+            if (includeCertificate) {
+                const certUrl = generateCertificateImage(
+                    certData.type,
+                    certData.number || 'CB-XXX-XXXXXX',
+                    certData.date || new Date().toISOString().split('T')[0]
+                );
+                bottomSegments.push({
+                    id: 'certificate-' + Date.now(),
+                    title: '품질 인증',
+                    logicalSections: ['신뢰', '인증서'],
+                    keyMessage: '안전하고 검증된 제품',
+                    visualPrompt: 'Certificate generated automatically.',
+                    imageUrl: certUrl,
+                    rawImageUrl: certUrl,
+                    textPosition: 'bottom',
+                    textColor: selectedPreset.defaultTextColor,
+                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
+                    isGenerating: false
+                });
+            }
+
+            // 제품 정보 및 관리방법은 상세페이지 맨 하단에 고정
+            if (includeProductInfo) {
+                const productInfoUrl = generateProductInfoImage(productInfoData);
+                bottomSegments.push({
+                    id: 'product-info-' + Date.now(),
+                    title: '제품 정보 및 관리방법',
+                    logicalSections: ['정보 제공', '관리'],
+                    keyMessage: '제품 정보를 확인하세요',
+                    visualPrompt: 'Product information generated automatically.',
+                    imageUrl: productInfoUrl,
+                    rawImageUrl: productInfoUrl,
+                    textPosition: 'bottom',
+                    textColor: selectedPreset.defaultTextColor,
+                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
+                    isGenerating: false
+                });
+            }
+
+            setSegments([...introSegments, ...afterIntroSegments, ...bodySegments, ...bottomSegments]);
             setStep(2);
         } catch (e) {
             console.error(e);
