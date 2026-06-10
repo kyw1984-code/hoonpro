@@ -3,9 +3,184 @@ import { planDetail, generateImage, generateFeatures } from '../../api/aiService
 import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical } from 'lucide-react';
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
+type DesignPresetKey = 'premium' | 'minimal' | 'street' | 'lifestyle' | 'deal' | 'clean';
 
 const DEFAULT_DETAIL_FONT_SCALE = 1.0;
 const INTRO_DETAIL_FONT_SCALE = 1.8;
+
+interface ReviewTheme {
+    tag: string;
+    bgStart: string;
+    bgMid: string;
+    bgEnd: string;
+    heading: string;
+    body: string;
+    muted: string;
+    badgeBg: string;
+    badgeText: string;
+    cardBg: string;
+    accentStart: string;
+    accentEnd: string;
+    quote: string;
+    rating: string;
+}
+
+interface DesignPreset {
+    label: string;
+    description: string;
+    copyTone: string;
+    imageStyle: string;
+    backgroundGuide: string;
+    defaultTextColor: string;
+    reviewTheme: ReviewTheme;
+}
+
+const DESIGN_PRESETS: Record<DesignPresetKey, DesignPreset> = {
+    premium: {
+        label: '프리미엄',
+        description: '고급스럽고 신뢰감 있는 럭셔리 톤',
+        copyTone: '절제된 고급 카피, 신뢰감, 프리미엄 가치 중심',
+        imageStyle: 'premium Korean e-commerce editorial model cut, refined pose, elegant styling, soft luxury lighting',
+        backgroundGuide: 'warm neutral studio background, subtle depth, no harsh contrast, polished premium mood',
+        defaultTextColor: '#111827',
+        reviewTheme: {
+            tag: 'PREMIUM REVIEW',
+            bgStart: '#f8fafc',
+            bgMid: '#eef2ff',
+            bgEnd: '#fff7ed',
+            heading: '#111827',
+            body: '#1e293b',
+            muted: '#64748b',
+            badgeBg: '#111827',
+            badgeText: '#ffffff',
+            cardBg: 'rgba(255, 255, 255, 0.92)',
+            accentStart: '#2563eb',
+            accentEnd: '#ec4899',
+            quote: '#94a3b8',
+            rating: '#f59e0b',
+        },
+    },
+    minimal: {
+        label: '미니멀',
+        description: '여백과 제품 선명도를 살리는 깔끔한 톤',
+        copyTone: '짧고 명료한 카피, 군더더기 없는 표현, 제품 본질 중심',
+        imageStyle: 'minimal Korean e-commerce model cut, clean composition, calm pose, refined simplicity',
+        backgroundGuide: 'pure white or very light gray seamless studio background with generous negative space',
+        defaultTextColor: '#0f172a',
+        reviewTheme: {
+            tag: 'CUSTOMER VOICE',
+            bgStart: '#ffffff',
+            bgMid: '#f8fafc',
+            bgEnd: '#f1f5f9',
+            heading: '#0f172a',
+            body: '#334155',
+            muted: '#64748b',
+            badgeBg: '#f8fafc',
+            badgeText: '#0f172a',
+            cardBg: 'rgba(255, 255, 255, 0.96)',
+            accentStart: '#cbd5e1',
+            accentEnd: '#94a3b8',
+            quote: '#cbd5e1',
+            rating: '#f59e0b',
+        },
+    },
+    street: {
+        label: '스트릿',
+        description: '강한 대비와 도시적인 모델컷',
+        copyTone: '대담하고 직관적인 카피, 강한 존재감과 스타일 강조',
+        imageStyle: 'street fashion Korean e-commerce model cut, confident pose, urban styling, bold contrast',
+        backgroundGuide: 'dark gray, concrete, or city-inspired seamless background with dramatic directional lighting',
+        defaultTextColor: '#ffffff',
+        reviewTheme: {
+            tag: 'STREET PROOF',
+            bgStart: '#111827',
+            bgMid: '#1f2937',
+            bgEnd: '#0f172a',
+            heading: '#f8fafc',
+            body: '#e5e7eb',
+            muted: '#cbd5e1',
+            badgeBg: '#f8fafc',
+            badgeText: '#111827',
+            cardBg: 'rgba(17, 24, 39, 0.9)',
+            accentStart: '#f97316',
+            accentEnd: '#ef4444',
+            quote: '#475569',
+            rating: '#fbbf24',
+        },
+    },
+    lifestyle: {
+        label: '감성 라이프',
+        description: '따뜻하고 자연스러운 생활감 중심',
+        copyTone: '부드럽고 감성적인 카피, 일상 속 만족감과 편안함 강조',
+        imageStyle: 'warm lifestyle Korean e-commerce model cut, natural pose, cozy atmosphere, approachable styling',
+        backgroundGuide: 'soft beige, warm daylight, home or lifestyle-inspired seamless scene with gentle texture',
+        defaultTextColor: '#3f2f24',
+        reviewTheme: {
+            tag: 'LIFE REVIEW',
+            bgStart: '#fff7ed',
+            bgMid: '#fffbeb',
+            bgEnd: '#fef3c7',
+            heading: '#3f2f24',
+            body: '#4b5563',
+            muted: '#78716c',
+            badgeBg: '#7c2d12',
+            badgeText: '#fff7ed',
+            cardBg: 'rgba(255, 251, 235, 0.94)',
+            accentStart: '#f59e0b',
+            accentEnd: '#fb7185',
+            quote: '#d6a35d',
+            rating: '#f59e0b',
+        },
+    },
+    deal: {
+        label: '세일/혜택',
+        description: '혜택과 구성 가치를 강하게 보여주는 톤',
+        copyTone: '혜택 중심의 명확한 카피, 구성 가치와 구매 이유 강조',
+        imageStyle: 'high-impact Korean e-commerce model cut, energetic pose, clear product visibility, promotional mood',
+        backgroundGuide: 'bright seamless background with vivid accent colors, dynamic but uncluttered composition',
+        defaultTextColor: '#dc2626',
+        reviewTheme: {
+            tag: 'BEST DEAL REVIEW',
+            bgStart: '#fff1f2',
+            bgMid: '#fff7ed',
+            bgEnd: '#fef2f2',
+            heading: '#991b1b',
+            body: '#1f2937',
+            muted: '#64748b',
+            badgeBg: '#dc2626',
+            badgeText: '#ffffff',
+            cardBg: 'rgba(255, 255, 255, 0.94)',
+            accentStart: '#dc2626',
+            accentEnd: '#f97316',
+            quote: '#fecaca',
+            rating: '#f59e0b',
+        },
+    },
+    clean: {
+        label: '클린 정보형',
+        description: '정보 전달과 비교가 쉬운 정돈된 톤',
+        copyTone: '논리적이고 정돈된 카피, 기능과 차별점 중심',
+        imageStyle: 'clean informational Korean e-commerce model cut, clear front-facing product view, balanced posture',
+        backgroundGuide: 'bright seamless studio background with subtle blue-gray tone and organized negative space',
+        defaultTextColor: '#1e3a8a',
+        reviewTheme: {
+            tag: 'VERIFIED REVIEW',
+            bgStart: '#eff6ff',
+            bgMid: '#f8fafc',
+            bgEnd: '#e0f2fe',
+            heading: '#1e3a8a',
+            body: '#1e293b',
+            muted: '#64748b',
+            badgeBg: '#1e40af',
+            badgeText: '#ffffff',
+            cardBg: 'rgba(255, 255, 255, 0.95)',
+            accentStart: '#2563eb',
+            accentEnd: '#06b6d4',
+            quote: '#bfdbfe',
+            rating: '#f59e0b',
+        },
+    },
+};
 
 const COMBINATION_OPTIONS: Array<{ value: CombinationType; label: string; desc: string }> = [
     { value: 'single', label: '일반 상품', desc: '단품 중심 상세페이지' },
@@ -77,6 +252,14 @@ ${introInstruction}
 `;
 };
 
+const buildDesignPresetImageInstruction = (designPreset: DesignPreset): string => `
+DESIGN PRESET (${designPreset.label}):
+- Copy tone: ${designPreset.copyTone}
+- Image style: ${designPreset.imageStyle}
+- Background direction: ${designPreset.backgroundGuide}
+- Keep the selected style consistent across all generated sections.
+`;
+
 // ✅ 인증서 이미지 생성 함수
 const generateCertificateImage = (certType: string, certNumber: string, certDate: string): string => {
     const canvas = document.createElement('canvas');
@@ -144,25 +327,28 @@ const generateReviewImageWithAI = async (
     reviews: Array<{ rating: number; text: string; author: string }>,
     productName: string,
     category: string,
-    referenceImages: string[]
+    referenceImages: string[],
+    designPreset: DesignPreset
 ): Promise<string> => {
     try {
         // AI로 후기 배경 이미지 생성
         const prompt = `Create a soft, elegant background image for customer reviews section of an e-commerce product detail page.
 Product: ${productName}
 Category: ${category}
+Design style: ${designPreset.label}
+Background direction: ${designPreset.backgroundGuide}
 
 REQUIREMENTS:
 - Subtle, professional background that doesn't distract from text
-- Use soft pastel colors or gentle gradients
+- Match this style: ${designPreset.imageStyle}
 - Include minimal decorative elements (subtle patterns, soft shapes, or textures)
 - Maintain the product's color scheme from reference images
 - NO text, NO words, NO letters
-- Clean, modern, premium feel
+- Clean, modern, professional feel
 - Aspect ratio 9:16
 - Leave plenty of clean space for text overlay
 
-Style: Minimalist, elegant, e-commerce professional`;
+Style: ${designPreset.copyTone}`;
 
         const bgImageUrl = await generateImage(prompt, referenceImages, "9:16");
         return bgImageUrl;
@@ -174,12 +360,13 @@ Style: Minimalist, elegant, e-commerce professional`;
 };
 
 // ✅ 고객 후기 이미지 생성 함수 (Canvas + AI 배경)
-const generateReviewImage = (reviews: Array<{ rating: number; text: string; author: string }>, bgImageUrl?: string): string => {
+const generateReviewImage = (reviews: Array<{ rating: number; text: string; author: string }>, designPreset: DesignPreset, bgImageUrl?: string): string => {
     const canvas = document.createElement('canvas');
     canvas.width = 860;
     canvas.height = 1000;
     const ctx = canvas.getContext('2d')!;
     const safeReviews = reviews.length > 0 ? reviews : [{ rating: 5, text: '만족스러운 품질과 사용감이 인상적입니다.', author: '고객**' }];
+    const theme = designPreset.reviewTheme;
 
     const drawRoundRect = (x: number, y: number, width: number, height: number, radius: number) => {
         const r = Math.min(radius, width / 2, height / 2);
@@ -228,9 +415,9 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
     };
 
     const bgGradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-    bgGradient.addColorStop(0, '#f8fafc');
-    bgGradient.addColorStop(0.48, '#eef2ff');
-    bgGradient.addColorStop(1, '#fff7ed');
+    bgGradient.addColorStop(0, theme.bgStart);
+    bgGradient.addColorStop(0.48, theme.bgMid);
+    bgGradient.addColorStop(1, theme.bgEnd);
     ctx.fillStyle = bgGradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -255,22 +442,23 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
     ctx.arc(120, 830, 210, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#111827';
+    ctx.fillStyle = theme.heading;
     ctx.font = 'bold 18px "Noto Sans KR", sans-serif';
     ctx.textAlign = 'left';
-    drawRoundRect(64, 58, 138, 42, 21);
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    const tagW = Math.max(138, ctx.measureText(theme.tag).width + 42);
+    drawRoundRect(64, 58, tagW, 42, 21);
+    ctx.fillStyle = theme.badgeBg;
     ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText('REAL REVIEW', 86, 85);
+    ctx.fillStyle = theme.badgeText;
+    ctx.fillText(theme.tag, 86, 85);
 
-    ctx.fillStyle = '#111827';
+    ctx.fillStyle = theme.heading;
     ctx.font = 'bold 52px "Noto Sans KR", sans-serif';
     ctx.fillText('고객이 먼저 알아본', 64, 155);
     ctx.fillText('만족감의 차이', 64, 218);
 
     const avgRating = safeReviews.reduce((sum, r) => sum + r.rating, 0) / safeReviews.length;
-    ctx.fillStyle = '#475569';
+    ctx.fillStyle = theme.muted;
     ctx.font = '24px "Noto Sans KR", sans-serif';
     ctx.fillText(`평균 ${avgRating.toFixed(1)}점 · 실제 사용 후기 ${safeReviews.length}건`, 66, 270);
 
@@ -278,17 +466,17 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
     ctx.shadowBlur = 28;
     ctx.shadowOffsetY = 12;
     drawRoundRect(566, 72, 230, 126, 28);
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.fillStyle = theme.cardBg;
     ctx.fill();
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
     ctx.shadowOffsetY = 0;
-    ctx.fillStyle = '#0f172a';
+    ctx.fillStyle = theme.heading;
     ctx.font = 'bold 42px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText(avgRating.toFixed(1), 681, 124);
     ctx.font = 'bold 24px sans-serif';
-    ctx.fillStyle = '#f59e0b';
+    ctx.fillStyle = theme.rating;
     ctx.fillText('★'.repeat(Math.round(avgRating)), 681, 164);
 
     const cardX = 64;
@@ -301,15 +489,15 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
         ctx.shadowBlur = 24;
         ctx.shadowOffsetY = 12;
         drawRoundRect(cardX, yOffset, cardW, cardH, 28);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.fillStyle = theme.cardBg;
         ctx.fill();
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
         ctx.shadowOffsetY = 0;
 
         const accentGradient = ctx.createLinearGradient(cardX, yOffset, cardX, yOffset + cardH);
-        accentGradient.addColorStop(0, '#2563eb');
-        accentGradient.addColorStop(1, '#ec4899');
+        accentGradient.addColorStop(0, theme.accentStart);
+        accentGradient.addColorStop(1, theme.accentEnd);
         drawRoundRect(cardX, yOffset, 8, cardH, 4);
         ctx.fillStyle = accentGradient;
         ctx.fill();
@@ -319,16 +507,16 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
         drawRoundRect(cardX, yOffset, cardW, cardH, 28);
         ctx.stroke();
 
-        ctx.fillStyle = '#f59e0b';
+        ctx.fillStyle = theme.rating;
         ctx.font = 'bold 23px sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText('★'.repeat(review.rating), cardX + 34, yOffset + 44);
 
-        ctx.fillStyle = '#94a3b8';
+        ctx.fillStyle = theme.quote;
         ctx.font = 'bold 46px Georgia, serif';
         ctx.fillText('“', cardX + cardW - 92, yOffset + 58);
 
-        ctx.fillStyle = '#1e293b';
+        ctx.fillStyle = theme.body;
         ctx.font = 'bold 25px "Noto Sans KR", sans-serif';
         drawWrappedText(review.text, cardX + 34, yOffset + 88, cardW - 96, 34, 2);
 
@@ -336,9 +524,9 @@ const generateReviewImage = (reviews: Array<{ rating: number; text: string; auth
         ctx.font = 'bold 19px "Noto Sans KR", sans-serif';
         const badgeW = Math.max(102, ctx.measureText(authorText).width + 42);
         drawRoundRect(cardX + cardW - badgeW - 28, yOffset + cardH - 56, badgeW, 34, 17);
-        ctx.fillStyle = '#f1f5f9';
+        ctx.fillStyle = theme.bgMid;
         ctx.fill();
-        ctx.fillStyle = '#475569';
+        ctx.fillStyle = theme.muted;
         ctx.textAlign = 'center';
         ctx.fillText(authorText, cardX + cardW - badgeW / 2 - 28, yOffset + cardH - 33);
 
@@ -713,6 +901,7 @@ export const DetailPlanner: React.FC = () => {
         target: '',
         imageInstruction: '',
         combinationType: 'single' as CombinationType,
+        designPreset: 'premium' as DesignPresetKey,
     });
     const [length, setLength] = useState<number | 'auto'>('auto');
     const [referenceImages, setReferenceImages] = useState<string[]>([]);
@@ -800,6 +989,7 @@ export const DetailPlanner: React.FC = () => {
         }
         setLoading(true);
         try {
+            const selectedPreset = DESIGN_PRESETS[info.designPreset];
             // 핵심 특징이 비어있으면 자동 생성
             let features = info.features;
             if (!features.trim()) {
@@ -808,7 +998,7 @@ export const DetailPlanner: React.FC = () => {
             }
 
             const combinationCount = getCombinationCount(info.combinationType);
-            const plannedSegments = await planDetail({ ...info, features, length, combinationCount });
+            const plannedSegments = await planDetail({ ...info, features, length, combinationCount, designPreset: selectedPreset });
             const segmentsWithCombinationIntro = info.combinationType === 'single'
                 ? plannedSegments
                 : plannedSegments.length > 0
@@ -830,7 +1020,7 @@ export const DetailPlanner: React.FC = () => {
                 return {
                     ...seg,
                     textPosition: isCombinationIntro || isStyleSection ? 'top' : 'bottom',
-                    textColor: '#1a1a1a',
+                    textColor: selectedPreset.defaultTextColor,
                     fontScale: isCombinationIntro ? INTRO_DETAIL_FONT_SCALE : DEFAULT_DETAIL_FONT_SCALE,
                     rawImageUrl: ''
                 };
@@ -848,7 +1038,7 @@ export const DetailPlanner: React.FC = () => {
                     imageUrl: sizeChartUrl,
                     rawImageUrl: sizeChartUrl,
                     textPosition: 'bottom',
-                    textColor: '#1a1a1a',
+                    textColor: selectedPreset.defaultTextColor,
                     fontScale: DEFAULT_DETAIL_FONT_SCALE,
                     isGenerating: false
                 });
@@ -866,7 +1056,7 @@ export const DetailPlanner: React.FC = () => {
                     imageUrl: productInfoUrl,
                     rawImageUrl: productInfoUrl,
                     textPosition: 'bottom',
-                    textColor: '#1a1a1a',
+                    textColor: selectedPreset.defaultTextColor,
                     fontScale: DEFAULT_DETAIL_FONT_SCALE,
                     isGenerating: false
                 });
@@ -888,7 +1078,7 @@ export const DetailPlanner: React.FC = () => {
                     imageUrl: certUrl,
                     rawImageUrl: certUrl,
                     textPosition: 'bottom',
-                    textColor: '#1a1a1a',
+                    textColor: selectedPreset.defaultTextColor,
                     fontScale: DEFAULT_DETAIL_FONT_SCALE,
                     isGenerating: false
                 });
@@ -897,24 +1087,24 @@ export const DetailPlanner: React.FC = () => {
             // 고객 후기 추가 (AI 배경 생성)
             if (includeReviews) {
                 // AI로 배경 이미지 생성
-                const reviewBgUrl = await generateReviewImageWithAI(reviewsData, info.name, info.category, referenceImages);
+                const reviewBgUrl = await generateReviewImageWithAI(reviewsData, info.name, info.category, referenceImages, selectedPreset);
 
                 // 배경과 후기를 합성
                 const reviewUrl = await new Promise<string>((resolve) => {
                     if (reviewBgUrl) {
                         const img = new window.Image();
                         img.onload = () => {
-                            const finalUrl = generateReviewImage(reviewsData, reviewBgUrl);
+                            const finalUrl = generateReviewImage(reviewsData, selectedPreset, reviewBgUrl);
                             resolve(finalUrl);
                         };
                         img.onerror = () => {
                             // 배경 로드 실패 시 기본 배경 사용
-                            const finalUrl = generateReviewImage(reviewsData);
+                            const finalUrl = generateReviewImage(reviewsData, selectedPreset);
                             resolve(finalUrl);
                         };
                         img.src = reviewBgUrl;
                     } else {
-                        const finalUrl = generateReviewImage(reviewsData);
+                        const finalUrl = generateReviewImage(reviewsData, selectedPreset);
                         resolve(finalUrl);
                     }
                 });
@@ -928,7 +1118,7 @@ export const DetailPlanner: React.FC = () => {
                     imageUrl: reviewUrl,
                     rawImageUrl: reviewUrl,
                     textPosition: 'bottom',
-                    textColor: '#1a1a1a',
+                    textColor: selectedPreset.defaultTextColor,
                     fontScale: DEFAULT_DETAIL_FONT_SCALE,
                     isGenerating: false
                 });
@@ -946,6 +1136,7 @@ export const DetailPlanner: React.FC = () => {
 
     const handleGenerateAll = async (regenerate = false) => {
         setStep(3);
+        const selectedPreset = DESIGN_PRESETS[info.designPreset];
 
         // 병렬 생성을 위한 인덱스 배열 생성
         const indicesToGenerate = segments
@@ -975,6 +1166,7 @@ export const DetailPlanner: React.FC = () => {
                         : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
                     const modelCutInstruction = buildModelCutInstruction(info.combinationType, i);
                     const combinationInstruction = buildCombinationImageInstruction(info.combinationType, i);
+                    const designPresetInstruction = buildDesignPresetImageInstruction(selectedPreset);
 
                     const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
@@ -985,6 +1177,7 @@ export const DetailPlanner: React.FC = () => {
 - If generating a front view and the reference front image has a logo, include that logo exactly
 - DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
 - Focus on visual composition only: ${segments[i].visualPrompt}
+${designPresetInstruction}
 ${modelCutInstruction}
 ${combinationInstruction}
 ${colorInstruction}
@@ -1097,6 +1290,26 @@ Clean background, professional product photography style, maintain ALL original 
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">타겟 고객</label>
                             <input type="text" value={info.target} onChange={e => setInfo({...info, target: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 20-30대 직장인 여성" />
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">디자인 스타일</label>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                {(Object.entries(DESIGN_PRESETS) as Array<[DesignPresetKey, DesignPreset]>).map(([key, preset]) => {
+                                    const selected = info.designPreset === key;
+                                    return (
+                                        <button
+                                            key={key}
+                                            type="button"
+                                            onClick={() => setInfo({ ...info, designPreset: key })}
+                                            className={`text-left p-4 rounded-xl border transition-all ${selected ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300 bg-white'}`}
+                                        >
+                                            <div className={`font-bold mb-1 ${selected ? 'text-blue-700' : 'text-slate-800'}`}>{preset.label}</div>
+                                            <div className="text-xs text-slate-500 leading-relaxed">{preset.description}</div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <p className="text-xs text-slate-500 mt-2">선택한 스타일은 AI 문구, 이미지 분위기, 기본 문구 색상, 고객 후기 템플릿에 함께 적용됩니다.</p>
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -1659,11 +1872,13 @@ Clean background, professional product photography style, maintain ALL original 
                                                     });
 
                                                     try {
+                                                        const selectedPreset = DESIGN_PRESETS[info.designPreset];
                                                         const colorInstruction = info.imageInstruction
                                                             ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
                                                             : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
                                                         const modelCutInstruction = buildModelCutInstruction(info.combinationType, idx);
                                                         const combinationInstruction = buildCombinationImageInstruction(info.combinationType, idx);
+                                                        const designPresetInstruction = buildDesignPresetImageInstruction(selectedPreset);
 
                                                         const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
@@ -1674,6 +1889,7 @@ Clean background, professional product photography style, maintain ALL original 
 - If generating a front view and the reference front image has a logo, include that logo exactly
 - DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
 - Focus on visual composition only: ${segments[idx].visualPrompt}
+${designPresetInstruction}
 ${modelCutInstruction}
 ${combinationInstruction}
 ${colorInstruction}

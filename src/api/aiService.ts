@@ -62,6 +62,19 @@ export const planDetail = async (data: any) => {
  - 실제 가격, 할인율, 최저가 같은 검증되지 않은 수치 표현은 만들지 마세요.
 `
       : ' 상품 구성: 일반 단품 상세페이지로 작성하세요.';
+    const designPreset = data.designPreset && typeof data.designPreset === 'object'
+      ? data.designPreset
+      : null;
+    const designGuide = designPreset
+      ? `
+ 디자인 프리셋:
+ - 스타일명: ${designPreset.label}
+ - 카피 톤: ${designPreset.copyTone}
+ - 이미지 스타일: ${designPreset.imageStyle}
+ - 배경 방향: ${designPreset.backgroundGuide}
+ - 모든 섹션의 keyMessage와 visualPrompt는 위 스타일을 일관되게 반영하세요.
+`
+      : '';
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -79,6 +92,7 @@ export const planDetail = async (data: any) => {
  페이지 길이: ${lengthGuide}
  상품 구성: ${combinationType ? `${combinationType} 조합상품 (${combinationCount}개 구성)` : '일반 상품'}
 ${combinationGuide}
+${designGuide}
 
  반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
  각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt 필드를 포함해야 합니다.
