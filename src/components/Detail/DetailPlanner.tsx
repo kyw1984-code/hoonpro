@@ -1,6 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, type DragEvent } from 'react';
 import { planDetail, generateImage, generateFeatures } from '../../api/aiService';
-import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X } from 'lucide-react';
+import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical } from 'lucide-react';
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
 
@@ -34,7 +34,7 @@ const buildCombinationIntroSegment = (combinationType: CombinationType, productN
         title: `${combinationType} 조합 인트로`,
         logicalSections: ['인트로', '조합 혜택'],
         keyMessage: `${combinationType} 구성\n${countLabel}를 한 번에`,
-        visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Reserve a clean empty copy-safe band in the top 25% of the frame, and place the ${count} fictional fashion models or ${count} model-cut panels below that band so their heads, bodies, and products are not cropped by overlay text. Each model should wear or naturally use one product unit from the reference images. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and do not include any text, numbers, labels, badges, or typography in the image.`,
+        visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Use one seamless studio background across the entire frame, including the top copy-safe area and the model area. Do not create a separate white header band, split-screen collage, panel layout, boxed sections, hard dividers, or different backgrounds behind each model. Reserve the top 22% as clean negative space with the same continuous background, and place the ${count} fictional fashion models below that area so their heads, bodies, and products are not cropped by overlay text. Each model should wear or naturally use one product unit from the reference images. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and do not include any text, numbers, labels, badges, or typography in the image.`,
     };
 };
 
@@ -42,7 +42,8 @@ const buildModelCutInstruction = (combinationType: CombinationType, segmentIndex
     const count = getCombinationCount(combinationType);
     const bundleIntro = combinationType !== 'single' && segmentIndex === 0
         ? `- For the intro, create a bundle model cut with exactly ${count} visible product-wearing/using model cuts in one vertical page.
-- Reserve the top 25% of the image as clean negative space for large Korean overlay copy.
+- Use one continuous seamless studio background for the entire image. Do NOT use split-screen panels, separate boxes, hard dividers, different backgrounds per model, or a white header block.
+- Reserve the top 22% of the image as clean negative space on the same continuous background for large Korean overlay copy.
 - Place models and products below that copy-safe area and keep faces, heads, outfits, and products fully visible without top cropping.`
         : '';
 
@@ -64,7 +65,8 @@ const buildCombinationImageInstruction = (combinationType: CombinationType, segm
     const count = getCombinationCount(combinationType);
     const introInstruction = segmentIndex === 0
         ? `- INTRO SECTION: Show exactly ${count} model-cut product presentations together in one vertical frame, using the reference images as the product source.
-- Keep the top area visually open for the app's oversized copy overlay; do not place important model faces or product details in the top 25% of the frame.`
+- Keep the top area visually open for the app's oversized copy overlay; do not place important model faces or product details in the top 22% of the frame.
+- The intro must look like one unified photo scene with a single continuous background, not a collage or separated panels.`
         : `- Keep the bundle context visible where natural; use multiple units together when it supports the section concept.`;
 
     return `
@@ -735,6 +737,40 @@ export const DetailPlanner: React.FC = () => {
         { rating: 4, text: '사용감이 좋아서 가족들에게도 추천했어요. 재구매 의사 100%입니다.', author: '박**' }
     ]);
     const [segments, setSegments] = useState<any[]>([]);
+    const [draggedSegmentIndex, setDraggedSegmentIndex] = useState<number | null>(null);
+
+    const moveSegment = (fromIndex: number, toIndex: number) => {
+        if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+        setSegments(prev => {
+            if (fromIndex >= prev.length || toIndex >= prev.length) return prev;
+            const next = [...prev];
+            const [moved] = next.splice(fromIndex, 1);
+            next.splice(toIndex, 0, moved);
+            return next;
+        });
+    };
+
+    const handleSegmentDragStart = (e: DragEvent<HTMLElement>, index: number) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(index));
+        setDraggedSegmentIndex(index);
+    };
+
+    const handleSegmentDragOver = (e: DragEvent<HTMLElement>) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+    };
+
+    const handleSegmentDrop = (index: number) => {
+        const sourceIndex = draggedSegmentIndex ?? Number.NaN;
+        if (Number.isNaN(sourceIndex)) return;
+        moveSegment(sourceIndex, index);
+        setDraggedSegmentIndex(null);
+    };
+
+    const handleSegmentDragEnd = () => {
+        setDraggedSegmentIndex(null);
+    };
 
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
@@ -942,6 +978,7 @@ export const DetailPlanner: React.FC = () => {
 
                     const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
+- Use one seamless full-page background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, or hard dividers for overlay copy.
 - Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
 - CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
 - If generating a back view and the reference back image has a logo, include that logo exactly
@@ -1369,8 +1406,24 @@ Clean background, professional product photography style, maintain ALL original 
                     </div>
                     <div className="grid grid-cols-1 gap-6">
                         {segments.map((seg, idx) => (
-                            <div key={seg.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6">
+                            <div
+                                key={seg.id}
+                                onDragOver={handleSegmentDragOver}
+                                onDrop={() => handleSegmentDrop(idx)}
+                                className={`bg-white p-6 rounded-2xl shadow-sm border flex flex-col md:flex-row gap-6 transition-all ${draggedSegmentIndex === idx ? 'border-blue-400 ring-2 ring-blue-100 opacity-70' : 'border-slate-200'}`}
+                            >
                                 <div className="w-full md:w-1/4 flex flex-col justify-center items-center bg-slate-50 rounded-xl p-4 border border-slate-100">
+                                    <div className="w-full flex justify-end mb-2">
+                                        <div
+                                            draggable
+                                            onDragStart={(e) => handleSegmentDragStart(e, idx)}
+                                            onDragEnd={handleSegmentDragEnd}
+                                            className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"
+                                            title="드래그해서 순서 변경"
+                                        >
+                                            <GripVertical className="w-5 h-5" />
+                                        </div>
+                                    </div>
                                     <div className="text-4xl font-black text-slate-200 mb-2">{String(idx + 1).padStart(2, '0')}</div>
                                     <div className="font-bold text-slate-700 text-center">{seg.title}</div>
                                     <div className="mt-3 flex flex-wrap gap-1 justify-center">
@@ -1421,7 +1474,15 @@ Clean background, professional product photography style, maintain ALL original 
                         <div className="flex justify-center">
                             <div className="w-full max-w-md bg-white shadow-2xl overflow-hidden sticky top-6">
                                 {segments.map((seg, idx) => (
-                                    <div key={seg.id} className="relative w-full bg-slate-100 border-b border-slate-200 flex items-center justify-center">
+                                    <div
+                                        key={seg.id}
+                                        draggable
+                                        onDragStart={(e) => handleSegmentDragStart(e, idx)}
+                                        onDragOver={handleSegmentDragOver}
+                                        onDrop={() => handleSegmentDrop(idx)}
+                                        onDragEnd={handleSegmentDragEnd}
+                                        className={`relative w-full bg-slate-100 border-b flex items-center justify-center transition-all ${draggedSegmentIndex === idx ? 'border-blue-400 opacity-70' : 'border-slate-200'}`}
+                                    >
                                         {seg.imageUrl ? (
                                             <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-auto object-contain" />
                                         ) : seg.isGenerating ? (
@@ -1435,6 +1496,9 @@ Clean background, professional product photography style, maintain ALL original 
                                         <div className="absolute top-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
                                             {idx + 1}. {seg.title}
                                         </div>
+                                        <div className="absolute top-2 right-2 bg-black/45 text-white p-1.5 rounded backdrop-blur-sm cursor-grab active:cursor-grabbing" title="드래그해서 순서 변경">
+                                            <GripVertical className="w-4 h-4" />
+                                        </div>
                                     </div>
                                 ))}
                             </div>
@@ -1445,9 +1509,23 @@ Clean background, professional product photography style, maintain ALL original 
                             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                                 <h3 className="text-lg font-bold text-slate-800 mb-4">문구 수정 및 재생성</h3>
                                 {segments.map((seg, idx) => (
-                                    <div key={seg.id} className="mb-6 pb-6 border-b border-slate-200 last:border-0 last:mb-0 last:pb-0">
+                                    <div
+                                        key={seg.id}
+                                        onDragOver={handleSegmentDragOver}
+                                        onDrop={() => handleSegmentDrop(idx)}
+                                        className={`mb-6 pb-6 border-b last:border-0 last:mb-0 last:pb-0 transition-all ${draggedSegmentIndex === idx ? 'border-blue-300 opacity-70' : 'border-slate-200'}`}
+                                    >
                                         <div className="flex items-center justify-between mb-3">
                                             <div className="flex items-center gap-2">
+                                                <span
+                                                    draggable
+                                                    onDragStart={(e) => handleSegmentDragStart(e, idx)}
+                                                    onDragEnd={handleSegmentDragEnd}
+                                                    className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"
+                                                    title="드래그해서 순서 변경"
+                                                >
+                                                    <GripVertical className="w-4 h-4" />
+                                                </span>
                                                 <span className="text-sm font-bold text-slate-600">#{idx + 1}</span>
                                                 <span className="text-sm font-medium text-slate-800">{seg.title}</span>
                                             </div>
@@ -1589,6 +1667,7 @@ Clean background, professional product photography style, maintain ALL original 
 
                                                         const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
+- Use one seamless full-page background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, or hard dividers for overlay copy.
 - Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
 - CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
 - If generating a back view and the reference back image has a logo, include that logo exactly
