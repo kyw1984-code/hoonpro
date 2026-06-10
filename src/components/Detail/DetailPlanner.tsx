@@ -4,6 +4,8 @@ import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X }
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
 
+const DEFAULT_DETAIL_FONT_SCALE = 1.8;
+
 const COMBINATION_OPTIONS: Array<{ value: CombinationType; label: string; desc: string }> = [
     { value: 'single', label: '일반 상품', desc: '단품 중심 상세페이지' },
     { value: '1+1', label: '1+1 상품', desc: '인트로에 2개 구성을 강조' },
@@ -31,8 +33,26 @@ const buildCombinationIntroSegment = (combinationType: CombinationType, productN
         title: `${combinationType} 조합 인트로`,
         logicalSections: ['인트로', '조합 혜택'],
         keyMessage: `${combinationType} 구성\n${countLabel}를 한 번에`,
-        visualPrompt: `A high-quality professional product photography of exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical e-commerce intro page. Show all ${count} product units from the reference images in a balanced side-by-side hero composition, with clean premium lighting, realistic scale, preserved product details, and enough negative space for Korean overlay copy. Do not include any text, numbers, labels, badges, or typography in the image.`,
+        visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Show ${count} fictional fashion models or ${count} model-cut panels in one balanced composition, each wearing or naturally using one product unit from the reference images. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and leave enough negative space for Korean overlay copy. Do not include any text, numbers, labels, badges, or typography in the image.`,
     };
+};
+
+const buildModelCutInstruction = (combinationType: CombinationType, segmentIndex: number): string => {
+    const count = getCombinationCount(combinationType);
+    const bundleIntro = combinationType !== 'single' && segmentIndex === 0
+        ? `- For the intro, create a bundle model cut with exactly ${count} visible product-wearing/using model cuts in one vertical page.`
+        : '';
+
+    return `
+MODEL CUT STYLE:
+- Generate a professional Korean e-commerce model cut, not a product-only catalog shot.
+- Do NOT create flat lay, hanger, mannequin, or product-only images.
+- If the product is clothing or an accessory, show a fictional model wearing it naturally.
+- If the product is not wearable, show a fictional model holding or using it in a natural lifestyle scene.
+- Use a new fictional model face and body; do not copy any real person from reference images.
+- Keep the product as the clear hero subject, large and easy to inspect.
+${bundleIntro}
+`;
 };
 
 const buildCombinationImageInstruction = (combinationType: CombinationType, segmentIndex: number): string => {
@@ -40,7 +60,7 @@ const buildCombinationImageInstruction = (combinationType: CombinationType, segm
 
     const count = getCombinationCount(combinationType);
     const introInstruction = segmentIndex === 0
-        ? `- INTRO SECTION: Show exactly ${count} separate product units together in one vertical frame, using the reference images as the product source.`
+        ? `- INTRO SECTION: Show exactly ${count} model-cut product presentations together in one vertical frame, using the reference images as the product source.`
         : `- Keep the bundle context visible where natural; use multiple units together when it supports the section concept.`;
 
     return `
@@ -500,6 +520,7 @@ export const FONT_SCALE_OPTIONS = [
     { key: 'md', label: '보통',     value: 1.0 },
     { key: 'lg', label: '크게',     value: 1.2 },
     { key: 'xl', label: '아주크게', value: 1.4 },
+    { key: 'xxl', label: '초대형',   value: DEFAULT_DETAIL_FONT_SCALE },
 ] as const;
 
 const overlayTextOnImage = (
@@ -507,7 +528,7 @@ const overlayTextOnImage = (
     keyMessage: string,
     position: 'top' | 'middle' | 'bottom',
     textColor: string = '#1a1a1a',
-    fontScale: number = 1.0
+    fontScale: number = DEFAULT_DETAIL_FONT_SCALE
 ): Promise<string> => {
     return new Promise((resolve) => {
         const img = new window.Image();
@@ -699,7 +720,7 @@ export const DetailPlanner: React.FC = () => {
                     ...seg,
                     textPosition: isCombinationIntro || isStyleSection ? 'top' : 'bottom',
                     textColor: '#1a1a1a',
-                    fontScale: 1.0,
+                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
                     rawImageUrl: ''
                 };
             });
@@ -717,7 +738,7 @@ export const DetailPlanner: React.FC = () => {
                     rawImageUrl: sizeChartUrl,
                     textPosition: 'bottom',
                     textColor: '#1a1a1a',
-                    fontScale: 1.0,
+                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
                     isGenerating: false
                 });
             }
@@ -735,7 +756,7 @@ export const DetailPlanner: React.FC = () => {
                     rawImageUrl: productInfoUrl,
                     textPosition: 'bottom',
                     textColor: '#1a1a1a',
-                    fontScale: 1.0,
+                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
                     isGenerating: false
                 });
             }
@@ -757,7 +778,7 @@ export const DetailPlanner: React.FC = () => {
                     rawImageUrl: certUrl,
                     textPosition: 'bottom',
                     textColor: '#1a1a1a',
-                    fontScale: 1.0,
+                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
                     isGenerating: false
                 });
             }
@@ -797,7 +818,7 @@ export const DetailPlanner: React.FC = () => {
                     rawImageUrl: reviewUrl,
                     textPosition: 'bottom',
                     textColor: '#1a1a1a',
-                    fontScale: 1.0,
+                    fontScale: DEFAULT_DETAIL_FONT_SCALE,
                     isGenerating: false
                 });
             }
@@ -841,6 +862,7 @@ export const DetailPlanner: React.FC = () => {
                     const colorInstruction = info.imageInstruction
                         ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
                         : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
+                    const modelCutInstruction = buildModelCutInstruction(info.combinationType, i);
                     const combinationInstruction = buildCombinationImageInstruction(info.combinationType, i);
 
                     const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
@@ -851,6 +873,7 @@ export const DetailPlanner: React.FC = () => {
 - If generating a front view and the reference front image has a logo, include that logo exactly
 - DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
 - Focus on visual composition only: ${segments[i].visualPrompt}
+${modelCutInstruction}
 ${combinationInstruction}
 ${colorInstruction}
 Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
@@ -870,7 +893,7 @@ Clean background, professional product photography style, maintain ALL original 
                     }
 
                     // ✅ Canvas로 한글 텍스트 덧씌우기 (위치 정보 포함)
-                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage, segments[i].textPosition || 'bottom', segments[i].textColor || '#1a1a1a', segments[i].fontScale ?? 1.0);
+                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage, segments[i].textPosition || 'bottom', segments[i].textColor || '#1a1a1a', segments[i].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
 
                     setSegments(prev => {
                         const newSegs = [...prev];
@@ -1355,7 +1378,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                                 const newSegs = [...segments];
                                                                 newSegs[idx].textPosition = pos;
                                                                 if (newSegs[idx].rawImageUrl) {
-                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(newSegs[idx].rawImageUrl, newSegs[idx].keyMessage, pos, newSegs[idx].textColor || '#1a1a1a', newSegs[idx].fontScale ?? 1.0);
+                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(newSegs[idx].rawImageUrl, newSegs[idx].keyMessage, pos, newSegs[idx].textColor || '#1a1a1a', newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
                                                                 }
                                                                 setSegments(newSegs);
                                                             }}
@@ -1384,7 +1407,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                                             newSegs[idx].keyMessage,
                                                                             newSegs[idx].textPosition || 'bottom',
                                                                             opt.fill,
-                                                                            newSegs[idx].fontScale ?? 1.0
+                                                                            newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE
                                                                         );
                                                                     }
                                                                     setSegments(newSegs);
@@ -1399,9 +1422,9 @@ Clean background, professional product photography style, maintain ALL original 
                                             </div>
                                             <div>
                                                 <label className="block text-xs font-medium text-slate-600 mb-1">문구 크기</label>
-                                                <div className="grid grid-cols-4 gap-1">
+                                                <div className="grid grid-cols-5 gap-1">
                                                     {FONT_SCALE_OPTIONS.map((opt) => {
-                                                        const current = seg.fontScale ?? 1.0;
+                                                        const current = seg.fontScale ?? DEFAULT_DETAIL_FONT_SCALE;
                                                         const selected = current === opt.value;
                                                         return (
                                                             <button
@@ -1438,7 +1461,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                         newSegs[idx] = { ...newSegs[idx], isGenerating: true };
                                                         return newSegs;
                                                     });
-                                                    const imageUrl = await overlayTextOnImage(seg.rawImageUrl, seg.keyMessage, seg.textPosition || 'bottom', seg.textColor || '#1a1a1a', seg.fontScale ?? 1.0);
+                                                    const imageUrl = await overlayTextOnImage(seg.rawImageUrl, seg.keyMessage, seg.textPosition || 'bottom', seg.textColor || '#1a1a1a', seg.fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
                                                     setSegments(prev => {
                                                         const newSegs = [...prev];
                                                         newSegs[idx] = { ...newSegs[idx], imageUrl, isGenerating: false };
@@ -1463,6 +1486,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                         const colorInstruction = info.imageInstruction
                                                             ? `ADDITIONAL COLOR REQUEST: ${info.imageInstruction}`
                                                             : 'CRITICAL: Use ONLY the exact colors shown in the reference images. DO NOT change or add any new colors. Maintain the original product colors precisely.';
+                                                        const modelCutInstruction = buildModelCutInstruction(info.combinationType, idx);
                                                         const combinationInstruction = buildCombinationImageInstruction(info.combinationType, idx);
 
                                                         const prompt = `High quality e-commerce product banner image. STRICT REQUIREMENTS:
@@ -1473,6 +1497,7 @@ Clean background, professional product photography style, maintain ALL original 
 - If generating a front view and the reference front image has a logo, include that logo exactly
 - DO NOT add any new logos, watermarks, or brand marks that are not in the reference images
 - Focus on visual composition only: ${segments[idx].visualPrompt}
+${modelCutInstruction}
 ${combinationInstruction}
 ${colorInstruction}
 Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
@@ -1484,7 +1509,7 @@ Clean background, professional product photography style, maintain ALL original 
                                                             throw new Error(`품질 검증 실패: ${validation.reason}`);
                                                         }
 
-                                                        const imageUrl = await overlayTextOnImage(rawImageUrl, segments[idx].keyMessage, segments[idx].textPosition || 'bottom', segments[idx].textColor || '#1a1a1a', segments[idx].fontScale ?? 1.0);
+                                                        const imageUrl = await overlayTextOnImage(rawImageUrl, segments[idx].keyMessage, segments[idx].textPosition || 'bottom', segments[idx].textColor || '#1a1a1a', segments[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
 
                                                         setSegments(prev => {
                                                             const newSegs = [...prev];

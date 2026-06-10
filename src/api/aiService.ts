@@ -57,7 +57,7 @@ export const planDetail = async (data: any) => {
  - 이 상품은 ${combinationType} 조합상품이며 총 ${combinationCount}개 구성입니다.
  - 첫 번째 항목은 반드시 "${combinationType} 조합 인트로" 섹션으로 작성하세요.
  - 첫 번째 keyMessage의 첫 줄에는 반드시 "${combinationType} 구성"을 포함하세요.
- - 첫 번째 visualPrompt는 정확히 ${combinationCount}개의 제품이 한 세로형 페이지에 함께 보이는 구성을 영어로 작성하세요.
+ - 첫 번째 visualPrompt는 정확히 ${combinationCount}개의 모델컷 또는 모델 착용/사용 장면이 한 세로형 페이지에 함께 보이는 구성을 영어로 작성하세요.
  - 이후 섹션도 단품이 아니라 묶음 구성의 실용성, 여유분, 함께 쓰는 장점, 선물/비축 가치 등을 자연스럽게 반영하세요.
  - 실제 가격, 할인율, 최저가 같은 검증되지 않은 수치 표현은 만들지 마세요.
 `
@@ -103,10 +103,13 @@ ${combinationGuide}
 
  시각적 프롬프트(visualPrompt) 작성 규칙:
  - 영어로 작성하며, AI 이미지 생성기가 이해하기 쉬운 구체적인 묘사 포함
- - "A high-quality professional product photography of..."로 시작
- - 조명, 배경, 각도, 질감 등을 사실적으로 기술
+ - "A high-quality professional Korean e-commerce model cut of..."로 시작
+ - 반드시 가상의 모델이 제품을 착용하거나 자연스럽게 사용하는 장면으로 작성
+ - 제품 단독컷, 행거컷, 마네킹컷, 플랫레이를 지시하지 말 것
+ - 조명, 배경, 각도, 질감, 모델 포즈를 사실적으로 기술
+ - 모델 얼굴은 새롭게 생성된 가상의 인물로 표현하고 레퍼런스 인물의 얼굴을 복제하지 말 것
 
- 배열 예시: [ {"title": "오감으로 느끼는 편안함", "logicalSections": ["메인", "시각화"], "keyMessage": "몸에 닿는 순간 느껴지는\n천연 소재의 압도적인 부드러움", "visualPrompt": "A high-quality professional product photography of the product in a minimalist studio background with soft natural lighting, showing its elegant design."} ]
+ 배열 예시: [ {"title": "오감으로 느끼는 편안함", "logicalSections": ["메인", "시각화"], "keyMessage": "몸에 닿는 순간 느껴지는\n천연 소재의 압도적인 부드러움", "visualPrompt": "A high-quality professional Korean e-commerce model cut of a fictional model wearing the product in a minimalist studio background with soft natural lighting, clearly showing the product texture, fit, and premium details."} ]
       `.trim(),
     });
     await logApiCall('detail-plan', 'gemini-2.5-flash', response);
