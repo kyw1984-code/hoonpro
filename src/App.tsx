@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { DetailPlanner } from './components/Detail/DetailPlanner';
+import { SourcingFinder } from './components/SourcingFinder';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { ProductNameGenerator } from './components/ProductName/ProductNameGenerator';
@@ -11,10 +12,10 @@ import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdminPanel } from './components/Admin/AdminPanel';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap } from 'lucide-react';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp } from 'lucide-react';
 import { getUser, removeToken, type AuthUser } from './lib/auth';
 
-type Tab = 'thumbnail' | 'detail' | 'analyzer' | 'productname' | 'admin';
+type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'analyzer' | 'productname' | 'admin';
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);
@@ -67,6 +68,12 @@ export default function App() {
                   <LayoutTemplate className="w-4 h-4 mr-2" />상세페이지 제작
                 </button>
                 <button
+                  onClick={() => setActiveTab('sourcing')}
+                  className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'sourcing' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  <TrendingUp className="w-4 h-4 mr-2" />소싱 파인더
+                </button>
+                <button
                   onClick={() => setActiveTab('analyzer')}
                   className={`flex items-center px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'analyzer' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
                 >
@@ -108,9 +115,10 @@ export default function App() {
           </div>
         </header>
 
-        <main className={`flex-grow ${activeTab === 'analyzer' ? '' : 'py-8'}`}>
+        <main className={`flex-grow ${activeTab === 'analyzer' || activeTab === 'sourcing' ? '' : 'py-8'}`}>
           {activeTab === 'thumbnail' && <ThumbnailGenerator />}
           {activeTab === 'detail' && <DetailPlanner />}
+          {activeTab === 'sourcing' && <SourcingFinder />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
           {activeTab === 'productname' && <ProductNameGenerator />}
           {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
