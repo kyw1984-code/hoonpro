@@ -26,7 +26,6 @@ export const Footer: React.FC = () => {
                         훈프로 홈페이지
                     </a>
                 </div>
-                <p className="mt-4 text-xs text-slate-400">Powered by Google Gemini API & remove.bg</p>
             </div>
         </footer>
     );
