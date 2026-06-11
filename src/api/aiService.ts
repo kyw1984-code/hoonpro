@@ -169,6 +169,28 @@ ${conversionGuide}
       ? ['조합 핵심 오퍼', '고객 문제/상황', '구매 근거', '제품 디테일', '활용 장면', '구매 안심']
       : ['핵심 오퍼', '고객 문제/상황', '구매 근거', '제품 디테일', '활용 장면', '구매 안심'];
     const fallbackTypes = ['offer', 'problem', 'proof', 'detail', 'lifestyle', 'trust'];
+    const fallbackMessages = combinationType
+      ? [
+          `${combinationType} 구성\n한 번에 준비하세요`,
+          '더 이상 고민하지 마세요\n편하게 선택하세요',
+          '구성의 차이를\n눈으로 확인하세요',
+          '디테일까지 꼼꼼하게\n살펴보세요',
+          '일상 속에서 더 자연스럽게\n활용해보세요',
+          '구매 전 마지막까지\n안심하고 확인하세요',
+        ]
+      : [
+          `${data.name || '상품'}\n선택해야 하는 이유`,
+          '더 이상 고민하지 마세요\n편하게 선택하세요',
+          '눈으로 확인하는\n믿을 수 있는 차이',
+          '디테일까지 꼼꼼하게\n살펴보세요',
+          '일상 속에서 더 자연스럽게\n활용해보세요',
+          '구매 전 마지막까지\n안심하고 확인하세요',
+        ];
+    const normalizeKeyMessage = (value: any, index: number) => {
+      const fallback = fallbackMessages[Math.min(index, fallbackMessages.length - 1)];
+      const message = String(value || '').trim() || fallback;
+      return message.split('\n').map(line => line.slice(0, 25)).join('\n').slice(0, 100);
+    };
 
     return arr.map((item: any, index: number) => ({
       ...item,
@@ -178,7 +200,7 @@ ${conversionGuide}
       sectionType: item.sectionType || fallbackTypes[Math.min(index, fallbackTypes.length - 1)],
       conversionRole: item.conversionRole || fallbackRoles[Math.min(index, fallbackRoles.length - 1)],
       // keyMessage 검증 - 각 줄이 25자를 초과하지 않도록 체크
-      keyMessage: (item.keyMessage ?? "").split('\n').map(line => line.slice(0, 25)).join('\n').slice(0, 100),
+      keyMessage: normalizeKeyMessage(item.keyMessage ?? item.copy ?? item.message, index),
       visualPrompt: item.visualPrompt ?? "",
     }));
   } catch (error) {

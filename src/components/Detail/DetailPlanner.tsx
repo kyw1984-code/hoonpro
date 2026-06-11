@@ -785,7 +785,7 @@ const buildConversionTemplateSegments = async (params: {
         logicalSections: ['전환율', '구매 이유'],
         conversionRole: '구매 근거',
         sectionType: 'conversion-benefits',
-        keyMessage: '',
+        keyMessage: '선택해야 하는 이유\n핵심 장점을 한눈에',
         visualPrompt: 'Conversion benefit summary card generated automatically.',
         imageUrl: benefitUrl,
         rawImageUrl: benefitUrl,
@@ -815,7 +815,7 @@ const buildConversionTemplateSegments = async (params: {
             logicalSections: ['전환율', '조합 혜택'],
             conversionRole: '조합 가치',
             sectionType: 'bundle-value',
-            keyMessage: '',
+            keyMessage: `${params.combinationType === 'single' ? '구성 가치' : `${params.combinationType} 구성 가치`}\n실용성을 더하세요`,
             visualPrompt: 'Bundle value conversion card generated automatically.',
             imageUrl: bundleUrl,
             rawImageUrl: bundleUrl,
@@ -845,7 +845,7 @@ const buildConversionTemplateSegments = async (params: {
         logicalSections: ['전환율', '문제 해결'],
         conversionRole: '고객 문제/상황',
         sectionType: 'problem-solution',
-        keyMessage: '',
+        keyMessage: '더 이상 고민하지 마세요\n선택이 쉬워집니다',
         visualPrompt: 'Problem solution conversion card generated automatically.',
         imageUrl: problemUrl,
         rawImageUrl: problemUrl,
@@ -873,7 +873,7 @@ const buildConversionTemplateSegments = async (params: {
         logicalSections: ['전환율', '구매 안심'],
         conversionRole: '구매 안심 정보',
         sectionType: 'buying-faq',
-        keyMessage: '',
+        keyMessage: '구매 전 확인하세요\n안심 포인트 정리',
         visualPrompt: 'Buying FAQ conversion card generated automatically.',
         imageUrl: faqUrl,
         rawImageUrl: faqUrl,
@@ -1693,6 +1693,13 @@ const overlayTextOnImage = (
     });
 };
 
+const getRenderableKeyMessage = (segment: any): string => {
+    const message = String(segment.keyMessage || '').trim();
+    if (message) return segment.keyMessage;
+    const title = String(segment.title || '상품 포인트').trim();
+    return `${title.slice(0, 18)}\n확인해보세요`;
+};
+
 export const DetailPlanner: React.FC = () => {
     const [step, setStep] = useState<1 | 2 | 3>(1);
     const [loading, setLoading] = useState(false);
@@ -2027,7 +2034,7 @@ export const DetailPlanner: React.FC = () => {
                     }
 
                     // ✅ Canvas로 한글 텍스트 덧씌우기 (위치 정보 포함)
-                    const imageUrl = await overlayTextOnImage(rawImageUrl, segments[i].keyMessage, segments[i].textPosition || 'bottom', segments[i].textColor || '#1a1a1a', segments[i].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
+                    const imageUrl = await overlayTextOnImage(rawImageUrl, getRenderableKeyMessage(segments[i]), segments[i].textPosition || 'bottom', segments[i].textColor || '#1a1a1a', segments[i].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
 
                         setSegments(prev => {
                             const newSegs = [...prev];
@@ -2733,7 +2740,7 @@ export const DetailPlanner: React.FC = () => {
                                                                 const newSegs = [...segments];
                                                                 newSegs[idx].textPosition = pos;
                                                                 if (newSegs[idx].rawImageUrl) {
-                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(newSegs[idx].rawImageUrl, newSegs[idx].keyMessage, pos, newSegs[idx].textColor || '#1a1a1a', newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
+                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(newSegs[idx].rawImageUrl, getRenderableKeyMessage(newSegs[idx]), pos, newSegs[idx].textColor || '#1a1a1a', newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
                                                                 }
                                                                 setSegments(newSegs);
                                                             }}
@@ -2759,7 +2766,7 @@ export const DetailPlanner: React.FC = () => {
                                                                     if (newSegs[idx].rawImageUrl) {
                                                                         newSegs[idx].imageUrl = await overlayTextOnImage(
                                                                             newSegs[idx].rawImageUrl,
-                                                                            newSegs[idx].keyMessage,
+                                                                            getRenderableKeyMessage(newSegs[idx]),
                                                                             newSegs[idx].textPosition || 'bottom',
                                                                             opt.fill,
                                                                             newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE
@@ -2790,7 +2797,7 @@ export const DetailPlanner: React.FC = () => {
                                                                     if (newSegs[idx].rawImageUrl) {
                                                                         newSegs[idx].imageUrl = await overlayTextOnImage(
                                                                             newSegs[idx].rawImageUrl,
-                                                                            newSegs[idx].keyMessage,
+                                                                            getRenderableKeyMessage(newSegs[idx]),
                                                                             newSegs[idx].textPosition || 'bottom',
                                                                             newSegs[idx].textColor || '#1a1a1a',
                                                                             opt.value
@@ -2816,7 +2823,7 @@ export const DetailPlanner: React.FC = () => {
                                                         newSegs[idx] = { ...newSegs[idx], isGenerating: true };
                                                         return newSegs;
                                                     });
-                                                    const imageUrl = await overlayTextOnImage(seg.rawImageUrl, seg.keyMessage, seg.textPosition || 'bottom', seg.textColor || '#1a1a1a', seg.fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
+                                                    const imageUrl = await overlayTextOnImage(seg.rawImageUrl, getRenderableKeyMessage(seg), seg.textPosition || 'bottom', seg.textColor || '#1a1a1a', seg.fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
                                                     setSegments(prev => {
                                                         const newSegs = [...prev];
                                                         newSegs[idx] = { ...newSegs[idx], imageUrl, isGenerating: false };
@@ -2848,7 +2855,7 @@ export const DetailPlanner: React.FC = () => {
                                                             throw new Error(`품질 검증 실패: ${validation.reason}`);
                                                         }
 
-                                                        const imageUrl = await overlayTextOnImage(rawImageUrl, segments[idx].keyMessage, segments[idx].textPosition || 'bottom', segments[idx].textColor || '#1a1a1a', segments[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
+                                                        const imageUrl = await overlayTextOnImage(rawImageUrl, getRenderableKeyMessage(segments[idx]), segments[idx].textPosition || 'bottom', segments[idx].textColor || '#1a1a1a', segments[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
 
                                                         setSegments(prev => {
                                                             const newSegs = [...prev];
