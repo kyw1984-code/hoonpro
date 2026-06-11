@@ -1,6 +1,6 @@
 import React, { useState, useRef, type DragEvent } from 'react';
 import { planDetail, generateImage, generateFeatures } from '../../api/aiService';
-import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical } from 'lucide-react';
+import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical, RefreshCw } from 'lucide-react';
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
 type DesignPresetKey = 'premium' | 'minimal' | 'street' | 'lifestyle' | 'deal' | 'clean';
@@ -2048,6 +2048,56 @@ export const DetailPlanner: React.FC = () => {
         await Promise.all(generatePromises);
     };
 
+    const handleRegenerateSegment = async (index: number) => {
+        const currentSegment = segments[index];
+        if (!currentSegment || currentSegment.staticImage) return;
+
+        setSegments(prev => {
+            const newSegs = [...prev];
+            newSegs[index] = { ...newSegs[index], isGenerating: true, error: false, errorMessage: '' };
+            return newSegs;
+        });
+
+        try {
+            const selectedPreset = DESIGN_PRESETS[info.designPreset];
+            const prompt = buildDetailImagePrompt(currentSegment, index, info, selectedPreset);
+            const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
+            const validation = await validateImageQuality(rawImageUrl);
+
+            if (!validation.isValid) {
+                throw new Error(`품질 검증 실패: ${validation.reason}`);
+            }
+
+            const imageUrl = await overlayTextOnImage(
+                rawImageUrl,
+                getRenderableKeyMessage(currentSegment),
+                currentSegment.textPosition || 'bottom',
+                currentSegment.textColor || '#1a1a1a',
+                currentSegment.fontScale ?? DEFAULT_DETAIL_FONT_SCALE
+            );
+
+            setSegments(prev => {
+                const newSegs = [...prev];
+                newSegs[index] = {
+                    ...newSegs[index],
+                    imageUrl,
+                    rawImageUrl,
+                    isGenerating: false,
+                    error: false,
+                    errorMessage: ''
+                };
+                return newSegs;
+            });
+        } catch (e) {
+            console.error(`이미지 ${index + 1} 부분 재생성 실패:`, e);
+            setSegments(prev => {
+                const newSegs = [...prev];
+                newSegs[index] = { ...newSegs[index], isGenerating: false, error: true, errorMessage: String(e) };
+                return newSegs;
+            });
+        }
+    };
+
     const handleDownloadAll = () => {
         segments.forEach((seg, idx) => {
             if (seg.imageUrl) {
@@ -2533,7 +2583,7 @@ export const DetailPlanner: React.FC = () => {
                             {segments.some(s => s.imageUrl && !s.staticImage) && (
                                 <button onClick={() => handleGenerateAll(true)} className="bg-orange-500 hover:bg-orange-600 text-white font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
                                     <ImageIcon className="w-5 h-5 mr-2" />
-                                    전체 재생성
+                                    전체 이미지 재생성
                                 </button>
                             )}
                         </div>
@@ -2614,7 +2664,7 @@ export const DetailPlanner: React.FC = () => {
                     <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                         <div>
                             <h2 className="text-2xl font-bold text-slate-800">상세페이지 결과물</h2>
-                            <p className="text-slate-500 mt-1">생성된 이미지를 확인하고 다운로드하세요. 문구를 수정하면 해당 이미지만 재생성됩니다.</p>
+                            <p className="text-slate-500 mt-1">생성된 이미지를 확인하고 다운로드하세요. 각 이미지별로 문구 적용 또는 AI 부분 재생성을 할 수 있습니다.</p>
                         </div>
                         <div className="flex gap-3">
                             <button onClick={() => setStep(2)} className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
@@ -2662,6 +2712,22 @@ export const DetailPlanner: React.FC = () => {
                                         <div className="absolute top-2 right-2 bg-black/45 text-white p-1.5 rounded backdrop-blur-sm cursor-grab active:cursor-grabbing" title="드래그해서 순서 변경">
                                             <GripVertical className="w-4 h-4" />
                                         </div>
+                                        {!seg.staticImage && (
+                                            <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleRegenerateSegment(idx);
+                                                }}
+                                                onMouseDown={(e) => e.stopPropagation()}
+                                                disabled={seg.isGenerating}
+                                                className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-blue-600/95 hover:bg-blue-700 disabled:bg-slate-500/80 text-white text-[11px] font-bold px-3 py-2 rounded-full shadow-lg backdrop-blur-sm flex items-center gap-1.5 transition-colors"
+                                                title="이 이미지만 AI로 다시 생성"
+                                            >
+                                                {seg.isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                                                부분 재생성
+                                            </button>
+                                        )}
                                     </div>
                                 ))}
                             </div>
@@ -2670,7 +2736,7 @@ export const DetailPlanner: React.FC = () => {
                         {/* 오른쪽: 문구 수정 패널 */}
                         <div className="space-y-4">
                             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <h3 className="text-lg font-bold text-slate-800 mb-4">문구 수정 및 재생성</h3>
+                                <h3 className="text-lg font-bold text-slate-800 mb-4">문구 수정 및 부분 재생성</h3>
                                 {segments.map((seg, idx) => (
                                     <div
                                         key={seg.id}
@@ -2824,46 +2890,11 @@ export const DetailPlanner: React.FC = () => {
                                                 {seg.staticImage ? '템플릿 고정' : '문구만 적용'}
                                             </button>
                                             <button
-                                                onClick={async () => {
-                                                    // 해당 이미지 AI 재생성
-                                                    setSegments(prev => {
-                                                        const newSegs = [...prev];
-                                                        newSegs[idx] = { ...newSegs[idx], isGenerating: true, error: false };
-                                                        return newSegs;
-                                                    });
-
-                                                    try {
-                                                        const selectedPreset = DESIGN_PRESETS[info.designPreset];
-                                                        const prompt = buildDetailImagePrompt(segments[idx], idx, info, selectedPreset);
-
-                                                        const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
-                                                        const validation = await validateImageQuality(rawImageUrl);
-
-                                                        if (!validation.isValid) {
-                                                            throw new Error(`품질 검증 실패: ${validation.reason}`);
-                                                        }
-
-                                                        const imageUrl = await overlayTextOnImage(rawImageUrl, getRenderableKeyMessage(segments[idx]), segments[idx].textPosition || 'bottom', segments[idx].textColor || '#1a1a1a', segments[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
-
-                                                        setSegments(prev => {
-                                                            const newSegs = [...prev];
-                                                            newSegs[idx] = { ...newSegs[idx], imageUrl, rawImageUrl, isGenerating: false, error: false, errorMessage: '' };
-                                                            return newSegs;
-                                                        });
-                                                    } catch (e) {
-                                                        console.error(`이미지 ${idx + 1} 재생성 실패:`, e);
-                                                        alert(`이미지 재생성에 실패했습니다: ${e}`);
-                                                        setSegments(prev => {
-                                                            const newSegs = [...prev];
-                                                            newSegs[idx] = { ...newSegs[idx], isGenerating: false, error: true, errorMessage: String(e) };
-                                                            return newSegs;
-                                                        });
-                                                    }
-                                                }}
+                                                onClick={() => handleRegenerateSegment(idx)}
                                                 disabled={seg.isGenerating || seg.staticImage}
                                                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-[10px] font-bold py-2 px-3 rounded-lg flex items-center justify-center transition-colors"
                                             >
-                                                {seg.staticImage ? '템플릿 고정' : 'AI 전체 재생성'}
+                                                {seg.isGenerating ? '재생성 중' : seg.staticImage ? '템플릿 고정' : 'AI 부분 재생성'}
                                             </button>
                                         </div>
                                     </div>
