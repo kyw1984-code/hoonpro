@@ -241,7 +241,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     <div className="flex items-center gap-2">
-                      <span>{user.today_calls} / 40</span>
+                      <span>{user.today_calls} / 60</span>
                       <button
                         onClick={() => handleReset(user.id, user.name)}
                         disabled={actionLoading === user.id + 'reset' || user.today_calls === 0}
