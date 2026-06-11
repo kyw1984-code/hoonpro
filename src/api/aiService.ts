@@ -147,6 +147,9 @@ ${conversionGuide}
  - 제품 단독컷, 행거컷, 마네킹컷, 플랫레이를 지시하지 말 것
  - 조명, 배경, 각도, 질감, 모델 포즈를 사실적으로 기술
  - 모델 얼굴은 새롭게 생성된 가상의 인물로 표현하고 레퍼런스 인물의 얼굴을 복제하지 말 것
+ - 클로즈업 섹션은 제품을 착용/사용한 상태의 자연스러운 부분 확대 컷으로 작성하고, 큰 제품 배경 위에 작은 전신 모델을 붙이는 합성 구도는 절대 지시하지 말 것
+ - 미니어처 모델, 스티커처럼 붙인 모델, picture-in-picture, 손에 들린 작은 사람, 거대한 제품 무늬 배경 뒤의 작은 모델 같은 부자연스러운 합성 표현은 visualPrompt에 포함하지 말 것
+ - 제품 로고/패턴/프린트는 실제 제품 위에서 현실적인 크기로 보이게 작성하고, 별도 배경 그래픽처럼 확대하지 말 것
 
  배열 예시: [ {"title": "오감으로 느끼는 편안함", "logicalSections": ["메인", "시각화"], "sectionType": "offer", "conversionRole": "핵심 오퍼", "keyMessage": "몸에 닿는 순간 느껴지는\n천연 소재의 부드러움", "visualPrompt": "A high-quality professional Korean e-commerce model cut of a fictional model wearing the product in a minimalist studio background with soft natural lighting, clearly showing the product texture, fit, and premium details."} ]
       `.trim(),

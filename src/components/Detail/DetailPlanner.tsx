@@ -295,6 +295,17 @@ const getAutoShotType = (segment: any, index: number): ShotPreferenceKey => {
     return index % 3 === 0 ? 'full' : index % 3 === 1 ? 'half' : 'closeup';
 };
 
+const NATURAL_MODEL_COMPOSITION_RULES = `
+NATURAL MODEL COMPOSITION:
+-- The model must appear at realistic human scale in the same physical scene as the product, with consistent perspective, lighting, and shadows.
+-- Never create a tiny, shrunken, miniature, sticker-like, pasted, or picture-in-picture model.
+-- Never show a person or model being held in a hand, placed on top of a product close-up, or floating over the product.
+-- Do not use an oversized product print, logo, texture, or fabric close-up as a backdrop behind a separate small model.
+-- Product artwork, logos, patterns, and texture must appear on the product at believable scale, unless the whole frame is a pure macro detail with no separate full-body model.
+-- For detail or close-up sections, use one natural close crop of the product being worn or used, such as torso fabric, neckline, print, texture, seam, hand interaction, or fit detail. Do not add a separate full-body model in the same frame.
+-- If a full-body or half-body model is shown, make the model life-size and fully integrated into the environment.
+`;
+
 const buildModelProfileInstruction = (info: DetailInputInfo): string => {
     const genderText = {
         auto: 'Choose the model gender that best matches the product category and target customer.',
@@ -325,7 +336,7 @@ const buildShotCompositionInstruction = (segment: any, segmentIndex: number, sho
         auto: 'Use the most suitable e-commerce model cut for this section.',
         full: 'Use a full-body model cut with the whole outfit/product visible and no cropped head or feet.',
         half: 'Use a waist-up or half-body model cut with the product large and clear.',
-        closeup: 'Use an extreme close-up or detail-focused model cut showing texture, fit, finish, and product details.',
+        closeup: 'Use one natural close crop of the product being worn or used, showing texture, fit, finish, and product details. Do not combine a giant product close-up background with a tiny/full-body model overlay.',
         lifestyle: 'Use a natural lifestyle model scene that shows how the product is used in daily life.',
     };
 
@@ -369,6 +380,7 @@ const buildDetailImagePrompt = (
 - Use one seamless full-page background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, vertical seams, side-by-side reference-image composites, or hard dividers for overlay copy.
 - If the reference image contains a real model/person, use it ONLY to understand product fit and scale. Replace the model with a completely new fictional Korean model with a different face, hair, pose, body impression, and expression.
 - Replace the reference photo background completely. Do NOT copy rooms, walls, mirrors, posters, furniture, doors, bathrooms, studios, or any visible environment from the uploaded reference photos.
+- The final image must look like a physically believable single photograph, not an artificial composite of product close-up and pasted model.
 - Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
 - CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
 - If generating a back view and the reference back image has a logo, include that logo exactly
@@ -379,6 +391,7 @@ ${designPresetInstruction}
 ${modelCutInstruction}
 ${combinationInstruction}
 ${modelProfileInstruction}
+${NATURAL_MODEL_COMPOSITION_RULES}
 ${shotInstruction}
 ${conversionInstruction}
 ${colorInstruction}
@@ -416,6 +429,9 @@ MODEL CUT STYLE:
 - Use a new fictional model face and body; do not copy any real person, face, hair, pose, body impression, or expression from reference images.
 - Change the environment completely; do not reuse reference rooms, walls, posters, mirrors, furniture, doors, or indoor backgrounds.
 - Keep the product as the clear hero subject, large and easy to inspect.
+- Keep the model, product, hands, and background at realistic scale in one physically believable scene.
+- Never create a miniature model pasted over a large product close-up, picture-in-picture model, sticker cutout, or hand-held tiny person.
+- Do not enlarge product artwork or fabric into a giant background behind a separate model.
 ${bundleIntro}
 `;
 };
@@ -599,6 +615,7 @@ STRICT REQUIREMENTS:
 - Use a completely new fictional model face/person and a new background; never copy reference people, faces, rooms, walls, posters, doors, mirrors, furniture, or indoor environments
 - Do not reuse the same pose, scene, or background as other conversion template visuals
 - Use one continuous scene only. Never create split-screen panels, vertical seams, side-by-side photo composites, or divided backgrounds
+${NATURAL_MODEL_COMPOSITION_RULES}
 - Leave clean negative space and avoid cropping model faces, heads, or product details`;
 
         return await generateImage(prompt, referenceImages, '9:16') || '';
