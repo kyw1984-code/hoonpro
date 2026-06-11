@@ -366,7 +366,9 @@ const buildDetailImagePrompt = (
 
     return `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
-- Use one seamless full-page background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, or hard dividers for overlay copy.
+- Use one seamless full-page background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, vertical seams, side-by-side reference-image composites, or hard dividers for overlay copy.
+- If the reference image contains a real model/person, use it ONLY to understand product fit and scale. Replace the model with a completely new fictional Korean model with a different face, hair, pose, body impression, and expression.
+- Replace the reference photo background completely. Do NOT copy rooms, walls, mirrors, posters, furniture, doors, bathrooms, studios, or any visible environment from the uploaded reference photos.
 - Preserve the EXACT colors from ALL reference product images - do not alter or add colors unless specifically requested
 - CRITICAL: Multiple reference images are provided showing different angles (front, back, side). Each image may have logos, brand marks, or design elements. You MUST preserve ALL logos and brand marks from ALL reference images exactly as they appear in their respective angles.
 - If generating a back view and the reference back image has a logo, include that logo exactly
@@ -392,15 +394,15 @@ const buildCombinationIntroSegment = (combinationType: CombinationType, productN
         title: `${combinationType} 조합 인트로`,
         logicalSections: ['인트로', '조합 혜택'],
         keyMessage: `${combinationType} 구성\n${countLabel}를 한 번에`,
-        visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Use one seamless studio background across the entire frame, including the top copy-safe area and the model area. Do not create a separate white header band, split-screen collage, panel layout, boxed sections, hard dividers, or different backgrounds behind each model. Reserve the top 22% as clean negative space with the same continuous background, and place the ${count} fictional fashion models below that area so their heads, bodies, and products are not cropped by overlay text. Each model should wear or naturally use one product unit from the reference images. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and do not include any text, numbers, labels, badges, or typography in the image.`,
+        visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Use one seamless studio background across the entire frame, including the top copy-safe area and the model area. The models must stand together in one continuous scene, not in separated columns. Do not create a separate white header band, split-screen collage, panel layout, boxed sections, vertical seams, hard dividers, or different backgrounds behind each model. If reference photos include real models, replace every face and person with completely new fictional Korean models; use the reference only for product design, fit, logo, color, and texture. Replace any reference room/background with a new premium studio background. Reserve the top 22% as clean negative space with the same continuous background, and place the ${count} fictional fashion models below that area so their heads, bodies, and products are not cropped by overlay text. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and do not include any text, numbers, labels, badges, or typography in the image.`,
     };
 };
 
 const buildModelCutInstruction = (combinationType: CombinationType, segmentIndex: number): string => {
     const count = getCombinationCount(combinationType);
     const bundleIntro = combinationType !== 'single' && segmentIndex === 0
-        ? `- For the intro, create a bundle model cut with exactly ${count} visible product-wearing/using model cuts in one vertical page.
-- Use one continuous seamless studio background for the entire image. Do NOT use split-screen panels, separate boxes, hard dividers, different backgrounds per model, or a white header block.
+        ? `- For the intro, create a bundle model cut with exactly ${count} visible product-wearing/using models together in one vertical page.
+- Use one continuous seamless studio background for the entire image. Do NOT use split-screen panels, vertical seams, separate boxes, hard dividers, different backgrounds per model, side-by-side reference-photo composites, or a white header block.
 - Reserve the top 22% of the image as clean negative space on the same continuous background for large Korean overlay copy.
 - Place models and products below that copy-safe area and keep faces, heads, outfits, and products fully visible without top cropping.`
         : '';
@@ -411,7 +413,8 @@ MODEL CUT STYLE:
 - Do NOT create flat lay, hanger, mannequin, or product-only images.
 - If the product is clothing or an accessory, show a fictional model wearing it naturally.
 - If the product is not wearable, show a fictional model holding or using it in a natural lifestyle scene.
-- Use a new fictional model face and body; do not copy any real person from reference images.
+- Use a new fictional model face and body; do not copy any real person, face, hair, pose, body impression, or expression from reference images.
+- Change the environment completely; do not reuse reference rooms, walls, posters, mirrors, furniture, doors, or indoor backgrounds.
 - Keep the product as the clear hero subject, large and easy to inspect.
 ${bundleIntro}
 `;
@@ -424,8 +427,8 @@ const buildCombinationImageInstruction = (combinationType: CombinationType, segm
     const introInstruction = segmentIndex === 0
         ? `- INTRO SECTION: Show exactly ${count} model-cut product presentations together in one vertical frame, using the reference images as the product source.
 - Keep the top area visually open for the app's oversized copy overlay; do not place important model faces or product details in the top 22% of the frame.
-- The intro must look like one unified photo scene with a single continuous background, not a collage or separated panels.`
-        : `- Keep the bundle context visible where natural; use multiple units together when it supports the section concept.`;
+- The intro must look like one unified photo scene with a single continuous background, not a collage, not a side-by-side split, and not separated panels.`
+        : `- Keep the bundle context visible where natural; use multiple units together in one unified scene when it supports the section concept. Never use split panels or visible seams.`;
 
     return `
 COMBINATION PRODUCT MODE (${combinationType}):
@@ -566,6 +569,7 @@ const drawCoverImage = (
 const generateConversionVisualImage = async (
     templateTitle: string,
     visualDirection: string,
+    visualVariant: string,
     productName: string,
     category: string,
     referenceImages: string[],
@@ -583,6 +587,7 @@ Product: ${productName || category}
 Category: ${category}
 Design style: ${designPreset.label}
 Visual direction: ${visualDirection}
+Unique visual variant: ${visualVariant}
 
 STRICT REQUIREMENTS:
 - NO TEXT, NO LETTERS, NO NUMBERS, NO BADGES, NO CAPTIONS in the image
@@ -591,6 +596,9 @@ STRICT REQUIREMENTS:
 - ${bundleGuide}
 - Use this style: ${designPreset.imageStyle}
 - Background direction: ${designPreset.backgroundGuide}
+- Use a completely new fictional model face/person and a new background; never copy reference people, faces, rooms, walls, posters, doors, mirrors, furniture, or indoor environments
+- Do not reuse the same pose, scene, or background as other conversion template visuals
+- Use one continuous scene only. Never create split-screen panels, vertical seams, side-by-side photo composites, or divided backgrounds
 - Leave clean negative space and avoid cropping model faces, heads, or product details`;
 
         return await generateImage(prompt, referenceImages, '9:16') || '';
@@ -603,7 +611,7 @@ STRICT REQUIREMENTS:
 const generateConversionTemplateImage = async (
     label: string,
     title: string,
-    subtitle: string,
+    _subtitle: string,
     items: Array<{ label: string; text: string }>,
     designPreset: DesignPreset,
     visualImageUrl?: string
@@ -639,10 +647,6 @@ const generateConversionTemplateImage = async (
     ctx.font = 'bold 54px "Noto Sans KR", sans-serif';
     drawCanvasWrappedText(ctx, title, 62, 232, canvas.width - 124, 62, 2);
 
-    ctx.fillStyle = theme.muted;
-    ctx.font = '23px "Noto Sans KR", sans-serif';
-    drawCanvasWrappedText(ctx, subtitle, 64, 332, canvas.width - 128, 34, 2);
-
     const cardX = 64;
     const cardW = canvas.width - 128;
     const hasVisual = Boolean(visualImage);
@@ -651,19 +655,19 @@ const generateConversionTemplateImage = async (
         ctx.shadowColor = designPreset.defaultTextColor === '#ffffff' ? 'rgba(0, 0, 0, 0.34)' : 'rgba(15, 23, 42, 0.13)';
         ctx.shadowBlur = 24;
         ctx.shadowOffsetY = 14;
-        drawCanvasRoundRect(ctx, cardX, 386, cardW, 330, 30);
+        drawCanvasRoundRect(ctx, cardX, 328, cardW, 388, 30);
         ctx.fillStyle = theme.cardBg;
         ctx.fill();
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
         ctx.shadowOffsetY = 0;
 
-        drawCoverImage(ctx, visualImage, cardX, 386, cardW, 330, 30);
-        const imageShade = ctx.createLinearGradient(cardX, 386, cardX, 716);
+        drawCoverImage(ctx, visualImage, cardX, 328, cardW, 388, 30);
+        const imageShade = ctx.createLinearGradient(cardX, 328, cardX, 716);
         imageShade.addColorStop(0, 'rgba(0, 0, 0, 0)');
         imageShade.addColorStop(1, 'rgba(0, 0, 0, 0.42)');
         ctx.fillStyle = imageShade;
-        drawCanvasRoundRect(ctx, cardX, 386, cardW, 330, 30);
+        drawCanvasRoundRect(ctx, cardX, 328, cardW, 388, 30);
         ctx.fill();
 
         ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
@@ -709,11 +713,6 @@ const generateConversionTemplateImage = async (
         y += cardH + (compactCard ? 12 : 24);
     });
 
-    ctx.textAlign = 'center';
-    ctx.fillStyle = theme.muted;
-    ctx.font = '20px "Noto Sans KR", sans-serif';
-    ctx.fillText(`${designPreset.label} 전환형 상세페이지 템플릿`, canvas.width / 2, canvas.height - 72);
-
     return canvas.toDataURL('image/png');
 };
 
@@ -728,9 +727,6 @@ const buildConversionTemplateSegments = async (params: {
     referenceImages: string[];
 }): Promise<{ afterIntro: any[]; bottom: any[] }> => {
     const featurePhrases = splitFeaturePhrases(params.features, params.productName || params.category || '상품의 핵심 장점');
-    const targetText = params.target || '고객';
-    const combinationCount = getCombinationCount(params.combinationType);
-    const countLabel = getCombinationCountLabel(combinationCount);
     const now = Date.now();
     const afterIntro: any[] = [];
     const bottom: any[] = [];
@@ -738,7 +734,8 @@ const buildConversionTemplateSegments = async (params: {
     const [benefitVisualUrl, bundleVisualUrl, problemVisualUrl] = await Promise.all([
         generateConversionVisualImage(
             '선택해야 하는 이유',
-            'A persuasive model cut that visually summarizes the product benefits with clear product visibility and a premium shopping mood.',
+            'A persuasive single-model hero cut that visually summarizes the product benefits with clear product visibility and a premium shopping mood.',
+            'Benefit summary: one fictional model, half-body editorial pose, clean premium studio background, product centered and confident.',
             params.productName,
             params.category,
             params.referenceImages,
@@ -749,6 +746,7 @@ const buildConversionTemplateSegments = async (params: {
             ? generateConversionVisualImage(
                 `${params.combinationType === 'single' ? '구성 가치' : `${params.combinationType} 구성 가치`}`,
                 'A practical bundle value scene showing multiple product units or multiple models using the product together on one seamless background.',
+                'Bundle value: group composition or multiple product units together, wider full-body framing, different studio set, no split panels.',
                 params.productName,
                 params.category,
                 params.referenceImages,
@@ -759,6 +757,7 @@ const buildConversionTemplateSegments = async (params: {
         generateConversionVisualImage(
             '더 이상 고민하지 마세요',
             'A reassuring problem-solution model cut that shows comfort, confidence, and ease of choosing the product.',
+            'Problem solved: relaxed lifestyle scene, softer warm background, different fictional model and pose, calm reassuring mood.',
             params.productName,
             params.category,
             params.referenceImages,
@@ -774,7 +773,7 @@ const buildConversionTemplateSegments = async (params: {
     const benefitUrl = await generateConversionTemplateImage(
         'WHY BUY',
         '선택해야 하는 이유',
-        `${targetText}에게 필요한 핵심 장점을 한눈에 정리했습니다.`,
+        '',
         benefitItems,
         params.designPreset,
         benefitVisualUrl
@@ -800,7 +799,7 @@ const buildConversionTemplateSegments = async (params: {
         const bundleUrl = await generateConversionTemplateImage(
             'BUNDLE VALUE',
             `${params.combinationType === 'single' ? '구성 가치' : `${params.combinationType} 구성 가치`}`,
-            `${countLabel}를 함께 준비했을 때 느껴지는 실용성을 강조합니다.`,
+            '',
             [
                 { label: '여유분 확보', text: '자주 쓰는 상품을 한 번에 준비해 사용 흐름이 끊기지 않습니다.' },
                 { label: '함께 활용', text: '가족, 파트너, 상황별 예비용으로 나누어 쓰기 좋습니다.' },
@@ -830,7 +829,7 @@ const buildConversionTemplateSegments = async (params: {
     const problemUrl = await generateConversionTemplateImage(
         'PROBLEM SOLVED',
         '더 이상 고민하지 마세요',
-        `${params.category || '상품'} 선택 전 망설였던 부분을 자연스럽게 해결해드립니다.`,
+        '',
         [
             { label: '착용감/사용감', text: '매일 사용해도 부담 없는 편안함을 중심으로 보여줍니다.' },
             { label: '소재와 마감', text: featurePhrases[0] || '눈으로 확인되는 제품 완성도를 강조합니다.' },
@@ -849,34 +848,6 @@ const buildConversionTemplateSegments = async (params: {
         visualPrompt: 'Problem solution conversion card generated automatically.',
         imageUrl: problemUrl,
         rawImageUrl: problemUrl,
-        textPosition: 'bottom',
-        textColor: params.designPreset.defaultTextColor,
-        fontScale: DEFAULT_DETAIL_FONT_SCALE,
-        isGenerating: false,
-        staticImage: true,
-    });
-
-    const faqUrl = await generateConversionTemplateImage(
-        'BUYING FAQ',
-        '구매 전 확인하세요',
-        '배송/교환 안내가 아닌 제품 선택에 필요한 궁금증만 정리했습니다.',
-        [
-            { label: '어떤 분께 맞나요?', text: `${targetText}이 자연스럽게 쓰기 좋은 상세 구성으로 제안합니다.` },
-            { label: '무엇을 확인하면 좋나요?', text: '실측, 소재, 활용 장면을 함께 비교하면 선택이 쉬워집니다.' },
-            { label: '관리 부담은 어떤가요?', text: '하단 제품 정보 및 관리방법에서 세탁과 주의사항을 확인하세요.' },
-        ],
-        params.designPreset
-    );
-    bottom.push({
-        id: `conversion-faq-${now}`,
-        title: '구매 안심 FAQ',
-        logicalSections: ['전환율', '구매 안심'],
-        conversionRole: '구매 안심 정보',
-        sectionType: 'buying-faq',
-        keyMessage: '구매 전 확인하세요\n안심 포인트 정리',
-        visualPrompt: 'Buying FAQ conversion card generated automatically.',
-        imageUrl: faqUrl,
-        rawImageUrl: faqUrl,
         textPosition: 'bottom',
         textColor: params.designPreset.defaultTextColor,
         fontScale: DEFAULT_DETAIL_FONT_SCALE,
