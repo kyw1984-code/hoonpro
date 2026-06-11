@@ -521,18 +521,99 @@ const splitFeaturePhrases = (features: string, fallback: string): string[] => {
     return [...base, fallback, '선택이 쉬운 제품력'].slice(0, 3);
 };
 
-const generateConversionTemplateImage = (
+const loadCanvasImage = (imageUrl?: string): Promise<HTMLImageElement | null> => {
+    if (!imageUrl) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+        const img = new window.Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = imageUrl;
+    });
+};
+
+const drawCoverImage = (
+    ctx: CanvasRenderingContext2D,
+    img: HTMLImageElement,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radius: number
+) => {
+    const imgRatio = img.width / img.height;
+    const targetRatio = width / height;
+    let sx = 0;
+    let sy = 0;
+    let sw = img.width;
+    let sh = img.height;
+
+    if (imgRatio > targetRatio) {
+        sw = img.height * targetRatio;
+        sx = (img.width - sw) / 2;
+    } else {
+        sh = img.width / targetRatio;
+        sy = (img.height - sh) / 2;
+    }
+
+    ctx.save();
+    drawCanvasRoundRect(ctx, x, y, width, height, radius);
+    ctx.clip();
+    ctx.drawImage(img, sx, sy, sw, sh, x, y, width, height);
+    ctx.restore();
+};
+
+const generateConversionVisualImage = async (
+    templateTitle: string,
+    visualDirection: string,
+    productName: string,
+    category: string,
+    referenceImages: string[],
+    designPreset: DesignPreset,
+    combinationType: CombinationType
+): Promise<string> => {
+    try {
+        const count = getCombinationCount(combinationType);
+        const bundleGuide = combinationType !== 'single'
+            ? `Show the value of a ${combinationType} bundle with exactly ${count} product-wearing/using model cuts when natural.`
+            : 'Show one clear hero product-use model cut.';
+        const prompt = `Create a premium Korean e-commerce model cut image for a conversion template.
+Template: ${templateTitle}
+Product: ${productName || category}
+Category: ${category}
+Design style: ${designPreset.label}
+Visual direction: ${visualDirection}
+
+STRICT REQUIREMENTS:
+- NO TEXT, NO LETTERS, NO NUMBERS, NO BADGES, NO CAPTIONS in the image
+- Professional fictional Korean model cut or lifestyle model scene
+- Product must be clearly visible and faithful to the reference images
+- ${bundleGuide}
+- Use this style: ${designPreset.imageStyle}
+- Background direction: ${designPreset.backgroundGuide}
+- Leave clean negative space and avoid cropping model faces, heads, or product details`;
+
+        return await generateImage(prompt, referenceImages, '9:16') || '';
+    } catch (error) {
+        console.error('Conversion visual image generation failed:', error);
+        return '';
+    }
+};
+
+const generateConversionTemplateImage = async (
     label: string,
     title: string,
     subtitle: string,
     items: Array<{ label: string; text: string }>,
-    designPreset: DesignPreset
-): string => {
+    designPreset: DesignPreset,
+    visualImageUrl?: string
+): Promise<string> => {
     const canvas = document.createElement('canvas');
     canvas.width = 860;
     canvas.height = 1000;
     const ctx = canvas.getContext('2d')!;
     const theme = designPreset.reviewTheme;
+    const visualImage = await loadCanvasImage(visualImageUrl);
 
     fillPresetBackground(ctx, canvas.width, canvas.height, designPreset);
 
@@ -564,14 +645,44 @@ const generateConversionTemplateImage = (
 
     const cardX = 64;
     const cardW = canvas.width - 128;
-    const cardH = items.length > 3 ? 128 : 154;
-    let y = 420;
+    const hasVisual = Boolean(visualImage);
 
-    items.slice(0, 4).forEach((item, idx) => {
+    if (visualImage) {
         ctx.shadowColor = designPreset.defaultTextColor === '#ffffff' ? 'rgba(0, 0, 0, 0.34)' : 'rgba(15, 23, 42, 0.13)';
-        ctx.shadowBlur = 22;
-        ctx.shadowOffsetY = 12;
-        drawCanvasRoundRect(ctx, cardX, y, cardW, cardH, 26);
+        ctx.shadowBlur = 24;
+        ctx.shadowOffsetY = 14;
+        drawCanvasRoundRect(ctx, cardX, 386, cardW, 330, 30);
+        ctx.fillStyle = theme.cardBg;
+        ctx.fill();
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetY = 0;
+
+        drawCoverImage(ctx, visualImage, cardX, 386, cardW, 330, 30);
+        const imageShade = ctx.createLinearGradient(cardX, 386, cardX, 716);
+        imageShade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        imageShade.addColorStop(1, 'rgba(0, 0, 0, 0.42)');
+        ctx.fillStyle = imageShade;
+        drawCanvasRoundRect(ctx, cardX, 386, cardW, 330, 30);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.font = 'bold 26px "Noto Sans KR", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(title, cardX + 34, 674);
+    }
+
+    const cardStartY = hasVisual ? 746 : 420;
+    const compactCard = hasVisual;
+    const cardH = compactCard ? 70 : items.length > 3 ? 128 : 154;
+    let y = cardStartY;
+
+    items.slice(0, compactCard ? 3 : 4).forEach((item, idx) => {
+        ctx.shadowColor = compactCard ? 'transparent' : designPreset.defaultTextColor === '#ffffff' ? 'rgba(0, 0, 0, 0.34)' : 'rgba(15, 23, 42, 0.13)';
+        ctx.shadowBlur = compactCard ? 0 : 22;
+        ctx.shadowOffsetY = compactCard ? 0 : 12;
+        drawCanvasRoundRect(ctx, cardX, y, cardW, cardH, compactCard ? 18 : 26);
         ctx.fillStyle = theme.cardBg;
         ctx.fill();
         ctx.shadowColor = 'transparent';
@@ -579,23 +690,23 @@ const generateConversionTemplateImage = (
         ctx.shadowOffsetY = 0;
 
         ctx.fillStyle = accent;
-        drawCanvasRoundRect(ctx, cardX + 26, y + 30, 62, 62, 31);
+        drawCanvasRoundRect(ctx, cardX + 22, y + (compactCard ? 18 : 30), compactCard ? 34 : 62, compactCard ? 34 : 62, compactCard ? 17 : 31);
         ctx.fill();
         ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 24px "Noto Sans KR", sans-serif';
+        ctx.font = `bold ${compactCard ? 17 : 24}px "Noto Sans KR", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(String(idx + 1), cardX + 57, y + 61);
+        ctx.fillText(String(idx + 1), cardX + (compactCard ? 39 : 57), y + (compactCard ? 35 : 61));
 
         ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
         ctx.fillStyle = theme.heading;
-        ctx.font = 'bold 26px "Noto Sans KR", sans-serif';
-        ctx.fillText(item.label, cardX + 112, y + 52);
+        ctx.font = `bold ${compactCard ? 20 : 26}px "Noto Sans KR", sans-serif`;
+        ctx.fillText(item.label, cardX + (compactCard ? 74 : 112), y + (compactCard ? 28 : 52));
         ctx.fillStyle = theme.body;
-        ctx.font = '22px "Noto Sans KR", sans-serif';
-        drawCanvasWrappedText(ctx, item.text, cardX + 112, y + 92, cardW - 150, 32, 2);
-        y += cardH + 24;
+        ctx.font = `${compactCard ? 17 : 22}px "Noto Sans KR", sans-serif`;
+        drawCanvasWrappedText(ctx, item.text, cardX + (compactCard ? 74 : 112), y + (compactCard ? 55 : 92), cardW - (compactCard ? 100 : 150), compactCard ? 24 : 32, compactCard ? 1 : 2);
+        y += cardH + (compactCard ? 12 : 24);
     });
 
     ctx.textAlign = 'center';
@@ -606,7 +717,7 @@ const generateConversionTemplateImage = (
     return canvas.toDataURL('image/png');
 };
 
-const buildConversionTemplateSegments = (params: {
+const buildConversionTemplateSegments = async (params: {
     productName: string;
     category: string;
     features: string;
@@ -614,7 +725,8 @@ const buildConversionTemplateSegments = (params: {
     combinationType: CombinationType;
     designPreset: DesignPreset;
     mode: ConversionModeKey;
-}) => {
+    referenceImages: string[];
+}): Promise<{ afterIntro: any[]; bottom: any[] }> => {
     const featurePhrases = splitFeaturePhrases(params.features, params.productName || params.category || '상품의 핵심 장점');
     const targetText = params.target || '고객';
     const combinationCount = getCombinationCount(params.combinationType);
@@ -622,17 +734,50 @@ const buildConversionTemplateSegments = (params: {
     const now = Date.now();
     const afterIntro: any[] = [];
     const bottom: any[] = [];
+    const shouldShowBundle = params.combinationType !== 'single' || params.mode === 'bundleValue';
+    const [benefitVisualUrl, bundleVisualUrl, problemVisualUrl] = await Promise.all([
+        generateConversionVisualImage(
+            '선택해야 하는 이유',
+            'A persuasive model cut that visually summarizes the product benefits with clear product visibility and a premium shopping mood.',
+            params.productName,
+            params.category,
+            params.referenceImages,
+            params.designPreset,
+            params.combinationType
+        ),
+        shouldShowBundle
+            ? generateConversionVisualImage(
+                `${params.combinationType === 'single' ? '구성 가치' : `${params.combinationType} 구성 가치`}`,
+                'A practical bundle value scene showing multiple product units or multiple models using the product together on one seamless background.',
+                params.productName,
+                params.category,
+                params.referenceImages,
+                params.designPreset,
+                params.combinationType
+            )
+            : Promise.resolve(''),
+        generateConversionVisualImage(
+            '더 이상 고민하지 마세요',
+            'A reassuring problem-solution model cut that shows comfort, confidence, and ease of choosing the product.',
+            params.productName,
+            params.category,
+            params.referenceImages,
+            params.designPreset,
+            params.combinationType
+        ),
+    ]);
 
     const benefitItems = featurePhrases.map((feature, idx) => ({
         label: idx === 0 ? '첫 번째 이유' : idx === 1 ? '두 번째 이유' : '세 번째 이유',
         text: feature,
     }));
-    const benefitUrl = generateConversionTemplateImage(
+    const benefitUrl = await generateConversionTemplateImage(
         'WHY BUY',
         '선택해야 하는 이유',
         `${targetText}에게 필요한 핵심 장점을 한눈에 정리했습니다.`,
         benefitItems,
-        params.designPreset
+        params.designPreset,
+        benefitVisualUrl
     );
     afterIntro.push({
         id: `conversion-benefits-${now}`,
@@ -651,8 +796,8 @@ const buildConversionTemplateSegments = (params: {
         staticImage: true,
     });
 
-    if (params.combinationType !== 'single' || params.mode === 'bundleValue') {
-        const bundleUrl = generateConversionTemplateImage(
+    if (shouldShowBundle) {
+        const bundleUrl = await generateConversionTemplateImage(
             'BUNDLE VALUE',
             `${params.combinationType === 'single' ? '구성 가치' : `${params.combinationType} 구성 가치`}`,
             `${countLabel}를 함께 준비했을 때 느껴지는 실용성을 강조합니다.`,
@@ -661,7 +806,8 @@ const buildConversionTemplateSegments = (params: {
                 { label: '함께 활용', text: '가족, 파트너, 상황별 예비용으로 나누어 쓰기 좋습니다.' },
                 { label: '선물 가치', text: '실용적인 구성이라 부담 없이 선물하기 좋은 선택입니다.' },
             ],
-            params.designPreset
+            params.designPreset,
+            bundleVisualUrl
         );
         afterIntro.push({
             id: `conversion-bundle-${now}`,
@@ -681,20 +827,21 @@ const buildConversionTemplateSegments = (params: {
         });
     }
 
-    const problemUrl = generateConversionTemplateImage(
+    const problemUrl = await generateConversionTemplateImage(
         'PROBLEM SOLVED',
-        '고객 고민 해결',
-        `${params.category || '상품'} 선택 전 자주 고민하는 부분을 구매 이유로 바꿉니다.`,
+        '더 이상 고민하지 마세요',
+        `${params.category || '상품'} 선택 전 망설였던 부분을 자연스럽게 해결해드립니다.`,
         [
             { label: '착용감/사용감', text: '매일 사용해도 부담 없는 편안함을 중심으로 보여줍니다.' },
             { label: '소재와 마감', text: featurePhrases[0] || '눈으로 확인되는 제품 완성도를 강조합니다.' },
             { label: '활용 상황', text: '일상 속에서 자연스럽게 쓰이는 장면으로 선택을 돕습니다.' },
         ],
-        params.designPreset
+        params.designPreset,
+        problemVisualUrl
     );
     afterIntro.push({
         id: `conversion-problem-${now}`,
-        title: '고객 고민 해결',
+        title: '더 이상 고민하지 마세요',
         logicalSections: ['전환율', '문제 해결'],
         conversionRole: '고객 문제/상황',
         sectionType: 'problem-solution',
@@ -709,7 +856,7 @@ const buildConversionTemplateSegments = (params: {
         staticImage: true,
     });
 
-    const faqUrl = generateConversionTemplateImage(
+    const faqUrl = await generateConversionTemplateImage(
         'BUYING FAQ',
         '구매 전 확인하세요',
         '배송/교환 안내가 아닌 제품 선택에 필요한 궁금증만 정리했습니다.',
@@ -1709,7 +1856,7 @@ export const DetailPlanner: React.FC = () => {
             const afterIntroSegments: any[] = [];
             const bottomSegments: any[] = [];
             const conversionTemplates = info.conversionEnabled
-                ? buildConversionTemplateSegments({
+                ? await buildConversionTemplateSegments({
                     productName: info.name,
                     category: info.category,
                     features,
@@ -1717,6 +1864,7 @@ export const DetailPlanner: React.FC = () => {
                     combinationType: info.combinationType,
                     designPreset: selectedPreset,
                     mode: effectiveConversionMode,
+                    referenceImages,
                 })
                 : { afterIntro: [], bottom: [] };
 
