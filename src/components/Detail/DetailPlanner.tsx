@@ -1,6 +1,6 @@
 import React, { useState, useRef, type DragEvent } from 'react';
-import { planDetail, generateImage, generateFeatures } from '../../api/aiService';
-import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical, RefreshCw } from 'lucide-react';
+import { planDetail, planStrategy, generateImage, generateFeatures } from '../../api/aiService';
+import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical, RefreshCw, Target, AlertCircle, Sparkles, Zap, Palette, Megaphone } from 'lucide-react';
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
 type DesignPresetKey = 'premium' | 'minimal' | 'street' | 'lifestyle' | 'deal' | 'clean';
@@ -1728,6 +1728,14 @@ export const DetailPlanner: React.FC = () => {
         { rating: 4, text: '사용감이 좋아서 가족들에게도 추천했어요. 재구매 의사 100%입니다.', author: '박**' }
     ]);
     const [segments, setSegments] = useState<any[]>([]);
+    const [strategy, setStrategy] = useState<{
+        targetModel: string;
+        purchaseConcerns: string[];
+        sellingPoints: string[];
+        purchaseTrigger: string;
+        brandTone: string;
+        colorDirection: string;
+    } | null>(null);
     const [draggedSegmentIndex, setDraggedSegmentIndex] = useState<number | null>(null);
 
     const moveSegment = (fromIndex: number, toIndex: number) => {
@@ -1806,14 +1814,22 @@ export const DetailPlanner: React.FC = () => {
             }
 
             const combinationCount = getCombinationCount(info.combinationType);
-            const plannedSegments = await planDetail({
-                ...info,
-                features,
-                length,
-                combinationCount,
-                designPreset: selectedPreset,
-                effectiveConversionMode,
-            });
+            const [strategyDraft, plannedSegments] = await Promise.all([
+                planStrategy({
+                    ...info,
+                    features,
+                    designPreset: selectedPreset,
+                }),
+                planDetail({
+                    ...info,
+                    features,
+                    length,
+                    combinationCount,
+                    designPreset: selectedPreset,
+                    effectiveConversionMode,
+                }),
+            ]);
+            setStrategy(strategyDraft);
             const segmentsWithCombinationIntro = info.combinationType === 'single'
                 ? plannedSegments
                 : plannedSegments.length > 0
@@ -2588,6 +2604,70 @@ export const DetailPlanner: React.FC = () => {
                             )}
                         </div>
                     </div>
+
+                    {strategy && (
+                        <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-2xl shadow-sm">
+                            <div className="flex items-center gap-2 mb-1">
+                                <Sparkles className="w-5 h-5 text-amber-400" />
+                                <h3 className="text-lg font-bold">전략 기획 초안</h3>
+                            </div>
+                            <p className="text-slate-300 text-sm mb-5">AI가 구매 전환 관점에서 분석한 핵심 전략입니다. 아래 기획안은 이 전략을 토대로 설계되었습니다.</p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                                    <div className="flex items-center gap-2 text-amber-300 text-xs font-bold mb-2">
+                                        <Target className="w-4 h-4" />타겟 모델
+                                    </div>
+                                    <p className="text-sm text-slate-100 leading-relaxed">{strategy.targetModel || '-'}</p>
+                                </div>
+                                <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                                    <div className="flex items-center gap-2 text-rose-300 text-xs font-bold mb-2">
+                                        <AlertCircle className="w-4 h-4" />핵심 구매 고민
+                                    </div>
+                                    <ul className="text-sm text-slate-100 leading-relaxed space-y-1">
+                                        {strategy.purchaseConcerns.length > 0
+                                            ? strategy.purchaseConcerns.map((c, i) => <li key={i}>· {c}</li>)
+                                            : <li>-</li>}
+                                    </ul>
+                                </div>
+                                <div className="bg-white/5 rounded-xl p-4 border border-white/10 md:col-span-2">
+                                    <div className="flex items-center gap-2 text-emerald-300 text-xs font-bold mb-2">
+                                        <Sparkles className="w-4 h-4" />핵심 셀링포인트 5가지
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1.5">
+                                        {strategy.sellingPoints.length > 0
+                                            ? strategy.sellingPoints.map((p, i) => (
+                                                <div key={i} className="flex gap-2 text-sm text-slate-100 leading-relaxed">
+                                                    <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-bold flex items-center justify-center">{i + 1}</span>
+                                                    <span>{p}</span>
+                                                </div>
+                                            ))
+                                            : <p className="text-sm text-slate-400">-</p>}
+                                    </div>
+                                </div>
+                                <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                                    <div className="flex items-center gap-2 text-blue-300 text-xs font-bold mb-2">
+                                        <Zap className="w-4 h-4" />구매 트리거
+                                    </div>
+                                    <p className="text-sm text-slate-100 leading-relaxed">{strategy.purchaseTrigger || '-'}</p>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                                        <div className="flex items-center gap-2 text-violet-300 text-xs font-bold mb-2">
+                                            <Megaphone className="w-4 h-4" />브랜드 톤
+                                        </div>
+                                        <p className="text-sm text-slate-100 leading-relaxed">{strategy.brandTone || '-'}</p>
+                                    </div>
+                                    <div className="bg-white/5 rounded-xl p-4 border border-white/10">
+                                        <div className="flex items-center gap-2 text-pink-300 text-xs font-bold mb-2">
+                                            <Palette className="w-4 h-4" />컬러 방향
+                                        </div>
+                                        <p className="text-sm text-slate-100 leading-relaxed">{strategy.colorDirection || '-'}</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-1 gap-6">
                         {segments.map((seg, idx) => (
                             <div

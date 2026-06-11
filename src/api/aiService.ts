@@ -41,6 +41,73 @@ export const generateFeatures = async (productName: string, category: string): P
   }
 };
 
+// 범용 상세페이지 전략 초안 생성 (1단계: 자동 분석 + 전략 초안)
+export const planStrategy = async (data: any) => {
+  try {
+    await trackUsage();
+    const designPreset = data.designPreset && typeof data.designPreset === 'object'
+      ? data.designPreset
+      : null;
+    const designGuide = designPreset
+      ? `\n선택된 디자인 스타일: ${designPreset.label} (${designPreset.copyTone})`
+      : '';
+    const combinationType = data.combinationType && data.combinationType !== 'single'
+      ? String(data.combinationType)
+      : '';
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      config: {
+        responseMimeType: "application/json",
+      },
+      contents: `
+당신은 이커머스 상세페이지를 제작하는 시니어 광고 디자이너이자 퍼포먼스 마케터입니다.
+아래 상품 정보를 바탕으로, 구매 전환을 극대화하기 위한 "전략 초안"을 자동 설계하세요.
+
+상품명: ${data.name}
+카테고리: ${data.category}
+핵심 특징: ${data.features || '없음 (상품명/카테고리 기반으로 합리적으로 추론)'}
+타겟 고객: ${data.target || '없음 (카테고리 기반으로 합리적으로 추론)'}
+상품 구성: ${combinationType ? `${combinationType} 조합상품` : '일반 단품'}${designGuide}
+
+다음 6가지 항목을 분석하여 반드시 아래 JSON 형식으로만 반환하세요. 다른 텍스트는 포함하지 마세요.
+모든 내용은 자연스러운 한국어 존댓말 또는 명사형으로 작성하고, 카테고리에 정확히 맞춰 구체적으로 작성하세요.
+검증되지 않은 수치(판매량, 할인율, 평점, 인증 여부 등)는 만들지 마세요.
+
+{
+  "targetModel": "타겟 모델 - 구체적 인물상과 사용 상황을 한 문장으로 (예: 재택근무가 잦은 30대 직장인, 저녁마다 목과 어깨 피로를 푸는 상황)",
+  "purchaseConcerns": ["핵심 구매 고민 1", "핵심 구매 고민 2 (최대 2개)"],
+  "sellingPoints": ["핵심 셀링포인트 1", "2", "3", "4", "5 (정확히 5개, 각각 구체적인 문장)"],
+  "purchaseTrigger": "즉시 구매를 유도하는 핵심 트리거 한 문장",
+  "brandTone": "브랜드 톤 1개 (예: 절제된 프리미엄, 따뜻한 감성, 직관적이고 대담한)",
+  "colorDirection": "컬러 방향 1개 (예: 화이트 베이스 + 딥네이비 포인트)"
+}
+      `.trim(),
+    });
+    await logApiCall('detail-strategy', 'gemini-2.5-flash', response);
+
+    const text = response.text ?? "";
+    const cleanJson = text.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleanJson);
+
+    return {
+      targetModel: String(parsed.targetModel || '').trim(),
+      purchaseConcerns: Array.isArray(parsed.purchaseConcerns)
+        ? parsed.purchaseConcerns.map((v: any) => String(v).trim()).filter(Boolean).slice(0, 2)
+        : [],
+      sellingPoints: Array.isArray(parsed.sellingPoints)
+        ? parsed.sellingPoints.map((v: any) => String(v).trim()).filter(Boolean).slice(0, 5)
+        : [],
+      purchaseTrigger: String(parsed.purchaseTrigger || '').trim(),
+      brandTone: String(parsed.brandTone || '').trim(),
+      colorDirection: String(parsed.colorDirection || '').trim(),
+    };
+  } catch (error) {
+    console.error("Strategy Plan Error:", error);
+    return null;
+  }
+};
+
 export const planDetail = async (data: any) => {
   try {
     await trackUsage();
@@ -117,6 +184,12 @@ export const planDetail = async (data: any) => {
 ${combinationGuide}
 ${designGuide}
 ${conversionGuide}
+
+ 범용 설득 구조 원칙 (반드시 반영):
+ - 한 이미지 = 하나의 설득 완결: 각 섹션은 메인 메시지 1개에 집중하고, 신뢰 → 상세 → CTA로 이어지는 흐름을 유지하세요.
+ - 전체 흐름은 Hook(시선 확보) → 문제 공감 → 해결 제안(Before/After) → 핵심 셀링포인트 → 활용/신뢰 강화 순서로 자연스럽게 설계하세요.
+ - 동일한 셀링포인트를 반복하더라도 상황 변화(아침/저녁/실내/실외/혼자/함께), 표현 변화(감성/기능/비교/숫자), 시각 변화(모델/클로즈업/사용 장면/결과 장면)로 다르게 표현하세요.
+ - keyMessage는 핵심 메시지를 직관적으로 전달하고, 고객의 현실 상황과 감정을 자극하는 카피로 작성하세요.
 
  반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
  각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt, sectionType, conversionRole 필드를 포함해야 합니다.
