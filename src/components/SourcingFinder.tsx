@@ -250,8 +250,8 @@ export function SourcingFinder() {
     setLoading(true);
     setSearchError(null);
     try {
-      const query = new URLSearchParams({ keyword: kw, minPrice, maxPrice });
-      const response = await fetch(`/api/naver-coupang?${query.toString()}`);
+      const query = new URLSearchParams({ type: 'products', keyword: kw, minPrice, maxPrice });
+      const response = await fetch(`/api/sourcing?${query.toString()}`);
       const data = await response.json();
 
       if (!response.ok || data.error) {
@@ -274,7 +274,7 @@ export function SourcingFinder() {
       const general = topProducts.filter((p: Product) => p.deliveryType === 'general' || (!p.isRocket && !p.deliveryType)).length;
       const sellerDist = JSON.stringify({ rocketPct: (rocket / total) * 100, jetPct: (jet / total) * 100, generalPct: (general / total) * 100 });
 
-      const statsRes = await fetch(`/api/keyword-stats?keyword=${encodeURIComponent(kw)}&sellerDistribution=${encodeURIComponent(sellerDist)}`);
+      const statsRes = await fetch(`/api/sourcing?type=stats&keyword=${encodeURIComponent(kw)}&sellerDistribution=${encodeURIComponent(sellerDist)}`);
       const statsData = await statsRes.json();
       setKeywordStats(statsData);
     } catch (error: any) {
