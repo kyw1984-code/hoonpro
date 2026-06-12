@@ -11,6 +11,8 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'gemini-2.5-flash': { input: 0.30, output: 2.50 },
   'gemini-2.5-flash-image': { input: 0.30, output: 30.00 },
   'gemini-2.0-flash': { input: 0.10, output: 0.40 },
+  'gpt-image-1.5': { input: 5.00, output: 40.00 },
+  'gpt-image-1': { input: 5.00, output: 40.00 },
 };
 
 function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
