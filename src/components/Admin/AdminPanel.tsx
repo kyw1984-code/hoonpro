@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3 } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
 
 interface UserRow {
@@ -26,7 +27,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'stats'>('users');
+  const [tab, setTab] = useState<'users' | 'stats' | 'config'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -134,9 +135,17 @@ export function AdminPanel() {
         >
           <BarChart3 className="w-4 h-4" /> API 사용량 통계
         </button>
+        <button
+          onClick={() => setTab('config')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'config' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <ImageIcon className="w-4 h-4" /> 이미지 설정
+        </button>
       </div>
 
-      {tab === 'stats' ? <UsageStats /> : <UsersTab
+      {tab === 'stats' ? <UsageStats /> : tab === 'config' ? <ImageConfigTab showToast={showToast} /> : <UsersTab
         users={users}
         loading={loading}
         filter={filter}
@@ -283,6 +292,136 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// ───────────────────────── 이미지 모델/품질 설정 탭 ─────────────────────────
+const MODEL_OPTIONS = [
+  { value: 'gpt-image-1.5', label: 'GPT Image 1.5 (최상 품질)', desc: '텍스트 정확도 최고 · 비용 높음' },
+  { value: 'gpt-image-1-mini', label: 'GPT Image 1 Mini (최저가)', desc: '비용 최저 · 텍스트 정확도 낮음' },
+  { value: 'gpt-image-1', label: 'GPT Image 1 (구버전)', desc: '2026-10-23 폐기 예정' },
+];
+const QUALITY_OPTIONS = [
+  { value: 'low', label: '낮음 (저비용)' },
+  { value: 'medium', label: '보통 (권장)' },
+  { value: 'high', label: '높음 (텍스트 정확)' },
+];
+// 장당 예상 비용(USD, 1024×1536 세로 기준 근사치)
+const COST_TABLE: Record<string, Record<string, number>> = {
+  'gpt-image-1.5': { low: 0.015, medium: 0.06, high: 0.17 },
+  'gpt-image-1-mini': { low: 0.008, medium: 0.02, high: 0.02 },
+  'gpt-image-1': { low: 0.015, medium: 0.06, high: 0.17 },
+};
+
+function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
+  const [imageModel, setImageModel] = useState('gpt-image-1.5');
+  const [imageQuality, setImageQuality] = useState('medium');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [migrated, setMigrated] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/config', { headers: { Authorization: `Bearer ${getToken()}` } });
+        const data = await res.json();
+        if (res.ok) {
+          setImageModel(data.imageModel);
+          setImageQuality(data.imageQuality);
+          setMigrated(data.migrated !== false);
+        } else {
+          showToast(data.error || '설정을 불러오지 못했습니다.');
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/admin/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ imageModel, imageQuality }),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.error);
+      showToast(data.message || '저장됐습니다.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const costUsd = COST_TABLE[imageModel]?.[imageQuality] ?? 0;
+  const costKrw = Math.round(costUsd * USD_TO_KRW);
+
+  if (loading) return <div className="text-center py-16 text-slate-400">불러오는 중...</div>;
+
+  return (
+    <div className="max-w-2xl">
+      <div className="flex items-center gap-2 mb-2">
+        <ImageIcon className="w-5 h-5 text-blue-600" />
+        <h2 className="text-lg font-bold text-slate-900">이미지 생성 모델 설정</h2>
+      </div>
+      <p className="text-sm text-slate-500 mb-6">선택한 모델·품질은 <b>모든 사용자</b>의 이미지 생성에 동일하게 적용됩니다. (비용 통제용)</p>
+
+      {!migrated && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-xl px-4 py-3 mb-5">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span><b>app_config 테이블이 없습니다.</b> Supabase에서 <code>supabase-schema.sql</code> 마이그레이션을 먼저 실행하세요. (지금은 기본값으로 동작합니다.)</span>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-2">모델 버전</label>
+          <div className="space-y-2">
+            {MODEL_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setImageModel(opt.value)}
+                className={`w-full text-left p-3 rounded-xl border transition-all ${imageModel === opt.value ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300'}`}
+              >
+                <div className={`font-bold text-sm ${imageModel === opt.value ? 'text-blue-700' : 'text-slate-800'}`}>{opt.label}</div>
+                <div className="text-xs text-slate-500">{opt.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-2">품질</label>
+          <div className="grid grid-cols-3 gap-2">
+            {QUALITY_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setImageQuality(opt.value)}
+                className={`p-3 rounded-xl border text-sm font-medium transition-all ${imageQuality === opt.value ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 text-slate-700 hover:border-blue-300'}`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm">
+          <span className="text-slate-500">장당 예상 비용 (세로 1024×1536 기준): </span>
+          <span className="font-bold text-slate-900">약 ${costUsd.toFixed(3)} / 장 (₩{costKrw.toLocaleString('ko-KR')})</span>
+          <p className="text-xs text-slate-400 mt-1">12~15장 1페이지 기준 약 ${(costUsd * 13).toFixed(2)} 내외. 비용을 줄이려면 Mini 또는 낮음을, 텍스트 정확도를 높이려면 1.5 + 높음을 선택하세요.</p>
+        </div>
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
+        >
+          {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> 저장 중...</> : <><Save className="w-4 h-4" /> 저장</>}
+        </button>
+        <p className="text-xs text-slate-400 text-center">변경 후 모든 사용자에게 약 45초 이내 반영됩니다.</p>
+      </div>
     </div>
   );
 }

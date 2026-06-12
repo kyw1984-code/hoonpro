@@ -5,8 +5,9 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   'gemini-2.5-flash': { input: 0.30, output: 2.50 },
   'gemini-2.5-flash-image': { input: 0.30, output: 30.00 },
   'gemini-2.0-flash': { input: 0.10, output: 0.40 },
-  // GPT Image 1.5 (medium 기준 근사치, 변동 시 수정)
+  // GPT Image (근사치, 변동 시 수정)
   'gpt-image-1.5': { input: 5.00, output: 40.00 },
+  'gpt-image-1-mini': { input: 2.00, output: 8.00 },
   'gpt-image-1': { input: 5.00, output: 40.00 },
 };
 

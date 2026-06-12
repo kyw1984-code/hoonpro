@@ -7,13 +7,15 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-// GPT Image 1.5 Medium 설정 (환경변수로 덮어쓰기 가능)
-const OPENAI_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5';
-const OPENAI_IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY || 'medium';
+// GPT Image 기본값 (app_config 미설정/오류 시 fallback)
+const DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1.5';
+const DEFAULT_IMAGE_QUALITY = process.env.OPENAI_IMAGE_QUALITY || 'medium';
+const ALLOWED_MODELS = ['gpt-image-1.5', 'gpt-image-1-mini', 'gpt-image-1'];
 
-// gpt-image 단가(USD per 1M tokens, medium 기준 근사치) - 변동 시 수정
+// gpt-image 단가(USD per 1M tokens, 근사치) - 변동 시 수정
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'gpt-image-1.5': { input: 5.0, output: 40.0 },
+  'gpt-image-1-mini': { input: 2.0, output: 8.0 },
   'gpt-image-1': { input: 5.0, output: 40.0 },
 };
 
@@ -21,6 +23,32 @@ function calcCostUsd(model: string, inputTokens: number, outputTokens: number): 
   const price = MODEL_PRICING[model];
   if (!price) return 0;
   return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
+}
+
+// ── 관리자 전역 설정(app_config)을 짧게 캐시해서 매 이미지마다 DB 조회를 피한다 ──
+const CONFIG_TTL_MS = 45_000;
+let cachedConfig: { imageModel: string; imageQuality: string } | null = null;
+let cacheExpiresAt = 0;
+
+async function getImageConfig(): Promise<{ imageModel: string; imageQuality: string }> {
+  const now = Date.now();
+  if (cachedConfig && now < cacheExpiresAt) return cachedConfig;
+  try {
+    const { data, error } = await supabase
+      .from('app_config')
+      .select('key, value')
+      .in('key', ['image_model', 'image_quality']);
+    if (error) throw error;
+    const map = Object.fromEntries((data || []).map((r) => [r.key, r.value]));
+    const imageModel = ALLOWED_MODELS.includes(map.image_model) ? map.image_model : DEFAULT_IMAGE_MODEL;
+    const imageQuality = ['low', 'medium', 'high'].includes(map.image_quality) ? map.image_quality : DEFAULT_IMAGE_QUALITY;
+    cachedConfig = { imageModel, imageQuality };
+    cacheExpiresAt = now + CONFIG_TTL_MS;
+    return cachedConfig;
+  } catch {
+    // 테이블 미존재/DB 오류 → 마지막 캐시 또는 기본값으로 폴백 (이미지 생성은 절대 막지 않음)
+    return cachedConfig || { imageModel: DEFAULT_IMAGE_MODEL, imageQuality: DEFAULT_IMAGE_QUALITY };
+  }
 }
 
 // 앱의 9:16 / 1:1 비율을 OpenAI 지원 사이즈로 매핑
@@ -76,15 +104,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'OPENAIAPIKEY가 설정되지 않았습니다.' });
 
-  const { prompt, images, aspectRatio, feature, quality } = req.body ?? {};
+  const { prompt, images, aspectRatio, feature } = req.body ?? {};
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: '프롬프트가 필요합니다.' });
   }
 
+  // 모델/품질은 관리자 전역 설정(app_config)이 우선 — 모든 사용자에 동일 적용(비용 통제)
+  const { imageModel, imageQuality } = await getImageConfig();
   const size = mapSize(String(aspectRatio || '9:16'));
-  const imageQuality = ['low', 'medium', 'high', 'auto'].includes(String(quality))
-    ? String(quality)
-    : OPENAI_IMAGE_QUALITY;
   const finalPrompt = `${prompt}\n\nQuality direction: ${COMMERCIAL_QUALITY_KEYWORDS}.`;
   const referenceImages: string[] = Array.isArray(images) ? images.filter(Boolean) : [];
 
@@ -94,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (referenceImages.length > 0) {
       // 레퍼런스 제품 이미지가 있으면 편집(edit) 엔드포인트 사용
       const form = new FormData();
-      form.append('model', OPENAI_IMAGE_MODEL);
+      form.append('model', imageModel);
       form.append('prompt', finalPrompt);
       form.append('quality', imageQuality);
       form.append('size', size);
@@ -119,7 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: OPENAI_IMAGE_MODEL,
+          model: imageModel,
           prompt: finalPrompt,
           quality: imageQuality,
           size,
@@ -157,14 +184,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const inputTokens = Math.max(0, Number(data?.usage?.input_tokens) || 0);
     const outputTokens = Math.max(0, Number(data?.usage?.output_tokens) || 0);
-    const cost = calcCostUsd(OPENAI_IMAGE_MODEL, inputTokens, outputTokens);
+    const cost = calcCostUsd(imageModel, inputTokens, outputTokens);
 
     // 사용량 로깅 (실패해도 응답은 정상 반환)
     try {
       await supabase.from('api_calls').insert({
         user_id: decoded.userId,
         feature: String(feature || (aspectRatio === '1:1' ? 'thumbnail-image' : 'detail-image')),
-        model: OPENAI_IMAGE_MODEL,
+        model: imageModel,
         input_tokens: inputTokens,
         output_tokens: outputTokens,
         cost_usd: cost,
@@ -175,7 +202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       image: `data:image/png;base64,${b64}`,
-      model: OPENAI_IMAGE_MODEL,
+      model: imageModel,
       usage: { input_tokens: inputTokens, output_tokens: outputTokens },
     });
   } catch (error: any) {
