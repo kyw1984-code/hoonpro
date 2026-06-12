@@ -3,9 +3,6 @@ import { generateImage, generateFeatures, generateDetailPlan, type DetailPlan } 
 import { Loader2, Upload, Download, Wand2, ChevronRight, X, RefreshCw, ChevronDown } from 'lucide-react';
 
 // ────────────────────────────── 상수 ──────────────────────────────
-const TARGET_WIDTH = 860;
-const TARGET_HEIGHT = 1000;
-
 type CombinationType = 'single' | '1+1';
 type ToneKey = 'auto' | '프리미엄' | '미니멀' | '감성' | '럭셔리' | '건강' | '테크' | '친환경';
 
@@ -20,127 +17,48 @@ const COMBINATION_OPTIONS: Array<{ value: CombinationType; label: string; desc: 
     { value: '1+1', label: '1+1 조합', desc: '1번 이미지에 2개 구성 강조' },
 ];
 
-const TEXT_COLOR_OPTIONS = [
-    { key: 'black', label: '검정', fill: '#1a1a1a' },
-    { key: 'white', label: '흰색', fill: '#ffffff' },
-    { key: 'red', label: '빨강', fill: '#dc2626' },
-    { key: 'orange', label: '주황', fill: '#f97316' },
-    { key: 'blue', label: '파랑', fill: '#2563eb' },
-    { key: 'pink', label: '분홍', fill: '#ec4899' },
-] as const;
-
-const FONT_SCALE_OPTIONS = [
-    { key: 'sm', label: '작게', value: 0.8 },
-    { key: 'md', label: '보통', value: 1.0 },
-    { key: 'lg', label: '크게', value: 1.2 },
-    { key: 'xl', label: '아주크게', value: 1.5 },
-] as const;
-
-// ────────────────────────────── 헬퍼 ──────────────────────────────
-const getContrastStroke = (hexColor: string): string => {
-    const h = hexColor.replace('#', '');
-    const r = parseInt(h.substring(0, 2), 16);
-    const g = parseInt(h.substring(2, 4), 16);
-    const b = parseInt(h.substring(4, 6), 16);
-    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    return luminance > 0.6 ? '#1a1a1a' : '#ffffff';
-};
-
-// AI 이미지를 860×1000으로 cover 후 한글 카피를 Canvas로 덧씌운다.
-const overlayTextOnImage = (
-    imageUrl: string,
-    mainCopy: string,
-    position: 'top' | 'middle' | 'bottom',
-    textColor: string,
-    fontScale: number
-): Promise<string> => {
-    return new Promise((resolve) => {
-        const img = new window.Image();
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = TARGET_WIDTH;
-            canvas.height = TARGET_HEIGHT;
-            const ctx = canvas.getContext('2d')!;
-
-            const imgRatio = img.width / img.height;
-            const canvasRatio = TARGET_WIDTH / TARGET_HEIGHT;
-            let sx = 0, sy = 0, sw = img.width, sh = img.height;
-            if (imgRatio > canvasRatio) {
-                sh = img.height;
-                sw = img.height * canvasRatio;
-                sx = (img.width - sw) / 2;
-            } else {
-                sw = img.width;
-                sh = img.width / canvasRatio;
-                sy = (img.height - sh) / 2;
-            }
-            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
-
-            const lines = (mainCopy || '').split('\n').map(l => l.trim()).filter(Boolean);
-            if (lines.length === 0) {
-                resolve(canvas.toDataURL('image/png'));
-                return;
-            }
-
-            const baseFontSize = position === 'top'
-                ? (lines.length === 1 ? 40 : lines.length === 2 ? 34 : 28)
-                : (lines.length === 1 ? 52 : lines.length === 2 ? 46 : 38);
-            const fontSize = Math.round(baseFontSize * fontScale);
-            const lineHeight = fontSize * 1.45;
-            const totalTextHeight = lines.length * lineHeight;
-
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-
-            let startY: number;
-            if (position === 'top') startY = Math.max(fontSize * 0.9 + 24, 56);
-            else if (position === 'middle') startY = (TARGET_HEIGHT / 2) - (totalTextHeight / 2) + (lineHeight / 2);
-            else startY = TARGET_HEIGHT - (totalTextHeight + fontSize) + (lineHeight / 2);
-
-            lines.forEach((line, i) => {
-                const y = startY + i * lineHeight;
-                ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
-                let displayText = line;
-                const maxWidth = TARGET_WIDTH - 80;
-                let textWidth = ctx.measureText(displayText).width;
-                if (textWidth > maxWidth) {
-                    while (textWidth > maxWidth && displayText.length > 0) {
-                        displayText = displayText.slice(0, -1);
-                        textWidth = ctx.measureText(displayText + '...').width;
-                    }
-                    displayText += '...';
-                }
-                ctx.lineJoin = 'round';
-                ctx.miterLimit = 2;
-                ctx.lineWidth = Math.max(4, fontSize * 0.18);
-                ctx.strokeStyle = getContrastStroke(textColor);
-                ctx.strokeText(displayText, TARGET_WIDTH / 2, y);
-                ctx.fillStyle = textColor;
-                ctx.fillText(displayText, TARGET_WIDTH / 2, y);
-            });
-            resolve(canvas.toDataURL('image/png'));
-        };
-        img.onerror = () => resolve(imageUrl);
-        img.src = imageUrl;
-    });
-};
-
-// 최종 이미지 생성 프롬프트(텍스트 없는 비주얼 + 레퍼런스 보존)
+// ────────────────────────────── 이미지 프롬프트 빌더 ──────────────────────────────
+// GPT Image가 카피·레이아웃·아이콘·타이포까지 이미지에 직접 렌더링하도록 지시한다(오버레이 X).
 const buildImagePrompt = (
-    img: { number: number; visualPrompt: string; textPosition: 'top' | 'middle' | 'bottom'; role: string },
-    combinationType: CombinationType
+    img: GenImage,
+    combinationType: CombinationType,
+    productName: string,
+    design?: { tone?: string; colors?: Record<string, string> }
 ): string => {
-    const bundle = combinationType === '1+1' && img.number === 1
-        ? '\nBUNDLE: Show exactly 2 identical product units together in one seamless scene (1+1 set), without any text/number/plus-sign.'
+    const tone = design?.tone || 'premium';
+    const colors = design?.colors || {};
+    const colorHint = colors.primary
+        ? `Brand colors — primary ${colors.primary}, accent ${colors.accent || colors.primary}, text ${colors.text || '#1a1a1a'}, background ${colors.background || '#ffffff'}.`
         : '';
-    return `${img.visualPrompt}
-STRICT REQUIREMENTS:
-- Absolutely NO text, letters, numbers, captions, or typography anywhere in the image.
-- Reserve a clean ${img.textPosition} area as negative space on the same continuous background for overlaid Korean copy.
-- One seamless photographic scene. No collage, split panels, vertical seams, or picture-in-picture.
-- Preserve the EXACT product colors, logos, prints and details from the reference images.
-- Replace any reference person with a brand-new fictional Korean model (different face) and replace the reference background completely.
-- Keep the model and product at realistic scale; never paste a tiny model over a giant product close-up.${bundle}`;
+    const points = (img.points || []).filter(Boolean);
+    const pointsBlock = points.length
+        ? `\n- 보조 포인트(각 항목마다 어울리는 작은 플랫 아이콘과 함께 깔끔하게 배치):\n${points.map(p => `   · ${p}`).join('\n')}`
+        : '';
+    const posKo = img.textPosition === 'top' ? '상단' : img.textPosition === 'middle' ? '중앙' : '하단';
+    const bundle = combinationType === '1+1' && img.number === 1
+        ? '\n- 1+1 세트 구성이므로 동일 제품 2개를 한 장면에 자연스럽게 함께 보여줄 것.'
+        : '';
+
+    return `Create ONE finished, polished Korean e-commerce detail-page section image (vertical 860x1000 / 4:5 layout) for the product "${productName}".
+This must look like a TOP 1% Korean smartstore/Coupang detail page section: real product photography COMBINED with clean, beautiful Korean text typography rendered DIRECTLY into the image (headline, sub copy, bullet points with small icons/badges) — NOT a plain photo.
+
+SECTION ROLE: ${img.role}${img.stage ? ` (구매 심리 단계: ${img.stage})` : ''}.
+
+이미지 안에 아래 한글 텍스트를 정확히 렌더링하라 (맞춤법 완벽, 자연스러운 한글 타이포그래피, 로마자 변환 금지, 문구 변경 금지):
+- 헤드라인(크고 굵게): "${(img.mainCopy || '').replace(/\n/g, ' ')}"
+${img.subCopy ? `- 서브 카피(중간 크기): "${img.subCopy}"` : ''}${pointsBlock}
+
+DESIGN DIRECTION:
+- 톤: ${tone}. 깔끔하고 현대적인 프리미엄 레이아웃, 명확한 시각적 위계, professional typography area, 넉넉한 여백, high conversion design, premium UI elements. ${colorHint}
+- 텍스트 블록은 ${posKo} 영역에 가독성 높게 배치하고, 나머지는 제품 사진이 하나의 자연스러운 장면으로 채울 것.
+- Korean smartstore optimized, photorealistic commercial product photography, natural lighting, ultra realistic texture, realistic shadows, premium visual merchandising, information-rich layout.
+
+PRODUCT VISUAL: ${img.visualPrompt}
+
+STRICT:
+- 레퍼런스 이미지의 제품 색상·로고·프린트·디테일을 정확히 보존할 것.
+- 레퍼런스에 사람이 있으면 완전히 새로운 가상의 한국인 모델(다른 얼굴)로 교체하고 배경도 새로 구성할 것.
+- 모든 한글은 또렷하고 맞춤법이 정확해야 하며, 깨진 글자·이상한 외국어 텍스트가 없어야 함.${bundle}`;
 };
 
 // ────────────────────────────── 타입 ──────────────────────────────
@@ -157,9 +75,6 @@ interface GenImage {
     trigger: string;
     textPosition: 'top' | 'middle' | 'bottom';
     visualPrompt: string;
-    textColor: string;
-    fontScale: number;
-    rawImageUrl: string;
     imageUrl: string;
     isGenerating: boolean;
 }
@@ -233,7 +148,6 @@ export const DetailPlanner: React.FC = () => {
                 return;
             }
             setPlan(result);
-            const defaultColor = result.designSystem?.colors?.text || '#1a1a1a';
             setImages(result.images.map((img, i) => ({
                 id: `img-${Date.now()}-${i}`,
                 number: img.number,
@@ -247,9 +161,6 @@ export const DetailPlanner: React.FC = () => {
                 trigger: img.trigger,
                 textPosition: img.textPosition,
                 visualPrompt: img.visualPrompt,
-                textColor: defaultColor,
-                fontScale: 1.0,
-                rawImageUrl: '',
                 imageUrl: '',
                 isGenerating: false,
             })));
@@ -266,32 +177,21 @@ export const DetailPlanner: React.FC = () => {
         setImages(prev => prev.map(img => img.id === id ? { ...img, ...patch } : img));
     };
 
-    // ── 단일 이미지 생성 ──
+    // ── 단일 이미지 생성 (카피·레이아웃까지 이미지에 직접 렌더링) ──
     const generateOne = async (seg: GenImage) => {
         updateImage(seg.id, { isGenerating: true });
-        const raw = await generateImage(buildImagePrompt(seg, info.combinationType), referenceImages, '9:16');
-        if (!raw) {
-            updateImage(seg.id, { isGenerating: false });
-            return;
-        }
-        const composed = await overlayTextOnImage(raw, seg.mainCopy, seg.textPosition, seg.textColor, seg.fontScale);
-        updateImage(seg.id, { rawImageUrl: raw, imageUrl: composed, isGenerating: false });
+        const prompt = buildImagePrompt(seg, info.combinationType, info.name, plan?.designSystem);
+        const raw = await generateImage(prompt, referenceImages, '9:16');
+        updateImage(seg.id, { imageUrl: raw || '', isGenerating: false });
     };
 
     // ── STEP 2 → 전체 이미지 생성 ──
     const handleGenerateAll = async () => {
         setStep(3);
-        const snapshot = images.map(img => ({ ...img, isGenerating: true, imageUrl: '', rawImageUrl: '' }));
+        const snapshot = images.map(img => ({ ...img, isGenerating: true, imageUrl: '' }));
         setImages(snapshot);
         // generateImage 내부에서 동시 2개 + 429 자동 재시도로 분당 한도를 지킴
         await Promise.all(snapshot.map(seg => generateOne(seg)));
-    };
-
-    // ── 문구만 다시 적용 (AI 재호출 없이 Canvas 재합성) ──
-    const reapplyText = async (seg: GenImage) => {
-        if (!seg.rawImageUrl) return;
-        const composed = await overlayTextOnImage(seg.rawImageUrl, seg.mainCopy, seg.textPosition, seg.textColor, seg.fontScale);
-        updateImage(seg.id, { imageUrl: composed });
     };
 
     const handleDownloadAll = () => {
@@ -475,13 +375,12 @@ export const DetailPlanner: React.FC = () => {
 
                     {/* 이미지별 기획 */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h2 className="text-xl font-bold text-slate-800">🖼 이미지별 기획안 (총 {images.length}장)</h2>
-                        </div>
+                        <h2 className="text-xl font-bold text-slate-800 mb-1">🖼 이미지별 기획안 (총 {images.length}장)</h2>
+                        <p className="text-sm text-slate-500 mb-4">카피는 이미지 안에 직접 렌더링됩니다. 필요하면 여기서 문구를 수정하세요.</p>
                         <div className="space-y-4">
                             {images.map((img) => (
                                 <div key={img.id} className="border border-slate-200 rounded-xl p-4">
-                                    <div className="flex items-center gap-2 mb-3">
+                                    <div className="flex items-center gap-2 mb-3 flex-wrap">
                                         <span className="bg-blue-600 text-white text-xs font-bold rounded-full w-7 h-7 flex items-center justify-center shrink-0">{img.number}</span>
                                         <span className="font-bold text-slate-800">{img.role}</span>
                                         {img.stage && <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{img.stage}</span>}
@@ -489,22 +388,22 @@ export const DetailPlanner: React.FC = () => {
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-xs font-medium text-slate-500 mb-1">메인 카피 (이미지에 표시)</label>
+                                            <label className="block text-xs font-medium text-slate-500 mb-1">메인 카피</label>
                                             <textarea value={img.mainCopy} onChange={e => updateImage(img.id, { mainCopy: e.target.value })} rows={2}
                                                 className="w-full p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                                            <div className="flex gap-2 mt-2">
+                                            <label className="block text-xs font-medium text-slate-500 mb-1 mt-2">서브 카피</label>
+                                            <input value={img.subCopy} onChange={e => updateImage(img.id, { subCopy: e.target.value })}
+                                                className="w-full p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                                            <div className="mt-2">
+                                                <span className="text-xs text-slate-400 mr-2">텍스트 위치</span>
                                                 <select value={img.textPosition} onChange={e => updateImage(img.id, { textPosition: e.target.value as any })} className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white">
                                                     <option value="top">상단</option>
                                                     <option value="middle">중앙</option>
                                                     <option value="bottom">하단</option>
                                                 </select>
-                                                <select value={img.textColor} onChange={e => updateImage(img.id, { textColor: e.target.value })} className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white">
-                                                    {TEXT_COLOR_OPTIONS.map(c => <option key={c.key} value={c.fill}>{c.label}</option>)}
-                                                </select>
                                             </div>
                                         </div>
                                         <div className="text-sm text-slate-600 space-y-1">
-                                            {img.subCopy && <p><span className="text-slate-400 text-xs">서브:</span> {img.subCopy}</p>}
                                             {img.points?.length > 0 && (
                                                 <ul className="list-disc list-inside text-xs text-slate-500">
                                                     {img.points.map((p, i) => <li key={i}>{p}</li>)}
@@ -572,21 +471,11 @@ export const DetailPlanner: React.FC = () => {
                                 </div>
                                 {seg.imageUrl && (
                                     <div className="p-3 space-y-2">
-                                        <div className="flex gap-1.5">
-                                            <select value={seg.textPosition} onChange={e => updateImage(seg.id, { textPosition: e.target.value as any })} className="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white flex-1">
-                                                <option value="top">상단</option><option value="middle">중앙</option><option value="bottom">하단</option>
-                                            </select>
-                                            <select value={seg.textColor} onChange={e => updateImage(seg.id, { textColor: e.target.value })} className="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white flex-1">
-                                                {TEXT_COLOR_OPTIONS.map(c => <option key={c.key} value={c.fill}>{c.label}</option>)}
-                                            </select>
-                                            <select value={seg.fontScale} onChange={e => updateImage(seg.id, { fontScale: Number(e.target.value) })} className="text-xs border border-slate-200 rounded px-1.5 py-1 bg-white flex-1">
-                                                {FONT_SCALE_OPTIONS.map(f => <option key={f.key} value={f.value}>{f.label}</option>)}
-                                            </select>
-                                        </div>
-                                        <div className="flex gap-1.5">
-                                            <button onClick={() => reapplyText(seg)} className="flex-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded py-1.5">문구 적용</button>
-                                            <button onClick={() => generateOne(seg)} className="flex-1 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded py-1.5 flex items-center justify-center gap-1"><RefreshCw className="w-3 h-3" /> 재생성</button>
-                                        </div>
+                                        <textarea value={seg.mainCopy} onChange={e => updateImage(seg.id, { mainCopy: e.target.value })} rows={2}
+                                            className="w-full p-2 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none" placeholder="메인 카피" />
+                                        <button onClick={() => generateOne(seg)} className="w-full text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded py-1.5 flex items-center justify-center gap-1">
+                                            <RefreshCw className="w-3 h-3" /> 이 문구로 재생성
+                                        </button>
                                     </div>
                                 )}
                             </div>

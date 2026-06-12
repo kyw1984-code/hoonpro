@@ -328,12 +328,11 @@ STEP 6. 신뢰성 검증: 사실 확인 불가 문구 금지("판매 1위", "만
 - 존댓말, mainCopy는 1~2줄(한 줄 22자 이내, \n 줄바꿈), subCopy는 1줄
 - 각 이미지마다 전환 트리거(손실회피/사회적 증거/권위/희소성/편의성/감정적 보상/비교우위) 중 하나 이상 적용
 
-[visualPrompt 규칙(영어)]
-- "A high-quality professional Korean e-commerce model cut of..."로 시작
-- 가상의 모델이 제품을 착용/사용하는 사실적 장면. 단독컷/행거컷/마네킹/플랫레이 금지
-- 다음 키워드를 녹일 것: photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, realistic shadows, Korean smartstore style, high conversion design
-- 이미지 안에는 어떤 텍스트도 넣지 말 것(카피는 앱이 따로 덧씌움). 상단 또는 하단에 카피를 올릴 깨끗한 여백 영역을 남길 것
-- 레퍼런스 인물 얼굴을 복제하지 말고 새 가상 인물로, 배경도 새로 구성
+[visualPrompt 규칙(영어)] — 이 필드는 '제품 사진 장면'만 영어로 묘사합니다(카피/텍스트는 mainCopy 등 별도 필드로 관리하므로 visualPrompt에는 넣지 말 것)
+- 제품이 돋보이는 사실적 촬영 장면(가상 모델의 착용/사용 또는 제품 클로즈업)을 구체적으로 묘사
+- photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, realistic shadows, Korean smartstore style를 녹일 것
+- 텍스트가 올라갈 영역(상/중/하)에는 깨끗한 여백이 생기도록 구도를 설계
+- 단독 나열컷/행거컷/마네킹/플랫레이 금지, 레퍼런스 인물은 새 가상 인물로 교체하고 배경도 새로 구성
 
 [출력 형식] 아래 JSON 객체 하나만 반환(다른 텍스트 금지):
 {
