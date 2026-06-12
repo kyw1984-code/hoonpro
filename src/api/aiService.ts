@@ -44,9 +44,24 @@ export const generateFeatures = async (productName: string, category: string): P
 export const planDetail = async (data: any) => {
   try {
     await trackUsage();
+    const targetCount = data.length === 'auto' ? '12~15장' : `${data.length}장`;
     const lengthGuide = data.length === 'auto'
-      ? '상품 특성에 맞게 5~9장 사이로 최적 구성'
+      ? 'V2.1 심리 흐름 기준 12~15장으로 최적 구성'
       : `정확히 ${data.length}장으로 구성`;
+    const structureGuide = `
+ [STEP 3] 이미지 순서 템플릿 (반드시 이 순서를 따르세요, 총 ${targetCount}):
+ - 1번 (Hook): 3초 안에 시선을 잡는 메인 이미지. 핵심 USP를 강하게 보여주는 첫인상. sectionType=offer, conversionRole=핵심 오퍼
+ - 2번 (문제 공감): 고객이 실제로 겪는 불편/상황에 공감. sectionType=problem, conversionRole=고객 문제/상황
+ - 3번 (문제 확대): 그 문제를 방치하면 생기는 손실을 자극(손실회피). sectionType=problem, conversionRole=문제 심화
+   (전체 장수가 적으면 2번과 3번을 한 장으로 합쳐도 됩니다)
+ - 4번 (해결책 제시): 왜 이 제품이, 왜 지금 필요한가. sectionType=offer, conversionRole=해결책
+ - 중간 (핵심 셀링포인트, 여러 장): 제품 강점을 서로 다른 관점으로. 각 장의 표현 방식은 절대 중복 금지하고 매 장 다른 각도를 사용:
+   · 기능 중심 / 감성 중심 / 비교 우위 중심 / 수치·근거 중심 / 사용 장면 중심 중에서 매 장 다른 각도
+   · sectionType은 detail/proof/lifestyle 중 내용에 맞게, conversionRole은 구매 근거/제품 디테일/활용 장면 등
+ - 끝에서 두 번째 (신뢰 강화): 원재료·제조공정·품질관리·브랜드 철학 등으로 신뢰를 높임. sectionType=trust, conversionRole=구매 안심
+ - 마지막 (CTA): 지금 구매해야 하는 이유와 행동 유도(타이밍 강조). sectionType=trust, conversionRole=구매 확신
+ - 전체 장수에 맞게 위 단계를 자연스럽게 배분하되, 반드시 Hook으로 시작해 CTA로 끝나야 합니다.
+`;
     const combinationType = data.combinationType && data.combinationType !== 'single'
       ? String(data.combinationType)
       : '';
@@ -130,7 +145,7 @@ ${conversionGuide}
  - 전체 흐름은 반드시 '인지 → 공감 → 문제 인식 → 해결책 발견 → 신뢰 형성 → 구매 확신 → 결제' 순서를 따르도록 섹션을 배치하세요.
  - 각 섹션은 이 흐름에서 어떤 단계 역할을 하는지 명확히 하여 logicalSections에 반영하세요.
  - 각 섹션마다 반드시 하나 이상의 전환 트리거(손실회피, 사회적 증거, 권위, 희소성, 편의성, 감정적 보상, 비교우위)를 적용하세요.
-
+${structureGuide}
  반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
  각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt, sectionType, conversionRole 필드를 포함해야 합니다.
 

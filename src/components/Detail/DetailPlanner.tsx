@@ -1847,8 +1847,16 @@ export const DetailPlanner: React.FC = () => {
                 };
             });
 
+            // V2.1 흐름: Hook(인트로) → 셀링 narrative(본문) → 후기/혜택/사이즈 → 인증/정보 → CTA(맨 마지막)
             const introSegments = mappedSegments.slice(0, 1);
-            const bodySegments = mappedSegments.slice(1);
+            // 마지막 섹션(CTA)은 분리하여 상세페이지 맨 끝에 배치 (총 4장 이상일 때만)
+            const ctaSegment = mappedSegments.length >= 4
+                ? mappedSegments[mappedSegments.length - 1]
+                : null;
+            const bodySegments = ctaSegment
+                ? mappedSegments.slice(1, mappedSegments.length - 1)
+                : mappedSegments.slice(1);
+            const ctaSegments = ctaSegment ? [ctaSegment] : [];
             const afterIntroSegments: any[] = [];
             const bottomSegments: any[] = [];
             const conversionTemplates = info.conversionEnabled
@@ -1970,7 +1978,7 @@ export const DetailPlanner: React.FC = () => {
                 });
             }
 
-            setSegments([...introSegments, ...afterIntroSegments, ...bodySegments, ...bottomSegments]);
+            setSegments([...introSegments, ...bodySegments, ...afterIntroSegments, ...bottomSegments, ...ctaSegments]);
             setStep(2);
         } catch (e) {
             console.error(e);
@@ -2355,10 +2363,10 @@ export const DetailPlanner: React.FC = () => {
                             <label className="block text-sm font-medium text-slate-700 mb-2">상세페이지 길이 (구조)</label>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 {[
-                                    { val: 'auto', label: 'Auto (AI 추천)', desc: '최적 길이 자동 판단' },
-                                    { val: 5, label: '5장 (Short)', desc: '저관여/저가 집중형' },
-                                    { val: 7, label: '7장 (Standard)', desc: '일반적인 구성' },
-                                    { val: 9, label: '9장 (Long)', desc: '고관여/스토리텔링' }
+                                    { val: 'auto', label: 'Auto (V2.1 추천)', desc: 'V2.1 심리흐름 12~15장 자동' },
+                                    { val: 9, label: '9장 (간결)', desc: '핵심 흐름 압축형' },
+                                    { val: 12, label: '12장 (V2.1 표준)', desc: 'V2.1 권장 기본 구성' },
+                                    { val: 15, label: '15장 (V2.1 풀)', desc: '셀링포인트 최대 확장' }
                                 ].map(opt => (
                                     <div key={opt.val} onClick={() => setLength(opt.val as any)} className={`p-4 rounded-xl border cursor-pointer transition-all ${length === opt.val ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300'}`}>
                                         <div className="font-medium text-slate-800 mb-1">{opt.label}</div>
