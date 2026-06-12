@@ -127,8 +127,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const data: any = await openaiRes.json();
     if (!openaiRes.ok) {
-      console.error('OpenAI image error:', data);
-      return res.status(502).json({ error: data?.error?.message || 'OpenAI 이미지 생성에 실패했습니다.' });
+      const e = data?.error || {};
+      const detail = [e.message, e.code ? `(code: ${e.code})` : '', e.type ? `[${e.type}]` : '']
+        .filter(Boolean)
+        .join(' ');
+      console.error('OpenAI image error:', JSON.stringify(data));
+      return res.status(502).json({
+        error: detail || `OpenAI 이미지 생성 실패 (HTTP ${openaiRes.status})`,
+      });
     }
 
     const b64 = data?.data?.[0]?.b64_json;

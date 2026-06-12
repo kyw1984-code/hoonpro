@@ -233,6 +233,7 @@ ${conversionGuide}
 
 // 이미지 생성은 OpenAI GPT Image 1.5 Medium 으로 처리합니다.
 // 키 노출을 막기 위해 서버리스 엔드포인트(/api/generate-image)를 통해 호출합니다.
+let imageErrorAlerted = false;
 export const generateImage = async (
   prompt: string,
   base64Images: string[] = [],
@@ -262,7 +263,14 @@ export const generateImage = async (
 
     const data = await res.json();
     if (!res.ok) {
-      console.error('Image generation failed:', data?.error);
+      const msg = data?.error || '이미지 생성에 실패했습니다.';
+      console.error('Image generation failed:', msg);
+      // 실제 OpenAI 오류를 화면에 1회 노출 (원인 진단용, 5초 디바운스)
+      if (typeof window !== 'undefined' && !imageErrorAlerted) {
+        imageErrorAlerted = true;
+        setTimeout(() => { imageErrorAlerted = false; }, 5000);
+        alert(`이미지 생성 오류\n\n${msg}`);
+      }
       return undefined;
     }
 
