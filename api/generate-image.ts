@@ -132,6 +132,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .filter(Boolean)
         .join(' ');
       console.error('OpenAI image error:', JSON.stringify(data));
+      // 분당 한도 초과(429): 클라이언트가 대기 후 자동 재시도하도록 retryAfter 전달
+      if (openaiRes.status === 429) {
+        const headerRetry = Number(openaiRes.headers.get('retry-after'));
+        const m = /try again in ([\d.]+)\s*s/i.exec(e.message || '');
+        const retryAfter = Number.isFinite(headerRetry) && headerRetry > 0
+          ? headerRetry
+          : (m ? Math.ceil(parseFloat(m[1])) : 12);
+        return res.status(429).json({
+          error: detail || '분당 이미지 생성 한도에 도달했습니다.',
+          retryAfter,
+        });
+      }
       return res.status(502).json({
         error: detail || `OpenAI 이미지 생성 실패 (HTTP ${openaiRes.status})`,
       });

@@ -246,9 +246,162 @@ ${structureGuide}
   }
 };
 
+// ─────────────────────────────────────────────────────────────
+// V2.1 마스터 프롬프트 기반 "상세페이지 기획서" 생성
+// 입력값 중 하나만 있어도 동작하며, 기획안(JSON)을 먼저 만든 뒤 이미지를 생성한다.
+// ─────────────────────────────────────────────────────────────
+export interface DetailPlanImage {
+  number: number;
+  role: string;          // Hook / 문제 공감 / 핵심 셀링포인트 ...
+  stage: string;         // 심리 단계: 인지/공감/문제 인식/해결책/신뢰/확신
+  sectionType: string;   // offer/problem/proof/detail/lifestyle/trust/cta
+  mainCopy: string;      // 메인 카피 (한글, \n 줄바꿈)
+  subCopy: string;       // 서브 카피
+  points: string[];      // 보조 포인트 3~5개
+  trustElement: string;  // 신뢰 요소
+  trigger: string;       // 전환 트리거
+  textPosition: 'top' | 'middle' | 'bottom';
+  visualPrompt: string;  // 이미지 생성 프롬프트 (영어, 텍스트 없는 비주얼)
+}
+
+export interface DetailPlan {
+  productDefinition: string;
+  customer: { target: string; surfaceNeed: string; realNeed: string };
+  differentiators: string[];
+  purchaseResistances: string[];
+  designSystem: {
+    tone: string;
+    colors: { primary: string; secondary: string; accent: string; background: string; text: string };
+  };
+  images: DetailPlanImage[];
+}
+
+export const generateDetailPlan = async (data: any): Promise<DetailPlan | null> => {
+  try {
+    await trackUsage();
+    const count = data.length === 'auto' ? '13' : String(data.length);
+    const combinationType = data.combinationType && data.combinationType !== 'single'
+      ? String(data.combinationType)
+      : '';
+    const combinationCount = combinationType === '1+1+1' ? 3 : combinationType === '1+1' ? 2 : 1;
+    const combinationGuide = combinationType
+      ? `이 상품은 ${combinationType} 조합상품(총 ${combinationCount}개 구성)입니다. 1번 Hook 이미지에서 ${combinationCount}개 구성을 함께 보여주고, 이후에도 묶음 구성의 실용성/여유분/함께 쓰는 가치/선물 가치를 자연스럽게 반영하세요. 단, 검증되지 않은 가격·할인율은 만들지 마세요.`
+      : '일반 단품 상세페이지로 작성하세요.';
+    const toneGuide = data.designTone && data.designTone !== 'auto'
+      ? `브랜드 톤은 "${data.designTone}"으로 고정하고 모든 카피·비주얼·컬러를 이 톤에 일관되게 맞추세요.`
+      : '브랜드 톤은 상품에 가장 적합한 것을 1개 자동 선택하세요.';
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      config: { responseMimeType: "application/json" },
+      contents: `
+당신은 대한민국 상위 1% 이커머스 광고 디자이너이자 퍼포먼스 마케터, CRO(전환율 최적화) 전문가, 브랜드 전략가입니다.
+목표는 단순 제작이 아니라 방문자를 구매자로 전환시키는 '판매용 상세페이지 기획서'를 만드는 것입니다.
+정보가 부족하면 카테고리 특성과 시장 관행으로 합리적으로 보완하세요.
+
+[입력값]
+상품명: ${data.name || '미입력'}
+카테고리: ${data.category || '미입력 (추정)'}
+상품 설명: ${data.description || '없음'}
+핵심 특징: ${data.features || '없음'}
+타겟 고객: ${data.target || '없음'}
+상품 구성: ${combinationType ? `${combinationType} 조합상품` : '일반 상품'}
+${combinationGuide}
+${toneGuide}
+
+[작성 절차]
+STEP 1. 상품 자동 분석: 제품 정의(무엇/왜 존재/어떤 문제 해결), 고객 분석(핵심 타겟 + 표면 니즈와 실제 숨은 니즈 구분), 경쟁 대비 차별점 3개 이상, 구매 직전 저항 요소 5개 이상.
+STEP 2. 전환 전략: 인지→공감→문제 인식→해결책 발견→신뢰 형성→구매 확신→결제 흐름으로 설계하고, 각 이미지가 어느 단계 역할인지 정의.
+STEP 3. 이미지 기획(총 ${count}장):
+  1) Hook: 3초 안에 시선 확보, 핵심 USP
+  2) 문제 공감: 실제 고객 상황/불편/감정 공감
+  3) 문제 확대: 방치 시 손실(손실회피 자극)
+  4) 해결책 제시: 왜 이 제품이, 왜 지금
+  5~중간) 핵심 셀링포인트(여러 장): 기능 중심/감성 중심/비교 중심/수치 중심/사용 장면 중심 — 매 장 다른 각도, 표현 중복 절대 금지
+  끝-2) 신뢰 강화: 인증/특허/원재료/제조공정/품질관리 등(없으면 대체)
+  끝-1) 상세 정보: 카테고리별 핵심 사양/구성/사용법 요약
+  끝) CTA: 지금 구매해야 하는 이유 + 행동 유도(타이밍 강조)
+STEP 6. 신뢰성 검증: 사실 확인 불가 문구 금지("판매 1위", "만족도 99%", "누적 100만개", "효과 보장" 등). 대신 "많은 고객이 선택한 이유", "꾸준히 사랑받는 이유"처럼 표현.
+
+[카피 규칙]
+- 광고 문구가 아니라 '고객의 머릿속 생각을 대신 말하는' 방식
+- 존댓말, mainCopy는 1~2줄(한 줄 22자 이내, \n 줄바꿈), subCopy는 1줄
+- 각 이미지마다 전환 트리거(손실회피/사회적 증거/권위/희소성/편의성/감정적 보상/비교우위) 중 하나 이상 적용
+
+[visualPrompt 규칙(영어)]
+- "A high-quality professional Korean e-commerce model cut of..."로 시작
+- 가상의 모델이 제품을 착용/사용하는 사실적 장면. 단독컷/행거컷/마네킹/플랫레이 금지
+- 다음 키워드를 녹일 것: photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, realistic shadows, Korean smartstore style, high conversion design
+- 이미지 안에는 어떤 텍스트도 넣지 말 것(카피는 앱이 따로 덧씌움). 상단 또는 하단에 카피를 올릴 깨끗한 여백 영역을 남길 것
+- 레퍼런스 인물 얼굴을 복제하지 말고 새 가상 인물로, 배경도 새로 구성
+
+[출력 형식] 아래 JSON 객체 하나만 반환(다른 텍스트 금지):
+{
+  "productDefinition": "제품 정의 요약",
+  "customer": { "target": "핵심 타겟 묘사", "surfaceNeed": "표면 니즈", "realNeed": "실제 숨은 니즈" },
+  "differentiators": ["차별점1", "차별점2", "차별점3"],
+  "purchaseResistances": ["저항1", "저항2", "저항3", "저항4", "저항5"],
+  "designSystem": { "tone": "프리미엄/미니멀/감성 등 1개", "colors": { "primary": "#hex", "secondary": "#hex", "accent": "#hex", "background": "#hex", "text": "#hex" } },
+  "images": [
+    { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "points": ["보조1","보조2","보조3"], "trustElement": "신뢰 요소", "trigger": "감정적 보상", "textPosition": "bottom", "visualPrompt": "A high-quality professional Korean e-commerce model cut of ..." }
+  ]
+}
+images 배열은 정확히 ${count}개여야 하며 1번은 Hook, 마지막은 CTA여야 합니다.
+      `.trim(),
+    });
+    await logApiCall('detail-plan', 'gemini-2.5-flash', response);
+
+    const text = response.text ?? "";
+    const cleanJson = text.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleanJson);
+    if (!parsed || !Array.isArray(parsed.images)) return null;
+
+    const validPositions = ['top', 'middle', 'bottom'];
+    parsed.images = parsed.images.map((img: any, idx: number) => ({
+      number: Number(img.number) || idx + 1,
+      role: String(img.role || `이미지 ${idx + 1}`),
+      stage: String(img.stage || ''),
+      sectionType: String(img.sectionType || 'detail'),
+      mainCopy: String(img.mainCopy || img.copy || '').split('\n').map((l: string) => l.slice(0, 22)).join('\n').slice(0, 60),
+      subCopy: String(img.subCopy || '').slice(0, 40),
+      points: Array.isArray(img.points) ? img.points.slice(0, 5).map((p: any) => String(p)) : [],
+      trustElement: String(img.trustElement || ''),
+      trigger: String(img.trigger || ''),
+      textPosition: validPositions.includes(img.textPosition) ? img.textPosition : (idx === 0 ? 'bottom' : 'bottom'),
+      visualPrompt: String(img.visualPrompt || ''),
+    }));
+    return parsed as DetailPlan;
+  } catch (error) {
+    console.error("Detail plan error:", error);
+    return null;
+  }
+};
+
 // 이미지 생성은 OpenAI GPT Image 1.5 Medium 으로 처리합니다.
 // 키 노출을 막기 위해 서버리스 엔드포인트(/api/generate-image)를 통해 호출합니다.
 let imageErrorAlerted = false;
+
+// ── gpt-image 분당 한도(Tier1: 5장/분) 대응 ──
+// 동시 요청 수를 제한하고, 429를 받으면 안내된 대기시간만큼 기다린 뒤 자동 재시도합니다.
+const MAX_CONCURRENT_IMAGES = 2;
+let activeImageRequests = 0;
+const imageSlotWaiters: Array<() => void> = [];
+
+const acquireImageSlot = async (): Promise<void> => {
+  if (activeImageRequests >= MAX_CONCURRENT_IMAGES) {
+    await new Promise<void>((resolve) => imageSlotWaiters.push(resolve));
+  }
+  activeImageRequests++;
+};
+
+const releaseImageSlot = (): void => {
+  activeImageRequests = Math.max(0, activeImageRequests - 1);
+  const next = imageSlotWaiters.shift();
+  if (next) next();
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export const generateImage = async (
   prompt: string,
   base64Images: string[] = [],
@@ -261,36 +414,53 @@ export const generateImage = async (
     if (!token) throw new Error('로그인이 필요합니다.');
 
     const feature = aspectRatio === '1:1' ? 'thumbnail-image' : 'detail-image';
-
-    const res = await fetch('/api/generate-image', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        prompt: `Generate a high-quality product image. ${prompt}. Aspect ratio: ${aspectRatio}.`,
-        images: base64Images,
-        aspectRatio,
-        feature,
-      }),
+    const body = JSON.stringify({
+      prompt: `Generate a high-quality product image. ${prompt}. Aspect ratio: ${aspectRatio}.`,
+      images: base64Images,
+      aspectRatio,
+      feature,
     });
 
-    const data = await res.json();
-    if (!res.ok) {
-      const msg = data?.error || '이미지 생성에 실패했습니다.';
-      console.error('Image generation failed:', msg);
-      // 실제 OpenAI 오류를 화면에 1회 노출 (원인 진단용, 5초 디바운스)
-      if (typeof window !== 'undefined' && !imageErrorAlerted) {
-        imageErrorAlerted = true;
-        setTimeout(() => { imageErrorAlerted = false; }, 5000);
-        alert(`이미지 생성 오류\n\n${msg}`);
+    await acquireImageSlot();
+    try {
+      const MAX_RETRIES = 8;
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        const res = await fetch('/api/generate-image', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body,
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          // 사용량/비용 로깅은 서버리스에서 처리 → 클라이언트 중복 기록 안 함
+          return data.image || undefined;
+        }
+
+        // 429(분당 한도): 안내된 시간만큼 대기 후 자동 재시도 (조용히 처리)
+        if (res.status === 429 && attempt < MAX_RETRIES) {
+          const waitSec = Math.min(60, Math.max(3, Number(data?.retryAfter) || 12));
+          await sleep((waitSec + 1) * 1000);
+          continue;
+        }
+
+        // 그 외 오류 또는 재시도 소진 → 1회 노출
+        const msg = data?.error || '이미지 생성에 실패했습니다.';
+        console.error('Image generation failed:', msg);
+        if (typeof window !== 'undefined' && !imageErrorAlerted) {
+          imageErrorAlerted = true;
+          setTimeout(() => { imageErrorAlerted = false; }, 5000);
+          alert(`이미지 생성 오류\n\n${msg}`);
+        }
+        return undefined;
       }
       return undefined;
+    } finally {
+      releaseImageSlot();
     }
-
-    // 사용량/비용 로깅은 서버리스에서 처리하므로 클라이언트에서는 중복 기록하지 않습니다.
-    return data.image || undefined;
   } catch (error) {
     console.error("Image generation failed:", error);
     return undefined;
