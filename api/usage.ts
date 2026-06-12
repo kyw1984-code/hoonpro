@@ -9,6 +9,20 @@ const supabase = createClient(
 
 const DAILY_LIMIT = 60;
 
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'gemini-2.5-flash': { input: 0.30, output: 2.50 },
+  'gemini-2.5-flash-image': { input: 0.30, output: 30.00 },
+  'gemini-2.0-flash': { input: 0.10, output: 0.40 },
+  'gpt-image-1.5': { input: 5.00, output: 40.00 },
+  'gpt-image-1': { input: 5.00, output: 40.00 },
+};
+
+function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
+  const price = MODEL_PRICING[model];
+  if (!price) return 0;
+  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -28,6 +42,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: '유효하지 않은 토큰입니다. 다시 로그인해주세요.' });
   }
 
+  const action = (req.query.action as string) || req.body?.action || 'track';
+
+  // 사용량 호출 기록 (비용/모델 로깅)
+  if (action === 'log') {
+    const { feature, model, inputTokens, outputTokens } = req.body ?? {};
+    if (!feature || !model) return res.status(400).json({ error: '잘못된 요청입니다.' });
+
+    const inTok = Math.max(0, Number(inputTokens) || 0);
+    const outTok = Math.max(0, Number(outputTokens) || 0);
+    const cost = calcCostUsd(String(model), inTok, outTok);
+
+    const { error } = await supabase.from('api_calls').insert({
+      user_id: decoded.userId,
+      feature: String(feature),
+      model: String(model),
+      input_tokens: inTok,
+      output_tokens: outTok,
+      cost_usd: cost,
+    });
+
+    if (error) return res.status(500).json({ error: '서버 오류' });
+    return res.status(200).json({ ok: true });
+  }
+
+  // 기본: 일일 사용 한도 증가 및 잔여 횟수 반환
   // 관리자는 한도 제한 없음
   if (decoded.isAdmin) {
     return res.status(200).json({ remaining: 999 });

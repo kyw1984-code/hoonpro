@@ -44,7 +44,7 @@ export async function trackUsage(): Promise<void> {
   const token = getToken();
   if (!token) throw new Error('로그인이 필요합니다.');
 
-  const res = await fetch('/api/usage/track', {
+  const res = await fetch('/api/usage?action=track', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -78,7 +78,7 @@ export async function logApiCall(
   const outputTokens = meta.candidatesTokenCount ?? 0;
 
   try {
-    await fetch('/api/usage/log-call', {
+    await fetch('/api/usage?action=log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ feature, model, inputTokens, outputTokens }),
