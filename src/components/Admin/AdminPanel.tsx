@@ -76,9 +76,10 @@ export function AdminPanel() {
     if (!confirm(`승인 대기 중인 ${counts.pending}명을 일괄 승인하시겠습니까?`)) return;
     setActionLoading('bulk-approve');
     try {
-      const res = await fetch('/api/admin/bulk-approve', {
+      const res = await fetch('/api/admin/user-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ action: 'bulk-approve' }),
       });
       const data = await res.json();
       if (!res.ok) return showToast(data.error);
@@ -93,10 +94,10 @@ export function AdminPanel() {
     if (!confirm(`${userName}님의 오늘 사용 횟수를 리셋하시겠습니까?`)) return;
     setActionLoading(userId + 'reset');
     try {
-      const res = await fetch('/api/admin/reset-usage', {
+      const res = await fetch('/api/admin/user-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ action: 'reset', userId }),
       });
       const data = await res.json();
       if (!res.ok) return showToast(data.error);
