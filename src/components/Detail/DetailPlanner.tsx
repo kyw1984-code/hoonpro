@@ -42,6 +42,7 @@ interface DesignPreset {
 interface DetailInputInfo {
     name: string;
     category: string;
+    description: string;
     features: string;
     target: string;
     imageInstruction: string;
@@ -1694,6 +1695,7 @@ export const DetailPlanner: React.FC = () => {
     const [info, setInfo] = useState<DetailInputInfo>({
         name: '',
         category: '',
+        description: '',
         features: '',
         target: '',
         imageInstruction: '',
@@ -1780,13 +1782,12 @@ export const DetailPlanner: React.FC = () => {
     };
 
     const handlePlan = async () => {
-        if (!info.name || !info.category) {
-            alert("상품명, 카테고리를 입력해주세요.");
+        if (!info.name) {
+            alert("상품명을 입력해주세요.");
             return;
         }
-        const requiredImageCount = Math.max(2, getCombinationCount(info.combinationType));
-        if (referenceImages.length < requiredImageCount) {
-            alert(`현재 구성은 최소 ${requiredImageCount}장 이상의 실제 제품 사진이 필요합니다.`);
+        if (referenceImages.length < 1) {
+            alert("실제 제품 사진을 최소 1장 이상 업로드해주세요.");
             return;
         }
         setLoading(true);
@@ -2159,8 +2160,16 @@ export const DetailPlanner: React.FC = () => {
                             <input type="text" value={info.name} onChange={e => setInfo({...info, name: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 무중력 메모리폼 베개" />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">카테고리 *</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                카테고리 <span className="text-slate-400 font-normal">(선택 - 비워두면 자동 추정)</span>
+                            </label>
                             <input type="text" value={info.category} onChange={e => setInfo({...info, category: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 리빙/침구" />
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                상품 설명 <span className="text-slate-400 font-normal">(선택 - 상품 소개나 상세 내용을 자유롭게 입력)</span>
+                            </label>
+                            <textarea value={info.description} onChange={e => setInfo({...info, description: e.target.value})} rows={3} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="상품 URL의 설명, 제품 소개글 등을 붙여넣으면 기획에 반영됩니다. (선택 입력)" />
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -2269,7 +2278,7 @@ export const DetailPlanner: React.FC = () => {
                             )}
                         </div>
                         <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-700 mb-2">레퍼런스 이미지 (최소 2장 필수)</label>
+                            <label className="block text-sm font-medium text-slate-700 mb-2">레퍼런스 이미지 (최소 1장 필수)</label>
                             <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:bg-slate-50 transition-colors">
                                 <div className="flex flex-col items-center text-slate-500">
                                     <Upload className="w-8 h-8 mb-2 text-slate-400" />
@@ -2556,7 +2565,7 @@ export const DetailPlanner: React.FC = () => {
                         </div>
                     </div>
                     <div className="mt-8 flex justify-end">
-                        <button onClick={handlePlan} disabled={loading || referenceImages.length < Math.max(2, getCombinationCount(info.combinationType))} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
+                        <button onClick={handlePlan} disabled={loading || referenceImages.length < 1} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
                             {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Wand2 className="w-5 h-5 mr-2" />}
                             AI 기획 시작하기
                         </button>

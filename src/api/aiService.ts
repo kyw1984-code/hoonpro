@@ -110,7 +110,8 @@ export const planDetail = async (data: any) => {
  아래 상품의 상세페이지 기획안을 JSON 배열로 작성해주세요. 정보가 부족하면 카테고리 특성과 시장 관행을 참고하여 합리적으로 보완하세요.
 
  상품명: ${data.name}
- 카테고리: ${data.category}
+ 카테고리: ${data.category || '미입력 (상품명/설명/이미지로 합리적으로 추정)'}
+ 상품 설명: ${data.description || '없음'}
  핵심 특징: ${data.features || '없음'}
  타겟 고객: ${data.target || '없음'}
  페이지 길이: ${lengthGuide}
