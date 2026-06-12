@@ -73,8 +73,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: '유효하지 않은 토큰입니다.' });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'OPENAI_API_KEY가 설정되지 않았습니다.' });
+  const apiKey = process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'OPENAIAPIKEY가 설정되지 않았습니다.' });
 
   const { prompt, images, aspectRatio, feature } = req.body ?? {};
   if (!prompt || typeof prompt !== 'string') {
