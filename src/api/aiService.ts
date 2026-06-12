@@ -323,9 +323,10 @@ STEP 3. 이미지 기획(총 ${count}장):
   끝) CTA: 지금 구매해야 하는 이유 + 행동 유도(타이밍 강조)
 STEP 6. 신뢰성 검증: 사실 확인 불가 문구 금지("판매 1위", "만족도 99%", "누적 100만개", "효과 보장" 등). 대신 "많은 고객이 선택한 이유", "꾸준히 사랑받는 이유"처럼 표현.
 
-[카피 규칙]
-- 광고 문구가 아니라 '고객의 머릿속 생각을 대신 말하는' 방식
-- 존댓말, mainCopy는 1~2줄(한 줄 22자 이내, \n 줄바꿈), subCopy는 1줄
+[카피 규칙] — 모든 카피는 이미지 안에 직접 렌더링되므로 반드시 짧고 정확하게
+- 광고 문구가 아니라 '고객의 머릿속 생각을 대신 말하는' 방식, 존댓말
+- mainCopy는 1~2줄, 한 줄 14자 이내(\n 줄바꿈). subCopy는 1줄 24자 이내. 불필요한 미사여구·어려운 한자어 지양
+- points는 3개, 각 항목 12자 이내의 짧은 명사구
 - 각 이미지마다 전환 트리거(손실회피/사회적 증거/권위/희소성/편의성/감정적 보상/비교우위) 중 하나 이상 적용
 
 [visualPrompt 규칙(영어)] — 이 필드는 '제품 사진 장면'만 영어로 묘사합니다(카피/텍스트는 mainCopy 등 별도 필드로 관리하므로 visualPrompt에는 넣지 말 것)
@@ -361,9 +362,9 @@ images 배열은 정확히 ${count}개여야 하며 1번은 Hook, 마지막은 C
       role: String(img.role || `이미지 ${idx + 1}`),
       stage: String(img.stage || ''),
       sectionType: String(img.sectionType || 'detail'),
-      mainCopy: String(img.mainCopy || img.copy || '').split('\n').map((l: string) => l.slice(0, 22)).join('\n').slice(0, 60),
-      subCopy: String(img.subCopy || '').slice(0, 40),
-      points: Array.isArray(img.points) ? img.points.slice(0, 5).map((p: any) => String(p)) : [],
+      mainCopy: String(img.mainCopy || img.copy || '').split('\n').map((l: string) => l.slice(0, 16)).slice(0, 2).join('\n').slice(0, 36),
+      subCopy: String(img.subCopy || '').slice(0, 26),
+      points: Array.isArray(img.points) ? img.points.slice(0, 3).map((p: any) => String(p).slice(0, 16)) : [],
       trustElement: String(img.trustElement || ''),
       trigger: String(img.trigger || ''),
       textPosition: validPositions.includes(img.textPosition) ? img.textPosition : (idx === 0 ? 'bottom' : 'bottom'),
@@ -381,30 +382,24 @@ images 배열은 정확히 ${count}개여야 하며 1번은 Hook, 마지막은 C
 let imageErrorAlerted = false;
 
 // ── gpt-image 분당 한도(Tier1: 5장/분) 대응 ──
-// 동시 요청 수를 제한하고, 429를 받으면 안내된 대기시간만큼 기다린 뒤 자동 재시도합니다.
-const MAX_CONCURRENT_IMAGES = 2;
-let activeImageRequests = 0;
-const imageSlotWaiters: Array<() => void> = [];
-
-const acquireImageSlot = async (): Promise<void> => {
-  if (activeImageRequests >= MAX_CONCURRENT_IMAGES) {
-    await new Promise<void>((resolve) => imageSlotWaiters.push(resolve));
-  }
-  activeImageRequests++;
-};
-
-const releaseImageSlot = (): void => {
-  activeImageRequests = Math.max(0, activeImageRequests - 1);
-  const next = imageSlotWaiters.shift();
-  if (next) next();
-};
-
+// 요청 시작 간격을 일정하게 페이싱해 429를 사전에 방지하고, 그래도 발생하면 자동 재시도한다.
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const MIN_IMAGE_INTERVAL_MS = 12500; // 약 5장/분 (60s / 5 = 12s + 안전 여유)
+let nextImageSlotAt = 0;
+const paceImageRequest = async (): Promise<void> => {
+  const now = Date.now();
+  const startAt = Math.max(now, nextImageSlotAt);
+  nextImageSlotAt = startAt + MIN_IMAGE_INTERVAL_MS;
+  const wait = startAt - now;
+  if (wait > 0) await sleep(wait);
+};
 
 export const generateImage = async (
   prompt: string,
   base64Images: string[] = [],
-  aspectRatio: string = "9:16"
+  aspectRatio: string = "9:16",
+  quality?: 'low' | 'medium' | 'high'
 ): Promise<string | undefined> => {
   try {
     await trackUsage();
@@ -417,49 +412,49 @@ export const generateImage = async (
       prompt: `Generate a high-quality product image. ${prompt}. Aspect ratio: ${aspectRatio}.`,
       images: base64Images,
       aspectRatio,
+      quality,
       feature,
     });
 
-    await acquireImageSlot();
-    try {
-      const MAX_RETRIES = 8;
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        const res = await fetch('/api/generate-image', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body,
-        });
-        const data = await res.json();
+    // 분당 한도에 맞춰 요청 시작 시점을 페이싱
+    await paceImageRequest();
 
-        if (res.ok) {
-          // 사용량/비용 로깅은 서버리스에서 처리 → 클라이언트 중복 기록 안 함
-          return data.image || undefined;
-        }
+    const MAX_RETRIES = 8;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const res = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body,
+      });
+      const data = await res.json();
 
-        // 429(분당 한도): 안내된 시간만큼 대기 후 자동 재시도 (조용히 처리)
-        if (res.status === 429 && attempt < MAX_RETRIES) {
-          const waitSec = Math.min(60, Math.max(3, Number(data?.retryAfter) || 12));
-          await sleep((waitSec + 1) * 1000);
-          continue;
-        }
+      if (res.ok) {
+        // 사용량/비용 로깅은 서버리스에서 처리 → 클라이언트 중복 기록 안 함
+        return data.image || undefined;
+      }
 
-        // 그 외 오류 또는 재시도 소진 → 1회 노출
-        const msg = data?.error || '이미지 생성에 실패했습니다.';
-        console.error('Image generation failed:', msg);
-        if (typeof window !== 'undefined' && !imageErrorAlerted) {
-          imageErrorAlerted = true;
-          setTimeout(() => { imageErrorAlerted = false; }, 5000);
-          alert(`이미지 생성 오류\n\n${msg}`);
-        }
-        return undefined;
+      // 429(분당 한도): 안내된 시간만큼 대기 후 자동 재시도 (조용히 처리)
+      if (res.status === 429 && attempt < MAX_RETRIES) {
+        const waitSec = Math.min(60, Math.max(3, Number(data?.retryAfter) || 12));
+        nextImageSlotAt = Date.now() + (waitSec + 1) * 1000;
+        await sleep((waitSec + 1) * 1000);
+        continue;
+      }
+
+      // 그 외 오류 또는 재시도 소진 → 1회 노출
+      const msg = data?.error || '이미지 생성에 실패했습니다.';
+      console.error('Image generation failed:', msg);
+      if (typeof window !== 'undefined' && !imageErrorAlerted) {
+        imageErrorAlerted = true;
+        setTimeout(() => { imageErrorAlerted = false; }, 5000);
+        alert(`이미지 생성 오류\n\n${msg}`);
       }
       return undefined;
-    } finally {
-      releaseImageSlot();
     }
+    return undefined;
   } catch (error) {
     console.error("Image generation failed:", error);
     return undefined;

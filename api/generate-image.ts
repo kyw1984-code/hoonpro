@@ -76,12 +76,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'OPENAIAPIKEY가 설정되지 않았습니다.' });
 
-  const { prompt, images, aspectRatio, feature } = req.body ?? {};
+  const { prompt, images, aspectRatio, feature, quality } = req.body ?? {};
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: '프롬프트가 필요합니다.' });
   }
 
   const size = mapSize(String(aspectRatio || '9:16'));
+  const imageQuality = ['low', 'medium', 'high', 'auto'].includes(String(quality))
+    ? String(quality)
+    : OPENAI_IMAGE_QUALITY;
   const finalPrompt = `${prompt}\n\nQuality direction: ${COMMERCIAL_QUALITY_KEYWORDS}.`;
   const referenceImages: string[] = Array.isArray(images) ? images.filter(Boolean) : [];
 
@@ -93,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const form = new FormData();
       form.append('model', OPENAI_IMAGE_MODEL);
       form.append('prompt', finalPrompt);
-      form.append('quality', OPENAI_IMAGE_QUALITY);
+      form.append('quality', imageQuality);
       form.append('size', size);
       form.append('n', '1');
       referenceImages.forEach((img, idx) => {
@@ -118,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         body: JSON.stringify({
           model: OPENAI_IMAGE_MODEL,
           prompt: finalPrompt,
-          quality: OPENAI_IMAGE_QUALITY,
+          quality: imageQuality,
           size,
           n: 1,
         }),

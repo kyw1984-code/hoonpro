@@ -103,6 +103,7 @@ export const DetailPlanner: React.FC = () => {
         combinationType: 'single',
     });
     const [length, setLength] = useState<number | 'auto'>('auto');
+    const [quality, setQuality] = useState<'medium' | 'high'>('high');
     const [referenceImages, setReferenceImages] = useState<string[]>([]);
     const [plan, setPlan] = useState<DetailPlan | null>(null);
     const [images, setImages] = useState<GenImage[]>([]);
@@ -181,7 +182,7 @@ export const DetailPlanner: React.FC = () => {
     const generateOne = async (seg: GenImage) => {
         updateImage(seg.id, { isGenerating: true });
         const prompt = buildImagePrompt(seg, info.combinationType, info.name, plan?.designSystem);
-        const raw = await generateImage(prompt, referenceImages, '9:16');
+        const raw = await generateImage(prompt, referenceImages, '9:16', quality);
         updateImage(seg.id, { imageUrl: raw || '', isGenerating: false });
     };
 
@@ -265,6 +266,27 @@ export const DetailPlanner: React.FC = () => {
                             <select value={info.designTone} onChange={e => setInfo({ ...info, designTone: e.target.value as ToneKey })} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white">
                                 {TONE_OPTIONS.map(t => <option key={t} value={t}>{t === 'auto' ? '자동 선택' : t}</option>)}
                             </select>
+                        </div>
+
+                        {/* 이미지 품질 */}
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">이미지 품질</label>
+                            <div className="grid grid-cols-2 gap-3">
+                                {([
+                                    { val: 'high', label: '고품질', desc: '한글 텍스트가 더 정확 · 생성 느림' },
+                                    { val: 'medium', label: '표준', desc: '생성 빠름 · 텍스트 깨질 수 있음' },
+                                ] as const).map(opt => {
+                                    const selected = quality === opt.val;
+                                    return (
+                                        <button key={opt.val} type="button" onClick={() => setQuality(opt.val)}
+                                            className={`text-left p-4 rounded-xl border transition-all ${selected ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300'}`}>
+                                            <div className={`font-bold mb-1 ${selected ? 'text-blue-700' : 'text-slate-800'}`}>{opt.label}</div>
+                                            <div className="text-xs text-slate-500">{opt.desc}</div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <p className="text-xs text-slate-500 mt-1">💡 문구가 깨지면 고품질을 선택하고 카피를 짧게 다듬어 보세요.</p>
                         </div>
 
                         {/* 상품 구성 */}
