@@ -1645,6 +1645,19 @@ const getRenderableKeyMessage = (segment: any): string => {
     return `${title.slice(0, 18)}\n확인해보세요`;
 };
 
+const getSegmentPreviewSize = (segment: any, index: number = 0, total: number = 1) => {
+    if (segment?.staticImage) {
+        const id = String(segment.id || '');
+        if (id.startsWith('size-chart-')) return { width: 800, height: 1422 };
+        return { width: DETAIL_CANVAS_WIDTH, height: 1000 };
+    }
+
+    return {
+        width: DETAIL_CANVAS_WIDTH,
+        height: getSegmentLayoutHeight(segment, index, total),
+    };
+};
+
 export const DetailPlanner: React.FC = () => {
     const [step, setStep] = useState<1 | 2 | 3>(1);
     const [loading, setLoading] = useState(false);
@@ -2638,66 +2651,73 @@ export const DetailPlanner: React.FC = () => {
                             </button>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,480px)_minmax(0,1fr)] gap-6 items-start">
                         {/* 왼쪽: 이미지 미리보기 */}
                         <div className="flex justify-center">
-                            <div className="w-full max-w-md bg-white shadow-2xl overflow-hidden sticky top-6">
-                                {segments.map((seg, idx) => (
-                                    <div
-                                        key={seg.id}
-                                        draggable
-                                        onDragStart={(e) => handleSegmentDragStart(e, idx)}
-                                        onDragOver={handleSegmentDragOver}
-                                        onDrop={() => handleSegmentDrop(idx)}
-                                        onDragEnd={handleSegmentDragEnd}
-                                        className={`relative w-full bg-slate-100 border-b flex items-center justify-center transition-all ${draggedSegmentIndex === idx ? 'border-blue-400 opacity-70' : 'border-slate-200'}`}
-                                    >
-                                        {seg.imageUrl ? (
-                                            <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-auto object-contain" />
-                                        ) : seg.isGenerating ? (
-                                            <div className="flex flex-col items-center text-slate-500 py-20">
-                                                <Loader2 className="w-8 h-8 animate-spin mb-2 text-blue-500" />
-                                                <p className="font-medium">이미지 생성 중...</p>
+                            <div className="w-full max-w-md bg-white shadow-2xl overflow-y-auto sticky top-24 max-h-[calc(100vh-7rem)] rounded-xl">
+                                {segments.map((seg, idx) => {
+                                    const previewSize = getSegmentPreviewSize(seg, idx, segments.length);
+                                    return (
+                                        <div
+                                            key={seg.id}
+                                            draggable
+                                            onDragStart={(e) => handleSegmentDragStart(e, idx)}
+                                            onDragOver={handleSegmentDragOver}
+                                            onDrop={() => handleSegmentDrop(idx)}
+                                            onDragEnd={handleSegmentDragEnd}
+                                            className={`relative w-full bg-slate-100 border-b flex items-center justify-center transition-all ${draggedSegmentIndex === idx ? 'border-blue-400 opacity-70' : 'border-slate-200'}`}
+                                            style={!seg.imageUrl ? { aspectRatio: `${previewSize.width} / ${previewSize.height}` } : undefined}
+                                        >
+                                            {seg.imageUrl ? (
+                                                <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-auto object-contain" />
+                                            ) : seg.isGenerating ? (
+                                                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 px-6 text-center">
+                                                    <Loader2 className="w-8 h-8 animate-spin mb-2 text-blue-500" />
+                                                    <p className="font-medium">이미지 생성 중...</p>
+                                                </div>
+                                            ) : seg.error ? (
+                                                <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 px-6 text-center">
+                                                    <p className="font-bold mb-2">생성 실패</p>
+                                                    <p className="text-xs text-red-400">{seg.errorMessage || '모델 잘림, 제품 미노출, 문구 영역 부족 가능성이 있어 재생성이 필요합니다.'}</p>
+                                                </div>
+                                            ) : (
+                                                <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-slate-400">대기 중...</div>
+                                            )}
+                                            <div className="absolute top-2 left-2 max-w-[70%] bg-black/55 text-white text-xs px-2 py-1 rounded backdrop-blur-sm truncate">
+                                                {idx + 1}. {seg.title}
                                             </div>
-                                        ) : seg.error ? (
-                                            <div className="flex flex-col items-center text-red-500 py-20 px-6 text-center">
-                                                <p className="font-bold mb-2">생성 실패</p>
-                                                <p className="text-xs text-red-400">{seg.errorMessage || '모델 잘림, 제품 미노출, 문구 영역 부족 가능성이 있어 재생성이 필요합니다.'}</p>
+                                            <div className="absolute bottom-2 left-2 bg-black/45 text-white text-[10px] px-2 py-1 rounded backdrop-blur-sm">
+                                                {previewSize.width}x{previewSize.height}
                                             </div>
-                                        ) : (
-                                            <div className="text-slate-400 py-20">대기 중...</div>
-                                        )}
-                                        <div className="absolute top-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded backdrop-blur-sm">
-                                            {idx + 1}. {seg.title}
+                                            <div className="absolute top-2 right-2 bg-black/45 text-white p-1.5 rounded backdrop-blur-sm cursor-grab active:cursor-grabbing" title="드래그해서 순서 변경">
+                                                <GripVertical className="w-4 h-4" />
+                                            </div>
+                                            {!seg.staticImage && (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleRegenerateSegment(idx);
+                                                    }}
+                                                    onMouseDown={(e) => e.stopPropagation()}
+                                                    disabled={seg.isGenerating}
+                                                    className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-blue-600/95 hover:bg-blue-700 disabled:bg-slate-500/80 text-white text-[11px] font-bold px-3 py-2 rounded-full shadow-lg backdrop-blur-sm flex items-center gap-1.5 transition-colors"
+                                                    title="이 이미지만 AI로 다시 생성"
+                                                >
+                                                    {seg.isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                                                    AI 재생성
+                                                </button>
+                                            )}
                                         </div>
-                                        <div className="absolute top-2 right-2 bg-black/45 text-white p-1.5 rounded backdrop-blur-sm cursor-grab active:cursor-grabbing" title="드래그해서 순서 변경">
-                                            <GripVertical className="w-4 h-4" />
-                                        </div>
-                                        {!seg.staticImage && (
-                                            <button
-                                                type="button"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleRegenerateSegment(idx);
-                                                }}
-                                                onMouseDown={(e) => e.stopPropagation()}
-                                                disabled={seg.isGenerating}
-                                                className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-blue-600/95 hover:bg-blue-700 disabled:bg-slate-500/80 text-white text-[11px] font-bold px-3 py-2 rounded-full shadow-lg backdrop-blur-sm flex items-center gap-1.5 transition-colors"
-                                                title="이 이미지만 AI로 다시 생성"
-                                            >
-                                                {seg.isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                                                부분 재생성
-                                            </button>
-                                        )}
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
 
                         {/* 오른쪽: 문구 수정 패널 */}
                         <div className="space-y-4">
                             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <h3 className="text-lg font-bold text-slate-800 mb-4">문구 수정 및 부분 재생성</h3>
+                                <h3 className="text-lg font-bold text-slate-800 mb-4">섹션 수정 및 AI 재생성</h3>
                                 {segments.map((seg, idx) => (
                                     <div
                                         key={seg.id}
@@ -2733,7 +2753,7 @@ export const DetailPlanner: React.FC = () => {
                                         )}
                                         <div className="flex flex-col gap-2">
                                             <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">카피 문구</label>
+                                                <label className="block text-xs font-medium text-slate-600 mb-1">AI 이미지에 넣을 카피</label>
                                                 <textarea
                                                     value={seg.keyMessage}
                                                     onChange={(e) => {
@@ -2745,85 +2765,66 @@ export const DetailPlanner: React.FC = () => {
                                                     className="w-full p-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                                                 />
                                             </div>
-                                            <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">문구 위치</label>
-                                                <div className="grid grid-cols-3 gap-1">
-                                                    {(['top', 'middle', 'bottom'] as const).map((pos) => (
-                                                        <button
-                                                            key={pos}
-                                                            onClick={async () => {
+                                            {!seg.staticImage && (
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-slate-600 mb-1">캔버스</label>
+                                                        <select
+                                                            value={getSegmentLayoutHeight(seg, idx, segments.length)}
+                                                            onChange={(e) => {
                                                                 const newSegs = [...segments];
-                                                                newSegs[idx].textPosition = pos;
+                                                                newSegs[idx].layoutHeight = normalizeLayoutHeight(e.target.value);
                                                                 setSegments(newSegs);
                                                             }}
-                                                            className={`py-1 px-2 rounded-md border text-[10px] font-bold transition-all ${seg.textPosition === pos ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500 hover:border-blue-300'}`}
+                                                            className="w-full p-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                                         >
-                                                            {pos === 'top' ? '상단' : pos === 'middle' ? '중간' : '하단'}
-                                                        </button>
-                                                    ))}
+                                                            {DETAIL_HEIGHT_PRESETS.map(height => (
+                                                                <option key={height} value={height}>{DETAIL_CANVAS_WIDTH}x{height} · {getHeightLabel(height)}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-slate-600 mb-1">컷 타입</label>
+                                                        <select
+                                                            value={seg.shotType || 'auto'}
+                                                            onChange={(e) => {
+                                                                const newSegs = [...segments];
+                                                                newSegs[idx].shotType = e.target.value;
+                                                                setSegments(newSegs);
+                                                            }}
+                                                            className="w-full p-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                                        >
+                                                            {SHOT_PREFERENCE_OPTIONS.map(option => (
+                                                                <option key={option.value} value={option.value}>{option.label}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">문구 색상</label>
-                                                <div className="flex flex-wrap gap-1.5">
-                                                    {TEXT_COLOR_OPTIONS.map((opt) => {
-                                                        const selected = (seg.textColor || '#1a1a1a') === opt.fill;
-                                                        return (
-                                                            <button
-                                                                key={opt.key}
-                                                                title={opt.label}
-                                                                onClick={async () => {
-                                                                    const newSegs = [...segments];
-                                                                    newSegs[idx].textColor = opt.fill;
-                                                                    setSegments(newSegs);
-                                                                }}
-                                                                className={`w-7 h-7 rounded-full border-2 transition-all ${selected ? 'border-blue-600 ring-2 ring-blue-200 scale-110' : 'border-slate-200 hover:border-blue-300'}`}
-                                                                style={{ backgroundColor: opt.fill }}
-                                                                aria-label={`문구 색상 ${opt.label}`}
-                                                            />
-                                                        );
-                                                    })}
+                                            )}
+                                            {!seg.staticImage && (
+                                                <div>
+                                                    <label className="block text-xs font-medium text-slate-600 mb-1">이미지 연출 지시</label>
+                                                    <textarea
+                                                        value={seg.visualPrompt}
+                                                        onChange={(e) => {
+                                                            const newSegs = [...segments];
+                                                            newSegs[idx].visualPrompt = e.target.value;
+                                                            setSegments(newSegs);
+                                                        }}
+                                                        rows={2}
+                                                        className="w-full p-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none text-slate-600"
+                                                    />
                                                 </div>
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">문구 크기</label>
-                                                <div className="grid grid-cols-5 gap-1">
-                                                    {FONT_SCALE_OPTIONS.map((opt) => {
-                                                        const current = seg.fontScale ?? DEFAULT_DETAIL_FONT_SCALE;
-                                                        const selected = current === opt.value;
-                                                        return (
-                                                            <button
-                                                                key={opt.key}
-                                                                onClick={async () => {
-                                                                    const newSegs = [...segments];
-                                                                    newSegs[idx].fontScale = opt.value;
-                                                                    setSegments(newSegs);
-                                                                }}
-                                                                className={`py-1 px-2 rounded-md border text-[10px] font-bold transition-all ${selected ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500 hover:border-blue-300'}`}
-                                                            >
-                                                                {opt.label}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
+                                            )}
                                         </div>
-                                        <div className="grid grid-cols-2 gap-2 mt-3">
-                                            <button
-                                                onClick={() => handleRegenerateSegment(idx)}
-                                                disabled={seg.isGenerating || seg.staticImage}
-                                                className="bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 text-slate-700 text-[10px] font-bold py-2 px-3 rounded-lg flex items-center justify-center transition-colors"
-                                            >
-                                                {seg.staticImage ? '템플릿 고정' : '문구로 AI 재생성'}
-                                            </button>
-                                            <button
-                                                onClick={() => handleRegenerateSegment(idx)}
-                                                disabled={seg.isGenerating || seg.staticImage}
-                                                className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-[10px] font-bold py-2 px-3 rounded-lg flex items-center justify-center transition-colors"
-                                            >
-                                                {seg.isGenerating ? '재생성 중' : seg.staticImage ? '템플릿 고정' : 'AI 부분 재생성'}
-                                            </button>
-                                        </div>
+                                        <button
+                                            onClick={() => handleRegenerateSegment(idx)}
+                                            disabled={seg.isGenerating || seg.staticImage}
+                                            className="w-full mt-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-[11px] font-bold py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                                        >
+                                            {seg.isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                                            {seg.isGenerating ? '재생성 중' : seg.staticImage ? '템플릿 고정' : '수정 내용으로 AI 재생성'}
+                                        </button>
                                     </div>
                                 ))}
                             </div>
