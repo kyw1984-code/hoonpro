@@ -70,3 +70,16 @@ create index if not exists idx_api_calls_feature on api_calls(feature);
 create index if not exists idx_api_calls_model on api_calls(model);
 
 alter table api_calls disable row level security;
+
+-- 6. 앱 전역 설정 (관리자 이미지 모델 선택 등)
+create table if not exists app_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz default now()
+);
+
+insert into app_settings (key, value)
+values ('image_generation', '{"provider":"gemini","model":"gemini-2.5-flash-image"}'::jsonb)
+on conflict (key) do nothing;
+
+alter table app_settings disable row level security;

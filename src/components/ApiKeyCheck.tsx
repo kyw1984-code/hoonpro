@@ -47,8 +47,7 @@ export const ApiKeyCheck: React.FC<{ children: React.ReactNode }> = ({ children 
                 <div className="bg-white p-8 rounded-2xl shadow-md max-w-md w-full text-center">
                     <h2 className="text-2xl font-bold text-slate-800 mb-4">API Key Required</h2>
                     <p className="text-slate-600 mb-6">
-                        To use the high-quality image generation features (Gemini 3.1 Flash Image Preview), 
-                        you need to select a paid Google Cloud API key.
+                        To use image generation features, select an API key or ask the administrator to configure the server image model settings.
                     </p>
                     <button 
                         onClick={handleSelectKey}

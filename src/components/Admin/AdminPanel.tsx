@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3 } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Save, AlertCircle } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { UsageStats } from './UsageStats';
+import { DEFAULT_IMAGE_SETTINGS, IMAGE_MODEL_OPTIONS, getImageModelOption, type ImageGenerationSettings } from '../../lib/imageModels';
 
 interface UserRow {
   id: string;
@@ -26,7 +27,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'stats'>('users');
+  const [tab, setTab] = useState<'users' | 'stats' | 'image-settings'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -134,9 +135,17 @@ export function AdminPanel() {
         >
           <BarChart3 className="w-4 h-4" /> API 사용량 통계
         </button>
+        <button
+          onClick={() => setTab('image-settings')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'image-settings' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <ImageIcon className="w-4 h-4" /> 이미지 모델 설정
+        </button>
       </div>
 
-      {tab === 'stats' ? <UsageStats /> : <UsersTab
+      {tab === 'stats' ? <UsageStats /> : tab === 'image-settings' ? <ImageSettingsTab showToast={showToast} /> : <UsersTab
         users={users}
         loading={loading}
         filter={filter}
@@ -155,6 +164,149 @@ export function AdminPanel() {
           {toast}
         </div>
       )}
+    </div>
+  );
+}
+
+function ImageSettingsTab({ showToast }: { showToast: (message: string) => void }) {
+  const [settings, setSettings] = useState<ImageGenerationSettings>(DEFAULT_IMAGE_SETTINGS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [warning, setWarning] = useState<string | null>(null);
+
+  const selected = getImageModelOption(settings.model);
+
+  const fetchSettings = async () => {
+    setLoading(true);
+    setWarning(null);
+    try {
+      const res = await fetch('/api/admin/stats?mode=image-settings', {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || '이미지 설정을 불러오지 못했습니다.');
+        return;
+      }
+      setSettings(data.settings || DEFAULT_IMAGE_SETTINGS);
+      setWarning(data.warning || null);
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchSettings(); }, []);
+
+  const saveSettings = async () => {
+    setSaving(true);
+    setWarning(null);
+    try {
+      const option = getImageModelOption(settings.model);
+      const nextSettings = { provider: option.provider, model: option.id };
+      const res = await fetch('/api/admin/stats?mode=image-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ settings: nextSettings }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || '이미지 설정을 저장하지 못했습니다.');
+        return;
+      }
+      setSettings(data.settings);
+      showToast(data.message || '저장했습니다.');
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <div className="text-center py-16 text-slate-400">불러오는 중...</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {warning && (
+        <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{warning}</span>
+        </div>
+      )}
+
+      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">이미지 생성 모델</h2>
+            <p className="text-sm text-slate-500 mt-1">여기서 선택한 모델이 썸네일 제작과 상세페이지 제작 이미지에 동일하게 적용됩니다.</p>
+          </div>
+          <button
+            onClick={saveSettings}
+            disabled={saving}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-bold px-4 py-2 rounded-xl transition-colors"
+          >
+            {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            저장
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {IMAGE_MODEL_OPTIONS.map(option => {
+            const active = settings.model === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setSettings({ provider: option.provider, model: option.id })}
+                className={`text-left rounded-2xl border p-4 transition-all ${
+                  active ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 bg-white hover:border-blue-300'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className={`font-bold ${active ? 'text-blue-700' : 'text-slate-900'}`}>{option.label}</div>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                    option.provider === 'openai' ? 'bg-slate-900 text-white' : 'bg-emerald-100 text-emerald-700'
+                  }`}>
+                    {option.provider}
+                  </span>
+                </div>
+                <p className="text-sm text-slate-600 leading-relaxed">{option.description}</p>
+                <p className="text-xs text-slate-500 mt-3 leading-relaxed">{option.costNote}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-2xl p-6">
+        <h3 className="text-sm font-bold text-slate-800 mb-3">현재 적용 및 예상비용 안내</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <InfoBox label="적용 모델" value={selected.label} />
+          <InfoBox label="적용 범위" value="썸네일 + 상세페이지 이미지" />
+          <InfoBox label="과금 방식" value={selected.provider === 'openai' ? '이미지 토큰 기준' : '토큰 사용량 추정'} />
+        </div>
+        <p className="text-xs text-slate-500 mt-4 leading-relaxed">
+          OpenAI 공식 가격표 기준 GPT-Image-2는 이미지 입력 $8.00/1M tokens, 캐시 입력 $2.00/1M tokens, 이미지 출력 $30.00/1M tokens입니다.
+          실제 비용은 프롬프트 길이, 레퍼런스 이미지 수, 출력 이미지 토큰량에 따라 달라집니다.
+        </p>
+        {selected.provider === 'openai' && (
+          <p className="text-xs text-red-500 mt-2">
+            Vercel 환경변수에 OPENAIAPIKEY가 등록되어 있어야 OpenAI 이미지 생성이 작동합니다.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InfoBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="text-xs font-bold text-slate-500 mb-1">{label}</div>
+      <div className="text-sm font-bold text-slate-900">{value}</div>
     </div>
   );
 }

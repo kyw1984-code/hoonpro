@@ -5,6 +5,7 @@ export const MODEL_PRICING: Record<string, { input: number; output: number }> = 
   'gemini-2.5-flash': { input: 0.30, output: 2.50 },
   'gemini-2.5-flash-image': { input: 0.30, output: 30.00 },
   'gemini-2.0-flash': { input: 0.10, output: 0.40 },
+  'gpt-image-2': { input: 8.00, output: 30.00 },
 };
 
 // USD → KRW 환율 (수동 업데이트)

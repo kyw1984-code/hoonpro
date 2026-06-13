@@ -1,5 +1,5 @@
-import { GoogleGenAI, Modality } from "@google/genai";
-import { trackUsage, logApiCall } from "../lib/auth";
+import { GoogleGenAI } from "@google/genai";
+import { getToken, trackUsage, logApiCall } from "../lib/auth";
 
 const getApiKey = () => {
   return (
@@ -227,45 +227,18 @@ export const generateImage = async (
 ) => {
   try {
     await trackUsage();
-    const parts: any[] = [];
-
-    if (base64Images.length > 0) {
-      for (const base64Image of base64Images) {
-        const mimeType =
-          base64Image.split(";")[0].split(":")[1] || "image/png";
-        const base64Data = base64Image.includes(",")
-          ? base64Image.split(",")[1]
-          : base64Image;
-        parts.push({ inlineData: { data: base64Data, mimeType } });
-      }
-    }
-
-    const taskInstruction = aspectRatio !== "1:1"
-      ? "Generate a polished vertical Korean e-commerce detail-page visual in a refined editorial AI-image style. The image should feel like a premium product story page, not a generic ad banner."
-      : "Generate a high-quality product image.";
-
-    parts.push({
-      text: `${taskInstruction} ${prompt}. Aspect ratio: ${aspectRatio}.`,
-    });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-image",
-      contents: [{ role: "user", parts }],
-      config: {
-        responseModalities: [Modality.IMAGE, Modality.TEXT],
+    const res = await fetch('/api/usage/log-call?mode=generate-image', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken()}`,
       },
+      body: JSON.stringify({ prompt, base64Images, aspectRatio }),
     });
-    const feature = aspectRatio === '1:1' ? 'thumbnail-image' : 'detail-image';
-    await logApiCall(feature, 'gemini-2.5-flash-image', response);
 
-    for (const part of response.candidates?.[0]?.content?.parts ?? []) {
-      if (part.inlineData) {
-        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-      }
-    }
-
-    console.warn("이미지 데이터가 응답에 없습니다.");
-    return undefined;
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '이미지 생성에 실패했습니다.');
+    return data.imageUrl as string | undefined;
   } catch (error) {
     console.error("Image generation failed:", error);
     return undefined;

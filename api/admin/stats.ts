@@ -7,6 +7,16 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
+const DEFAULT_IMAGE_SETTINGS = {
+  provider: 'gemini',
+  model: 'gemini-2.5-flash-image',
+};
+
+const IMAGE_MODEL_PROVIDER: Record<string, 'gemini' | 'openai'> = {
+  'gemini-2.5-flash-image': 'gemini',
+  'gpt-image-2': 'openai',
+};
+
 function verifyAdmin(req: VercelRequest): boolean {
   const auth = req.headers.authorization;
   if (!auth?.startsWith('Bearer ')) return false;
@@ -15,6 +25,62 @@ function verifyAdmin(req: VercelRequest): boolean {
     return decoded.isAdmin === true;
   } catch {
     return false;
+  }
+}
+
+function normalizeImageSettings(value: any) {
+  const model = String(value?.model || DEFAULT_IMAGE_SETTINGS.model);
+  const provider = IMAGE_MODEL_PROVIDER[model];
+  if (!provider) return DEFAULT_IMAGE_SETTINGS;
+  return { provider, model };
+}
+
+async function fetchImageSettings() {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'image_generation')
+    .maybeSingle();
+
+  if (error) throw error;
+  return normalizeImageSettings(data?.value);
+}
+
+async function handleImageSettings(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'GET') {
+    try {
+      const settings = await fetchImageSettings();
+      return res.status(200).json({ settings });
+    } catch (error: any) {
+      if (String(error?.message || '').includes('app_settings')) {
+        return res.status(200).json({
+          settings: DEFAULT_IMAGE_SETTINGS,
+          warning: 'app_settings 테이블이 없어 기본값을 사용 중입니다. supabase-schema.sql을 적용하면 저장할 수 있습니다.',
+        });
+      }
+      return res.status(500).json({ error: '설정을 불러오지 못했습니다.' });
+    }
+  }
+
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const settings = normalizeImageSettings(req.body?.settings ?? req.body);
+  try {
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert({
+        key: 'image_generation',
+        value: settings,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'key' });
+
+    if (error) throw error;
+    return res.status(200).json({ settings, message: '이미지 생성 모델 설정을 저장했습니다.' });
+  } catch (error: any) {
+    if (String(error?.message || '').includes('app_settings')) {
+      return res.status(500).json({ error: 'app_settings 테이블이 없습니다. supabase-schema.sql을 먼저 적용해주세요.' });
+    }
+    return res.status(500).json({ error: '설정을 저장하지 못했습니다.' });
   }
 }
 
@@ -52,11 +118,16 @@ function startOfPeriod(period: string): string | null {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   if (!verifyAdmin(req)) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+
+  if (String(req.query.mode || '') === 'image-settings') {
+    return handleImageSettings(req, res);
+  }
+
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   const period = String(req.query.period ?? '30d');
   const since = startOfPeriod(period);
