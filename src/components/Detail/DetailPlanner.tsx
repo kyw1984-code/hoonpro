@@ -39,7 +39,7 @@ const buildImagePrompt = (
         ? '\n- 1+1 세트 구성이므로 동일 제품 2개를 한 장면에 자연스럽게 함께 보여줄 것.'
         : '';
 
-    return `Create ONE finished, polished Korean e-commerce editorial detail-page image (vertical 9:16 layout) for the product "${productName}".
+    return `Create ONE finished, polished Korean e-commerce editorial detail-page image (vertical 860x1000 / 4:5 layout) for the product "${productName}".
 This must feel like a high-quality GPT-generated product story image: one believable photographic scene, tasteful negative space, natural Korean typography, premium Korean shopping-mall polish, NOT a generic ad banner.
 
 SECTION ROLE: ${img.role}${img.stage ? ` (구매 심리 단계: ${img.stage})` : ''}.
@@ -443,7 +443,7 @@ export const DetailPlanner: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                         {images.map((seg) => (
                             <div key={seg.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                                <div className="relative bg-slate-100" style={{ aspectRatio: '9 / 16' }}>
+                                <div className="relative bg-slate-100" style={{ aspectRatio: '860 / 1000' }}>
                                     {seg.isGenerating ? (
                                         <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
                                             <Loader2 className="w-8 h-8 animate-spin mb-2" />
