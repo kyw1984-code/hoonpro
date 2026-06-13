@@ -1,6 +1,6 @@
 import React, { useState, useRef, type DragEvent } from 'react';
 import { planDetail, generateImage } from '../../api/aiService';
-import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical, RefreshCw } from 'lucide-react';
+import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical, RefreshCw, Maximize2 } from 'lucide-react';
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
 type DesignPresetKey = 'premium' | 'minimal' | 'street' | 'lifestyle' | 'deal' | 'clean';
@@ -1698,6 +1698,7 @@ export const DetailPlanner: React.FC = () => {
     ]);
     const [segments, setSegments] = useState<any[]>([]);
     const [draggedSegmentIndex, setDraggedSegmentIndex] = useState<number | null>(null);
+    const [previewSegmentIndex, setPreviewSegmentIndex] = useState<number | null>(null);
 
     const moveSegment = (fromIndex: number, toIndex: number) => {
         if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
@@ -1749,13 +1750,13 @@ export const DetailPlanner: React.FC = () => {
     };
 
     const handlePlan = async () => {
-        if (!info.name || !info.category) {
-            alert("상품명, 카테고리를 입력해주세요.");
+        if (!info.name) {
+            alert("상품명을 입력해주세요.");
             return;
         }
-        const requiredImageCount = Math.max(2, getCombinationCount(info.combinationType));
+        const requiredImageCount = 1;
         if (referenceImages.length < requiredImageCount) {
-            alert(`현재 구성은 최소 ${requiredImageCount}장 이상의 실제 제품 사진이 필요합니다.`);
+            alert(`최소 ${requiredImageCount}장 이상의 실제 제품 사진이 필요합니다.`);
             return;
         }
         setLoading(true);
@@ -2080,9 +2081,14 @@ export const DetailPlanner: React.FC = () => {
     );
 
     return (
-        <div className="max-w-5xl mx-auto p-6">
+        <div className="max-w-7xl mx-auto px-6 py-8">
             {/* Stepper */}
-            <div className="flex items-center justify-between mb-8">
+            <div className="mb-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="bg-slate-950 px-7 py-6 text-white">
+                    <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-200">Detail Page Studio</p>
+                    <h2 className="mt-2 text-2xl font-black tracking-tight">상세페이지 제작</h2>
+                </div>
+            <div className="flex items-center justify-between px-7 py-5">
                 {[1, 2, 3].map((s) => (
                     <div key={s} className="flex items-center">
                         <div
@@ -2110,24 +2116,28 @@ export const DetailPlanner: React.FC = () => {
                     </div>
                 ))}
             </div>
+            </div>
 
             {step === 1 && (
-                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-                    <div className="flex justify-between items-center mb-6">
-                        <h2 className="text-2xl font-bold text-slate-800">상품 정보 입력</h2>
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="flex justify-between items-center px-8 py-6 border-b border-slate-100 bg-slate-50">
+                        <div>
+                            <p className="text-xs font-black tracking-[0.18em] text-blue-600 uppercase">Strategy Inputs</p>
+                            <h2 className="text-xl font-black text-slate-900 mt-1">상품 정보 입력</h2>
+                        </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-8">
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">상품명 *</label>
-                            <input type="text" value={info.name} onChange={e => setInfo({...info, name: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 무중력 메모리폼 베개" />
+                            <input type="text" value={info.name} onChange={e => setInfo({...info, name: e.target.value})} className="w-full p-3.5 border border-slate-200 bg-slate-50 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-colors" placeholder="예: 무중력 메모리폼 베개" />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">카테고리 *</label>
-                            <input type="text" value={info.category} onChange={e => setInfo({...info, category: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 리빙/침구" />
+                            <label className="block text-sm font-medium text-slate-700 mb-1">카테고리 <span className="text-slate-400 font-normal">(선택)</span></label>
+                            <input type="text" value={info.category} onChange={e => setInfo({...info, category: e.target.value})} className="w-full p-3.5 border border-slate-200 bg-slate-50 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-colors" placeholder="예: 리빙/침구" />
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">타겟 고객</label>
-                            <input type="text" value={info.target} onChange={e => setInfo({...info, target: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 20-30대 직장인 여성" />
+                            <input type="text" value={info.target} onChange={e => setInfo({...info, target: e.target.value})} className="w-full p-3.5 border border-slate-200 bg-slate-50 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white outline-none transition-colors" placeholder="예: 20-30대 직장인 여성" />
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-2">디자인 스타일</label>
@@ -2226,8 +2236,8 @@ export const DetailPlanner: React.FC = () => {
                             )}
                         </div>
                         <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-700 mb-2">레퍼런스 이미지 (최소 2장 필수)</label>
-                            <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-300 rounded-2xl p-8 text-center cursor-pointer hover:bg-slate-50 transition-colors">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">레퍼런스 이미지 (최소 1장 필수)</label>
+                            <div onClick={() => fileInputRef.current?.click()} className="border border-dashed border-slate-300 bg-slate-50 rounded-2xl p-8 text-center cursor-pointer hover:bg-white hover:border-blue-300 transition-colors">
                                 <div className="flex flex-col items-center text-slate-500">
                                     <Upload className="w-8 h-8 mb-2 text-slate-400" />
                                     <p className="font-medium">클릭하여 제품 사진 업로드 (다중 선택 가능)</p>
@@ -2513,7 +2523,7 @@ export const DetailPlanner: React.FC = () => {
                         </div>
                     </div>
                     <div className="mt-8 flex justify-end">
-                        <button onClick={handlePlan} disabled={loading || referenceImages.length < Math.max(2, getCombinationCount(info.combinationType))} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
+                        <button onClick={handlePlan} disabled={loading || referenceImages.length < 1} className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
                             {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Wand2 className="w-5 h-5 mr-2" />}
                             AI 기획 시작하기
                         </button>
@@ -2669,7 +2679,14 @@ export const DetailPlanner: React.FC = () => {
                                             style={!seg.imageUrl ? { aspectRatio: `${previewSize.width} / ${previewSize.height}` } : undefined}
                                         >
                                             {seg.imageUrl ? (
-                                                <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-auto object-contain" />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setPreviewSegmentIndex(idx)}
+                                                    className="block w-full cursor-zoom-in"
+                                                    title="이미지 크게 보기"
+                                                >
+                                                    <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-auto object-contain" />
+                                                </button>
                                             ) : seg.isGenerating ? (
                                                 <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 px-6 text-center">
                                                     <Loader2 className="w-8 h-8 animate-spin mb-2 text-blue-500" />
@@ -2706,6 +2723,20 @@ export const DetailPlanner: React.FC = () => {
                                                 >
                                                     {seg.isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                                                     AI 재생성
+                                                </button>
+                                            )}
+                                            {seg.imageUrl && (
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setPreviewSegmentIndex(idx);
+                                                    }}
+                                                    className="absolute bottom-3 right-3 bg-slate-950/85 hover:bg-slate-950 text-white text-[11px] font-bold px-3 py-2 rounded-full shadow-lg backdrop-blur-sm flex items-center gap-1.5 transition-colors"
+                                                    title="이미지 전체 미리보기"
+                                                >
+                                                    <Maximize2 className="w-3.5 h-3.5" />
+                                                    크게 보기
                                                 </button>
                                             )}
                                         </div>
@@ -2828,6 +2859,34 @@ export const DetailPlanner: React.FC = () => {
                                     </div>
                                 ))}
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {previewSegmentIndex !== null && segments[previewSegmentIndex]?.imageUrl && (
+                <div className="fixed inset-0 z-50 bg-slate-950/92 backdrop-blur-sm flex flex-col">
+                    <div className="h-16 px-5 md:px-8 flex items-center justify-between border-b border-white/10 text-white">
+                        <div className="min-w-0">
+                            <p className="text-xs text-slate-300">#{previewSegmentIndex + 1}</p>
+                            <h3 className="font-bold truncate">{segments[previewSegmentIndex].title}</h3>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setPreviewSegmentIndex(null)}
+                            className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                            aria-label="미리보기 닫기"
+                        >
+                            <X className="w-5 h-5" />
+                        </button>
+                    </div>
+                    <div className="flex-1 overflow-auto p-4 md:p-8">
+                        <div className="min-h-full flex items-start justify-center">
+                            <img
+                                src={segments[previewSegmentIndex].imageUrl}
+                                alt={`Section ${previewSegmentIndex + 1} large preview`}
+                                className="max-w-full h-auto object-contain rounded-xl shadow-2xl"
+                            />
                         </div>
                     </div>
                 </div>

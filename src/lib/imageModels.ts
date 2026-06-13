@@ -29,8 +29,8 @@ export const IMAGE_MODEL_OPTIONS: ImageModelOption[] = [
   {
     id: 'gpt-image-2',
     provider: 'openai',
-    label: 'GPT-Image-2',
-    description: 'OpenAI 최신 고품질 이미지 생성 모델입니다. 한글 문구/상세페이지 완성형 이미지에 적합합니다.',
+    label: 'OpenAI GPT-Image-2',
+    description: 'OpenAI GPT Image 계열의 최신 고품질 이미지 생성 모델입니다. 상품 레퍼런스 기반 생성, 한글 카피 렌더링, 상세페이지 완성형 이미지에 우선 추천합니다.',
     costNote: 'OpenAI 공식 가격: 이미지 입력 $8.00/1M tokens, 캐시 입력 $2.00/1M tokens, 이미지 출력 $30.00/1M tokens',
   },
 ];
