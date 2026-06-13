@@ -1,5 +1,5 @@
 import React, { useState, useRef, type DragEvent } from 'react';
-import { generateImage, generateFeatures, generateDetailPlan, type DetailPlan } from '../../api/aiService';
+import { generateImage, generateDetailPlan, type DetailPlan } from '../../api/aiService';
 import { Loader2, Upload, Download, Wand2, ChevronRight, X, RefreshCw, ChevronDown } from 'lucide-react';
 
 // ────────────────────────────── 상수 ──────────────────────────────
@@ -18,7 +18,7 @@ const COMBINATION_OPTIONS: Array<{ value: CombinationType; label: string; desc: 
 ];
 
 // ────────────────────────────── 이미지 프롬프트 빌더 ──────────────────────────────
-// GPT Image가 카피·레이아웃·아이콘·타이포까지 이미지에 직접 렌더링하도록 지시한다(오버레이 X).
+// GPT Image가 사진과 짧은 한글 카피를 하나의 에디토리얼 컷으로 완성하도록 지시한다.
 const buildImagePrompt = (
     img: GenImage,
     combinationType: CombinationType,
@@ -30,17 +30,17 @@ const buildImagePrompt = (
     const colorHint = colors.primary
         ? `Brand colors — primary ${colors.primary}, accent ${colors.accent || colors.primary}, text ${colors.text || '#1a1a1a'}, background ${colors.background || '#ffffff'}.`
         : '';
-    const points = (img.points || []).filter(Boolean);
+    const points = (img.points || []).filter(Boolean).slice(0, 3);
     const pointsBlock = points.length
-        ? `\n- 보조 포인트(각 항목마다 어울리는 작은 플랫 아이콘과 함께 깔끔하게 배치):\n${points.map(p => `   · ${p}`).join('\n')}`
+        ? `\n- 작은 보조 문구(필요할 때만 본문보다 작고 조용하게 배치): ${points.join(' · ')}`
         : '';
     const posKo = img.textPosition === 'top' ? '상단' : img.textPosition === 'middle' ? '중앙' : '하단';
     const bundle = combinationType === '1+1' && img.number === 1
         ? '\n- 1+1 세트 구성이므로 동일 제품 2개를 한 장면에 자연스럽게 함께 보여줄 것.'
         : '';
 
-    return `Create ONE finished, polished Korean e-commerce detail-page section image (vertical 860x1000 / 4:5 layout) for the product "${productName}".
-This must look like a TOP 1% Korean smartstore/Coupang detail page section: real product photography COMBINED with clean, beautiful Korean text typography rendered DIRECTLY into the image (headline, sub copy, bullet points with small icons/badges) — NOT a plain photo.
+    return `Create ONE finished, polished Korean e-commerce editorial detail-page image (vertical 9:16 layout) for the product "${productName}".
+This must feel like a high-quality GPT-generated product story image: one believable photographic scene, tasteful negative space, natural Korean typography, premium Korean shopping-mall polish, NOT a generic ad banner.
 
 SECTION ROLE: ${img.role}${img.stage ? ` (구매 심리 단계: ${img.stage})` : ''}.
 
@@ -49,9 +49,10 @@ SECTION ROLE: ${img.role}${img.stage ? ` (구매 심리 단계: ${img.stage})` :
 ${img.subCopy ? `- 서브 카피(중간 크기): "${img.subCopy}"` : ''}${pointsBlock}
 
 DESIGN DIRECTION:
-- 톤: ${tone}. 깔끔하고 현대적인 프리미엄 레이아웃, 명확한 시각적 위계, professional typography area, 넉넉한 여백, high conversion design, premium UI elements. ${colorHint}
-- 텍스트 블록은 ${posKo} 영역에 가독성 높게 배치하고, 나머지는 제품 사진이 하나의 자연스러운 장면으로 채울 것.
-- Korean smartstore optimized, photorealistic commercial product photography, natural lighting, ultra realistic texture, realistic shadows, premium visual merchandising, information-rich layout.
+- 톤: ${tone}. 깔끔하고 현대적인 프리미엄 에디토리얼 레이아웃, 명확한 시각적 위계, 넉넉한 여백, 고급스러운 제품 스토리 무드. ${colorHint}
+- 텍스트 블록은 ${posKo} 영역의 자연스러운 여백에 배치하고, 나머지는 제품 사진이 하나의 실제 장면처럼 이어지게 채울 것.
+- Korean ecommerce editorial, photorealistic commercial product photography, natural lighting, ultra realistic texture, realistic shadows, premium visual merchandising.
+- 카드형 UI, 유리 패널, 흰색 pill 배지, 말풍선, 가격표, 스티커, 과도한 아이콘/칩 레이아웃을 만들지 말 것.
 
 PRODUCT VISUAL: ${img.visualPrompt}
 
@@ -83,7 +84,6 @@ interface InputInfo {
     name: string;
     category: string;
     description: string;
-    features: string;
     target: string;
     designTone: ToneKey;
     combinationType: CombinationType;
@@ -97,7 +97,6 @@ export const DetailPlanner: React.FC = () => {
         name: '',
         category: '',
         description: '',
-        features: '',
         target: '',
         designTone: 'auto',
         combinationType: 'single',
@@ -137,12 +136,7 @@ export const DetailPlanner: React.FC = () => {
         }
         setLoading(true);
         try {
-            let features = info.features;
-            if (!features.trim()) {
-                features = await generateFeatures(info.name, info.category);
-                setInfo(prev => ({ ...prev, features }));
-            }
-            const result = await generateDetailPlan({ ...info, features, length });
+            const result = await generateDetailPlan({ ...info, features: '', length });
             if (!result || !result.images?.length) {
                 alert('기획안 생성에 실패했습니다. 다시 시도해주세요.');
                 return;
@@ -251,10 +245,6 @@ export const DetailPlanner: React.FC = () => {
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">상품 설명 <span className="text-slate-400 font-normal">(선택 - 상품 소개/상세 내용 붙여넣기)</span></label>
                             <textarea value={info.description} onChange={e => setInfo({ ...info, description: e.target.value })} rows={3} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="상품 URL의 설명이나 제품 소개글을 붙여넣으면 기획에 반영됩니다." />
-                        </div>
-                        <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-700 mb-1">핵심 특징 <span className="text-slate-400 font-normal">(비워두면 자동 생성)</span></label>
-                            <textarea value={info.features} onChange={e => setInfo({ ...info, features: e.target.value })} rows={2} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="상품의 주요 장점을 입력하세요." />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">타겟 고객 <span className="text-slate-400 font-normal">(선택)</span></label>
@@ -453,7 +443,7 @@ export const DetailPlanner: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                         {images.map((seg) => (
                             <div key={seg.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                                <div className="relative bg-slate-100" style={{ aspectRatio: '860 / 1000' }}>
+                                <div className="relative bg-slate-100" style={{ aspectRatio: '9 / 16' }}>
                                     {seg.isGenerating ? (
                                         <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
                                             <Loader2 className="w-8 h-8 animate-spin mb-2" />

@@ -14,33 +14,6 @@ const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 export const removeBackground = async (image: string) => image;
 
-// 상품명 기반 핵심 특징 자동 생성
-export const generateFeatures = async (productName: string, category: string): Promise<string> => {
-  try {
-    await trackUsage();
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `
-상품명: ${productName}
-카테고리: ${category}
-
-위 상품의 핵심 특징 3-5가지를 간결하게 작성해주세요.
-각 특징은 한 줄로, 구체적이고 설득력 있게 작성하세요.
-반드시 텍스트만 반환하고, 불릿 포인트나 번호 없이 쉼표로 구분하세요.
-
-예시: "프리미엄 메모리폼 소재로 목과 어깨 압력 분산, 통기성 좋은 3D 메쉬 커버, 세탁 가능한 분리형 커버, 인체공학적 디자인"
-      `.trim(),
-    });
-    await logApiCall('features-recommend', 'gemini-2.5-flash', response);
-
-    const text = response.text ?? "";
-    return text.trim();
-  } catch (error) {
-    console.error("Feature generation error:", error);
-    return ""; // 실패시 빈 문자열 반환
-  }
-};
-
 export const planDetail = async (data: any) => {
   try {
     await trackUsage();
@@ -127,7 +100,6 @@ export const planDetail = async (data: any) => {
  상품명: ${data.name}
  카테고리: ${data.category || '미입력 (상품명/설명/이미지로 합리적으로 추정)'}
  상품 설명: ${data.description || '없음'}
- 핵심 특징: ${data.features || '없음'}
  타겟 고객: ${data.target || '없음'}
  페이지 길이: ${lengthGuide}
  상품 구성: ${combinationType ? `${combinationType} 조합상품 (${combinationCount}개 구성)` : '일반 상품'}
@@ -168,24 +140,28 @@ ${structureGuide}
     - 대체 예시: "많은 고객이 선택한 이유", "재구매 후기가 이어지는 이유", "꾸준히 사랑받는 이유"
 
  keyMessage 작성 규칙:
- - 광고 문구가 아니라 '고객의 머릿속 생각을 대신 말하는' 방식으로 작성하여 공감과 설득을 동시에 유도
- - 반드시 존댓말(~세요, ~습니다)로 작성 (반말 금지)
- - 1~2줄로 작성하되, 한 줄당 25자 이내로 제한 (줄바꿈 \n 사용)
- - 예시: "매일 아침이 기다려지는\n부드러운 실크의 감촉을 느껴보세요"
+ - GPT 이미지 생성 결과처럼 짧고 자연스러운 한국어 에디토리얼 카피로 작성
+ - 억지 존댓말, 번역투, 과장 광고 문구를 피하고 상황에 맞게 담백한 평서형/서술형을 사용
+ - 상품명과 카테고리만 보고 확정할 수 없는 기능, 소재, 수치, 효능은 만들지 말 것
+ - "최고의 선택", "지금 바로 경험하세요", "더 이상 고민하지 마세요", "완벽함", "비밀" 같은 상투어는 사용하지 말 것
+ - 1~2줄로 작성하되, 한 줄당 18자 이내로 제한 (줄바꿈 \n 사용)
+ - 예시: "입는 순간,\n분위기가 달라진다"
 
  시각적 프롬프트(visualPrompt) 작성 규칙:
  - 영어로 작성하며, AI 이미지 생성기가 이해하기 쉬운 구체적인 묘사 포함
- - "A high-quality professional Korean e-commerce model cut of..."로 시작
- - 반드시 가상의 모델이 제품을 착용하거나 자연스럽게 사용하는 장면으로 작성
- - 제품 단독컷, 행거컷, 마네킹컷, 플랫레이를 지시하지 말 것
- - 다음 상업 사진 키워드를 자연스럽게 녹여서 묘사: photorealistic, commercial product photography, premium e-commerce, natural lighting, ultra realistic texture, high-end advertising, realistic shadows, Korean smartstore style, high conversion design
+ - "A premium vertical Korean e-commerce editorial image of..."로 시작
+ - 섹션 목적에 맞게 모델 착용컷, 자연스러운 사용 장면, 제품 디테일 클로즈업, 정갈한 제품 단독컷을 섞어서 작성
+ - 모든 섹션을 같은 반신 모델컷이나 같은 배경으로 만들지 말고 카메라 거리, 포즈, 배경, 연출 소품을 섹션마다 다르게 작성
+ - 첫 섹션은 GPT 예시처럼 여백이 있는 세로형 메인 비주얼, 이후 섹션은 클로즈업/라이프스타일/디테일/마무리 컷으로 다양화
+ - 이미지 안에 글자, 배지, 카드, 말풍선, UI 패널, 가격표를 만들라고 지시하지 말 것
+ - photorealistic, commercial product photography, premium e-commerce, natural lighting, ultra realistic texture, realistic shadows를 자연스럽게 반영
  - 조명, 배경, 각도, 질감, 모델 포즈를 사실적으로 기술
  - 모델 얼굴은 새롭게 생성된 가상의 인물로 표현하고 레퍼런스 인물의 얼굴을 복제하지 말 것
  - 클로즈업 섹션은 제품을 착용/사용한 상태의 자연스러운 부분 확대 컷으로 작성하고, 큰 제품 배경 위에 작은 전신 모델을 붙이는 합성 구도는 절대 지시하지 말 것
  - 미니어처 모델, 스티커처럼 붙인 모델, picture-in-picture, 손에 들린 작은 사람, 거대한 제품 무늬 배경 뒤의 작은 모델 같은 부자연스러운 합성 표현은 visualPrompt에 포함하지 말 것
  - 제품 로고/패턴/프린트는 실제 제품 위에서 현실적인 크기로 보이게 작성하고, 별도 배경 그래픽처럼 확대하지 말 것
 
- 배열 예시: [ {"title": "오감으로 느끼는 편안함", "logicalSections": ["인지", "공감"], "sectionType": "offer", "conversionRole": "핵심 오퍼", "keyMessage": "몸에 닿는 순간 느껴지는\n천연 소재의 부드러움", "visualPrompt": "A high-quality professional Korean e-commerce model cut of a fictional model wearing the product in a minimalist studio background with soft natural lighting, photorealistic commercial product photography, ultra realistic texture and realistic shadows, clearly showing the product fit and premium details."} ]
+ 배열 예시: [ {"title": "분위기를 바꾸는 첫인상", "logicalSections": ["인지", "공감"], "sectionType": "offer", "conversionRole": "핵심 오퍼", "keyMessage": "입는 순간,\n분위기가 달라진다", "visualPrompt": "A premium vertical Korean e-commerce editorial image of a fictional Korean model wearing the product in a calm studio room, full-body composition with generous clean negative space on the left for Korean headline typography, soft daylight, realistic fabric texture, refined lifestyle mood."} ]
       `.trim(),
     });
     await logApiCall('detail-plan', 'gemini-2.5-flash', response);
@@ -226,7 +202,7 @@ ${structureGuide}
     const normalizeKeyMessage = (value: any, index: number) => {
       const fallback = fallbackMessages[Math.min(index, fallbackMessages.length - 1)];
       const message = String(value || '').trim() || fallback;
-      return message.split('\n').map(line => line.slice(0, 25)).join('\n').slice(0, 100);
+      return message.split('\n').map(line => line.slice(0, 18)).join('\n').slice(0, 80);
     };
 
     return arr.map((item: any, index: number) => ({
@@ -303,7 +279,6 @@ export const generateDetailPlan = async (data: any): Promise<DetailPlan | null> 
 상품명: ${data.name || '미입력'}
 카테고리: ${data.category || '미입력 (추정)'}
 상품 설명: ${data.description || '없음'}
-핵심 특징: ${data.features || '없음'}
 타겟 고객: ${data.target || '없음'}
 상품 구성: ${combinationType ? `${combinationType} 조합상품` : '일반 상품'}
 ${combinationGuide}
@@ -323,17 +298,20 @@ STEP 3. 이미지 기획(총 ${count}장):
   끝) CTA: 지금 구매해야 하는 이유 + 행동 유도(타이밍 강조)
 STEP 6. 신뢰성 검증: 사실 확인 불가 문구 금지("판매 1위", "만족도 99%", "누적 100만개", "효과 보장" 등). 대신 "많은 고객이 선택한 이유", "꾸준히 사랑받는 이유"처럼 표현.
 
-[카피 규칙] — 모든 카피는 이미지 안에 직접 렌더링되므로 반드시 짧고 정확하게
-- 광고 문구가 아니라 '고객의 머릿속 생각을 대신 말하는' 방식, 존댓말
-- mainCopy는 1~2줄, 한 줄 14자 이내(\n 줄바꿈). subCopy는 1줄 24자 이내. 불필요한 미사여구·어려운 한자어 지양
-- points는 3개, 각 항목 12자 이내의 짧은 명사구
-- 각 이미지마다 전환 트리거(손실회피/사회적 증거/권위/희소성/편의성/감정적 보상/비교우위) 중 하나 이상 적용
+[카피 규칙] — 모든 카피는 이미지 안에 직접 렌더링되므로 반드시 짧고 자연스럽게
+- GPT 이미지 생성 결과처럼 짧고 감각적인 한국어 에디토리얼 카피. 억지 존댓말, 번역투, 과장 광고 문구 금지
+- 상품명/카테고리/설명만 보고 확정할 수 없는 기능, 소재, 수치, 효능은 만들지 말 것
+- "최고의 선택", "지금 바로 경험하세요", "더 이상 고민하지 마세요", "완벽함", "비밀" 같은 상투어 금지
+- mainCopy는 1~2줄, 한 줄 12자 이내(\n 줄바꿈). subCopy는 1줄 22자 이내
+- points는 최대 3개, 각 항목 10자 이내의 조용한 보조 문구로 작성
 
 [visualPrompt 규칙(영어)] — 이 필드는 '제품 사진 장면'만 영어로 묘사합니다(카피/텍스트는 mainCopy 등 별도 필드로 관리하므로 visualPrompt에는 넣지 말 것)
-- 제품이 돋보이는 사실적 촬영 장면(가상 모델의 착용/사용 또는 제품 클로즈업)을 구체적으로 묘사
-- photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, realistic shadows, Korean smartstore style를 녹일 것
+- 제품이 돋보이는 사실적 촬영 장면을 구체적으로 묘사
+- 모델 착용컷, 라이프스타일, 디테일 클로즈업, 정갈한 제품 단독/정물컷을 섹션별로 섞어 모든 이미지가 같은 스타일로 반복되지 않게 할 것
+- 첫 이미지는 여백이 있는 세로형 메인 비주얼, 이후는 클로즈업/일상 장면/제품 디테일/마무리 컷으로 다양화
 - 텍스트가 올라갈 영역(상/중/하)에는 깨끗한 여백이 생기도록 구도를 설계
-- 단독 나열컷/행거컷/마네킹/플랫레이 금지, 레퍼런스 인물은 새 가상 인물로 교체하고 배경도 새로 구성
+- 이미지 안에 카드형 UI, 유리 패널, 흰색 pill 배지, 가격표, 스티커, 말풍선을 만들라고 지시하지 말 것
+- 레퍼런스 인물은 새 가상 인물로 교체하고 배경도 새로 구성
 
 [출력 형식] 아래 JSON 객체 하나만 반환(다른 텍스트 금지):
 {
@@ -362,9 +340,9 @@ images 배열은 정확히 ${count}개여야 하며 1번은 Hook, 마지막은 C
       role: String(img.role || `이미지 ${idx + 1}`),
       stage: String(img.stage || ''),
       sectionType: String(img.sectionType || 'detail'),
-      mainCopy: String(img.mainCopy || img.copy || '').split('\n').map((l: string) => l.slice(0, 16)).slice(0, 2).join('\n').slice(0, 36),
-      subCopy: String(img.subCopy || '').slice(0, 26),
-      points: Array.isArray(img.points) ? img.points.slice(0, 3).map((p: any) => String(p).slice(0, 16)) : [],
+      mainCopy: String(img.mainCopy || img.copy || '').split('\n').map((l: string) => l.slice(0, 12)).slice(0, 2).join('\n').slice(0, 28),
+      subCopy: String(img.subCopy || '').slice(0, 22),
+      points: Array.isArray(img.points) ? img.points.slice(0, 3).map((p: any) => String(p).slice(0, 10)) : [],
       trustElement: String(img.trustElement || ''),
       trigger: String(img.trigger || ''),
       textPosition: validPositions.includes(img.textPosition) ? img.textPosition : (idx === 0 ? 'bottom' : 'bottom'),
@@ -408,8 +386,12 @@ export const generateImage = async (
     if (!token) throw new Error('로그인이 필요합니다.');
 
     const feature = aspectRatio === '1:1' ? 'thumbnail-image' : 'detail-image';
+    const taskInstruction = aspectRatio === "9:16"
+      ? "Generate a polished vertical Korean e-commerce detail-page visual in a refined editorial AI-image style. The image should feel like a premium product story page, not a generic ad banner."
+      : "Generate a high-quality product image.";
+
     const body = JSON.stringify({
-      prompt: `Generate a high-quality product image. ${prompt}. Aspect ratio: ${aspectRatio}.`,
+      prompt: `${taskInstruction} ${prompt}. Aspect ratio: ${aspectRatio}.`,
       images: base64Images,
       aspectRatio,
       quality,
