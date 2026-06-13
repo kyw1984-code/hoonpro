@@ -1,5 +1,5 @@
 import React, { useState, useRef, type DragEvent } from 'react';
-import { planDetail, generateImage } from '../../api/aiService';
+import { planDetail, generateImage, generateFeatures } from '../../api/aiService';
 import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical, RefreshCw } from 'lucide-react';
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
@@ -11,44 +11,6 @@ type ShotPreferenceKey = 'auto' | 'full' | 'half' | 'closeup' | 'lifestyle';
 
 const DEFAULT_DETAIL_FONT_SCALE = 1.0;
 const INTRO_DETAIL_FONT_SCALE = 1.8;
-const DETAIL_CANVAS_WIDTH = 860;
-const DETAIL_HEIGHT_PRESETS = [1000, 1200, 1529, 1720] as const;
-type DetailLayoutHeight = typeof DETAIL_HEIGHT_PRESETS[number];
-
-const normalizeLayoutHeight = (value: unknown, fallback: DetailLayoutHeight = 1200): DetailLayoutHeight => {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return fallback;
-    return DETAIL_HEIGHT_PRESETS.reduce((best, current) => (
-        Math.abs(current - n) < Math.abs(best - n) ? current : best
-    ), DETAIL_HEIGHT_PRESETS[0]);
-};
-
-const getFallbackLayoutHeight = (segment: any, index: number = 0, total: number = 1): DetailLayoutHeight => {
-    const text = `${segment?.title || ''} ${segment?.conversionRole || ''} ${segment?.sectionType || ''}`.toLowerCase();
-    if (index === 0) return 1529;
-    if (index === total - 1) return 1200;
-    if (text.includes('lifestyle') || text.includes('활용')) return 1529;
-    if (text.includes('detail') || text.includes('디테일') || text.includes('proof') || text.includes('근거')) return 1000;
-    if (text.includes('problem') || text.includes('문제')) return 1200;
-    return 1200;
-};
-
-const getSegmentLayoutHeight = (segment: any, index: number = 0, total: number = 1): DetailLayoutHeight => (
-    normalizeLayoutHeight(segment?.layoutHeight, getFallbackLayoutHeight(segment, index, total))
-);
-
-const getGenerationAspectRatio = (height: DetailLayoutHeight): string => {
-    if (height <= 1000) return '4:5';
-    if (height <= 1200) return '3:4';
-    return '9:16';
-};
-
-const getHeightLabel = (height: DetailLayoutHeight): string => {
-    if (height === 1000) return '컴팩트';
-    if (height === 1200) return '표준';
-    if (height === 1529) return '9:16';
-    return '롱';
-};
 
 interface ReviewTheme {
     tag: string;
@@ -80,6 +42,7 @@ interface DesignPreset {
 interface DetailInputInfo {
     name: string;
     category: string;
+    features: string;
     target: string;
     imageInstruction: string;
     combinationType: CombinationType;
@@ -325,7 +288,7 @@ const getFallbackSectionType = (index: number, combinationType: CombinationType)
 
 const getAutoShotType = (segment: any, index: number): ShotPreferenceKey => {
     const text = `${segment.title || ''} ${segment.conversionRole || ''} ${segment.sectionType || ''}`.toLowerCase();
-    if (index === 0) return 'full';
+    if (index === 0) return 'half';
     if (text.includes('디테일') || text.includes('detail') || text.includes('소재') || text.includes('마감')) return 'closeup';
     if (text.includes('활용') || text.includes('라이프') || text.includes('상황') || text.includes('lifestyle')) return 'lifestyle';
     if (text.includes('핏') || text.includes('실루엣') || text.includes('착용')) return 'full';
@@ -342,40 +305,6 @@ NATURAL MODEL COMPOSITION:
 -- For detail or close-up sections, use one natural close crop of the product being worn or used, such as torso fabric, neckline, print, texture, seam, hand interaction, or fit detail. Do not add a separate full-body model in the same frame.
 -- If a full-body or half-body model is shown, make the model life-size and fully integrated into the environment.
 `;
-
-const getSectionEditorialDirection = (segment: any, segmentIndex: number): string => {
-    const sectionType = String(segment.sectionType || '').toLowerCase();
-    const role = String(segment.conversionRole || '').toLowerCase();
-    const title = String(segment.title || '').toLowerCase();
-    const signatureVariant = [
-        'calm studio room with left-side negative space, full or three-quarter body editorial composition',
-        'warm daily-life interior with natural daylight, candid posture, product used naturally',
-        'close product texture and fit detail, hands or body context only, tactile macro realism',
-        'clean product-focused still life or folded product scene with premium shadows and enough empty space',
-        'outdoor or cafe lifestyle scene with movement, relaxed expression, product clearly visible',
-        'minimal final hero composition with product as the confident focus and generous copy-safe space',
-    ][segmentIndex % 6];
-
-    const roleDirection =
-        sectionType.includes('detail') || title.includes('디테일') || title.includes('소재') || title.includes('마감')
-            ? 'Use a detail-first composition: fabric, finish, print, logo, stitching, grip, texture, or functional part shown at realistic scale.'
-            : sectionType.includes('lifestyle') || role.includes('상황') || title.includes('활용')
-                ? 'Use a lifestyle composition that shows the product inside a believable day-to-day moment.'
-                : sectionType.includes('trust') || role.includes('안심') || title.includes('summary') || title.includes('cta')
-                    ? 'Use a quiet product-story composition that can close the page without looking like a sale banner.'
-                    : segmentIndex === 0
-                        ? 'Use a main hero composition similar to a premium AI-generated fashion detail page: model large, clean negative space, natural editorial room.'
-                        : 'Use a distinct editorial composition that does not repeat the previous section camera angle, pose, or background.';
-
-    return `
-EDITORIAL VARIATION:
-- Section visual variant: ${signatureVariant}
-- ${roleDirection}
-- Vary camera distance, model pose, room/background, props, and product angle from every other section.
-- Avoid repeated centered torso close-ups unless this section is explicitly a close-up detail section.
-- Do not create frosted glass cards, white pill badges, UI panels, price tags, sale stickers, or text boxes inside the generated image.
-`;
-};
 
 const buildModelProfileInstruction = (info: DetailInputInfo): string => {
     const genderText = {
@@ -404,9 +333,9 @@ const buildShotCompositionInstruction = (segment: any, segmentIndex: number, sho
         ? (segment.shotType || getAutoShotType(segment, segmentIndex))
         : shotPreference;
     const shotGuide: Record<ShotPreferenceKey, string> = {
-        auto: 'Use the most suitable editorial e-commerce composition for this section.',
-        full: 'Use a full-body or three-quarter model cut with the whole outfit/product visible and no cropped head or feet.',
-        half: 'Use a waist-up or half-body model cut only when it helps the section; avoid repeating the same torso crop across sections.',
+        auto: 'Use the most suitable e-commerce model cut for this section.',
+        full: 'Use a full-body model cut with the whole outfit/product visible and no cropped head or feet.',
+        half: 'Use a waist-up or half-body model cut with the product large and clear.',
         closeup: 'Use one natural close crop of the product being worn or used, showing texture, fit, finish, and product details. Do not combine a giant product close-up background with a tiny/full-body model overlay.',
         lifestyle: 'Use a natural lifestyle model scene that shows how the product is used in daily life.',
     };
@@ -416,8 +345,7 @@ SECTION SHOT COMPOSITION:
 - Conversion role: ${segment.conversionRole || getFallbackConversionRole(segmentIndex, 'single')}
 - Required shot type: ${shotType}
 - ${shotGuide[shotType as ShotPreferenceKey] || shotGuide.auto}
-- Leave natural copy-safe negative space near the top-left or left side when possible, but keep the scene continuous and photographic.
-- Avoid placing model faces or critical product details under the likely Korean copy area.
+- Keep the overlay copy-safe area clean and avoid placing model faces or critical product details under the text area.
 `;
 };
 
@@ -446,15 +374,10 @@ const buildDetailImagePrompt = (
     const modelProfileInstruction = buildModelProfileInstruction(info);
     const shotInstruction = buildShotCompositionInstruction(segment, segmentIndex, info.shotPreference);
     const conversionInstruction = buildConversionImageInstruction(segment);
-    const editorialDirection = getSectionEditorialDirection(segment, segmentIndex);
-    const layoutHeight = getSegmentLayoutHeight(segment, segmentIndex);
-    const sourceAspectRatio = getGenerationAspectRatio(layoutHeight);
 
-    return `Premium vertical Korean e-commerce editorial detail-page image. STRICT REQUIREMENTS:
+    return `High quality e-commerce product banner image. STRICT REQUIREMENTS:
 - NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
-- Final app canvas is exactly ${DETAIL_CANVAS_WIDTH}x${layoutHeight}px. Compose for this canvas size, using a ${sourceAspectRatio} source guide. Keep all model faces, product details, and copy-safe negative space inside the frame.
-- Use one seamless full-page photographic background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, vertical seams, side-by-side reference-image composites, or hard dividers for overlay copy.
-- Aim for the refined GPT-style detail-page feeling: realistic product story, tasteful negative space, editorial composition, natural light, and premium Korean shopping-mall polish.
+- Use one seamless full-page background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, vertical seams, side-by-side reference-image composites, or hard dividers for overlay copy.
 - If the reference image contains a real model/person, use it ONLY to understand product fit and scale. Replace the model with a completely new fictional Korean model with a different face, hair, pose, body impression, and expression.
 - Replace the reference photo background completely. Do NOT copy rooms, walls, mirrors, posters, furniture, doors, bathrooms, studios, or any visible environment from the uploaded reference photos.
 - The final image must look like a physically believable single photograph, not an artificial composite of product close-up and pasted model.
@@ -471,9 +394,8 @@ ${modelProfileInstruction}
 ${NATURAL_MODEL_COMPOSITION_RULES}
 ${shotInstruction}
 ${conversionInstruction}
-${editorialDirection}
 ${colorInstruction}
-Maintain ALL original product details including logos and colors from ALL reference images while making this section visually distinct from the others.`;
+Clean background, professional product photography style, maintain ALL original product details including logos and colors from ALL reference images.`;
 };
 
 const buildCombinationIntroSegment = (combinationType: CombinationType, productName: string) => {
@@ -485,7 +407,6 @@ const buildCombinationIntroSegment = (combinationType: CombinationType, productN
         title: `${combinationType} 조합 인트로`,
         logicalSections: ['인트로', '조합 혜택'],
         keyMessage: `${combinationType} 구성\n${countLabel}를 한 번에`,
-        layoutHeight: 1529,
         visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Use one seamless studio background across the entire frame, including the top copy-safe area and the model area. The models must stand together in one continuous scene, not in separated columns. Do not create a separate white header band, split-screen collage, panel layout, boxed sections, vertical seams, hard dividers, or different backgrounds behind each model. If reference photos include real models, replace every face and person with completely new fictional Korean models; use the reference only for product design, fit, logo, color, and texture. Replace any reference room/background with a new premium studio background. Reserve the top 22% as clean negative space with the same continuous background, and place the ${count} fictional fashion models below that area so their heads, bodies, and products are not cropped by overlay text. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and do not include any text, numbers, labels, badges, or typography in the image.`,
     };
 };
@@ -501,10 +422,10 @@ const buildModelCutInstruction = (combinationType: CombinationType, segmentIndex
 
     return `
 MODEL CUT STYLE:
-- Use a professional Korean e-commerce editorial composition, not a generic catalog banner.
-- For hero, lifestyle, fit, and offer sections, show a fictional model wearing/using the product naturally.
-- For detail, summary, CTA, trust, or product-info-like sections, product-only still life, folded product, close-up texture, or clean object composition is allowed when it fits the section better.
-- Do not use mannequins. Use hangers or flat lays only when the section is clearly a product detail or still-life scene and the result feels premium, not cheap catalog-like.
+- Generate a professional Korean e-commerce model cut, not a product-only catalog shot.
+- Do NOT create flat lay, hanger, mannequin, or product-only images.
+- If the product is clothing or an accessory, show a fictional model wearing it naturally.
+- If the product is not wearable, show a fictional model holding or using it in a natural lifestyle scene.
 - Use a new fictional model face and body; do not copy any real person, face, hair, pose, body impression, or expression from reference images.
 - Change the environment completely; do not reuse reference rooms, walls, posters, mirrors, furniture, doors, or indoor backgrounds.
 - Keep the product as the clear hero subject, large and easy to inspect.
@@ -538,7 +459,7 @@ DESIGN PRESET (${designPreset.label}):
 - Copy tone: ${designPreset.copyTone}
 - Image style: ${designPreset.imageStyle}
 - Background direction: ${designPreset.backgroundGuide}
-- Keep the selected brand mood consistent, but vary the camera angle, scene, framing, and background so the page does not feel like the same image repeated.
+- Keep the selected style consistent across all generated sections.
 `;
 
 const drawCanvasRoundRect = (
@@ -607,6 +528,16 @@ const fillPresetBackground = (ctx: CanvasRenderingContext2D, width: number, heig
     gradient.addColorStop(1, theme.bgEnd);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
+};
+
+const splitFeaturePhrases = (features: string, fallback: string): string[] => {
+    const phrases = features
+        .split(/[\n,ㆍ·|/]+/)
+        .map(item => item.replace(/^[-*]\s*/, '').trim())
+        .filter(Boolean);
+
+    const base = phrases.length > 0 ? phrases : [fallback, '매일 쓰기 좋은 편안함', '믿고 선택하는 완성도'];
+    return [...base, fallback, '선택이 쉬운 제품력'].slice(0, 3);
 };
 
 const loadCanvasImage = (imageUrl?: string): Promise<HTMLImageElement | null> => {
@@ -800,6 +731,148 @@ const generateConversionTemplateImage = async (
     });
 
     return canvas.toDataURL('image/png');
+};
+
+const buildConversionTemplateSegments = async (params: {
+    productName: string;
+    category: string;
+    features: string;
+    target: string;
+    combinationType: CombinationType;
+    designPreset: DesignPreset;
+    mode: ConversionModeKey;
+    referenceImages: string[];
+}): Promise<{ afterIntro: any[]; bottom: any[] }> => {
+    const featurePhrases = splitFeaturePhrases(params.features, params.productName || params.category || '상품의 핵심 장점');
+    const now = Date.now();
+    const afterIntro: any[] = [];
+    const bottom: any[] = [];
+    const shouldShowBundle = params.combinationType !== 'single' || params.mode === 'bundleValue';
+    const [benefitVisualUrl, bundleVisualUrl, problemVisualUrl] = await Promise.all([
+        generateConversionVisualImage(
+            '선택해야 하는 이유',
+            'A persuasive single-model hero cut that visually summarizes the product benefits with clear product visibility and a premium shopping mood.',
+            'Benefit summary: one fictional model, half-body editorial pose, clean premium studio background, product centered and confident.',
+            params.productName,
+            params.category,
+            params.referenceImages,
+            params.designPreset,
+            params.combinationType
+        ),
+        shouldShowBundle
+            ? generateConversionVisualImage(
+                `${params.combinationType === 'single' ? '구성 가치' : `${params.combinationType} 구성 가치`}`,
+                'A practical bundle value scene showing multiple product units or multiple models using the product together on one seamless background.',
+                'Bundle value: group composition or multiple product units together, wider full-body framing, different studio set, no split panels.',
+                params.productName,
+                params.category,
+                params.referenceImages,
+                params.designPreset,
+                params.combinationType
+            )
+            : Promise.resolve(''),
+        generateConversionVisualImage(
+            '더 이상 고민하지 마세요',
+            'A reassuring problem-solution model cut that shows comfort, confidence, and ease of choosing the product.',
+            'Problem solved: relaxed lifestyle scene, softer warm background, different fictional model and pose, calm reassuring mood.',
+            params.productName,
+            params.category,
+            params.referenceImages,
+            params.designPreset,
+            params.combinationType
+        ),
+    ]);
+
+    const benefitItems = featurePhrases.map((feature, idx) => ({
+        label: idx === 0 ? '첫 번째 이유' : idx === 1 ? '두 번째 이유' : '세 번째 이유',
+        text: feature,
+    }));
+    const benefitUrl = await generateConversionTemplateImage(
+        'WHY BUY',
+        '선택해야 하는 이유',
+        '',
+        benefitItems,
+        params.designPreset,
+        benefitVisualUrl
+    );
+    afterIntro.push({
+        id: `conversion-benefits-${now}`,
+        title: '핵심 혜택 요약',
+        logicalSections: ['전환율', '구매 이유'],
+        conversionRole: '구매 근거',
+        sectionType: 'conversion-benefits',
+        keyMessage: '선택해야 하는 이유\n핵심 장점을 한눈에',
+        visualPrompt: 'Conversion benefit summary card generated automatically.',
+        imageUrl: benefitUrl,
+        rawImageUrl: benefitUrl,
+        textPosition: 'bottom',
+        textColor: params.designPreset.defaultTextColor,
+        fontScale: DEFAULT_DETAIL_FONT_SCALE,
+        isGenerating: false,
+        staticImage: true,
+    });
+
+    if (shouldShowBundle) {
+        const bundleUrl = await generateConversionTemplateImage(
+            'BUNDLE VALUE',
+            `${params.combinationType === 'single' ? '구성 가치' : `${params.combinationType} 구성 가치`}`,
+            '',
+            [
+                { label: '여유분 확보', text: '자주 쓰는 상품을 한 번에 준비해 사용 흐름이 끊기지 않습니다.' },
+                { label: '함께 활용', text: '가족, 파트너, 상황별 예비용으로 나누어 쓰기 좋습니다.' },
+                { label: '선물 가치', text: '실용적인 구성이라 부담 없이 선물하기 좋은 선택입니다.' },
+            ],
+            params.designPreset,
+            bundleVisualUrl
+        );
+        afterIntro.push({
+            id: `conversion-bundle-${now}`,
+            title: '조합상품 가치 강조',
+            logicalSections: ['전환율', '조합 혜택'],
+            conversionRole: '조합 가치',
+            sectionType: 'bundle-value',
+            keyMessage: `${params.combinationType === 'single' ? '구성 가치' : `${params.combinationType} 구성 가치`}\n실용성을 더하세요`,
+            visualPrompt: 'Bundle value conversion card generated automatically.',
+            imageUrl: bundleUrl,
+            rawImageUrl: bundleUrl,
+            textPosition: 'bottom',
+            textColor: params.designPreset.defaultTextColor,
+            fontScale: DEFAULT_DETAIL_FONT_SCALE,
+            isGenerating: false,
+            staticImage: true,
+        });
+    }
+
+    const problemUrl = await generateConversionTemplateImage(
+        'PROBLEM SOLVED',
+        '더 이상 고민하지 마세요',
+        '',
+        [
+            { label: '착용감/사용감', text: '매일 사용해도 부담 없는 편안함을 중심으로 보여줍니다.' },
+            { label: '소재와 마감', text: featurePhrases[0] || '눈으로 확인되는 제품 완성도를 강조합니다.' },
+            { label: '활용 상황', text: '일상 속에서 자연스럽게 쓰이는 장면으로 선택을 돕습니다.' },
+        ],
+        params.designPreset,
+        problemVisualUrl
+    );
+    afterIntro.push({
+        id: `conversion-problem-${now}`,
+        title: '더 이상 고민하지 마세요',
+        logicalSections: ['전환율', '문제 해결'],
+        conversionRole: '고객 문제/상황',
+        sectionType: 'problem-solution',
+        keyMessage: '더 이상 고민하지 마세요\n선택이 쉬워집니다',
+        visualPrompt: 'Problem solution conversion card generated automatically.',
+        imageUrl: problemUrl,
+        rawImageUrl: problemUrl,
+        textPosition: 'bottom',
+        textColor: params.designPreset.defaultTextColor,
+        fontScale: DEFAULT_DETAIL_FONT_SCALE,
+        isGenerating: false,
+        staticImage: true,
+    });
+
+    return { afterIntro, bottom };
 };
 
 // ✅ 인증서 이미지 생성 함수
@@ -1469,8 +1542,9 @@ const validateImageQuality = (imageUrl: string): Promise<{ isValid: boolean; rea
     });
 };
 
-// AI 이미지를 860px 고정 상세페이지 컷으로 리사이즈 후 한글 텍스트 Canvas 덧씌우기
-const TARGET_WIDTH = DETAIL_CANVAS_WIDTH;
+// ✅ AI 이미지를 860×1000으로 리사이즈 후 한글 텍스트 Canvas 덧씌우기
+const TARGET_WIDTH = 860;
+const TARGET_HEIGHT = 1000;
 
 // 선택 가능한 문구 색상 팔레트 (라벨/채움색)
 export const TEXT_COLOR_OPTIONS = [
@@ -1509,31 +1583,33 @@ const overlayTextOnImage = (
     keyMessage: string,
     position: 'top' | 'middle' | 'bottom',
     textColor: string = '#1a1a1a',
-    fontScale: number = DEFAULT_DETAIL_FONT_SCALE,
-    layoutHeight: DetailLayoutHeight = 1529
+    fontScale: number = DEFAULT_DETAIL_FONT_SCALE
 ): Promise<string> => {
     return new Promise((resolve) => {
         const img = new window.Image();
+        // base64 이미지는 crossOrigin 불필요 - 오히려 깨짐 원인
         img.onload = () => {
-            const targetHeight = normalizeLayoutHeight(layoutHeight, 1529);
             const canvas = document.createElement('canvas');
             canvas.width = TARGET_WIDTH;
-            canvas.height = targetHeight;
+            canvas.height = TARGET_HEIGHT;
             const ctx = canvas.getContext('2d')!;
 
+            // 이미지를 860×1000에 cover 방식으로 그리기 (꽉 채우기, 검정 없음)
             const imgRatio = img.width / img.height;
-            const canvasRatio = TARGET_WIDTH / targetHeight;
+            const canvasRatio = TARGET_WIDTH / TARGET_HEIGHT;
             let sx = 0, sy = 0, sw = img.width, sh = img.height;
             if (imgRatio > canvasRatio) {
+                // 이미지가 더 넓음 → 좌우 크롭
                 sh = img.height;
                 sw = img.height * canvasRatio;
                 sx = (img.width - sw) / 2;
             } else {
+                // 이미지가 더 높음 → 상하 크롭 (중앙 기준)
                 sw = img.width;
                 sh = img.width / canvasRatio;
                 sy = (img.height - sh) / 2;
             }
-            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, targetHeight);
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
 
             if (!keyMessage.trim()) {
                 resolve(canvas.toDataURL('image/png'));
@@ -1541,87 +1617,64 @@ const overlayTextOnImage = (
             }
 
             const lines = keyMessage.split('\n').filter(l => l.trim());
-            const isLightText = getContrastStroke(textColor) === '#1a1a1a';
-            const shade = position === 'bottom'
-                ? ctx.createLinearGradient(0, targetHeight * 0.52, 0, targetHeight)
-                : position === 'middle'
-                    ? ctx.createLinearGradient(0, targetHeight * 0.18, 0, targetHeight * 0.82)
-                    : ctx.createLinearGradient(0, 0, 0, targetHeight * 0.44);
-            const shadeColor = isLightText ? '0, 0, 0' : '255, 255, 255';
-            if (position === 'top') {
-                shade.addColorStop(0, `rgba(${shadeColor}, ${isLightText ? 0.36 : 0.52})`);
-                shade.addColorStop(1, `rgba(${shadeColor}, 0)`);
-            } else if (position === 'middle') {
-                shade.addColorStop(0, `rgba(${shadeColor}, 0)`);
-                shade.addColorStop(0.5, `rgba(${shadeColor}, ${isLightText ? 0.32 : 0.48})`);
-                shade.addColorStop(1, `rgba(${shadeColor}, 0)`);
-            } else {
-                shade.addColorStop(0, `rgba(${shadeColor}, 0)`);
-                shade.addColorStop(1, `rgba(${shadeColor}, ${isLightText ? 0.42 : 0.58})`);
-            }
-            ctx.fillStyle = shade;
-            if (position === 'bottom') {
-                ctx.fillRect(0, targetHeight * 0.52, TARGET_WIDTH, targetHeight * 0.48);
-            } else if (position === 'middle') {
-                ctx.fillRect(0, targetHeight * 0.18, TARGET_WIDTH, targetHeight * 0.64);
-            } else {
-                ctx.fillRect(0, 0, TARGET_WIDTH, targetHeight * 0.44);
-            }
 
-            const x = 68;
-            const maxWidth = TARGET_WIDTH - 136;
-            const baseFontSize = position === 'top' ? 58 : 64;
+            // 줄 수에 따라 폰트 크기 자동 결정 후 사용자 배율 적용
+            const baseFontSize = position === 'top'
+                ? (lines.length === 1 ? 32 : lines.length === 2 ? 28 : 24)
+                : (lines.length === 1 ? 48 : lines.length === 2 ? 42 : 36);
             let fontSize = Math.round(baseFontSize * fontScale);
-            const minFontSize = 34;
-
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'top';
-            while (fontSize > minFontSize) {
-                ctx.font = `900 ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
-                const widest = Math.max(...lines.map(line => ctx.measureText(line).width));
-                if (widest <= maxWidth) break;
-                fontSize -= 2;
-            }
-
-            const lineHeight = Math.round(fontSize * 1.18);
+            const lineHeight = fontSize * 1.5;
             const totalTextHeight = lines.length * lineHeight;
-            let startY = 86;
-            if (position === 'middle') {
-                startY = Math.round((targetHeight - totalTextHeight) / 2);
-            } else if (position === 'bottom') {
-                startY = Math.round(targetHeight - totalTextHeight - 150);
-            }
 
-            ctx.shadowColor = isLightText ? 'rgba(0, 0, 0, 0.42)' : 'rgba(255, 255, 255, 0.72)';
-            ctx.shadowBlur = isLightText ? 14 : 10;
-            ctx.shadowOffsetY = isLightText ? 3 : 2;
-            ctx.fillStyle = textColor;
-            ctx.font = `900 ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
+            // 텍스트 렌더링 세팅
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            let startY = 0;
+            if (position === 'top') startY = Math.max(fontSize * 0.9 + 12, 44);
+            else if (position === 'middle') startY = (TARGET_HEIGHT / 2) - (totalTextHeight / 2) + (lineHeight / 2);
+            else startY = TARGET_HEIGHT - (totalTextHeight + fontSize) + (lineHeight / 2);
 
             lines.forEach((line, i) => {
-                ctx.fillText(line, x, startY + i * lineHeight);
-            });
+                const y = startY + i * lineHeight;
+                ctx.font = `bold ${fontSize}px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif`;
 
-            ctx.shadowColor = 'transparent';
-            const accentY = startY + totalTextHeight + 36;
-            ctx.fillStyle = textColor;
-            ctx.globalAlpha = 0.76;
-            drawCanvasRoundRect(ctx, x, accentY, 68, 4, 2);
-            ctx.fill();
-            ctx.globalAlpha = 1;
+                let displayText = line;
+                const maxWidth = TARGET_WIDTH - 80;
+                let textWidth = ctx.measureText(displayText).width;
+
+                if (textWidth > maxWidth) {
+                    while (textWidth > maxWidth && displayText.length > 0) {
+                        displayText = displayText.slice(0, -1);
+                        textWidth = ctx.measureText(displayText + '...').width;
+                    }
+                    displayText += '...';
+                }
+
+                // 외곽선(stroke) → 채움(fill) 순서로 그려 어떤 배경에서도 가독성 확보
+                // 외곽선 색상은 채움 색상의 명도에 따라 자동 결정 (대비 확보)
+                ctx.lineJoin = 'round';
+                ctx.miterLimit = 2;
+                ctx.lineWidth = Math.max(4, fontSize * 0.18);
+                ctx.strokeStyle = getContrastStroke(textColor);
+                ctx.strokeText(displayText, TARGET_WIDTH / 2, y);
+
+                ctx.fillStyle = textColor;
+                ctx.fillText(displayText, TARGET_WIDTH / 2, y);
+            });
             resolve(canvas.toDataURL('image/png'));
         };
         img.onerror = () => {
             const canvas = document.createElement('canvas');
             canvas.width = TARGET_WIDTH;
-            canvas.height = layoutHeight;
+            canvas.height = TARGET_HEIGHT;
             const ctx = canvas.getContext('2d')!;
             ctx.fillStyle = '#1e293b';
-            ctx.fillRect(0, 0, TARGET_WIDTH, layoutHeight);
+            ctx.fillRect(0, 0, TARGET_WIDTH, TARGET_HEIGHT);
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 32px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('이미지 로드 실패', TARGET_WIDTH / 2, layoutHeight / 2);
+            ctx.fillText('이미지 로드 실패', TARGET_WIDTH / 2, TARGET_HEIGHT / 2);
             resolve(canvas.toDataURL('image/png'));
         };
         img.src = imageUrl;
@@ -1641,6 +1694,7 @@ export const DetailPlanner: React.FC = () => {
     const [info, setInfo] = useState<DetailInputInfo>({
         name: '',
         category: '',
+        features: '',
         target: '',
         imageInstruction: '',
         combinationType: 'single' as CombinationType,
@@ -1744,9 +1798,17 @@ export const DetailPlanner: React.FC = () => {
                 info.combinationType,
                 info.designPreset
             );
+            // 핵심 특징이 비어있으면 자동 생성
+            let features = info.features;
+            if (!features.trim()) {
+                features = await generateFeatures(info.name, info.category);
+                setInfo(prev => ({ ...prev, features }));
+            }
+
             const combinationCount = getCombinationCount(info.combinationType);
             const plannedSegments = await planDetail({
                 ...info,
+                features,
                 length,
                 combinationCount,
                 designPreset: selectedPreset,
@@ -1764,8 +1826,7 @@ export const DetailPlanner: React.FC = () => {
                     ]
                     : [buildCombinationIntroSegment(info.combinationType, info.name)];
             
-            // 각 세그먼트에 텍스트 위치와 캔버스 높이 기본값 설정
-            const totalPlannedSegments = segmentsWithCombinationIntro.length;
+            // 각 세그먼트에 텍스트 위치 기본값 설정
             const mappedSegments = segmentsWithCombinationIntro.map((seg: any, index: number) => {
                 const isStyleSection = seg.title.includes('스타일') || 
                                      seg.title.includes('코디') || 
@@ -1773,17 +1834,12 @@ export const DetailPlanner: React.FC = () => {
                 const isCombinationIntro = info.combinationType !== 'single' && seg.title.includes('조합 인트로');
                 const conversionRole = seg.conversionRole || getFallbackConversionRole(index, info.combinationType);
                 const sectionType = seg.sectionType || getFallbackSectionType(index, info.combinationType);
-                const layoutHeight = normalizeLayoutHeight(
-                    seg.layoutHeight,
-                    getFallbackLayoutHeight({ ...seg, conversionRole, sectionType }, index, totalPlannedSegments)
-                );
                 return {
                     ...seg,
                     conversionRole,
                     sectionType,
-                    layoutHeight,
                     shotType: seg.shotType || getAutoShotType({ ...seg, conversionRole, sectionType }, index),
-                    textPosition: index === 0 || isCombinationIntro || isStyleSection ? 'top' : 'bottom',
+                    textPosition: isCombinationIntro || isStyleSection ? 'top' : 'bottom',
                     textColor: selectedPreset.defaultTextColor,
                     fontScale: isCombinationIntro ? INTRO_DETAIL_FONT_SCALE : DEFAULT_DETAIL_FONT_SCALE,
                     rawImageUrl: ''
@@ -1794,6 +1850,18 @@ export const DetailPlanner: React.FC = () => {
             const bodySegments = mappedSegments.slice(1);
             const afterIntroSegments: any[] = [];
             const bottomSegments: any[] = [];
+            const conversionTemplates = info.conversionEnabled
+                ? await buildConversionTemplateSegments({
+                    productName: info.name,
+                    category: info.category,
+                    features,
+                    target: info.target,
+                    combinationType: info.combinationType,
+                    designPreset: selectedPreset,
+                    mode: effectiveConversionMode,
+                    referenceImages,
+                })
+                : { afterIntro: [], bottom: [] };
 
             // 사이즈표는 옵션 템플릿 중 가장 먼저, 인트로 바로 다음에 배치
             if (includeSizeChart) {
@@ -1854,6 +1922,9 @@ export const DetailPlanner: React.FC = () => {
                     staticImage: true
                 });
             }
+
+            afterIntroSegments.push(...conversionTemplates.afterIntro);
+            bottomSegments.push(...conversionTemplates.bottom);
 
             // 인증서는 본문 이후에 배치하되, 제품 정보 및 관리방법보다는 위에 둔다
             if (includeCertificate) {
@@ -1934,10 +2005,9 @@ export const DetailPlanner: React.FC = () => {
 
             while (attempt <= MAX_RETRY) {
                 try {
-                    const layoutHeight = getSegmentLayoutHeight(segments[i], i, segments.length);
-                    const prompt = buildDetailImagePrompt({ ...segments[i], layoutHeight }, i, info, selectedPreset);
+                    const prompt = buildDetailImagePrompt(segments[i], i, info, selectedPreset);
 
-                    const rawImageUrl = await generateImage(prompt, referenceImages, getGenerationAspectRatio(layoutHeight));
+                    const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
 
                     // ✅ 이미지 품질 검증
                     const validation = await validateImageQuality(rawImageUrl);
@@ -1952,18 +2022,11 @@ export const DetailPlanner: React.FC = () => {
                     }
 
                     // ✅ Canvas로 한글 텍스트 덧씌우기 (위치 정보 포함)
-                    const imageUrl = await overlayTextOnImage(
-                        rawImageUrl,
-                        getRenderableKeyMessage(segments[i]),
-                        segments[i].textPosition || 'bottom',
-                        segments[i].textColor || '#1a1a1a',
-                        segments[i].fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
-                        layoutHeight
-                    );
+                    const imageUrl = await overlayTextOnImage(rawImageUrl, getRenderableKeyMessage(segments[i]), segments[i].textPosition || 'bottom', segments[i].textColor || '#1a1a1a', segments[i].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
 
                         setSegments(prev => {
                             const newSegs = [...prev];
-                            newSegs[i] = { ...newSegs[i], layoutHeight, imageUrl, rawImageUrl, isGenerating: false, error: false, errorMessage: '' };
+                            newSegs[i] = { ...newSegs[i], imageUrl, rawImageUrl, isGenerating: false, error: false, errorMessage: '' };
                             return newSegs;
                         });
                     break; // 성공하면 루프 탈출
@@ -1997,9 +2060,8 @@ export const DetailPlanner: React.FC = () => {
 
         try {
             const selectedPreset = DESIGN_PRESETS[info.designPreset];
-            const layoutHeight = getSegmentLayoutHeight(currentSegment, index, segments.length);
-            const prompt = buildDetailImagePrompt({ ...currentSegment, layoutHeight }, index, info, selectedPreset);
-            const rawImageUrl = await generateImage(prompt, referenceImages, getGenerationAspectRatio(layoutHeight));
+            const prompt = buildDetailImagePrompt(currentSegment, index, info, selectedPreset);
+            const rawImageUrl = await generateImage(prompt, referenceImages, "9:16");
             const validation = await validateImageQuality(rawImageUrl);
 
             if (!validation.isValid) {
@@ -2011,15 +2073,13 @@ export const DetailPlanner: React.FC = () => {
                 getRenderableKeyMessage(currentSegment),
                 currentSegment.textPosition || 'bottom',
                 currentSegment.textColor || '#1a1a1a',
-                currentSegment.fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
-                layoutHeight
+                currentSegment.fontScale ?? DEFAULT_DETAIL_FONT_SCALE
             );
 
             setSegments(prev => {
                 const newSegs = [...prev];
                 newSegs[index] = {
                     ...newSegs[index],
-                    layoutHeight,
                     imageUrl,
                     rawImageUrl,
                     isGenerating: false,
@@ -2101,6 +2161,12 @@ export const DetailPlanner: React.FC = () => {
                         <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">카테고리 *</label>
                             <input type="text" value={info.category} onChange={e => setInfo({...info, category: e.target.value})} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 리빙/침구" />
+                        </div>
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-slate-700 mb-1">
+                                핵심 특징 <span className="text-slate-400 font-normal">(비워두면 상품명 기반 자동 생성)</span>
+                            </label>
+                            <textarea value={info.features} onChange={e => setInfo({...info, features: e.target.value})} rows={3} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="상품의 주요 장점을 입력하세요. (빈칸으로 두면 자동 생성됩니다)" />
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">타겟 고객</label>
@@ -2565,7 +2631,7 @@ export const DetailPlanner: React.FC = () => {
                                         <label className="block text-sm font-medium text-slate-700 mb-1">Key Message (이미지에 들어갈 카피)</label>
                                         <textarea value={seg.keyMessage} onChange={(e) => { const newSegs = [...segments]; newSegs[idx].keyMessage = e.target.value; setSegments(newSegs); }} rows={2} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none resize-none font-medium" />
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                         <div>
                                             <label className="block text-sm font-medium text-slate-700 mb-1">전환 역할</label>
                                             <input value={seg.conversionRole || ''} onChange={(e) => { const newSegs = [...segments]; newSegs[idx].conversionRole = e.target.value; setSegments(newSegs); }} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
@@ -2575,23 +2641,6 @@ export const DetailPlanner: React.FC = () => {
                                             <select value={seg.shotType || 'auto'} onChange={(e) => { const newSegs = [...segments]; newSegs[idx].shotType = e.target.value; setSegments(newSegs); }} disabled={seg.staticImage} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm disabled:bg-slate-100 disabled:text-slate-400">
                                                 {SHOT_PREFERENCE_OPTIONS.map(option => (
                                                     <option key={option.value} value={option.value}>{option.label}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-slate-700 mb-1">캔버스</label>
-                                            <select
-                                                value={getSegmentLayoutHeight(seg, idx, segments.length)}
-                                                onChange={(e) => {
-                                                    const newSegs = [...segments];
-                                                    newSegs[idx].layoutHeight = normalizeLayoutHeight(e.target.value);
-                                                    setSegments(newSegs);
-                                                }}
-                                                disabled={seg.staticImage}
-                                                className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm disabled:bg-slate-100 disabled:text-slate-400"
-                                            >
-                                                {DETAIL_HEIGHT_PRESETS.map(height => (
-                                                    <option key={height} value={height}>{DETAIL_CANVAS_WIDTH}x{height} · {getHeightLabel(height)}</option>
                                                 ))}
                                             </select>
                                         </div>
@@ -2745,14 +2794,7 @@ export const DetailPlanner: React.FC = () => {
                                                                 const newSegs = [...segments];
                                                                 newSegs[idx].textPosition = pos;
                                                                 if (newSegs[idx].rawImageUrl) {
-                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(
-                                                                        newSegs[idx].rawImageUrl,
-                                                                        getRenderableKeyMessage(newSegs[idx]),
-                                                                        pos,
-                                                                        newSegs[idx].textColor || '#1a1a1a',
-                                                                        newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
-                                                                        getSegmentLayoutHeight(newSegs[idx], idx, newSegs.length)
-                                                                    );
+                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(newSegs[idx].rawImageUrl, getRenderableKeyMessage(newSegs[idx]), pos, newSegs[idx].textColor || '#1a1a1a', newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
                                                                 }
                                                                 setSegments(newSegs);
                                                             }}
@@ -2781,8 +2823,7 @@ export const DetailPlanner: React.FC = () => {
                                                                             getRenderableKeyMessage(newSegs[idx]),
                                                                             newSegs[idx].textPosition || 'bottom',
                                                                             opt.fill,
-                                                                            newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
-                                                                            getSegmentLayoutHeight(newSegs[idx], idx, newSegs.length)
+                                                                            newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE
                                                                         );
                                                                     }
                                                                     setSegments(newSegs);
@@ -2813,8 +2854,7 @@ export const DetailPlanner: React.FC = () => {
                                                                             getRenderableKeyMessage(newSegs[idx]),
                                                                             newSegs[idx].textPosition || 'bottom',
                                                                             newSegs[idx].textColor || '#1a1a1a',
-                                                                            opt.value,
-                                                                            getSegmentLayoutHeight(newSegs[idx], idx, newSegs.length)
+                                                                            opt.value
                                                                         );
                                                                     }
                                                                     setSegments(newSegs);
@@ -2837,14 +2877,7 @@ export const DetailPlanner: React.FC = () => {
                                                         newSegs[idx] = { ...newSegs[idx], isGenerating: true };
                                                         return newSegs;
                                                     });
-                                                    const imageUrl = await overlayTextOnImage(
-                                                        seg.rawImageUrl,
-                                                        getRenderableKeyMessage(seg),
-                                                        seg.textPosition || 'bottom',
-                                                        seg.textColor || '#1a1a1a',
-                                                        seg.fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
-                                                        getSegmentLayoutHeight(seg, idx, segments.length)
-                                                    );
+                                                    const imageUrl = await overlayTextOnImage(seg.rawImageUrl, getRenderableKeyMessage(seg), seg.textPosition || 'bottom', seg.textColor || '#1a1a1a', seg.fontScale ?? DEFAULT_DETAIL_FONT_SCALE);
                                                     setSegments(prev => {
                                                         const newSegs = [...prev];
                                                         newSegs[idx] = { ...newSegs[idx], imageUrl, isGenerating: false };

@@ -14,25 +14,31 @@ const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 export const removeBackground = async (image: string) => image;
 
-const DETAIL_CANVAS_WIDTH = 860;
-const DETAIL_HEIGHT_PRESETS = [1000, 1200, 1529, 1720] as const;
+// 상품명 기반 핵심 특징 자동 생성
+export const generateFeatures = async (productName: string, category: string): Promise<string> => {
+  try {
+    await trackUsage();
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: `
+상품명: ${productName}
+카테고리: ${category}
 
-const normalizeLayoutHeight = (value: any, fallback: number): number => {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return DETAIL_HEIGHT_PRESETS.reduce((best, current) => (
-    Math.abs(current - n) < Math.abs(best - n) ? current : best
-  ), DETAIL_HEIGHT_PRESETS[0]);
-};
+위 상품의 핵심 특징 3-5가지를 간결하게 작성해주세요.
+각 특징은 한 줄로, 구체적이고 설득력 있게 작성하세요.
+반드시 텍스트만 반환하고, 불릿 포인트나 번호 없이 쉼표로 구분하세요.
 
-const getFallbackLayoutHeight = (item: any, index: number, total: number): number => {
-  const text = `${item?.title || ''} ${item?.conversionRole || ''} ${item?.sectionType || ''}`.toLowerCase();
-  if (index === 0) return 1529;
-  if (index === total - 1) return 1200;
-  if (text.includes('lifestyle') || text.includes('활용')) return 1529;
-  if (text.includes('detail') || text.includes('디테일') || text.includes('proof') || text.includes('근거')) return 1000;
-  if (text.includes('problem') || text.includes('문제')) return 1200;
-  return 1200;
+예시: "프리미엄 메모리폼 소재로 목과 어깨 압력 분산, 통기성 좋은 3D 메쉬 커버, 세탁 가능한 분리형 커버, 인체공학적 디자인"
+      `.trim(),
+    });
+    await logApiCall('features-recommend', 'gemini-2.5-flash', response);
+
+    const text = response.text ?? "";
+    return text.trim();
+  } catch (error) {
+    console.error("Feature generation error:", error);
+    return ""; // 실패시 빈 문자열 반환
+  }
 };
 
 export const planDetail = async (data: any) => {
@@ -104,6 +110,7 @@ export const planDetail = async (data: any) => {
 
  상품명: ${data.name}
  카테고리: ${data.category}
+ 핵심 특징: ${data.features || '없음'}
  타겟 고객: ${data.target || '없음'}
  페이지 길이: ${lengthGuide}
  상품 구성: ${combinationType ? `${combinationType} 조합상품 (${combinationCount}개 구성)` : '일반 상품'}
@@ -112,15 +119,7 @@ ${designGuide}
 ${conversionGuide}
 
  반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
- 각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt, sectionType, conversionRole, layoutHeight 필드를 포함해야 합니다.
-
- 상세페이지 캔버스 규칙:
- - 모든 이미지는 가로 ${DETAIL_CANVAS_WIDTH}px 고정 상세페이지 섹션으로 기획합니다.
- - 각 항목의 layoutHeight는 반드시 ${DETAIL_HEIGHT_PRESETS.join(', ')} 중 하나만 사용하세요.
- - Hook/모델 착용/감성 히어로/라이프스타일 섹션은 1529를 우선 사용하세요.
- - 제품 디테일/근거/짧은 정보 섹션은 1000, 일반 설명 섹션은 1200을 사용하세요.
- - 긴 스토리/비교/사용 장면은 필요할 때만 1720을 사용하세요.
- - 모든 섹션이 같은 높이가 되지 않게, 설득 역할에 맞춰 높이를 다르게 배분하세요.
+ 각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt, sectionType, conversionRole 필드를 포함해야 합니다.
 
  중요 규칙 및 절대 금지 사항 (MUST FOLLOW):
  1. 반드시 제품의 시각적 가치(디테일, 소재, 착용샷, 연출샷 등)를 보여주는 '이미지 중심'의 섹션으로만 구성하세요.
@@ -137,27 +136,22 @@ ${conversionGuide}
 
  keyMessage 작성 규칙:
  - 고객의 감성을 자극하는 전문 카피라이터 톤앤매너 유지
- - GPT 이미지 생성 결과처럼 짧고 자연스러운 한국어 에디토리얼 카피로 작성
- - 억지 존댓말, 번역투, 과장 광고 문구를 피하고 상황에 맞게 담백한 평서형/서술형을 사용
- - 상품명과 카테고리만 보고 확정할 수 없는 기능, 소재, 수치, 효능은 만들지 말 것
- - "최고의 선택", "지금 바로 경험하세요", "더 이상 고민하지 마세요", "완벽함", "비밀" 같은 상투어는 사용하지 말 것
- - 1~2줄로 작성하되, 한 줄당 18자 이내로 제한 (줄바꿈 \n 사용)
- - 예시: "입는 순간,\n분위기가 달라진다"
+ - 반드시 존댓말(~세요, ~습니다)로 작성 (반말 금지)
+ - 1~2줄로 작성하되, 한 줄당 25자 이내로 제한 (줄바꿈 \n 사용)
+ - 예시: "매일 아침이 기다려지는\n부드러운 실크의 감촉을 느껴보세요"
 
  시각적 프롬프트(visualPrompt) 작성 규칙:
  - 영어로 작성하며, AI 이미지 생성기가 이해하기 쉬운 구체적인 묘사 포함
- - "A premium vertical Korean e-commerce editorial image of..."로 시작
- - 섹션 목적에 맞게 모델 착용컷, 자연스러운 사용 장면, 제품 디테일 클로즈업, 정갈한 제품 단독컷을 섞어서 작성
- - 모든 섹션을 같은 반신 모델컷이나 같은 배경으로 만들지 말고 카메라 거리, 포즈, 배경, 연출 소품을 섹션마다 다르게 작성
- - 첫 섹션은 GPT 예시처럼 여백이 있는 세로형 메인 비주얼, 이후 섹션은 클로즈업/라이프스타일/디테일/마무리 컷으로 다양화
- - 이미지 안에 글자, 배지, 카드, 말풍선, UI 패널, 가격표를 만들라고 지시하지 말 것
+ - "A high-quality professional Korean e-commerce model cut of..."로 시작
+ - 반드시 가상의 모델이 제품을 착용하거나 자연스럽게 사용하는 장면으로 작성
+ - 제품 단독컷, 행거컷, 마네킹컷, 플랫레이를 지시하지 말 것
  - 조명, 배경, 각도, 질감, 모델 포즈를 사실적으로 기술
  - 모델 얼굴은 새롭게 생성된 가상의 인물로 표현하고 레퍼런스 인물의 얼굴을 복제하지 말 것
  - 클로즈업 섹션은 제품을 착용/사용한 상태의 자연스러운 부분 확대 컷으로 작성하고, 큰 제품 배경 위에 작은 전신 모델을 붙이는 합성 구도는 절대 지시하지 말 것
  - 미니어처 모델, 스티커처럼 붙인 모델, picture-in-picture, 손에 들린 작은 사람, 거대한 제품 무늬 배경 뒤의 작은 모델 같은 부자연스러운 합성 표현은 visualPrompt에 포함하지 말 것
  - 제품 로고/패턴/프린트는 실제 제품 위에서 현실적인 크기로 보이게 작성하고, 별도 배경 그래픽처럼 확대하지 말 것
 
- 배열 예시: [ {"title": "분위기를 바꾸는 첫인상", "logicalSections": ["메인", "시각화"], "sectionType": "offer", "conversionRole": "핵심 오퍼", "layoutHeight": 1529, "keyMessage": "입는 순간,\n분위기가 달라진다", "visualPrompt": "A premium vertical Korean e-commerce editorial image of a fictional Korean model wearing the product in a calm studio room, full-body composition with generous clean negative space on the left for Korean headline overlay, soft daylight, realistic fabric texture, refined lifestyle mood, no text."} ]
+ 배열 예시: [ {"title": "오감으로 느끼는 편안함", "logicalSections": ["메인", "시각화"], "sectionType": "offer", "conversionRole": "핵심 오퍼", "keyMessage": "몸에 닿는 순간 느껴지는\n천연 소재의 부드러움", "visualPrompt": "A high-quality professional Korean e-commerce model cut of a fictional model wearing the product in a minimalist studio background with soft natural lighting, clearly showing the product texture, fit, and premium details."} ]
       `.trim(),
     });
     await logApiCall('detail-plan', 'gemini-2.5-flash', response);
@@ -188,20 +182,19 @@ ${conversionGuide}
           '구매 전 마지막까지\n안심하고 확인하세요',
         ]
       : [
-          `${data.name || '상품'}\n첫인상이 달라진다`,
-          '매일 손이 가는\n편안한 분위기',
-          '가까이 볼수록\n선명한 디테일',
-          '결이 살아나는\n섬세한 마감',
-          '일상에 자연스럽게\n스며드는 스타일',
-          '마지막까지\n차분하게 확인하세요',
+          `${data.name || '상품'}\n선택해야 하는 이유`,
+          '더 이상 고민하지 마세요\n편하게 선택하세요',
+          '눈으로 확인하는\n믿을 수 있는 차이',
+          '디테일까지 꼼꼼하게\n살펴보세요',
+          '일상 속에서 더 자연스럽게\n활용해보세요',
+          '구매 전 마지막까지\n안심하고 확인하세요',
         ];
     const normalizeKeyMessage = (value: any, index: number) => {
       const fallback = fallbackMessages[Math.min(index, fallbackMessages.length - 1)];
       const message = String(value || '').trim() || fallback;
-      return message.split('\n').map(line => line.slice(0, 18)).join('\n').slice(0, 80);
+      return message.split('\n').map(line => line.slice(0, 25)).join('\n').slice(0, 100);
     };
 
-    const totalItems = arr.length;
     return arr.map((item: any, index: number) => ({
       ...item,
       id: Math.random().toString(36).substring(7),
@@ -209,7 +202,6 @@ ${conversionGuide}
       logicalSections: Array.isArray(item.logicalSections) ? item.logicalSections : ["기본"],
       sectionType: item.sectionType || fallbackTypes[Math.min(index, fallbackTypes.length - 1)],
       conversionRole: item.conversionRole || fallbackRoles[Math.min(index, fallbackRoles.length - 1)],
-      layoutHeight: normalizeLayoutHeight(item.layoutHeight, getFallbackLayoutHeight(item, index, totalItems)),
       // keyMessage 검증 - 각 줄이 25자를 초과하지 않도록 체크
       keyMessage: normalizeKeyMessage(item.keyMessage ?? item.copy ?? item.message, index),
       visualPrompt: item.visualPrompt ?? "",
@@ -240,12 +232,8 @@ export const generateImage = async (
       }
     }
 
-    const taskInstruction = aspectRatio !== "1:1"
-      ? "Generate a polished vertical Korean e-commerce detail-page visual in a refined editorial AI-image style. The image should feel like a premium product story page, not a generic ad banner."
-      : "Generate a high-quality product image.";
-
     parts.push({
-      text: `${taskInstruction} ${prompt}. Aspect ratio: ${aspectRatio}.`,
+      text: `Generate a high-quality product image. ${prompt}. Aspect ratio: ${aspectRatio}.`,
     });
 
     const response = await ai.models.generateContent({
