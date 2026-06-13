@@ -15,6 +15,9 @@ const DEFAULT_IMAGE_SETTINGS = {
 const IMAGE_MODEL_PROVIDER: Record<string, 'gemini' | 'openai'> = {
   'gemini-2.5-flash-image': 'gemini',
   'gpt-image-2': 'openai',
+  'gpt-image-1.5': 'openai',
+  'gpt-image-1': 'openai',
+  'gpt-image-1-mini': 'openai',
 };
 
 function verifyAdmin(req: VercelRequest): boolean {

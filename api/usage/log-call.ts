@@ -13,6 +13,9 @@ const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'gemini-2.5-flash-image': { input: 0.30, output: 30.00 },
   'gemini-2.0-flash': { input: 0.10, output: 0.40 },
   'gpt-image-2': { input: 8.00, output: 30.00 },
+  'gpt-image-1.5': { input: 8.00, output: 32.05 },
+  'gpt-image-1': { input: 8.00, output: 40.06 },
+  'gpt-image-1-mini': { input: 8.00, output: 8.33 },
 };
 
 const DEFAULT_IMAGE_SETTINGS = {
@@ -23,6 +26,9 @@ const DEFAULT_IMAGE_SETTINGS = {
 const IMAGE_MODEL_PROVIDER: Record<string, 'gemini' | 'openai'> = {
   'gemini-2.5-flash-image': 'gemini',
   'gpt-image-2': 'openai',
+  'gpt-image-1.5': 'openai',
+  'gpt-image-1': 'openai',
+  'gpt-image-1-mini': 'openai',
 };
 
 function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
@@ -62,7 +68,10 @@ function estimateInputTokens(prompt: string, imageCount: number): number {
   return Math.ceil(prompt.length / 3) + imageCount * 350;
 }
 
-function estimateOutputTokens(aspectRatio: string): number {
+function estimateOutputTokens(aspectRatio: string, model?: string): number {
+  if (model && ['gpt-image-1.5', 'gpt-image-1', 'gpt-image-1-mini'].includes(model)) {
+    return aspectRatio === '1:1' ? 4160 : 6240;
+  }
   if (aspectRatio === '1:1') return 1100;
   if (aspectRatio === '4:5') return 1400;
   if (aspectRatio === '3:4') return 1500;
@@ -116,7 +125,7 @@ async function generateWithGemini(prompt: string, base64Images: string[], aspect
       return {
         imageUrl: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
         inputTokens: response.usageMetadata?.promptTokenCount ?? estimateInputTokens(prompt, base64Images.length),
-        outputTokens: response.usageMetadata?.candidatesTokenCount ?? estimateOutputTokens(aspectRatio),
+        outputTokens: response.usageMetadata?.candidatesTokenCount ?? estimateOutputTokens(aspectRatio, model),
       };
     }
   }
@@ -168,7 +177,7 @@ async function generateWithOpenAi(prompt: string, base64Images: string[], aspect
   return {
     imageUrl: `data:image/png;base64,${base64}`,
     inputTokens: usage?.input_tokens ?? estimateInputTokens(prompt, base64Images.length),
-    outputTokens: usage?.output_tokens ?? estimateOutputTokens(aspectRatio),
+    outputTokens: usage?.output_tokens ?? estimateOutputTokens(aspectRatio, model),
   };
 }
 
