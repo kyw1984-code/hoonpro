@@ -427,7 +427,7 @@ const buildConversionImageInstruction = (segment: any): string => {
 CONVERSION FUNNEL PURPOSE:
 - This image supports: ${segment.conversionRole || 'purchase persuasion'}
 - Section type: ${segment.sectionType || 'conversion'}
-- The image must visually support this selling purpose without adding any text inside the generated image.
+- The image must visually support this selling purpose while rendering only the requested Korean copy. Do not add unrelated badges, prices, reviews, captions, or extra claims.
 `;
 };
 
@@ -449,12 +449,22 @@ const buildDetailImagePrompt = (
     const editorialDirection = getSectionEditorialDirection(segment, segmentIndex);
     const layoutHeight = getSegmentLayoutHeight(segment, segmentIndex);
     const sourceAspectRatio = getGenerationAspectRatio(layoutHeight);
+    const headline = String(segment.keyMessage || segment.title || info.name || '상품 포인트').trim();
+    const supportingCopy = Array.isArray(segment.logicalSections)
+        ? segment.logicalSections.filter(Boolean).slice(0, 3).join(' · ')
+        : '';
+    const posKo = segment.textPosition === 'top' ? 'top area' : segment.textPosition === 'middle' ? 'middle area' : 'bottom area';
+    const typographyHint = `Use ${segment.textColor || designPreset.defaultTextColor} or the closest readable premium color for the Korean typography. Scale preference ${segment.fontScale ?? DEFAULT_DETAIL_FONT_SCALE}; keep it elegant and readable.`;
 
-    return `Premium vertical Korean e-commerce editorial detail-page image. STRICT REQUIREMENTS:
-- NO TEXT, NO WORDS, NO LETTERS, NO CAPTIONS anywhere in the generated image
+    return `Create ONE finished premium vertical Korean e-commerce editorial detail-page image. STRICT REQUIREMENTS:
 - Final app canvas is exactly ${DETAIL_CANVAS_WIDTH}x${layoutHeight}px. Compose for this canvas size, using a ${sourceAspectRatio} source guide. Keep all model faces, product details, and copy-safe negative space inside the frame.
-- Use one seamless full-page photographic background across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, vertical seams, side-by-side reference-image composites, or hard dividers for overlay copy.
+- Render the requested Korean copy as part of the image, like a polished GPT-generated product story page. Korean typography must be natural, sharp, correctly spelled, and never romanized.
+- Use one seamless full-page photographic scene across the entire vertical image. Do NOT create a separate blank text area, header band, footer band, split-screen collage, panels, boxes, vertical seams, side-by-side reference-image composites, or hard dividers.
 - Aim for the refined GPT-style detail-page feeling: realistic product story, tasteful negative space, editorial composition, natural light, and premium Korean shopping-mall polish.
+- Place the Korean text block in the ${posKo}, directly on clean negative space. Avoid frosted glass cards, white pill badges, UI panels, speech bubbles, price tags, sale stickers, or generic ad banner boxes.
+- EXACT KOREAN HEADLINE TO RENDER, preserving line breaks and wording: "${headline}"
+${supportingCopy ? `- Optional small supporting labels, only if they fit naturally: "${supportingCopy}"` : ''}
+- ${typographyHint}
 - If the reference image contains a real model/person, use it ONLY to understand product fit and scale. Replace the model with a completely new fictional Korean model with a different face, hair, pose, body impression, and expression.
 - Replace the reference photo background completely. Do NOT copy rooms, walls, mirrors, posters, furniture, doors, bathrooms, studios, or any visible environment from the uploaded reference photos.
 - The final image must look like a physically believable single photograph, not an artificial composite of product close-up and pasted model.
@@ -486,7 +496,7 @@ const buildCombinationIntroSegment = (combinationType: CombinationType, productN
         logicalSections: ['인트로', '조합 혜택'],
         keyMessage: `${combinationType} 구성\n${countLabel}를 한 번에`,
         layoutHeight: 1529,
-        visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Use one seamless studio background across the entire frame, including the top copy-safe area and the model area. The models must stand together in one continuous scene, not in separated columns. Do not create a separate white header band, split-screen collage, panel layout, boxed sections, vertical seams, hard dividers, or different backgrounds behind each model. If reference photos include real models, replace every face and person with completely new fictional Korean models; use the reference only for product design, fit, logo, color, and texture. Replace any reference room/background with a new premium studio background. Reserve the top 22% as clean negative space with the same continuous background, and place the ${count} fictional fashion models below that area so their heads, bodies, and products are not cropped by overlay text. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and do not include any text, numbers, labels, badges, or typography in the image.`,
+        visualPrompt: `A high-quality professional Korean e-commerce model cut for exactly ${count} separate units of ${productName || 'the product'} arranged together on one vertical intro page. Use one seamless studio background across the entire frame, including the top copy-safe area and the model area. The models must stand together in one continuous scene, not in separated columns. Do not create a separate white header band, split-screen collage, panel layout, boxed sections, vertical seams, hard dividers, or different backgrounds behind each model. If reference photos include real models, replace every face and person with completely new fictional Korean models; use the reference only for product design, fit, logo, color, and texture. Replace any reference room/background with a new premium studio background. Reserve the top 22% as clean negative space with the same continuous background, and place the ${count} fictional fashion models below that area so their heads, bodies, and products are not cropped by the integrated Korean headline. Keep the products large and clearly visible, preserve product details, logos, colors, and texture, use clean premium lighting, and do not include unrelated text, prices, numbers, labels, badges, or extra typography beyond the requested Korean copy.`,
     };
 };
 
@@ -495,7 +505,7 @@ const buildModelCutInstruction = (combinationType: CombinationType, segmentIndex
     const bundleIntro = combinationType !== 'single' && segmentIndex === 0
         ? `- For the intro, create a bundle model cut with exactly ${count} visible product-wearing/using models together in one vertical page.
 - Use one continuous seamless studio background for the entire image. Do NOT use split-screen panels, vertical seams, separate boxes, hard dividers, different backgrounds per model, side-by-side reference-photo composites, or a white header block.
-- Reserve the top 22% of the image as clean negative space on the same continuous background for large Korean overlay copy.
+- Reserve the top 22% of the image as clean negative space on the same continuous background for the integrated Korean headline.
 - Place models and products below that copy-safe area and keep faces, heads, outfits, and products fully visible without top cropping.`
         : '';
 
@@ -521,7 +531,7 @@ const buildCombinationImageInstruction = (combinationType: CombinationType, segm
     const count = getCombinationCount(combinationType);
     const introInstruction = segmentIndex === 0
         ? `- INTRO SECTION: Show exactly ${count} model-cut product presentations together in one vertical frame, using the reference images as the product source.
-- Keep the top area visually open for the app's oversized copy overlay; do not place important model faces or product details in the top 22% of the frame.
+- Keep the top area visually open for the requested Korean headline; do not place important model faces or product details in the top 22% of the frame.
 - The intro must look like one unified photo scene with a single continuous background, not a collage, not a side-by-side split, and not separated panels.`
         : `- Keep the bundle context visible where natural; use multiple units together in one unified scene when it supports the section concept. Never use split panels or visible seams.`;
 
@@ -529,7 +539,7 @@ const buildCombinationImageInstruction = (combinationType: CombinationType, segm
 COMBINATION PRODUCT MODE (${combinationType}):
 - This detail page is for a ${combinationType} bundle containing ${count} product units.
 ${introInstruction}
-- Do NOT render the text "${combinationType}", numbers, plus signs, sale badges, or any typography inside the generated image. Korean copy will be overlaid by the app.
+- Do NOT render unrelated bundle numbers, plus signs, sale badges, prices, or extra typography. Only render the requested Korean headline/copy from this prompt.
 `;
 };
 
@@ -1951,10 +1961,10 @@ export const DetailPlanner: React.FC = () => {
                         }
                     }
 
-                    // ✅ Canvas로 한글 텍스트 덧씌우기 (위치 정보 포함)
+                    // AI가 한글 카피까지 포함한 완성형 이미지를 만들고, 앱은 860px 캔버스 정규화만 수행한다.
                     const imageUrl = await overlayTextOnImage(
                         rawImageUrl,
-                        getRenderableKeyMessage(segments[i]),
+                        '',
                         segments[i].textPosition || 'bottom',
                         segments[i].textColor || '#1a1a1a',
                         segments[i].fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
@@ -2008,7 +2018,7 @@ export const DetailPlanner: React.FC = () => {
 
             const imageUrl = await overlayTextOnImage(
                 rawImageUrl,
-                getRenderableKeyMessage(currentSegment),
+                '',
                 currentSegment.textPosition || 'bottom',
                 currentSegment.textColor || '#1a1a1a',
                 currentSegment.fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
@@ -2744,16 +2754,6 @@ export const DetailPlanner: React.FC = () => {
                                                             onClick={async () => {
                                                                 const newSegs = [...segments];
                                                                 newSegs[idx].textPosition = pos;
-                                                                if (newSegs[idx].rawImageUrl) {
-                                                                    newSegs[idx].imageUrl = await overlayTextOnImage(
-                                                                        newSegs[idx].rawImageUrl,
-                                                                        getRenderableKeyMessage(newSegs[idx]),
-                                                                        pos,
-                                                                        newSegs[idx].textColor || '#1a1a1a',
-                                                                        newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
-                                                                        getSegmentLayoutHeight(newSegs[idx], idx, newSegs.length)
-                                                                    );
-                                                                }
                                                                 setSegments(newSegs);
                                                             }}
                                                             className={`py-1 px-2 rounded-md border text-[10px] font-bold transition-all ${seg.textPosition === pos ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500 hover:border-blue-300'}`}
@@ -2775,16 +2775,6 @@ export const DetailPlanner: React.FC = () => {
                                                                 onClick={async () => {
                                                                     const newSegs = [...segments];
                                                                     newSegs[idx].textColor = opt.fill;
-                                                                    if (newSegs[idx].rawImageUrl) {
-                                                                        newSegs[idx].imageUrl = await overlayTextOnImage(
-                                                                            newSegs[idx].rawImageUrl,
-                                                                            getRenderableKeyMessage(newSegs[idx]),
-                                                                            newSegs[idx].textPosition || 'bottom',
-                                                                            opt.fill,
-                                                                            newSegs[idx].fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
-                                                                            getSegmentLayoutHeight(newSegs[idx], idx, newSegs.length)
-                                                                        );
-                                                                    }
                                                                     setSegments(newSegs);
                                                                 }}
                                                                 className={`w-7 h-7 rounded-full border-2 transition-all ${selected ? 'border-blue-600 ring-2 ring-blue-200 scale-110' : 'border-slate-200 hover:border-blue-300'}`}
@@ -2807,16 +2797,6 @@ export const DetailPlanner: React.FC = () => {
                                                                 onClick={async () => {
                                                                     const newSegs = [...segments];
                                                                     newSegs[idx].fontScale = opt.value;
-                                                                    if (newSegs[idx].rawImageUrl) {
-                                                                        newSegs[idx].imageUrl = await overlayTextOnImage(
-                                                                            newSegs[idx].rawImageUrl,
-                                                                            getRenderableKeyMessage(newSegs[idx]),
-                                                                            newSegs[idx].textPosition || 'bottom',
-                                                                            newSegs[idx].textColor || '#1a1a1a',
-                                                                            opt.value,
-                                                                            getSegmentLayoutHeight(newSegs[idx], idx, newSegs.length)
-                                                                        );
-                                                                    }
                                                                     setSegments(newSegs);
                                                                 }}
                                                                 className={`py-1 px-2 rounded-md border text-[10px] font-bold transition-all ${selected ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500 hover:border-blue-300'}`}
@@ -2830,31 +2810,11 @@ export const DetailPlanner: React.FC = () => {
                                         </div>
                                         <div className="grid grid-cols-2 gap-2 mt-3">
                                             <button
-                                                onClick={async () => {
-                                                    if (!seg.rawImageUrl) return;
-                                                    setSegments(prev => {
-                                                        const newSegs = [...prev];
-                                                        newSegs[idx] = { ...newSegs[idx], isGenerating: true };
-                                                        return newSegs;
-                                                    });
-                                                    const imageUrl = await overlayTextOnImage(
-                                                        seg.rawImageUrl,
-                                                        getRenderableKeyMessage(seg),
-                                                        seg.textPosition || 'bottom',
-                                                        seg.textColor || '#1a1a1a',
-                                                        seg.fontScale ?? DEFAULT_DETAIL_FONT_SCALE,
-                                                        getSegmentLayoutHeight(seg, idx, segments.length)
-                                                    );
-                                                    setSegments(prev => {
-                                                        const newSegs = [...prev];
-                                                        newSegs[idx] = { ...newSegs[idx], imageUrl, isGenerating: false };
-                                                        return newSegs;
-                                                    });
-                                                }}
-                                                disabled={!seg.rawImageUrl || seg.isGenerating || seg.staticImage}
+                                                onClick={() => handleRegenerateSegment(idx)}
+                                                disabled={seg.isGenerating || seg.staticImage}
                                                 className="bg-slate-100 hover:bg-slate-200 disabled:bg-slate-50 text-slate-700 text-[10px] font-bold py-2 px-3 rounded-lg flex items-center justify-center transition-colors"
                                             >
-                                                {seg.staticImage ? '템플릿 고정' : '문구만 적용'}
+                                                {seg.staticImage ? '템플릿 고정' : '문구로 AI 재생성'}
                                             </button>
                                             <button
                                                 onClick={() => handleRegenerateSegment(idx)}
