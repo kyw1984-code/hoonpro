@@ -1,5 +1,5 @@
-import { GoogleGenAI, Modality } from "@google/genai";
-import { trackUsage, logApiCall } from "../lib/auth";
+import { GoogleGenAI } from "@google/genai";
+import { trackUsage, logApiCall, getToken } from "../lib/auth";
 
 const getApiKey = () => {
   return (
@@ -13,6 +13,41 @@ const getApiKey = () => {
 const ai = new GoogleGenAI({ apiKey: getApiKey() });
 
 export const removeBackground = async (image: string) => image;
+
+// 레퍼런스 제품 사진을 적당한 크기로 압축해 전송 payload 를 줄입니다.
+// (휴대폰 원본 사진 여러 장이 Vercel 본문 크기 한도를 넘겨 생성이 실패하는 것을 방지)
+const compressReferenceImage = (dataUrl: string, maxDimension = 1280, quality = 0.9): Promise<string> =>
+  new Promise((resolve) => {
+    try {
+      const img = new window.Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDimension || height > maxDimension) {
+          if (width >= height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(dataUrl);
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    } catch {
+      resolve(dataUrl);
+    }
+  });
+
+const compressReferenceImages = async (images: string[]): Promise<string[]> =>
+  Promise.all(images.map((img) => compressReferenceImage(img)));
 
 // 상품명 기반 핵심 특징 자동 생성
 export const generateFeatures = async (productName: string, category: string): Promise<string> => {
@@ -219,41 +254,22 @@ export const generateImage = async (
 ) => {
   try {
     await trackUsage();
-    const parts: any[] = [];
+    const compressedImages = base64Images.length > 0
+      ? await compressReferenceImages(base64Images)
+      : base64Images;
 
-    if (base64Images.length > 0) {
-      for (const base64Image of base64Images) {
-        const mimeType =
-          base64Image.split(";")[0].split(":")[1] || "image/png";
-        const base64Data = base64Image.includes(",")
-          ? base64Image.split(",")[1]
-          : base64Image;
-        parts.push({ inlineData: { data: base64Data, mimeType } });
-      }
-    }
-
-    parts.push({
-      text: `Generate a high-quality product image. ${prompt}. Aspect ratio: ${aspectRatio}.`,
-    });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-image",
-      contents: [{ role: "user", parts }],
-      config: {
-        responseModalities: [Modality.IMAGE, Modality.TEXT],
+    const res = await fetch('/api/usage/log-call?mode=generate-image', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken()}`,
       },
+      body: JSON.stringify({ prompt, base64Images: compressedImages, aspectRatio }),
     });
-    const feature = aspectRatio === '1:1' ? 'thumbnail-image' : 'detail-image';
-    await logApiCall(feature, 'gemini-2.5-flash-image', response);
 
-    for (const part of response.candidates?.[0]?.content?.parts ?? []) {
-      if (part.inlineData) {
-        return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-      }
-    }
-
-    console.warn("이미지 데이터가 응답에 없습니다.");
-    return undefined;
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '이미지 생성에 실패했습니다.');
+    return data.imageUrl as string | undefined;
   } catch (error) {
     console.error("Image generation failed:", error);
     return undefined;
