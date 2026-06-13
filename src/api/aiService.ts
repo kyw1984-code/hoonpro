@@ -35,11 +35,55 @@ const getFallbackLayoutHeight = (item: any, index: number, total: number): numbe
   return 1200;
 };
 
+const MASTER_PROMPT_STRATEGY = `
+상세페이지 생성 마스터 기준:
+- 당신은 대한민국 상위 1% 이커머스 광고 디자이너, 퍼포먼스 마케터, CRO 전문가, 브랜드 전략가입니다.
+- 목표는 예쁜 이미지가 아니라 방문자를 구매자로 전환시키는 판매용 상세페이지입니다.
+- 정보가 부족하면 상품명, 카테고리, 이미지 단서, 시장 관행을 바탕으로 합리적으로 보완하되 사실처럼 검증 불가능한 수치나 인증은 만들지 마세요.
+- 먼저 제품 정의, 핵심 타겟, 숨겨진 니즈, 경쟁상품 대비 차별점, 구매 저항 요소를 내부적으로 분석한 뒤 이미지별 기획에 반영하세요.
+- 고객 심리 흐름은 관심 -> 공감 -> 문제 인식 -> 해결책 발견 -> 신뢰 형성 -> 구매 확신 -> 결제 순서로 설계하세요.
+- 각 이미지는 단독으로 보더라도 하나의 설득이 완결되어야 하며, 서로 다른 설득 역할과 전환 트리거를 가져야 합니다.
+- 각 이미지마다 최소 하나 이상의 전환 트리거를 적용하세요: 손실회피, 사회적 증거, 권위, 희소성, 편의성, 감정적 보상, 비교우위.
+- 광고 문구처럼 외치는 대신 실제 고객의 머릿속 생각을 대신 말하는 카피를 작성하세요.
+- 경쟁 상세페이지보다 정보 밀도는 높고 가독성은 더 뛰어나게 설계하세요.
+`;
+
+const MASTER_DETAIL_STRUCTURE = `
+권장 상세페이지 흐름:
+1. Hook / 3초 안에 시선 확보 / 제품 메인컷 또는 모델컷 / 핵심 USP
+2. 문제 공감 / 실제 고객 상황 / 불편함과 감정 공감
+3. 문제 확대 / 방치 시 손실 / 실패 비용과 후회 방지
+4. 해결책 제시 / 왜 이 제품이 필요한지 / 왜 지금 필요한지
+5. 핵심 셀링포인트 기능 중심
+6. 핵심 셀링포인트 감성 중심
+7. 핵심 셀링포인트 비교 중심
+8. 핵심 셀링포인트 사용 장면 중심
+9. 핵심 셀링포인트 디테일 또는 근거 중심
+10. 경쟁상품 비교 / 검증 가능한 범위의 비교우위
+11. 사회적 증거 / 실제 후기 데이터가 없으면 허위 리뷰 대신 사용 상황 기반 기대감
+12. 신뢰 강화 / 인증 자료가 없으면 원재료, 제조공정, 품질관리, 생산환경, 디테일 근거로 대체
+13. 제품 상세 정보는 앱의 별도 템플릿이 처리하므로 AI 이미지 기획에서는 반복하지 않음
+14. FAQ는 앱의 별도 정보 섹션과 충돌하지 않게 구매 저항 해소형 메시지로만 반영
+15. CTA / 지금 선택해야 하는 이유 / 구매 확신과 행동 유도
+`;
+
+const MASTER_IMAGE_PROMPT_KEYWORDS = `
+이미지 생성 프롬프트에는 상황에 맞게 다음 품질 키워드를 녹여 쓰세요:
+photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, high-end advertising, clean layout, professional typography area, Korean ecommerce style, smartstore optimized, 860px width composition, high conversion design, premium visual merchandising, realistic shadows, premium UI elements, information-rich layout, luxury branding.
+`;
+
+const MASTER_TRUST_RULES = `
+신뢰성 검증:
+- 사실 확인 불가 문구 금지: 국내 판매 1위, 만족도 99%, 누적 판매량, 효과 보장, 인증/특허/시험성적서 허위 표현.
+- 대체 표현 사용: 많은 고객이 선택한 이유, 꾸준히 사랑받는 이유, 재구매를 고민하게 만드는 포인트, 구매 전 확인해야 할 차이.
+- 실제 가격, 할인율, 리뷰 수, 평점, 배송 보장, 인증 여부처럼 사용자가 제공하지 않은 수치는 만들지 마세요.
+`;
+
 export const planDetail = async (data: any) => {
   try {
     await trackUsage();
     const lengthGuide = data.length === 'auto'
-      ? '상품 특성에 맞게 5~9장 사이로 최적 구성'
+      ? '마스터 프롬프트 기준으로 12~15장 사이의 전환형 상세페이지 구성'
       : `정확히 ${data.length}장으로 구성`;
     const combinationType = data.combinationType && data.combinationType !== 'single'
       ? String(data.combinationType)
@@ -110,9 +154,14 @@ export const planDetail = async (data: any) => {
 ${combinationGuide}
 ${designGuide}
 ${conversionGuide}
+${MASTER_PROMPT_STRATEGY}
+${MASTER_DETAIL_STRUCTURE}
+${MASTER_IMAGE_PROMPT_KEYWORDS}
+${MASTER_TRUST_RULES}
 
  반드시 아래 형식의 JSON 배열만 반환하세요. 배열 [ ] 로 시작하고 다른 텍스트는 포함하지 마세요.
  각 항목은 반드시 title, logicalSections, keyMessage, visualPrompt, sectionType, conversionRole, layoutHeight 필드를 포함해야 합니다.
+ 각 항목의 logicalSections에는 이미지 목적, 전환 트리거, 보조 포인트, 신뢰 요소를 짧게 포함하세요.
 
  상세페이지 캔버스 규칙:
  - 모든 이미지는 가로 ${DETAIL_CANVAS_WIDTH}px 고정 상세페이지 섹션으로 기획합니다.
@@ -134,6 +183,7 @@ ${conversionGuide}
     - 일상 생활에서의 자연스러운 사용/착용 연출 섹션 (Lifestyle shot)
     - 제품의 신뢰도를 높이는 브랜드 철학이나 품질 강조 섹션
  4. 검증되지 않은 할인율, 판매량, 리뷰 수, 평점, 인증 문구는 절대 만들지 마세요.
+ 5. 마스터 프롬프트의 이미지 13~14에 해당하는 제품 정보/FAQ는 앱의 별도 템플릿과 충돌하지 않도록, AI가 생성하는 메인 이미지에서는 구매 저항 해소와 신뢰 근거 중심으로만 녹이세요.
 
  keyMessage 작성 규칙:
  - 고객의 감성을 자극하는 전문 카피라이터 톤앤매너 유지
@@ -143,6 +193,7 @@ ${conversionGuide}
  - "최고의 선택", "지금 바로 경험하세요", "더 이상 고민하지 마세요", "완벽함", "비밀" 같은 상투어는 사용하지 말 것
  - 1~2줄로 작성하되, 한 줄당 18자 이내로 제한 (줄바꿈 \n 사용)
  - 예시: "입는 순간,\n분위기가 달라진다"
+ - 각 이미지의 메인 카피는 중복되지 않아야 하며, 한 이미지 안에서 하나의 설득 목적만 선명하게 전달하세요.
 
  시각적 프롬프트(visualPrompt) 작성 규칙:
  - 영어로 작성하며, AI 이미지 생성기가 이해하기 쉬운 구체적인 묘사 포함
@@ -159,6 +210,8 @@ ${conversionGuide}
  - 클로즈업 섹션은 제품을 착용/사용한 상태의 자연스러운 부분 확대 컷으로 작성하고, 큰 제품 배경 위에 작은 전신 모델을 붙이는 합성 구도는 절대 지시하지 말 것
  - 미니어처 모델, 스티커처럼 붙인 모델, picture-in-picture, 손에 들린 작은 사람, 거대한 제품 무늬 배경 뒤의 작은 모델 같은 부자연스러운 합성 표현은 visualPrompt에 포함하지 말 것
  - 제품 로고/패턴/프린트는 실제 제품 위에서 현실적인 크기로 보이게 작성하고, 별도 배경 그래픽처럼 확대하지 말 것
+ - 이미지마다 메인카피, 서브카피, 보조포인트 3~5개, 신뢰 요소가 디자인에 반영될 수 있도록 전문적인 typography area와 정보 밀도 있는 레이아웃을 지시할 것
+ - 첫 섹션 이외에도 기능/감성/비교/사용장면/근거/CTA 섹션이 서로 다른 표현 방식이 되도록 작성할 것
 
  배열 예시: [ {"title": "분위기를 바꾸는 첫인상", "logicalSections": ["메인", "감성 카피", "아이콘 포인트"], "sectionType": "offer", "conversionRole": "핵심 오퍼", "layoutHeight": 1529, "keyMessage": "입는 순간,\n분위기가 달라진다", "visualPrompt": "A premium vertical Korean e-commerce editorial image of a fictional Korean model wearing the product in a calm bright studio room, full-body or three-quarter composition on the right side, generous clean negative space on the left for a bold Korean headline, smaller supporting Korean copy, a thin divider line, and three minimal circular line-icon feature labels stacked vertically, soft daylight, realistic fabric texture, refined GPT-generated shopping-mall detail page mood, no prices, no badges, no cards."} ]
       `.trim(),
@@ -178,25 +231,43 @@ ${conversionGuide}
     }
 
     const fallbackRoles = combinationType
-      ? ['조합 핵심 오퍼', '고객 문제/상황', '구매 근거', '제품 디테일', '활용 장면', '구매 안심']
-      : ['핵심 오퍼', '고객 문제/상황', '구매 근거', '제품 디테일', '활용 장면', '구매 안심'];
-    const fallbackTypes = ['offer', 'problem', 'proof', 'detail', 'lifestyle', 'trust'];
+      ? ['조합 핵심 오퍼', '고객 문제/상황', '손실 회피', '해결책 제시', '기능 셀링포인트', '감성 셀링포인트', '비교우위', '사용 장면', '제품 디테일', '구매 근거', '구매 저항 해소', '품질 신뢰', '활용 확신', 'FAQ 해소', 'CTA']
+      : ['핵심 오퍼', '고객 문제/상황', '손실 회피', '해결책 제시', '기능 셀링포인트', '감성 셀링포인트', '비교우위', '사용 장면', '제품 디테일', '구매 근거', '구매 저항 해소', '품질 신뢰', '활용 확신', 'FAQ 해소', 'CTA'];
+    const fallbackTypes = ['offer', 'problem', 'problem', 'proof', 'proof', 'lifestyle', 'proof', 'lifestyle', 'detail', 'proof', 'trust', 'trust', 'lifestyle', 'trust', 'offer'];
     const fallbackMessages = combinationType
       ? [
           `${combinationType} 구성\n한 번에 준비하세요`,
-          '더 이상 고민하지 마세요\n편하게 선택하세요',
-          '구성의 차이를\n눈으로 확인하세요',
-          '디테일까지 꼼꼼하게\n살펴보세요',
+          '구매 전 고민을\n먼저 줄입니다',
+          '놓치기 쉬운 불편함을\n확인하세요',
+          '필요한 이유가\n분명해집니다',
+          '기능의 차이를\n눈으로 확인하세요',
+          '쓸수록 느껴지는\n만족감',
+          '비교할수록\n선택은 쉬워집니다',
           '일상 속에서 더 자연스럽게\n활용해보세요',
+          '디테일까지 꼼꼼하게\n살펴보세요',
+          '구성의 차이를\n눈으로 확인하세요',
+          '구매 전 걱정을\n차분히 덜어냅니다',
+          '품질 기준을\n확인하세요',
+          '함께 쓰면 더 좋은\n구성입니다',
           '구매 전 마지막까지\n안심하고 확인하세요',
+          '지금 필요한 구성을\n놓치지 마세요',
         ]
       : [
           `${data.name || '상품'}\n첫인상이 달라진다`,
-          '매일 손이 가는\n편안한 분위기',
+          '이런 불편함,\n익숙하지 않나요',
+          '그냥 넘기면\n계속 반복됩니다',
+          '필요한 이유가\n분명해집니다',
+          '기능의 차이를\n눈으로 확인하세요',
+          '매일 손이 가는\n편안한 만족감',
+          '비교할수록\n선택은 쉬워집니다',
+          '일상에 자연스럽게\n스며드는 스타일',
           '가까이 볼수록\n선명한 디테일',
           '결이 살아나는\n섬세한 마감',
-          '일상에 자연스럽게\n스며드는 스타일',
+          '구매 전 걱정을\n차분히 덜어냅니다',
+          '품질 기준을\n확인하세요',
+          '사용 장면까지\n쉽게 그려집니다',
           '마지막까지\n차분하게 확인하세요',
+          '지금 선택해도\n후회 없도록',
         ];
     const normalizeKeyMessage = (value: any, index: number) => {
       const fallback = fallbackMessages[Math.min(index, fallbackMessages.length - 1)];

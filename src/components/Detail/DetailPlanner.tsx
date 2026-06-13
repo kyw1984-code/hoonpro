@@ -355,6 +355,16 @@ GPT-STYLE EDITORIAL DETAIL PAGE LAYOUT:
 -- The image should feel like a finished GPT-generated Korean e-commerce visual similar to a premium fashion landing section, not a raw catalog photo and not a collage.
 `;
 
+const MASTER_DETAIL_IMAGE_QUALITY_RULES = `
+MASTER DETAIL PAGE IMAGE QUALITY:
+-- Behave like a top-tier Korean ecommerce advertising designer, performance marketer, CRO expert, and brand strategist.
+-- The goal is high conversion, not decoration. Every image must clearly support one persuasion role: attention, empathy, problem recognition, solution, trust, confidence, or CTA.
+-- Apply at least one conversion trigger naturally: loss aversion, social proof without fake numbers, authority without fake certifications, convenience, emotional reward, comparison advantage, or purchase confidence.
+-- Use these visual qualities where appropriate: photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, high-end advertising, clean layout, professional typography area, Korean ecommerce style, smartstore optimized, 860px width composition, high conversion design, premium visual merchandising, realistic shadows, premium UI elements, information-rich layout, luxury branding.
+-- Keep information density high but readable. Use hierarchy: main headline, short subcopy, 3 to 5 support points, and one trust cue only when it is visually natural.
+-- Never invent unverifiable facts such as sales rank, exact satisfaction rate, cumulative sales, guaranteed effects, certification, patent, award, review count, rating, or discount.
+`;
+
 const getSectionEditorialDirection = (segment: any, segmentIndex: number): string => {
     const sectionType = String(segment.sectionType || '').toLowerCase();
     const role = String(segment.conversionRole || '').toLowerCase();
@@ -479,6 +489,7 @@ ${supportingCopy ? `- Optional small supporting labels, only if they fit natural
 - ${typographyHint}
 - For the first hero image and other model/product story sections, strongly follow the GPT-style reference layout: bold left-aligned Korean headline, smaller supporting copy, optional thin divider, optional circular icon feature list, and a large realistic model/product occupying the right side.
 - If using feature icons, use simple line icons only and pair them with short Korean labels derived from the product benefits. Do not add fake prices, discounts, ratings, review counts, brand names, or unverifiable claims.
+- The image must feel like a complete high-conversion Korean detail-page section: main copy, subcopy or support points, trust cue if available, and a clear visual hierarchy.
 - If the reference image contains a real model/person, use it ONLY to understand product fit and scale. Replace the model with a completely new fictional Korean model with a different face, hair, pose, body impression, and expression.
 - Replace the reference photo background completely. Do NOT copy rooms, walls, mirrors, posters, furniture, doors, bathrooms, studios, or any visible environment from the uploaded reference photos.
 - The final image must look like a physically believable single photograph, not an artificial composite of product close-up and pasted model.
@@ -493,6 +504,7 @@ ${modelCutInstruction}
 ${combinationInstruction}
 ${modelProfileInstruction}
 ${GPT_EDITORIAL_REFERENCE_LAYOUT}
+${MASTER_DETAIL_IMAGE_QUALITY_RULES}
 ${NATURAL_MODEL_COMPOSITION_RULES}
 ${shotInstruction}
 ${conversionInstruction}
@@ -2328,10 +2340,12 @@ export const DetailPlanner: React.FC = () => {
                             <label className="block text-sm font-medium text-slate-700 mb-2">상세페이지 길이 (구조)</label>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 {[
-                                    { val: 'auto', label: 'Auto (AI 추천)', desc: '최적 길이 자동 판단' },
+                                    { val: 'auto', label: 'Auto (12~15)', desc: '전환형 마스터 구성' },
                                     { val: 5, label: '5장 (Short)', desc: '저관여/저가 집중형' },
                                     { val: 7, label: '7장 (Standard)', desc: '일반적인 구성' },
-                                    { val: 9, label: '9장 (Long)', desc: '고관여/스토리텔링' }
+                                    { val: 9, label: '9장 (Long)', desc: '고관여/스토리텔링' },
+                                    { val: 12, label: '12장 (CRO)', desc: '문제-해결-신뢰형' },
+                                    { val: 15, label: '15장 (Master)', desc: '상위 1% 풀 구성' }
                                 ].map(opt => (
                                     <div key={opt.val} onClick={() => setLength(opt.val as any)} className={`p-4 rounded-xl border cursor-pointer transition-all ${length === opt.val ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300'}`}>
                                         <div className="font-medium text-slate-800 mb-1">{opt.label}</div>
