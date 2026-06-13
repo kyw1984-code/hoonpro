@@ -169,22 +169,31 @@ export const ThumbnailGenerator: React.FC = () => {
     };
 
     return (
-        <div className="max-w-7xl mx-auto px-6 py-8">
+        <div className="max-w-7xl mx-auto px-6 py-8 text-slate-900">
             <div className="mb-7 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="bg-slate-950 px-7 py-6 text-white">
-                    <p className="text-xs font-black uppercase tracking-[0.22em] text-emerald-200">Thumbnail Studio</p>
-                    <h2 className="mt-2 text-2xl font-black tracking-tight">썸네일 제작</h2>
+                    <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-200">Thumbnail Studio</p>
+                    <div className="mt-2 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                        <div>
+                            <h2 className="text-2xl font-black tracking-tight">썸네일 제작</h2>
+                            <p className="mt-1 text-sm text-slate-300">상품 이미지를 고급 커머스 썸네일 톤으로 정리하고 즉시 확인합니다.</p>
+                        </div>
+                        <div className="flex gap-2 text-xs font-bold text-slate-300">
+                            <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">1:1 Canvas</span>
+                            <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1">Smart Store</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)] gap-8 items-start">
             {/* Input Form */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="flex items-center gap-3 px-7 py-5 border-b border-slate-100 bg-slate-50">
-                    <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center">
+                <div className="flex items-center gap-3 px-7 py-5 border-b border-slate-100 bg-[linear-gradient(135deg,#f8fafc,#eef2ff)]">
+                    <div className="w-10 h-10 rounded-xl bg-slate-950 text-white flex items-center justify-center shadow-sm">
                         <SlidersHorizontal className="w-5 h-5" />
                     </div>
                     <div>
-                        <p className="text-xs font-black tracking-[0.18em] text-emerald-600 uppercase">Creative Controls</p>
+                        <p className="text-xs font-black tracking-[0.18em] text-blue-600 uppercase">Creative Controls</p>
                         <h3 className="text-lg font-black text-slate-900">생성 설정</h3>
                     </div>
                 </div>
@@ -206,13 +215,13 @@ export const ThumbnailGenerator: React.FC = () => {
                         <div className="grid grid-cols-2 gap-3 mb-5">
                             <button
                                 onClick={() => setShotType('product')}
-                                className={`p-3.5 rounded-xl border font-bold transition-all ${shotType === 'product' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}
+                                className={`p-3.5 rounded-xl border font-bold transition-all ${shotType === 'product' ? 'border-slate-950 bg-slate-950 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
                             >
                                 제품컷 (Product)
                             </button>
                             <button
                                 onClick={() => setShotType('model')}
-                                className={`p-3.5 rounded-xl border font-bold transition-all ${shotType === 'model' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}
+                                className={`p-3.5 rounded-xl border font-bold transition-all ${shotType === 'model' ? 'border-slate-950 bg-slate-950 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
                             >
                                 모델컷 (Model)
                             </button>
@@ -226,13 +235,13 @@ export const ThumbnailGenerator: React.FC = () => {
                                 <div className="grid grid-cols-2 gap-2">
                                     <button
                                         onClick={() => setModelEthnicity('asian')}
-                                        className={`p-2 rounded-lg border text-sm transition-all ${modelEthnicity === 'asian' ? 'bg-white border-blue-500 text-blue-600' : 'bg-transparent border-slate-200 text-slate-500'}`}
+                                        className={`p-2 rounded-lg border text-sm transition-all ${modelEthnicity === 'asian' ? 'bg-white border-slate-900 text-slate-950 font-bold' : 'bg-transparent border-slate-200 text-slate-500'}`}
                                     >
                                         동양인
                                     </button>
                                     <button
                                         onClick={() => setModelEthnicity('western')}
-                                        className={`p-2 rounded-lg border text-sm transition-all ${modelEthnicity === 'western' ? 'bg-white border-blue-500 text-blue-600' : 'bg-transparent border-slate-200 text-slate-500'}`}
+                                        className={`p-2 rounded-lg border text-sm transition-all ${modelEthnicity === 'western' ? 'bg-white border-slate-900 text-slate-950 font-bold' : 'bg-transparent border-slate-200 text-slate-500'}`}
                                     >
                                         서양인
                                     </button>
@@ -243,13 +252,13 @@ export const ThumbnailGenerator: React.FC = () => {
                                 <div className="grid grid-cols-2 gap-2">
                                     <button
                                         onClick={() => setModelGender('female')}
-                                        className={`p-2 rounded-lg border text-sm transition-all ${modelGender === 'female' ? 'bg-white border-blue-500 text-blue-600' : 'bg-transparent border-slate-200 text-slate-500'}`}
+                                        className={`p-2 rounded-lg border text-sm transition-all ${modelGender === 'female' ? 'bg-white border-slate-900 text-slate-950 font-bold' : 'bg-transparent border-slate-200 text-slate-500'}`}
                                     >
                                         여성
                                     </button>
                                     <button
                                         onClick={() => setModelGender('male')}
-                                        className={`p-2 rounded-lg border text-sm transition-all ${modelGender === 'male' ? 'bg-white border-blue-500 text-blue-600' : 'bg-transparent border-slate-200 text-slate-500'}`}
+                                        className={`p-2 rounded-lg border text-sm transition-all ${modelGender === 'male' ? 'bg-white border-slate-900 text-slate-950 font-bold' : 'bg-transparent border-slate-200 text-slate-500'}`}
                                     >
                                         남성
                                     </button>
@@ -263,13 +272,13 @@ export const ThumbnailGenerator: React.FC = () => {
                         <div className="grid grid-cols-2 gap-3 mb-5">
                             <button
                                 onClick={() => setBackgroundType('white')}
-                                className={`p-3.5 rounded-xl border font-bold transition-all ${backgroundType === 'white' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}
+                                className={`p-3.5 rounded-xl border font-bold transition-all ${backgroundType === 'white' ? 'border-slate-950 bg-slate-950 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
                             >
                                 화이트 배경
                             </button>
                             <button
                                 onClick={() => setBackgroundType('natural')}
-                                className={`p-3.5 rounded-xl border font-bold transition-all ${backgroundType === 'natural' ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}
+                                className={`p-3.5 rounded-xl border font-bold transition-all ${backgroundType === 'natural' ? 'border-slate-950 bg-slate-950 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
                             >
                                 자연스러운 배경
                             </button>
@@ -290,7 +299,7 @@ export const ThumbnailGenerator: React.FC = () => {
                                 <button
                                     key={pos}
                                     onClick={() => setTextPosition(pos)}
-                                    className={`py-2 px-3 rounded-lg border text-sm font-bold transition-all ${textPosition === pos ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'}`}
+                                    className={`py-2 px-3 rounded-lg border text-sm font-bold transition-all ${textPosition === pos ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
                                 >
                                     {pos === 'top' ? '상단' : pos === 'middle' ? '중간' : '하단'}
                                 </button>
@@ -344,7 +353,7 @@ export const ThumbnailGenerator: React.FC = () => {
                     <button 
                         onClick={handleGenerate} 
                         disabled={loading}
-                        className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-bold py-3.5 px-8 rounded-xl flex items-center justify-center transition-colors mt-4 shadow-sm"
+                        className="w-full bg-slate-950 hover:bg-slate-800 disabled:bg-slate-300 text-white font-black py-3.5 px-8 rounded-xl flex items-center justify-center transition-colors mt-4 shadow-sm"
                     >
                         {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Wand2 className="w-5 h-5 mr-2" />}
                         썸네일 생성하기
@@ -354,9 +363,9 @@ export const ThumbnailGenerator: React.FC = () => {
 
             {/* Result View */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col sticky top-24">
-                <div className="flex items-center justify-between gap-3 px-7 py-5 border-b border-slate-100 bg-slate-50">
+                <div className="flex items-center justify-between gap-3 px-7 py-5 border-b border-slate-100 bg-[linear-gradient(135deg,#f8fafc,#eef2ff)]">
                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-xl bg-slate-950 text-white flex items-center justify-center shadow-sm">
                             <Layers className="w-5 h-5" />
                         </div>
                         <div>
@@ -367,7 +376,7 @@ export const ThumbnailGenerator: React.FC = () => {
                     <Sparkles className="w-5 h-5 text-amber-500" />
                 </div>
                 
-                <div className="m-7 flex-grow flex items-center justify-center bg-[linear-gradient(135deg,#f8fafc_0%,#eff6ff_48%,#ecfeff_100%)] rounded-2xl border border-slate-200 overflow-hidden relative aspect-square w-full max-w-[1000px] mx-auto">
+                <div className="m-7 flex-grow flex items-center justify-center bg-[linear-gradient(135deg,#f8fafc_0%,#eef2ff_48%,#f8fafc_100%)] rounded-2xl border border-slate-200 overflow-hidden relative aspect-square w-full max-w-[1000px] mx-auto shadow-inner">
                     {resultImage ? (
                         <img src={resultImage} alt="Generated Thumbnail" className="w-full h-full object-contain" />
                     ) : loading ? (
@@ -388,7 +397,7 @@ export const ThumbnailGenerator: React.FC = () => {
                         <a 
                             href={resultImage}
                             download="thumbnail.png"
-                            className="bg-slate-900 hover:bg-slate-950 text-white font-bold py-3 px-6 rounded-xl flex items-center transition-colors"
+                            className="bg-slate-950 hover:bg-slate-800 text-white font-black py-3 px-6 rounded-xl flex items-center transition-colors"
                         >
                             <Download className="w-5 h-5 mr-2" />
                             다운로드

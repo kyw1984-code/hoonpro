@@ -1726,6 +1726,7 @@ export const DetailPlanner: React.FC = () => {
     const [segments, setSegments] = useState<any[]>([]);
     const [draggedSegmentIndex, setDraggedSegmentIndex] = useState<number | null>(null);
     const [previewSegmentIndex, setPreviewSegmentIndex] = useState<number | null>(null);
+    const [activeResultIndex, setActiveResultIndex] = useState(0);
 
     const moveSegment = (fromIndex: number, toIndex: number) => {
         if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
@@ -1950,6 +1951,7 @@ export const DetailPlanner: React.FC = () => {
             }
 
             setSegments([...introSegments, ...afterIntroSegments, ...bodySegments, ...bottomSegments]);
+            setActiveResultIndex(0);
             setStep(2);
         } catch (e) {
             console.error(e);
@@ -1961,6 +1963,7 @@ export const DetailPlanner: React.FC = () => {
 
     const handleGenerateAll = async (regenerate = false) => {
         setStep(3);
+        setActiveResultIndex(0);
         const selectedPreset = DESIGN_PRESETS[info.designPreset];
 
         // 병렬 생성을 위한 인덱스 배열 생성
@@ -2017,6 +2020,7 @@ export const DetailPlanner: React.FC = () => {
                             newSegs[i] = { ...newSegs[i], layoutHeight, imageUrl, rawImageUrl, isGenerating: false, error: false, errorMessage: '' };
                             return newSegs;
                         });
+                    setActiveResultIndex(i);
                     break; // 성공하면 루프 탈출
                 } catch (e) {
                     console.error(`이미지 ${i + 1} 생성 실패 (시도 ${attempt + 1}/${MAX_RETRY + 1}):`, e);
@@ -2079,6 +2083,7 @@ export const DetailPlanner: React.FC = () => {
                 };
                 return newSegs;
             });
+            setActiveResultIndex(index);
         } catch (e) {
             console.error(`이미지 ${index + 1} 부분 재생성 실패:`, e);
             setSegments(prev => {
@@ -2106,6 +2111,10 @@ export const DetailPlanner: React.FC = () => {
         info.combinationType,
         info.designPreset
     );
+    const activeResultSegment = segments[activeResultIndex] ?? segments[0];
+    const activeResultSize = activeResultSegment
+        ? getSegmentPreviewSize(activeResultSegment, activeResultIndex, segments.length)
+        : { width: DETAIL_CANVAS_WIDTH, height: 1200 };
 
     return (
         <div className="max-w-7xl mx-auto px-6 py-8">
@@ -2673,248 +2682,316 @@ export const DetailPlanner: React.FC = () => {
             )}
 
             {step === 3 && (
-                <div className="space-y-6">
-                    <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                        <div>
-                            <h2 className="text-2xl font-bold text-slate-800">상세페이지 결과물</h2>
-                            <p className="text-slate-500 mt-1">생성된 이미지를 확인하고 다운로드하세요. 각 이미지별로 문구 적용 또는 AI 부분 재생성을 할 수 있습니다.</p>
-                        </div>
-                        <div className="flex gap-3">
-                            <button onClick={() => setStep(2)} className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-medium py-3 px-6 rounded-xl flex items-center transition-colors">
-                                <ChevronRight className="w-5 h-5 mr-2 rotate-180" />
-                                이전 단계
-                            </button>
-                            <button onClick={handleDownloadAll} className="bg-slate-800 hover:bg-slate-900 text-white font-medium py-3 px-8 rounded-xl flex items-center transition-colors">
-                                <Download className="w-5 h-5 mr-2" />
-                                전체 다운로드
-                            </button>
+                <div className="space-y-5">
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <div className="flex flex-col gap-4 bg-slate-950 px-7 py-6 text-white lg:flex-row lg:items-center lg:justify-between">
+                            <div>
+                                <p className="text-xs font-black uppercase tracking-[0.22em] text-blue-200">Detail Output Board</p>
+                                <h2 className="mt-2 text-2xl font-black tracking-tight">상세페이지 이미지 생성</h2>
+                                <p className="mt-1 text-sm text-slate-300">각 이미지를 선택하면 전체 비율로 바로 확인하고, 선택한 컷만 수정/재생성할 수 있습니다.</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                <button onClick={() => setStep(2)} className="inline-flex items-center rounded-xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-white/15">
+                                    <ChevronRight className="mr-2 h-4 w-4 rotate-180" />
+                                    이전 단계
+                                </button>
+                                <button onClick={handleDownloadAll} className="inline-flex items-center rounded-xl bg-white px-5 py-3 text-sm font-black text-slate-950 transition-colors hover:bg-blue-50">
+                                    <Download className="mr-2 h-4 w-4" />
+                                    전체 다운로드
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,480px)_minmax(0,1fr)] gap-6 items-start">
-                        {/* 왼쪽: 이미지 미리보기 */}
-                        <div className="flex justify-center">
-                            <div className="w-full max-w-md bg-white shadow-2xl overflow-y-auto sticky top-24 max-h-[calc(100vh-7rem)] rounded-xl">
-                                {segments.map((seg, idx) => {
-                                    const previewSize = getSegmentPreviewSize(seg, idx, segments.length);
-                                    return (
-                                        <div
-                                            key={seg.id}
-                                            draggable
-                                            onDragStart={(e) => handleSegmentDragStart(e, idx)}
-                                            onDragOver={handleSegmentDragOver}
-                                            onDrop={() => handleSegmentDrop(idx)}
-                                            onDragEnd={handleSegmentDragEnd}
-                                            className={`relative w-full bg-slate-100 border-b flex items-center justify-center transition-all ${draggedSegmentIndex === idx ? 'border-blue-400 opacity-70' : 'border-slate-200'}`}
-                                            style={!seg.imageUrl ? { aspectRatio: `${previewSize.width} / ${previewSize.height}` } : undefined}
+
+                    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_390px]">
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                            <div className="mb-4 flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                    <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">Selected Image</p>
+                                    <h3 className="truncate text-lg font-black text-slate-900">
+                                        {activeResultSegment ? `${activeResultIndex + 1}. ${activeResultSegment.title}` : '이미지 대기 중'}
+                                    </h3>
+                                </div>
+                                <div className="shrink-0 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600">
+                                    {activeResultSize.width}x{activeResultSize.height}
+                                </div>
+                            </div>
+                            <div className="flex h-[min(68vh,720px)] min-h-[460px] items-center justify-center rounded-2xl border border-slate-200 bg-[linear-gradient(135deg,#f8fafc_0%,#eef2ff_50%,#f8fafc_100%)] p-4">
+                                <div
+                                    className="relative flex max-h-full max-w-full items-center justify-center overflow-hidden rounded-xl bg-white shadow-2xl ring-1 ring-slate-200"
+                                    style={{
+                                        aspectRatio: `${activeResultSize.width} / ${activeResultSize.height}`,
+                                        height: activeResultSize.height >= activeResultSize.width ? '100%' : 'auto',
+                                        width: activeResultSize.height < activeResultSize.width ? '100%' : 'auto',
+                                    }}
+                                >
+                                    {activeResultSegment?.imageUrl ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => setPreviewSegmentIndex(activeResultIndex)}
+                                            className="h-full w-full cursor-zoom-in"
+                                            title="이미지 전체 미리보기"
                                         >
-                                            {seg.imageUrl ? (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setPreviewSegmentIndex(idx)}
-                                                    className="block w-full cursor-zoom-in"
-                                                    title="이미지 크게 보기"
-                                                >
-                                                    <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="w-full h-auto object-contain" />
-                                                </button>
-                                            ) : seg.isGenerating ? (
-                                                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 px-6 text-center">
-                                                    <Loader2 className="w-8 h-8 animate-spin mb-2 text-blue-500" />
-                                                    <p className="font-medium">이미지 생성 중...</p>
-                                                </div>
-                                            ) : seg.error ? (
-                                                <div className="absolute inset-0 flex flex-col items-center justify-center text-red-500 px-6 text-center">
-                                                    <p className="font-bold mb-2">생성 실패</p>
-                                                    <p className="text-xs text-red-400">{seg.errorMessage || '모델 잘림, 제품 미노출, 문구 영역 부족 가능성이 있어 재생성이 필요합니다.'}</p>
-                                                </div>
-                                            ) : (
-                                                <div className="absolute inset-0 flex items-center justify-center px-6 text-center text-slate-400">대기 중...</div>
-                                            )}
-                                            <div className="absolute top-2 left-2 max-w-[70%] bg-black/55 text-white text-xs px-2 py-1 rounded backdrop-blur-sm truncate">
-                                                {idx + 1}. {seg.title}
-                                            </div>
-                                            <div className="absolute bottom-2 left-2 bg-black/45 text-white text-[10px] px-2 py-1 rounded backdrop-blur-sm">
-                                                {previewSize.width}x{previewSize.height}
-                                            </div>
-                                            <div className="absolute top-2 right-2 bg-black/45 text-white p-1.5 rounded backdrop-blur-sm cursor-grab active:cursor-grabbing" title="드래그해서 순서 변경">
-                                                <GripVertical className="w-4 h-4" />
-                                            </div>
-                                            {!seg.staticImage && (
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleRegenerateSegment(idx);
-                                                    }}
-                                                    onMouseDown={(e) => e.stopPropagation()}
-                                                    disabled={seg.isGenerating}
-                                                    className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-blue-600/95 hover:bg-blue-700 disabled:bg-slate-500/80 text-white text-[11px] font-bold px-3 py-2 rounded-full shadow-lg backdrop-blur-sm flex items-center gap-1.5 transition-colors"
-                                                    title="이 이미지만 AI로 다시 생성"
-                                                >
-                                                    {seg.isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                                                    AI 재생성
-                                                </button>
-                                            )}
-                                            {seg.imageUrl && (
-                                                <button
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setPreviewSegmentIndex(idx);
-                                                    }}
-                                                    className="absolute bottom-3 right-3 bg-slate-950/85 hover:bg-slate-950 text-white text-[11px] font-bold px-3 py-2 rounded-full shadow-lg backdrop-blur-sm flex items-center gap-1.5 transition-colors"
-                                                    title="이미지 전체 미리보기"
-                                                >
-                                                    <Maximize2 className="w-3.5 h-3.5" />
-                                                    크게 보기
-                                                </button>
-                                            )}
+                                            <img src={activeResultSegment.imageUrl} alt={`Section ${activeResultIndex + 1}`} className="h-full w-full object-contain" />
+                                        </button>
+                                    ) : activeResultSegment?.isGenerating ? (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center text-slate-500">
+                                            <Loader2 className="mb-3 h-10 w-10 animate-spin text-blue-500" />
+                                            <p className="font-bold">이미지 생성 중...</p>
                                         </div>
-                                    );
-                                })}
+                                    ) : activeResultSegment?.error ? (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center text-red-500">
+                                            <p className="mb-2 font-black">생성 실패</p>
+                                            <p className="text-xs text-red-400">{activeResultSegment.errorMessage || '재생성이 필요합니다.'}</p>
+                                        </div>
+                                    ) : (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center text-slate-400">
+                                            <ImageIcon className="mb-3 h-10 w-10" />
+                                            <p className="font-medium">선택한 이미지가 이곳에 전체 비율로 표시됩니다.</p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
-                        {/* 오른쪽: 문구 수정 패널 */}
-                        <div className="space-y-4">
-                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                <h3 className="text-lg font-bold text-slate-800 mb-4">섹션 수정 및 AI 재생성</h3>
-                                {segments.map((seg, idx) => (
-                                    <div
-                                        key={seg.id}
-                                        onDragOver={handleSegmentDragOver}
-                                        onDrop={() => handleSegmentDrop(idx)}
-                                        className={`mb-6 pb-6 border-b last:border-0 last:mb-0 last:pb-0 transition-all ${draggedSegmentIndex === idx ? 'border-blue-300 opacity-70' : 'border-slate-200'}`}
-                                    >
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="flex items-center gap-2">
-                                                <span
-                                                    draggable
-                                                    onDragStart={(e) => handleSegmentDragStart(e, idx)}
-                                                    onDragEnd={handleSegmentDragEnd}
-                                                    className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500"
-                                                    title="드래그해서 순서 변경"
-                                                >
-                                                    <GripVertical className="w-4 h-4" />
-                                                </span>
-                                                <span className="text-sm font-bold text-slate-600">#{idx + 1}</span>
-                                                <span className="text-sm font-medium text-slate-800">{seg.title}</span>
-                                                {seg.conversionRole && (
-                                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold">{seg.conversionRole}</span>
-                                                )}
-                                                {seg.staticImage && (
-                                                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold">템플릿</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        {seg.error && (
-                                            <div className="mb-3 rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
-                                                {seg.errorMessage || '생성 품질이 부족합니다. 모델 잘림, 제품 미노출, 문구 영역 부족 여부를 확인하고 AI 재생성을 시도하세요.'}
-                                            </div>
+                        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                            <div className="mb-4">
+                                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Edit Selected</p>
+                                <h3 className="text-lg font-black text-slate-900">선택 이미지 수정</h3>
+                            </div>
+                            {activeResultSegment ? (
+                                <div className="space-y-3">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-bold text-white">#{activeResultIndex + 1}</span>
+                                        {activeResultSegment.conversionRole && (
+                                            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">{activeResultSegment.conversionRole}</span>
                                         )}
-                                        <div className="flex flex-col gap-2">
+                                        {activeResultSegment.staticImage && (
+                                            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">템플릿</span>
+                                        )}
+                                    </div>
+                                    {activeResultSegment.error && (
+                                        <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
+                                            {activeResultSegment.errorMessage || '생성 품질이 부족합니다. 재생성을 시도하세요.'}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <label className="mb-1 block text-xs font-bold text-slate-600">AI 이미지에 넣을 카피</label>
+                                        <textarea
+                                            value={activeResultSegment.keyMessage}
+                                            onChange={(e) => {
+                                                const newSegs = [...segments];
+                                                newSegs[activeResultIndex].keyMessage = e.target.value;
+                                                setSegments(newSegs);
+                                            }}
+                                            rows={3}
+                                            className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm outline-none transition-colors focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                                        />
+                                    </div>
+                                    {!activeResultSegment.staticImage && (
+                                        <div className="grid grid-cols-2 gap-2">
                                             <div>
-                                                <label className="block text-xs font-medium text-slate-600 mb-1">AI 이미지에 넣을 카피</label>
-                                                <textarea
-                                                    value={seg.keyMessage}
+                                                <label className="mb-1 block text-xs font-bold text-slate-600">캔버스</label>
+                                                <select
+                                                    value={getSegmentLayoutHeight(activeResultSegment, activeResultIndex, segments.length)}
                                                     onChange={(e) => {
                                                         const newSegs = [...segments];
-                                                        newSegs[idx].keyMessage = e.target.value;
+                                                        newSegs[activeResultIndex].layoutHeight = normalizeLayoutHeight(e.target.value);
                                                         setSegments(newSegs);
                                                     }}
-                                                    rows={2}
-                                                    className="w-full p-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none"
-                                                />
+                                                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                                >
+                                                    {DETAIL_HEIGHT_PRESETS.map(height => (
+                                                        <option key={height} value={height}>{DETAIL_CANVAS_WIDTH}x{height} · {getHeightLabel(height)}</option>
+                                                    ))}
+                                                </select>
                                             </div>
-                                            {!seg.staticImage && (
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                                    <div>
-                                                        <label className="block text-xs font-medium text-slate-600 mb-1">캔버스</label>
-                                                        <select
-                                                            value={getSegmentLayoutHeight(seg, idx, segments.length)}
-                                                            onChange={(e) => {
-                                                                const newSegs = [...segments];
-                                                                newSegs[idx].layoutHeight = normalizeLayoutHeight(e.target.value);
-                                                                setSegments(newSegs);
-                                                            }}
-                                                            className="w-full p-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                                        >
-                                                            {DETAIL_HEIGHT_PRESETS.map(height => (
-                                                                <option key={height} value={height}>{DETAIL_CANVAS_WIDTH}x{height} · {getHeightLabel(height)}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                    <div>
-                                                        <label className="block text-xs font-medium text-slate-600 mb-1">컷 타입</label>
-                                                        <select
-                                                            value={seg.shotType || 'auto'}
-                                                            onChange={(e) => {
-                                                                const newSegs = [...segments];
-                                                                newSegs[idx].shotType = e.target.value;
-                                                                setSegments(newSegs);
-                                                            }}
-                                                            className="w-full p-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                                        >
-                                                            {SHOT_PREFERENCE_OPTIONS.map(option => (
-                                                                <option key={option.value} value={option.value}>{option.label}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {!seg.staticImage && (
-                                                <div>
-                                                    <label className="block text-xs font-medium text-slate-600 mb-1">이미지 연출 지시</label>
-                                                    <textarea
-                                                        value={seg.visualPrompt}
-                                                        onChange={(e) => {
-                                                            const newSegs = [...segments];
-                                                            newSegs[idx].visualPrompt = e.target.value;
-                                                            setSegments(newSegs);
-                                                        }}
-                                                        rows={2}
-                                                        className="w-full p-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none text-slate-600"
-                                                    />
-                                                </div>
-                                            )}
+                                            <div>
+                                                <label className="mb-1 block text-xs font-bold text-slate-600">컷 타입</label>
+                                                <select
+                                                    value={activeResultSegment.shotType || 'auto'}
+                                                    onChange={(e) => {
+                                                        const newSegs = [...segments];
+                                                        newSegs[activeResultIndex].shotType = e.target.value;
+                                                        setSegments(newSegs);
+                                                    }}
+                                                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                                >
+                                                    {SHOT_PREFERENCE_OPTIONS.map(option => (
+                                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
                                         </div>
+                                    )}
+                                    {!activeResultSegment.staticImage && (
+                                        <div>
+                                            <label className="mb-1 block text-xs font-bold text-slate-600">이미지 연출 지시</label>
+                                            <textarea
+                                                value={activeResultSegment.visualPrompt}
+                                                onChange={(e) => {
+                                                    const newSegs = [...segments];
+                                                    newSegs[activeResultIndex].visualPrompt = e.target.value;
+                                                    setSegments(newSegs);
+                                                }}
+                                                rows={5}
+                                                className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600 outline-none transition-colors focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+                                            />
+                                        </div>
+                                    )}
+                                    <div className="grid grid-cols-2 gap-2">
                                         <button
-                                            onClick={() => handleRegenerateSegment(idx)}
-                                            disabled={seg.isGenerating || seg.staticImage}
-                                            className="w-full mt-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white text-[11px] font-bold py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                                            onClick={() => handleRegenerateSegment(activeResultIndex)}
+                                            disabled={activeResultSegment.isGenerating || activeResultSegment.staticImage}
+                                            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-3 text-xs font-black text-white transition-colors hover:bg-blue-700 disabled:bg-slate-300"
                                         >
-                                            {seg.isGenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                                            {seg.isGenerating ? '재생성 중' : seg.staticImage ? '템플릿 고정' : '수정 내용으로 AI 재생성'}
+                                            {activeResultSegment.isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                                            재생성
+                                        </button>
+                                        <button
+                                            onClick={() => activeResultSegment.imageUrl && setPreviewSegmentIndex(activeResultIndex)}
+                                            disabled={!activeResultSegment.imageUrl}
+                                            className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-black text-slate-700 transition-colors hover:bg-slate-50 disabled:text-slate-300"
+                                        >
+                                            <Maximize2 className="mr-2 h-4 w-4" />
+                                            크게 보기
                                         </button>
                                     </div>
-                                ))}
+                                </div>
+                            ) : (
+                                <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-400">
+                                    생성할 이미지가 없습니다.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                        <div className="mb-4 flex items-end justify-between gap-3">
+                            <div>
+                                <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-600">Image Cards</p>
+                                <h3 className="text-lg font-black text-slate-900">각 이미지 미리보기</h3>
                             </div>
+                            <p className="text-xs font-bold text-slate-400">클릭해서 위 화면에 표시</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                            {segments.map((seg, idx) => {
+                                const previewSize = getSegmentPreviewSize(seg, idx, segments.length);
+                                const selected = idx === activeResultIndex;
+                                return (
+                                    <div
+                                        key={seg.id}
+                                        draggable
+                                        onDragStart={(e) => handleSegmentDragStart(e, idx)}
+                                        onDragOver={handleSegmentDragOver}
+                                        onDrop={() => handleSegmentDrop(idx)}
+                                        onDragEnd={handleSegmentDragEnd}
+                                        className={`group rounded-2xl border bg-slate-50 p-2 transition-all ${selected ? 'border-blue-500 ring-2 ring-blue-100' : draggedSegmentIndex === idx ? 'border-blue-300 opacity-70' : 'border-slate-200 hover:border-slate-300'}`}
+                                    >
+                                        <button
+                                            type="button"
+                                            onClick={() => setActiveResultIndex(idx)}
+                                            className="block w-full text-left"
+                                        >
+                                            <div
+                                                className="relative mx-auto flex w-full items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200"
+                                                style={{ aspectRatio: `${previewSize.width} / ${previewSize.height}` }}
+                                            >
+                                                {seg.imageUrl ? (
+                                                    <img src={seg.imageUrl} alt={`Section ${idx + 1}`} className="h-full w-full object-contain" />
+                                                ) : seg.isGenerating ? (
+                                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-center text-slate-500">
+                                                        <Loader2 className="mb-2 h-6 w-6 animate-spin text-blue-500" />
+                                                        <span className="text-xs font-bold">생성 중</span>
+                                                    </div>
+                                                ) : seg.error ? (
+                                                    <div className="absolute inset-0 flex items-center justify-center px-3 text-center text-xs font-bold text-red-500">실패</div>
+                                                ) : (
+                                                    <div className="absolute inset-0 flex items-center justify-center px-3 text-center text-xs font-bold text-slate-400">대기</div>
+                                                )}
+                                                <div className="absolute left-2 top-2 rounded-full bg-slate-950/80 px-2 py-1 text-[10px] font-black text-white backdrop-blur">
+                                                    {String(idx + 1).padStart(2, '0')}
+                                                </div>
+                                                <div className="absolute right-2 top-2 cursor-grab rounded-full bg-white/90 p-1 text-slate-500 shadow-sm active:cursor-grabbing" title="드래그해서 순서 변경">
+                                                    <GripVertical className="h-3.5 w-3.5" />
+                                                </div>
+                                            </div>
+                                            <div className="mt-2 min-w-0">
+                                                <p className="truncate text-xs font-black text-slate-800">{seg.title}</p>
+                                                <p className="mt-0.5 text-[11px] font-bold text-slate-400">{previewSize.width}x{previewSize.height}</p>
+                                            </div>
+                                        </button>
+                                        <div className="mt-2 grid grid-cols-2 gap-1.5">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setActiveResultIndex(idx);
+                                                    handleRegenerateSegment(idx);
+                                                }}
+                                                disabled={seg.isGenerating || seg.staticImage}
+                                                className="rounded-lg bg-blue-600 px-2 py-2 text-[10px] font-black text-white transition-colors hover:bg-blue-700 disabled:bg-slate-300"
+                                            >
+                                                재생성
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setActiveResultIndex(idx);
+                                                    if (seg.imageUrl) setPreviewSegmentIndex(idx);
+                                                }}
+                                                disabled={!seg.imageUrl}
+                                                className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-[10px] font-black text-slate-700 transition-colors hover:bg-slate-50 disabled:text-slate-300"
+                                            >
+                                                전체보기
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 </div>
             )}
 
             {previewSegmentIndex !== null && segments[previewSegmentIndex]?.imageUrl && (
-                <div className="fixed inset-0 z-50 bg-slate-950/92 backdrop-blur-sm flex flex-col">
-                    <div className="h-16 px-5 md:px-8 flex items-center justify-between border-b border-white/10 text-white">
+                <div
+                    className="fixed inset-0 z-50 flex flex-col bg-slate-950/92 backdrop-blur-sm"
+                    onClick={() => setPreviewSegmentIndex(null)}
+                >
+                    <div
+                        className="h-16 px-5 md:px-8 flex items-center justify-between border-b border-white/10 text-white"
+                        onClick={(e) => e.stopPropagation()}
+                    >
                         <div className="min-w-0">
                             <p className="text-xs text-slate-300">#{previewSegmentIndex + 1}</p>
                             <h3 className="font-bold truncate">{segments[previewSegmentIndex].title}</h3>
                         </div>
-                        <button
-                            type="button"
-                            onClick={() => setPreviewSegmentIndex(null)}
-                            className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
-                            aria-label="미리보기 닫기"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setPreviewSegmentIndex(null)}
+                                className="rounded-full bg-white px-4 py-2 text-sm font-black text-slate-950 transition-colors hover:bg-blue-50"
+                                aria-label="결과 화면으로 돌아가기"
+                            >
+                                돌아가기
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPreviewSegmentIndex(null)}
+                                className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors"
+                                aria-label="미리보기 닫기"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
                     </div>
-                    <div className="flex-1 overflow-auto p-4 md:p-8">
-                        <div className="min-h-full flex items-start justify-center">
+                    <div className="flex-1 p-4 md:p-8">
+                        <div className="flex h-full items-center justify-center">
                             <img
+                                onClick={(e) => e.stopPropagation()}
                                 src={segments[previewSegmentIndex].imageUrl}
                                 alt={`Section ${previewSegmentIndex + 1} large preview`}
-                                className="max-w-full h-auto object-contain rounded-xl shadow-2xl"
+                                className="max-h-full max-w-full rounded-xl object-contain shadow-2xl"
                             />
                         </div>
                     </div>
