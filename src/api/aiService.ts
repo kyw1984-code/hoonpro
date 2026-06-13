@@ -149,15 +149,18 @@ ${conversionGuide}
  - "A premium vertical Korean e-commerce editorial image of..."로 시작
  - 섹션 목적에 맞게 모델 착용컷, 자연스러운 사용 장면, 제품 디테일 클로즈업, 정갈한 제품 단독컷을 섞어서 작성
  - 모든 섹션을 같은 반신 모델컷이나 같은 배경으로 만들지 말고 카메라 거리, 포즈, 배경, 연출 소품을 섹션마다 다르게 작성
- - 첫 섹션은 GPT 예시처럼 여백이 있는 세로형 메인 비주얼, 이후 섹션은 클로즈업/라이프스타일/디테일/마무리 컷으로 다양화
+ - 첫 섹션은 사용자가 제시한 GPT 예시처럼 완성형 세로 상세페이지 메인 비주얼로 작성: 좌측 상단의 굵은 한국어 헤드라인 공간, 그 아래 짧은 설명, 얇은 구분선, 좌측 세로 아이콘 포인트 리스트, 우측 또는 중앙 우측의 큰 모델 착용컷/제품컷, 밝고 고급스러운 실내 또는 스튜디오 배경
+ - offer/problem/lifestyle 섹션도 가능하면 매거진형 레이아웃을 활용: 왼쪽에는 카피와 3~4개 짧은 아이콘 라벨, 오른쪽에는 제품을 착용/사용한 실제감 있는 모델 또는 제품 장면
+ - 제품 디테일 섹션은 아이콘 리스트보다 소재/프린트/마감/핏이 잘 보이는 클로즈업 위주로 작성
  - 이미지 안에 글자, 배지, 카드, 말풍선, UI 패널, 가격표를 만들라고 지시하지 말 것
+ - 단, 헤드라인, 짧은 설명, 얇은 구분선, 작은 원형 라인 아이콘과 짧은 한국어 라벨은 프리미엄 상세페이지 구성요소로 허용
  - 조명, 배경, 각도, 질감, 모델 포즈를 사실적으로 기술
  - 모델 얼굴은 새롭게 생성된 가상의 인물로 표현하고 레퍼런스 인물의 얼굴을 복제하지 말 것
  - 클로즈업 섹션은 제품을 착용/사용한 상태의 자연스러운 부분 확대 컷으로 작성하고, 큰 제품 배경 위에 작은 전신 모델을 붙이는 합성 구도는 절대 지시하지 말 것
  - 미니어처 모델, 스티커처럼 붙인 모델, picture-in-picture, 손에 들린 작은 사람, 거대한 제품 무늬 배경 뒤의 작은 모델 같은 부자연스러운 합성 표현은 visualPrompt에 포함하지 말 것
  - 제품 로고/패턴/프린트는 실제 제품 위에서 현실적인 크기로 보이게 작성하고, 별도 배경 그래픽처럼 확대하지 말 것
 
- 배열 예시: [ {"title": "분위기를 바꾸는 첫인상", "logicalSections": ["메인", "시각화"], "sectionType": "offer", "conversionRole": "핵심 오퍼", "layoutHeight": 1529, "keyMessage": "입는 순간,\n분위기가 달라진다", "visualPrompt": "A premium vertical Korean e-commerce editorial image of a fictional Korean model wearing the product in a calm studio room, full-body composition with generous clean negative space on the left for Korean headline overlay, soft daylight, realistic fabric texture, refined lifestyle mood, no text."} ]
+ 배열 예시: [ {"title": "분위기를 바꾸는 첫인상", "logicalSections": ["메인", "감성 카피", "아이콘 포인트"], "sectionType": "offer", "conversionRole": "핵심 오퍼", "layoutHeight": 1529, "keyMessage": "입는 순간,\n분위기가 달라진다", "visualPrompt": "A premium vertical Korean e-commerce editorial image of a fictional Korean model wearing the product in a calm bright studio room, full-body or three-quarter composition on the right side, generous clean negative space on the left for a bold Korean headline, smaller supporting Korean copy, a thin divider line, and three minimal circular line-icon feature labels stacked vertically, soft daylight, realistic fabric texture, refined GPT-generated shopping-mall detail page mood, no prices, no badges, no cards."} ]
       `.trim(),
     });
     await logApiCall('detail-plan', 'gemini-2.5-flash', response);

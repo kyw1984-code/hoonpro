@@ -343,12 +343,24 @@ NATURAL MODEL COMPOSITION:
 -- If a full-body or half-body model is shown, make the model life-size and fully integrated into the environment.
 `;
 
+const GPT_EDITORIAL_REFERENCE_LAYOUT = `
+GPT-STYLE EDITORIAL DETAIL PAGE LAYOUT:
+-- Use the attached example style as the target mood: a tall premium fashion/product story page with a large realistic model or product scene and clean Korean editorial typography.
+-- For hero, offer, fit, lifestyle, and problem sections, prefer a magazine-like layout: large model/product on the right or center-right, generous clean negative space on the left, and a calm premium interior or studio background.
+-- Render a bold Korean headline in the upper-left area, 2 to 4 short lines, with strong black or high-contrast typography.
+-- Under the headline, render 1 to 3 short supporting Korean copy lines in a smaller clean font when space allows.
+-- When the section naturally supports feature points, include a thin divider line and 3 to 4 small circular line icons with short Korean labels stacked vertically on the left, like a refined shopping-mall detail page. Keep icons minimal and relevant, not decorative clutter.
+-- Text and icons must sit directly on the clean background, not inside cards, boxes, speech bubbles, badges, or floating panels.
+-- Keep the model/product full, realistic, and easy to inspect. Avoid covering the face, chest print, logo, texture, or main product detail with text.
+-- The image should feel like a finished GPT-generated Korean e-commerce visual similar to a premium fashion landing section, not a raw catalog photo and not a collage.
+`;
+
 const getSectionEditorialDirection = (segment: any, segmentIndex: number): string => {
     const sectionType = String(segment.sectionType || '').toLowerCase();
     const role = String(segment.conversionRole || '').toLowerCase();
     const title = String(segment.title || '').toLowerCase();
     const signatureVariant = [
-        'calm studio room with left-side negative space, full or three-quarter body editorial composition',
+        'calm studio room with left-side editorial copy space, full or three-quarter body fashion composition',
         'warm daily-life interior with natural daylight, candid posture, product used naturally',
         'close product texture and fit detail, hands or body context only, tactile macro realism',
         'clean product-focused still life or folded product scene with premium shadows and enough empty space',
@@ -364,7 +376,7 @@ const getSectionEditorialDirection = (segment: any, segmentIndex: number): strin
                 : sectionType.includes('trust') || role.includes('안심') || title.includes('summary') || title.includes('cta')
                     ? 'Use a quiet product-story composition that can close the page without looking like a sale banner.'
                     : segmentIndex === 0
-                        ? 'Use a main hero composition similar to a premium AI-generated fashion detail page: model large, clean negative space, natural editorial room.'
+                        ? 'Use a main hero composition similar to the provided GPT example: bold Korean headline on the left, feature icon list below, large realistic model/product on the right, clean premium interior.'
                         : 'Use a distinct editorial composition that does not repeat the previous section camera angle, pose, or background.';
 
     return `
@@ -465,6 +477,8 @@ const buildDetailImagePrompt = (
 - EXACT KOREAN HEADLINE TO RENDER, preserving line breaks and wording: "${headline}"
 ${supportingCopy ? `- Optional small supporting labels, only if they fit naturally: "${supportingCopy}"` : ''}
 - ${typographyHint}
+- For the first hero image and other model/product story sections, strongly follow the GPT-style reference layout: bold left-aligned Korean headline, smaller supporting copy, optional thin divider, optional circular icon feature list, and a large realistic model/product occupying the right side.
+- If using feature icons, use simple line icons only and pair them with short Korean labels derived from the product benefits. Do not add fake prices, discounts, ratings, review counts, brand names, or unverifiable claims.
 - If the reference image contains a real model/person, use it ONLY to understand product fit and scale. Replace the model with a completely new fictional Korean model with a different face, hair, pose, body impression, and expression.
 - Replace the reference photo background completely. Do NOT copy rooms, walls, mirrors, posters, furniture, doors, bathrooms, studios, or any visible environment from the uploaded reference photos.
 - The final image must look like a physically believable single photograph, not an artificial composite of product close-up and pasted model.
@@ -478,6 +492,7 @@ ${designPresetInstruction}
 ${modelCutInstruction}
 ${combinationInstruction}
 ${modelProfileInstruction}
+${GPT_EDITORIAL_REFERENCE_LAYOUT}
 ${NATURAL_MODEL_COMPOSITION_RULES}
 ${shotInstruction}
 ${conversionInstruction}
