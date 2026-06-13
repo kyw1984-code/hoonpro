@@ -231,6 +231,7 @@ export interface DetailPlanImage {
   role: string;          // Hook / 문제 공감 / 핵심 셀링포인트 ...
   stage: string;         // 심리 단계: 인지/공감/문제 인식/해결책/신뢰/확신
   sectionType: string;   // offer/problem/proof/detail/lifestyle/trust/cta
+  layoutHeight: number;  // fixed 860px width, variable height preset
   mainCopy: string;      // 메인 카피 (한글, \n 줄바꿈)
   subCopy: string;       // 서브 카피
   points: string[];      // 보조 포인트 3~5개
@@ -251,6 +252,27 @@ export interface DetailPlan {
   };
   images: DetailPlanImage[];
 }
+
+const DETAIL_CANVAS_WIDTH = 860;
+const DETAIL_HEIGHT_PRESETS = [1000, 1200, 1529, 1720] as const;
+
+const normalizeLayoutHeight = (value: any, fallback: number): number => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return DETAIL_HEIGHT_PRESETS.reduce((best, current) => (
+    Math.abs(current - n) < Math.abs(best - n) ? current : best
+  ), DETAIL_HEIGHT_PRESETS[0]);
+};
+
+const getFallbackLayoutHeight = (img: any, index: number, total: number): number => {
+  const text = `${img?.role || ''} ${img?.stage || ''} ${img?.sectionType || ''}`.toLowerCase();
+  if (index === 0) return 1529;
+  if (index === total - 1) return 1200;
+  if (text.includes('lifestyle') || text.includes('활용')) return 1529;
+  if (text.includes('detail') || text.includes('디테일') || text.includes('proof') || text.includes('근거')) return 1000;
+  if (text.includes('problem') || text.includes('문제')) return 1200;
+  return 1200;
+};
 
 export const generateDetailPlan = async (data: any): Promise<DetailPlan | null> => {
   try {
@@ -298,6 +320,14 @@ STEP 3. 이미지 기획(총 ${count}장):
   끝) CTA: 지금 구매해야 하는 이유 + 행동 유도(타이밍 강조)
 STEP 6. 신뢰성 검증: 사실 확인 불가 문구 금지("판매 1위", "만족도 99%", "누적 100만개", "효과 보장" 등). 대신 "많은 고객이 선택한 이유", "꾸준히 사랑받는 이유"처럼 표현.
 
+[상세페이지 캔버스 규칙]
+- 모든 이미지는 가로 ${DETAIL_CANVAS_WIDTH}px 고정 상세페이지 섹션으로 기획합니다.
+- 각 이미지마다 layoutHeight를 반드시 아래 숫자 중 하나로 지정하세요: ${DETAIL_HEIGHT_PRESETS.join(', ')}
+- Hook/모델 착용/감성 히어로/라이프스타일 섹션은 1529를 우선 사용하세요.
+- 제품 디테일/근거/정보가 짧은 섹션은 1000, 설명이 조금 긴 표준 섹션은 1200을 사용하세요.
+- 긴 스토리/비교/사용 장면은 1720을 사용할 수 있습니다.
+- 모든 섹션이 같은 높이가 되지 않게, 설득 역할에 맞춰 높이를 다르게 배분하세요.
+
 [카피 규칙] — 모든 카피는 이미지 안에 직접 렌더링되므로 반드시 짧고 자연스럽게
 - GPT 이미지 생성 결과처럼 짧고 감각적인 한국어 에디토리얼 카피. 억지 존댓말, 번역투, 과장 광고 문구 금지
 - 상품명/카테고리/설명만 보고 확정할 수 없는 기능, 소재, 수치, 효능은 만들지 말 것
@@ -321,7 +351,7 @@ STEP 6. 신뢰성 검증: 사실 확인 불가 문구 금지("판매 1위", "만
   "purchaseResistances": ["저항1", "저항2", "저항3", "저항4", "저항5"],
   "designSystem": { "tone": "프리미엄/미니멀/감성 등 1개", "colors": { "primary": "#hex", "secondary": "#hex", "accent": "#hex", "background": "#hex", "text": "#hex" } },
   "images": [
-    { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "points": ["보조1","보조2","보조3"], "trustElement": "신뢰 요소", "trigger": "감정적 보상", "textPosition": "bottom", "visualPrompt": "A high-quality professional Korean e-commerce model cut of ..." }
+    { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "layoutHeight": 1529, "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "points": ["보조1","보조2","보조3"], "trustElement": "신뢰 요소", "trigger": "감정적 보상", "textPosition": "bottom", "visualPrompt": "A high-quality professional Korean e-commerce model cut of ..." }
   ]
 }
 images 배열은 정확히 ${count}개여야 하며 1번은 Hook, 마지막은 CTA여야 합니다.
@@ -335,11 +365,13 @@ images 배열은 정확히 ${count}개여야 하며 1번은 Hook, 마지막은 C
     if (!parsed || !Array.isArray(parsed.images)) return null;
 
     const validPositions = ['top', 'middle', 'bottom'];
+    const totalImages = parsed.images.length;
     parsed.images = parsed.images.map((img: any, idx: number) => ({
       number: Number(img.number) || idx + 1,
       role: String(img.role || `이미지 ${idx + 1}`),
       stage: String(img.stage || ''),
       sectionType: String(img.sectionType || 'detail'),
+      layoutHeight: normalizeLayoutHeight(img.layoutHeight, getFallbackLayoutHeight(img, idx, totalImages)),
       mainCopy: String(img.mainCopy || img.copy || '').split('\n').map((l: string) => l.slice(0, 12)).slice(0, 2).join('\n').slice(0, 28),
       subCopy: String(img.subCopy || '').slice(0, 22),
       points: Array.isArray(img.points) ? img.points.slice(0, 3).map((p: any) => String(p).slice(0, 10)) : [],
@@ -377,7 +409,8 @@ export const generateImage = async (
   prompt: string,
   base64Images: string[] = [],
   aspectRatio: string = "9:16",
-  quality?: 'low' | 'medium' | 'high'
+  quality?: 'low' | 'medium' | 'high',
+  featureOverride?: string
 ): Promise<string | undefined> => {
   try {
     await trackUsage();
@@ -385,8 +418,8 @@ export const generateImage = async (
     const token = getToken();
     if (!token) throw new Error('로그인이 필요합니다.');
 
-    const feature = aspectRatio === '1:1' ? 'thumbnail-image' : 'detail-image';
-    const taskInstruction = aspectRatio === "9:16"
+    const feature = featureOverride || (aspectRatio === '1:1' ? 'thumbnail-image' : 'detail-image');
+    const taskInstruction = feature === 'detail-image'
       ? "Generate a polished vertical Korean e-commerce detail-page visual in a refined editorial AI-image style. The image should feel like a premium product story page, not a generic ad banner."
       : "Generate a high-quality product image.";
 

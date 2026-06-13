@@ -16,6 +16,80 @@ const COMBINATION_OPTIONS: Array<{ value: CombinationType; label: string; desc: 
     { value: 'single', label: '단품', desc: '단품 중심 상세페이지' },
     { value: '1+1', label: '1+1 조합', desc: '1번 이미지에 2개 구성 강조' },
 ];
+const DETAIL_CANVAS_WIDTH = 860;
+const DETAIL_HEIGHT_PRESETS = [1000, 1200, 1529, 1720] as const;
+type DetailLayoutHeight = typeof DETAIL_HEIGHT_PRESETS[number];
+
+const normalizeLayoutHeight = (value: unknown, fallback: DetailLayoutHeight = 1200): DetailLayoutHeight => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    return DETAIL_HEIGHT_PRESETS.reduce((best, current) => (
+        Math.abs(current - n) < Math.abs(best - n) ? current : best
+    ), DETAIL_HEIGHT_PRESETS[0]);
+};
+
+const getFallbackLayoutHeight = (img: { role?: string; stage?: string; sectionType?: string }, index: number, total: number): DetailLayoutHeight => {
+    const text = `${img.role || ''} ${img.stage || ''} ${img.sectionType || ''}`.toLowerCase();
+    if (index === 0) return 1529;
+    if (index === total - 1) return 1200;
+    if (text.includes('lifestyle') || text.includes('활용')) return 1529;
+    if (text.includes('detail') || text.includes('디테일') || text.includes('proof') || text.includes('근거')) return 1000;
+    if (text.includes('problem') || text.includes('문제')) return 1200;
+    return 1200;
+};
+
+const getGenerationAspectRatio = (height: DetailLayoutHeight): '1:1' | '9:16' => (
+    height <= 1000 ? '1:1' : '9:16'
+);
+
+const getHeightLabel = (height: DetailLayoutHeight): string => {
+    if (height === 1000) return '컴팩트';
+    if (height === 1200) return '표준';
+    if (height === 1529) return '9:16';
+    return '롱';
+};
+
+const normalizeGeneratedImage = (src: string, targetHeight: DetailLayoutHeight): Promise<string> => (
+    new Promise((resolve) => {
+        if (typeof window === 'undefined') {
+            resolve(src);
+            return;
+        }
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = DETAIL_CANVAS_WIDTH;
+            canvas.height = targetHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                resolve(src);
+                return;
+            }
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const targetRatio = canvas.width / canvas.height;
+            const imgRatio = img.width / img.height;
+            let sx = 0;
+            let sy = 0;
+            let sw = img.width;
+            let sh = img.height;
+
+            if (imgRatio > targetRatio) {
+                sw = img.height * targetRatio;
+                sx = (img.width - sw) / 2;
+            } else {
+                sh = img.width / targetRatio;
+                sy = (img.height - sh) / 2;
+            }
+
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => resolve(src);
+        img.src = src;
+    })
+);
 
 // ────────────────────────────── 이미지 프롬프트 빌더 ──────────────────────────────
 // GPT Image가 사진과 짧은 한글 카피를 하나의 에디토리얼 컷으로 완성하도록 지시한다.
@@ -35,11 +109,12 @@ const buildImagePrompt = (
         ? `\n- 작은 보조 문구(필요할 때만 본문보다 작고 조용하게 배치): ${points.join(' · ')}`
         : '';
     const posKo = img.textPosition === 'top' ? '상단' : img.textPosition === 'middle' ? '중앙' : '하단';
+    const layoutHeight = normalizeLayoutHeight(img.layoutHeight);
     const bundle = combinationType === '1+1' && img.number === 1
         ? '\n- 1+1 세트 구성이므로 동일 제품 2개를 한 장면에 자연스럽게 함께 보여줄 것.'
         : '';
 
-    return `Create ONE finished, polished Korean e-commerce editorial detail-page image (vertical 860x1000 / 4:5 layout) for the product "${productName}".
+    return `Create ONE finished, polished Korean e-commerce editorial detail-page image (vertical ${DETAIL_CANVAS_WIDTH}x${layoutHeight} layout) for the product "${productName}".
 This must feel like a high-quality GPT-generated product story image: one believable photographic scene, tasteful negative space, natural Korean typography, premium Korean shopping-mall polish, NOT a generic ad banner.
 
 SECTION ROLE: ${img.role}${img.stage ? ` (구매 심리 단계: ${img.stage})` : ''}.
@@ -49,6 +124,7 @@ SECTION ROLE: ${img.role}${img.stage ? ` (구매 심리 단계: ${img.stage})` :
 ${img.subCopy ? `- 서브 카피(중간 크기): "${img.subCopy}"` : ''}${pointsBlock}
 
 DESIGN DIRECTION:
+- 최종 상세페이지 캔버스는 가로 ${DETAIL_CANVAS_WIDTH}px, 세로 ${layoutHeight}px 기준이다. 모든 제품, 모델, 한글 텍스트는 잘림 없이 안쪽 안전 여백에 배치할 것.
 - 톤: ${tone}. 깔끔하고 현대적인 프리미엄 에디토리얼 레이아웃, 명확한 시각적 위계, 넉넉한 여백, 고급스러운 제품 스토리 무드. ${colorHint}
 - 텍스트 블록은 ${posKo} 영역의 자연스러운 여백에 배치하고, 나머지는 제품 사진이 하나의 실제 장면처럼 이어지게 채울 것.
 - Korean ecommerce editorial, photorealistic commercial product photography, natural lighting, ultra realistic texture, realistic shadows, premium visual merchandising.
@@ -69,6 +145,7 @@ interface GenImage {
     role: string;
     stage: string;
     sectionType: string;
+    layoutHeight: DetailLayoutHeight;
     mainCopy: string;
     subCopy: string;
     points: string[];
@@ -148,6 +225,7 @@ export const DetailPlanner: React.FC = () => {
                 role: img.role,
                 stage: img.stage,
                 sectionType: img.sectionType,
+                layoutHeight: normalizeLayoutHeight(img.layoutHeight, getFallbackLayoutHeight(img, i, result.images.length)),
                 mainCopy: img.mainCopy,
                 subCopy: img.subCopy,
                 points: img.points,
@@ -174,9 +252,16 @@ export const DetailPlanner: React.FC = () => {
     // ── 단일 이미지 생성 (카피·레이아웃까지 이미지에 직접 렌더링) ──
     const generateOne = async (seg: GenImage) => {
         updateImage(seg.id, { isGenerating: true });
-        const prompt = buildImagePrompt(seg, info.combinationType, info.name, plan?.designSystem);
-        const raw = await generateImage(prompt, referenceImages, '9:16');
-        updateImage(seg.id, { imageUrl: raw || '', isGenerating: false });
+        try {
+            const layoutHeight = normalizeLayoutHeight(seg.layoutHeight);
+            const prompt = buildImagePrompt({ ...seg, layoutHeight }, info.combinationType, info.name, plan?.designSystem);
+            const raw = await generateImage(prompt, referenceImages, getGenerationAspectRatio(layoutHeight), undefined, 'detail-image');
+            const normalized = raw ? await normalizeGeneratedImage(raw, layoutHeight) : '';
+            updateImage(seg.id, { imageUrl: normalized, isGenerating: false });
+        } catch (e) {
+            console.error(e);
+            updateImage(seg.id, { imageUrl: '', isGenerating: false });
+        }
     };
 
     // ── STEP 2 → 전체 이미지 생성 ──
@@ -392,6 +477,14 @@ export const DetailPlanner: React.FC = () => {
                                                     <option value="bottom">하단</option>
                                                 </select>
                                             </div>
+                                            <div className="mt-2">
+                                                <span className="text-xs text-slate-400 mr-2">캔버스</span>
+                                                <select value={img.layoutHeight} onChange={e => updateImage(img.id, { layoutHeight: normalizeLayoutHeight(e.target.value) })} className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white">
+                                                    {DETAIL_HEIGHT_PRESETS.map(height => (
+                                                        <option key={height} value={height}>{DETAIL_CANVAS_WIDTH}x{height} · {getHeightLabel(height)}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
                                         </div>
                                         <div className="text-sm text-slate-600 space-y-1">
                                             {img.points?.length > 0 && (
@@ -443,7 +536,7 @@ export const DetailPlanner: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                         {images.map((seg) => (
                             <div key={seg.id} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                                <div className="relative bg-slate-100" style={{ aspectRatio: '860 / 1000' }}>
+                                <div className="relative bg-slate-100" style={{ aspectRatio: `${DETAIL_CANVAS_WIDTH} / ${normalizeLayoutHeight(seg.layoutHeight)}` }}>
                                     {seg.isGenerating ? (
                                         <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
                                             <Loader2 className="w-8 h-8 animate-spin mb-2" />
@@ -458,6 +551,7 @@ export const DetailPlanner: React.FC = () => {
                                         </div>
                                     )}
                                     <span className="absolute top-2 left-2 bg-black/60 text-white text-xs font-bold rounded-full px-2 py-0.5">{seg.number}. {seg.role}</span>
+                                    <span className="absolute top-2 right-2 bg-black/50 text-white text-[10px] font-bold rounded-full px-2 py-0.5">{DETAIL_CANVAS_WIDTH}x{normalizeLayoutHeight(seg.layoutHeight)}</span>
                                 </div>
                                 {seg.imageUrl && (
                                     <div className="p-3 space-y-2">
