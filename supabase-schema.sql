@@ -70,3 +70,19 @@ create index if not exists idx_api_calls_feature on api_calls(feature);
 create index if not exists idx_api_calls_model on api_calls(model);
 
 alter table api_calls disable row level security;
+
+-- 6. 앱 전역 설정 (관리자 제어, 서비스 키로만 접근)
+create table if not exists app_config (
+  key text primary key,
+  value text,
+  updated_at timestamptz default now()
+);
+
+alter table app_config disable row level security;
+
+-- 기본값 시드 (이미 존재하면 덮어쓰지 않음)
+insert into app_config (key, value) values
+  ('image_model', 'gpt-image-1.5'),
+  ('image_quality', 'medium'),
+  ('ai_integrated_text_enabled', 'false')
+on conflict (key) do nothing;
