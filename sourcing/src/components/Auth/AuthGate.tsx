@@ -72,8 +72,8 @@ export function AuthGate({ onSuccess }: Props) {
         <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center mb-4">
           <BarChart3 className="w-7 h-7 text-white" />
         </div>
-        <h1 className="text-xl font-bold text-slate-900 mb-1">쿠팡 광고 성과 분석기</h1>
-        <p className="text-sm text-slate-500 mb-1">훈프로의 정밀 운영 전략을 자동 생성</p>
+        <h1 className="text-xl font-bold text-slate-900 mb-1">소싱 파인더 · 광고 성과 분석기</h1>
+        <p className="text-sm text-slate-500 mb-1">훈프로의 정밀 소싱·운영 전략을 자동 생성</p>
         <p className="text-xs text-blue-600 font-medium mb-6 flex items-center gap-1">
           <Lock className="w-3 h-3" /> 가입 즉시 7일 무료 체험
         </p>

@@ -25,6 +25,15 @@ export const Footer: React.FC = () => {
           >
             훈프로 홈페이지
           </a>
+          <span className="text-slate-300">|</span>
+          <a
+            href="https://www.hoonpro.co.kr"
+            target="_blank"
+            rel="noreferrer"
+            className="text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            쇼크트리 홈페이지
+          </a>
         </div>
       </div>
     </footer>

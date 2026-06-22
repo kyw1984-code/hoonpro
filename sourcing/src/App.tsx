@@ -1,21 +1,22 @@
 import React, { useState } from 'react';
-import { BarChart3, LogOut, Clock, ShieldCheck } from 'lucide-react';
+import { BarChart3, LogOut, Clock, ShieldCheck, TrendingUp, LayoutTemplate } from 'lucide-react';
 import { AnalyzerDashboard } from './components/Analyzer/AnalyzerDashboard';
+import { SourcingFinder } from './components/Sourcing/SourcingFinder';
 import { AdminPanel } from './components/Admin/AdminPanel';
 import { Footer } from './components/Layout/Footer';
 import { AuthGate } from './components/Auth/AuthGate';
 import { getUser, removeToken, getRemainingDays, type AuthUser } from './lib/auth';
 
-type Tab = 'analyzer' | 'admin';
+type Tab = 'sourcing' | 'analyzer' | 'admin';
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);
-  const [activeTab, setActiveTab] = useState<Tab>('analyzer');
+  const [activeTab, setActiveTab] = useState<Tab>('sourcing');
 
   const handleLogout = () => {
     removeToken();
     setUser(null);
-    setActiveTab('analyzer');
+    setActiveTab('sourcing');
   };
 
   if (!user) {
@@ -30,24 +31,32 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-white" />
+              <LayoutTemplate className="w-5 h-5 text-white" />
             </div>
             <h1 className="text-lg font-bold text-slate-900 tracking-tight">
-              쿠팡 광고 성과 분석기
+              훈프로 소싱·광고 분석 체험판
             </h1>
           </div>
 
           <div className="flex items-center gap-4">
-            {user.isAdmin && (
-              <div className="flex bg-slate-100 p-1 rounded-xl">
-                <button
-                  onClick={() => setActiveTab('analyzer')}
-                  className={`flex items-center px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                    activeTab === 'analyzer' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <BarChart3 className="w-4 h-4 mr-1.5" /> 분석기
-                </button>
+            <div className="flex bg-slate-100 p-1 rounded-xl">
+              <button
+                onClick={() => setActiveTab('sourcing')}
+                className={`flex items-center px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'sourcing' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <TrendingUp className="w-4 h-4 mr-1.5" /> 소싱 파인더
+              </button>
+              <button
+                onClick={() => setActiveTab('analyzer')}
+                className={`flex items-center px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'analyzer' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4 mr-1.5" /> 광고 분석기
+              </button>
+              {user.isAdmin && (
                 <button
                   onClick={() => setActiveTab('admin')}
                   className={`flex items-center px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
@@ -56,8 +65,8 @@ export default function App() {
                 >
                   <ShieldCheck className="w-4 h-4 mr-1.5" /> 관리자
                 </button>
-              </div>
-            )}
+              )}
+            </div>
 
             <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
               {!user.isAdmin && (
@@ -88,7 +97,9 @@ export default function App() {
       </header>
 
       <main className="flex-grow">
-        {activeTab === 'admin' && user.isAdmin ? <AdminPanel /> : <AnalyzerDashboard />}
+        {activeTab === 'sourcing' && <SourcingFinder />}
+        {activeTab === 'analyzer' && <AnalyzerDashboard />}
+        {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
       </main>
 
       <Footer />
