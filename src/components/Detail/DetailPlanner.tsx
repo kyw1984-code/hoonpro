@@ -1,6 +1,7 @@
 import React, { useState, useRef, type DragEvent } from 'react';
 import { planDetail, generateImage, generateFeatures } from '../../api/aiService';
-import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical, RefreshCw } from 'lucide-react';
+import { Loader2, Upload, Image as ImageIcon, Download, Wand2, ChevronRight, X, GripVertical, RefreshCw, Sparkles, Copy, Check } from 'lucide-react';
+import { FREE_DETAIL_PROMPT } from './freePromptContent';
 
 type CombinationType = 'single' | '1+1' | '1+1+1';
 type DesignPresetKey = 'premium' | 'minimal' | 'street' | 'lifestyle' | 'deal' | 'clean';
@@ -1729,6 +1730,26 @@ export const DetailPlanner: React.FC = () => {
     ]);
     const [segments, setSegments] = useState<any[]>([]);
     const [draggedSegmentIndex, setDraggedSegmentIndex] = useState<number | null>(null);
+    const [freePromptOpen, setFreePromptOpen] = useState(false);
+    const [freePromptCopied, setFreePromptCopied] = useState(false);
+    const [freePromptGuideOpen, setFreePromptGuideOpen] = useState(false);
+
+    const handleCopyFreePrompt = async () => {
+        try {
+            await navigator.clipboard.writeText(FREE_DETAIL_PROMPT);
+            setFreePromptCopied(true);
+            setTimeout(() => setFreePromptCopied(false), 2000);
+        } catch (e) {
+            const textarea = document.createElement('textarea');
+            textarea.value = FREE_DETAIL_PROMPT;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            setFreePromptCopied(true);
+            setTimeout(() => setFreePromptCopied(false), 2000);
+        }
+    };
 
     const moveSegment = (fromIndex: number, toIndex: number) => {
         if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
@@ -2150,8 +2171,16 @@ export const DetailPlanner: React.FC = () => {
 
             {step === 1 && (
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-                    <div className="flex justify-between items-center mb-6">
+                    <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
                         <h2 className="text-2xl font-bold text-slate-800">상품 정보 입력</h2>
+                        <button
+                            type="button"
+                            onClick={() => setFreePromptOpen(true)}
+                            className="bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-700 hover:to-pink-600 text-white font-bold py-2.5 px-4 rounded-xl flex items-center gap-2 shadow-md transition-all"
+                        >
+                            <Sparkles className="w-4 h-4" />
+                            상세페이지 무료 프롬프트
+                        </button>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
@@ -2900,6 +2929,93 @@ export const DetailPlanner: React.FC = () => {
                                     </div>
                                 ))}
                             </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {freePromptOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setFreePromptOpen(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-6 border-b border-slate-200">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600 to-pink-500 flex items-center justify-center">
+                                    <Sparkles className="w-5 h-5 text-white" />
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-slate-900">상세페이지 무료 프롬프트</h3>
+                                    <p className="text-xs text-slate-500 mt-0.5">아래 전체 프롬프트를 복사해서 ChatGPT에 붙여넣고 사용하세요.</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setFreePromptOpen(false)} className="text-slate-400 hover:text-slate-700 p-1">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        <div className="px-6 pt-4 pb-2 flex items-center justify-between gap-3 flex-wrap">
+                            <button
+                                type="button"
+                                onClick={() => setFreePromptGuideOpen(true)}
+                                className="text-sm font-semibold text-purple-700 hover:text-purple-900 underline underline-offset-2"
+                            >
+                                사용방법 안내 보기
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleCopyFreePrompt}
+                                className={`font-bold py-2 px-4 rounded-lg flex items-center gap-2 transition-colors ${freePromptCopied ? 'bg-emerald-600 text-white' : 'bg-slate-900 hover:bg-slate-800 text-white'}`}
+                            >
+                                {freePromptCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                                {freePromptCopied ? '복사 완료' : '전체 프롬프트 복사'}
+                            </button>
+                        </div>
+
+                        <div className="px-6 pb-6 overflow-y-auto">
+                            <div className="bg-amber-50 border border-amber-200 text-amber-900 text-sm rounded-xl p-3 mb-3 leading-relaxed">
+                                아래 전체 내용을 복사해서 <strong>ChatGPT</strong>에 붙여넣고, 상품 이미지 1장과 함께 사용하면 상세페이지 기획서와 1~15번 이미지 생성 프롬프트가 자동으로 만들어집니다.
+                            </div>
+                            <pre className="whitespace-pre-wrap text-[13px] leading-relaxed text-slate-800 bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono">
+{FREE_DETAIL_PROMPT}
+                            </pre>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {freePromptGuideOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={() => setFreePromptGuideOpen(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between p-6 border-b border-slate-200">
+                            <h3 className="text-xl font-bold text-slate-900">사용방법 안내</h3>
+                            <button onClick={() => setFreePromptGuideOpen(false)} className="text-slate-400 hover:text-slate-700 p-1">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <ol className="p-6 space-y-4">
+                            <li className="flex gap-3">
+                                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">1</span>
+                                <p className="text-slate-700 leading-relaxed pt-0.5">GPT에 전체 프롬프트를 넣고 이미지 한 장을 넣는다.</p>
+                            </li>
+                            <li className="flex gap-3">
+                                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">2</span>
+                                <p className="text-slate-700 leading-relaxed pt-0.5">기획서가 완성이 되면 1~15번까지의 이미지 프롬프트가 완성된다.</p>
+                            </li>
+                            <li className="flex gap-3">
+                                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">3</span>
+                                <p className="text-slate-700 leading-relaxed pt-0.5">각각의 이미지 프롬프트(영어)를 1번부터 복사하여 붙여넣기 한다.</p>
+                            </li>
+                            <li className="flex gap-3">
+                                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-purple-600 text-white text-sm font-bold flex items-center justify-center">4</span>
+                                <p className="text-slate-700 leading-relaxed pt-0.5">1번과 동일한 방법으로 이미지 프롬프트를 넣어 하나하나 생성한다.</p>
+                            </li>
+                        </ol>
+                        <div className="p-6 pt-0">
+                            <button
+                                onClick={() => setFreePromptGuideOpen(false)}
+                                className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl"
+                            >
+                                확인
+                            </button>
                         </div>
                     </div>
                 </div>
