@@ -9,9 +9,18 @@ create table if not exists sourcing_users (
   created_at timestamptz default now()
 );
 
+-- 관리자 승인 시스템 (기존 회원은 이미 사용 중이므로 'approved' 기본값으로 백필)
+alter table sourcing_users
+  add column if not exists status text not null default 'approved'
+  check (status in ('pending', 'approved', 'rejected'));
+
+alter table sourcing_users
+  add column if not exists approved_at timestamptz;
+
 -- 만료 여부 빠른 조회용 인덱스
 create index if not exists idx_sourcing_users_email on sourcing_users(email);
 create index if not exists idx_sourcing_users_trial_started_at on sourcing_users(trial_started_at);
+create index if not exists idx_sourcing_users_status on sourcing_users(status);
 
 -- 서비스 키로만 접근 (RLS 비활성화)
 alter table sourcing_users disable row level security;

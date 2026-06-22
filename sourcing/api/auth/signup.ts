@@ -1,8 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import jwt from 'jsonwebtoken';
-
-const TRIAL_DAYS = 7;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -31,11 +28,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: '올바른 이메일 형식이 아닙니다.' });
   }
 
-  const trialStartedAt = new Date();
-
   const { data: user, error } = await supabase
     .from('sourcing_users')
-    .insert({ name, phone, email, trial_started_at: trialStartedAt.toISOString() })
+    .insert({
+      name,
+      phone,
+      email: String(email).trim().toLowerCase(),
+      status: 'pending',
+    })
     .select('*')
     .single();
 
@@ -46,30 +46,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: `서버 오류: ${error?.message ?? 'unknown'} (code: ${error?.code ?? '-'})` });
   }
 
-  const trialStartedMs = new Date(user.trial_started_at).getTime();
-  const trialExpiresMs = trialStartedMs + TRIAL_DAYS * 24 * 60 * 60 * 1000;
-  const isAdmin = !!process.env.ADMIN_EMAIL && user.email === process.env.ADMIN_EMAIL.toLowerCase();
-  // 관리자는 만료 없이 30일 토큰, 일반은 체험 만료까지
-  const expiresInSec = isAdmin
-    ? 30 * 24 * 60 * 60
-    : Math.max(60, Math.floor((trialExpiresMs - Date.now()) / 1000));
-
-  const token = jwt.sign(
-    {
-      userId: user.id,
-      email: user.email,
-      name: user.name,
-      trialStartedAt: trialStartedMs,
-      trialExpiresAt: trialExpiresMs,
-      isAdmin,
-    },
-    jwtSecret,
-    { expiresIn: expiresInSec }
-  );
-
   return res.status(201).json({
-    token,
-    user: { id: user.id, name: user.name, email: user.email, isAdmin },
-    trialExpiresAt: trialExpiresMs,
+    pending: true,
+    message: '가입 신청이 접수되었습니다. 관리자 승인 후 이용 가능합니다.',
   });
 }

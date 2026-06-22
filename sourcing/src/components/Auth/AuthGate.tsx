@@ -57,6 +57,16 @@ export function AuthGate({ onSuccess }: Props) {
       });
       const data = await res.json();
       if (!res.ok) return setMessage({ text: data.error, type: 'error' });
+      if (data.pending) {
+        setMode('login');
+        setSignupName('');
+        setSignupPhone('');
+        setSignupEmail('');
+        return setMessage({
+          text: data.message ?? '가입 신청이 접수되었습니다. 관리자 승인 후 이용 가능합니다.',
+          type: 'success',
+        });
+      }
       setToken(data.token);
       onSuccess();
     } catch {
@@ -75,7 +85,7 @@ export function AuthGate({ onSuccess }: Props) {
         <h1 className="text-xl font-bold text-slate-900 mb-1">소싱 파인더 · 광고 성과 분석기</h1>
         <p className="text-sm text-slate-500 mb-1">훈프로의 정밀 소싱·운영 전략을 자동 생성</p>
         <p className="text-xs text-blue-600 font-medium mb-6 flex items-center gap-1">
-          <Lock className="w-3 h-3" /> 가입 즉시 7일 무료 체험
+          <Lock className="w-3 h-3" /> 관리자 승인 후 7일 무료 체험
         </p>
 
         <div className="flex w-full bg-slate-100 p-1 rounded-xl mb-6">

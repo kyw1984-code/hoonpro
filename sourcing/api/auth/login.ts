@@ -34,11 +34,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(404).json({ error: '등록되지 않은 이메일입니다. 먼저 가입해주세요.' });
   }
 
-  const trialStartedMs = new Date(user.trial_started_at).getTime();
-  const trialExpiresMs = trialStartedMs + TRIAL_DAYS * 24 * 60 * 60 * 1000;
   const isAdmin = !!process.env.ADMIN_EMAIL && user.email === process.env.ADMIN_EMAIL.toLowerCase();
 
-  // 관리자는 만료 무시, 일반은 체험 만료 시 차단
+  if (!isAdmin) {
+    if (user.status === 'pending') {
+      return res.status(403).json({ error: '관리자 승인 대기 중입니다. 승인 후 이용 가능합니다.' });
+    }
+    if (user.status === 'rejected') {
+      return res.status(403).json({ error: '가입이 거절되었습니다. 운영자에게 문의해주세요.' });
+    }
+  }
+
+  const trialStartedMs = new Date(user.trial_started_at).getTime();
+  const trialExpiresMs = trialStartedMs + TRIAL_DAYS * 24 * 60 * 60 * 1000;
+
   if (!isAdmin && trialExpiresMs <= Date.now()) {
     return res.status(403).json({
       error: '7일 무료 체험이 만료됐습니다. 연장은 운영자에게 문의해주세요.',
