@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { BarChart3, LogOut, Clock, ShieldCheck, TrendingUp, LayoutTemplate } from 'lucide-react';
+import { BarChart3, LogOut, Clock, ShieldCheck, TrendingUp, LayoutTemplate, Sparkles } from 'lucide-react';
 import { AnalyzerDashboard } from './components/Analyzer/AnalyzerDashboard';
 import { SourcingFinder } from './components/Sourcing/SourcingFinder';
+import { DetailPromptViewer } from './components/DetailPrompt/DetailPromptViewer';
 import { AdminPanel } from './components/Admin/AdminPanel';
 import { Footer } from './components/Layout/Footer';
 import { AuthGate } from './components/Auth/AuthGate';
 import { getUser, removeToken, getRemainingDays, type AuthUser } from './lib/auth';
 
-type Tab = 'sourcing' | 'analyzer' | 'admin';
+type Tab = 'sourcing' | 'analyzer' | 'detail' | 'admin';
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);
@@ -56,6 +57,17 @@ export default function App() {
               >
                 <BarChart3 className="w-4 h-4 mr-1.5" /> 광고 분석기
               </button>
+              <button
+                onClick={() => setActiveTab('detail')}
+                className={`flex items-center px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  activeTab === 'detail'
+                    ? 'bg-white text-blue-700 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Sparkles className="w-4 h-4 mr-1.5" /> 상세페이지 프롬프트
+                <span className="ml-1.5 text-[10px] font-bold bg-amber-400 text-amber-900 px-1.5 py-0.5 rounded-full">FREE</span>
+              </button>
               {user.isAdmin && (
                 <button
                   onClick={() => setActiveTab('admin')}
@@ -99,6 +111,7 @@ export default function App() {
       <main className="flex-grow">
         {activeTab === 'sourcing' && <SourcingFinder />}
         {activeTab === 'analyzer' && <AnalyzerDashboard />}
+        {activeTab === 'detail' && <DetailPromptViewer />}
         {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
       </main>
 
