@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, type DragEvent } from 'react';
-import { generateImage, generateDetailPlan, generateProductBrief, type DetailPlan, type ProductBrief, type GeneratedImageResult } from '../../api/aiService';
+import { analyzeImageVision, generateImage, generateDetailPlan, generateProductBrief, type DetailPlan, type ProductBrief, type GeneratedImageResult, type VisionAnalysisResult } from '../../api/aiService';
 import { AlertTriangle, CheckCircle2, ChevronDown, Download, Eye, FileText, Image as ImageIcon, Layers3, Loader2, Lock, Palette, RefreshCw, Sparkles, Upload, Wand2, X } from 'lucide-react';
+import { getToken } from '../../lib/auth';
 
 // ────────────────────────────── 상수 ──────────────────────────────
 type CombinationType = 'single' | `bundle-${number}`;
@@ -24,6 +25,17 @@ interface ProductVisualLock {
     mustPreserve: string[];
     forbiddenChanges: string[];
     heroModelDirection: string;
+}
+
+interface ReferenceProfile {
+    index: number;
+    image: string;
+    summary: string;
+    preserveProfile: string;
+    warnings: string[];
+    detectedColors: string[];
+    detectedSurface: ProductSurfaceLock;
+    detectedProductCount?: number;
 }
 
 interface MasterReferences {
@@ -240,6 +252,47 @@ const compactCopyLine = (value: string, maxLength: number): string => {
     return Array.from(normalized).slice(0, maxLength).join('');
 };
 
+const splitCopyLineByLength = (line: string, maxLength: number): string[] => {
+    const normalized = line.replace(/[^\S\n]+/g, ' ').trim();
+    if (!normalized) return [];
+
+    const tokens = normalized.split(/(\s+)/).filter(Boolean);
+    const chunks: string[] = [];
+    let current = '';
+
+    const pushLongToken = (token: string) => {
+        const chars = Array.from(token);
+        for (let i = 0; i < chars.length; i += maxLength) {
+            const chunk = chars.slice(i, i + maxLength).join('').trim();
+            if (chunk) chunks.push(chunk);
+        }
+    };
+
+    for (const token of tokens) {
+        if (/^\s+$/.test(token)) {
+            if (current && !current.endsWith(' ')) current += ' ';
+            continue;
+        }
+
+        const next = `${current}${token}`;
+        if (Array.from(next.trim()).length <= maxLength) {
+            current = next;
+            continue;
+        }
+
+        if (current.trim()) chunks.push(current.trim());
+        if (Array.from(token).length > maxLength) {
+            pushLongToken(token);
+            current = '';
+        } else {
+            current = token;
+        }
+    }
+
+    if (current.trim()) chunks.push(current.trim());
+    return chunks;
+};
+
 const formatMainCopy = (value: string): string => {
     const lines: string[] = [];
     normalizeOverlayCopy(value)
@@ -248,11 +301,7 @@ const formatMainCopy = (value: string): string => {
         .map(line => line.trim())
         .filter(Boolean)
         .forEach(line => {
-            const chars = Array.from(line);
-            for (let i = 0; i < chars.length; i += 14) {
-                const chunk = chars.slice(i, i + 14).join('').trim();
-                if (chunk) lines.push(chunk);
-            }
+            lines.push(...splitCopyLineByLength(line, 14));
         });
     return lines.join('\n');
 };
@@ -493,6 +542,7 @@ const getImageQaTags = (img: Omit<GenImage, 'qaTags'>): string[] => {
     if (/male model only|female model only|남성|여성|men|women/i.test(img.visualPrompt)) tags.push('모델 성별 확인 필요');
     tags.push('제품 가림 확인 필요');
     if ((img.qualityWarnings || []).length > 0) tags.push('기획 경고');
+    if ((img.visionWarnings || []).length > 0) tags.push('비전 QA 경고');
     return Array.from(new Set(tags));
 };
 
@@ -719,11 +769,31 @@ const wrapText = (
 
     for (const sourceLine of sourceLines) {
         let line = '';
-        for (const char of Array.from(sourceLine)) {
-            const next = line + char;
+        const tokens = sourceLine.split(/(\s+)/).filter(Boolean);
+        for (const token of tokens) {
+            if (/^\s+$/.test(token)) {
+                if (line && !line.endsWith(' ')) line += ' ';
+                continue;
+            }
+
+            const next = `${line}${token}`;
             if (ctx.measureText(next).width > maxWidth && line.length > 0) {
-                wrapped.push(line);
-                line = char.trimStart();
+                wrapped.push(line.trim());
+                if (ctx.measureText(token).width > maxWidth) {
+                    let charLine = '';
+                    for (const char of Array.from(token)) {
+                        const charNext = charLine + char;
+                        if (ctx.measureText(charNext).width > maxWidth && charLine.length > 0) {
+                            wrapped.push(charLine.trim());
+                            charLine = char;
+                        } else {
+                            charLine = charNext;
+                        }
+                    }
+                    line = charLine;
+                } else {
+                    line = token;
+                }
             } else {
                 line = next;
             }
@@ -981,6 +1051,10 @@ interface GenImage {
     variantUrls?: string[];
     selectedVariantIndex?: number;
     visualLockWarnings?: string[];
+    visionWarnings?: string[];
+    visionSummary?: string;
+    visionRegenerationHint?: string;
+    qaChecked?: boolean;
     priority?: number;
     bundleRequirement?: BundleRequirement;
     regenerationHint?: string;
@@ -1141,6 +1215,8 @@ export const DetailPlanner: React.FC = () => {
     });
     const [length, setLength] = useState<number | 'auto'>(8);
     const [referenceImages, setReferenceImages] = useState<string[]>([]);
+    const [referenceProfiles, setReferenceProfiles] = useState<ReferenceProfile[]>([]);
+    const [referenceAnalyzing, setReferenceAnalyzing] = useState(false);
     const [plan, setPlan] = useState<DetailPlan | null>(null);
     const [images, setImages] = useState<GenImage[]>([]);
     const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null);
@@ -1160,7 +1236,10 @@ export const DetailPlanner: React.FC = () => {
         if (!files) return;
         Array.from(files).forEach(file => {
             const reader = new FileReader();
-            reader.onloadend = () => setReferenceImages(prev => [...prev, reader.result as string]);
+            reader.onloadend = () => {
+                setReferenceProfiles([]);
+                setReferenceImages(prev => [...prev, reader.result as string]);
+            };
             reader.readAsDataURL(file);
         });
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -1169,7 +1248,10 @@ export const DetailPlanner: React.FC = () => {
         e.preventDefault();
         handleFiles(e.dataTransfer.files);
     };
-    const removeImage = (idx: number) => setReferenceImages(prev => prev.filter((_, i) => i !== idx));
+    const removeImage = (idx: number) => {
+        setReferenceProfiles([]);
+        setReferenceImages(prev => prev.filter((_, i) => i !== idx));
+    };
 
     // ── STEP 1 → 기획안 생성 ──
     const handleGeneratePlan = async () => {
@@ -1183,12 +1265,26 @@ export const DetailPlanner: React.FC = () => {
         }
         setLoading(true);
         try {
+            const profiles = await analyzeReferenceImages();
+            const profileText = profiles.map(profile => profile.preserveProfile || profile.summary).filter(Boolean).join('\n');
             const brief = editableTextToBrief(briefText, productBrief || await generateProductBrief(info));
-            setProductBrief(brief);
-            setBriefText(briefToEditableText(brief));
-            const visualLock = buildProductVisualLock(info, brief, briefToEditableText(brief), productVisualLock);
+            const enrichedBrief: ProductBrief = {
+                ...brief,
+                visualMustKeep: [
+                    ...brief.visualMustKeep,
+                    ...profiles.map(profile => profile.preserveProfile || profile.summary).filter(Boolean),
+                ].slice(0, 8),
+            };
+            setProductBrief(enrichedBrief);
+            setBriefText(briefToEditableText(enrichedBrief));
+            const visualLock = getVisualLockWithReferenceProfiles(buildProductVisualLock(info, enrichedBrief, briefToEditableText(enrichedBrief), productVisualLock));
             setProductVisualLock(visualLock);
-            const result = await generateDetailPlan({ ...info, length, productBrief: brief });
+            const result = await generateDetailPlan({
+                ...info,
+                length,
+                productBrief: enrichedBrief,
+                description: [info.description, profileText ? `레퍼런스 분석:\n${profileText}` : ''].filter(Boolean).join('\n\n'),
+            });
             if (!result || !result.images?.length) {
                 alert('기획안 생성에 실패했습니다. 다시 시도해주세요.');
                 return;
@@ -1249,7 +1345,10 @@ export const DetailPlanner: React.FC = () => {
         let alive = true;
         (async () => {
             try {
-                const res = await fetch('/api/config');
+                const res = await fetch('/api/usage?action=config', {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${getToken()}` },
+                });
                 const data = await res.json();
                 if (!alive) return;
                 const unlocked = data?.aiIntegratedTextEnabled === true;
@@ -1305,6 +1404,67 @@ export const DetailPlanner: React.FC = () => {
     const getActiveVisualLock = (): ProductVisualLock => (
         productVisualLock || buildProductVisualLock(info, productBrief, briefText, productVisualLock)
     );
+
+    const getReferenceProfileText = (): string => (
+        referenceProfiles
+            .map(profile => [
+                `Reference ${profile.index + 1}: ${profile.preserveProfile || profile.summary}`,
+                profile.detectedColors.length ? `colors=${profile.detectedColors.join(', ')}` : '',
+                profile.detectedSurface ? `surface=${profile.detectedSurface}` : '',
+            ].filter(Boolean).join(' / '))
+            .join('\n')
+    );
+
+    const getVisualLockWithReferenceProfiles = (baseLock = getActiveVisualLock()): ProductVisualLock => {
+        const profileText = getReferenceProfileText();
+        if (!profileText) return baseLock;
+        return {
+            ...baseLock,
+            surfaceLock: referenceProfiles.some(profile => profile.detectedSurface === 'printed')
+                ? 'printed'
+                : baseLock.surfaceLock,
+            mustPreserve: [
+                ...baseLock.mustPreserve,
+                ...referenceProfiles.map(profile => profile.preserveProfile || profile.summary).filter(Boolean),
+            ].slice(0, 10),
+            forbiddenChanges: [
+                ...baseLock.forbiddenChanges,
+                'Do not deviate from the analyzed reference preservation profiles.',
+            ],
+        };
+    };
+
+    const analyzeReferenceImages = async (): Promise<ReferenceProfile[]> => {
+        if (referenceImages.length === 0) return [];
+        if (referenceProfiles.length === referenceImages.length && referenceProfiles.every((profile, idx) => profile.image === referenceImages[idx])) {
+            return referenceProfiles;
+        }
+        setReferenceAnalyzing(true);
+        try {
+            const profiles = await Promise.all(referenceImages.slice(0, 4).map(async (image, index) => {
+                const result = await analyzeImageVision({
+                    image,
+                    mode: 'reference',
+                    productName: info.name,
+                    combinationCount: getCombinationCount(info.combinationType),
+                });
+                return {
+                    index,
+                    image,
+                    summary: result?.summary || `업로드 레퍼런스 ${index + 1}`,
+                    preserveProfile: result?.preserveProfile || result?.summary || '',
+                    warnings: result?.warnings || [],
+                    detectedColors: result?.detectedColors || [],
+                    detectedSurface: (result?.detectedSurface || 'unknown') as ProductSurfaceLock,
+                    detectedProductCount: result?.detectedProductCount,
+                };
+            }));
+            setReferenceProfiles(profiles);
+            return profiles;
+        } finally {
+            setReferenceAnalyzing(false);
+        }
+    };
 
     const buildReferencePayload = (seg: GenImage, masters: MasterReferences) => {
         if (seg.bundleRequirement === 'before-no-current-product' || isProblemContrastSection(seg)) {
@@ -1444,6 +1604,7 @@ export const DetailPlanner: React.FC = () => {
                 runtimeLock.genderLock,
                 runtimeLock.inferredGenderReason || '',
                 runtimeLock.mustPreserve.join(' '),
+                getReferenceProfileText(),
             ].join(' ');
             const colorLock = runtimeLock.colorLock || detectProductColorLock(productLockSource);
             const genderLock = runtimeLock.genderLock || detectModelGenderLock(productLockSource);
@@ -1458,8 +1619,10 @@ export const DetailPlanner: React.FC = () => {
                 : latest;
             const prompt = buildImagePrompt(promptSource, info.combinationType, info.name, colorLock, genderLock, requestedTextMode, runtimeLock, masterReferenceType, plan?.designSystem, referenceImages.length);
             const { refs, roles } = buildReferencePayload(latest, runtimeMasters);
+            const wantsCandidatePair = !asCandidate && shouldRunVisionQa(latest) && (latest.number === 1 || latest.layoutPreset === 'cta' || isFeatureBenefitImage(latest));
             const result = await generateImage(prompt, refs, '9:16', bulkGenerate ? 'medium' : undefined, {
                 inputFidelity: 'high',
+                variantCount: wantsCandidatePair ? 2 : 1,
                 referenceRoles: roles,
                 pacingMode: 'auto',
                 priority: latest.priority ?? getImageGenerationPriority(latest),
@@ -1478,6 +1641,10 @@ export const DetailPlanner: React.FC = () => {
             const imageUrl = canUseIntegratedText
                 ? raw
                 : await overlayTextOnImage(raw, { ...latest, textRenderMode: 'canvas' }, plan?.designSystem);
+            const secondRaw = result?.images?.find(candidate => candidate && candidate !== raw);
+            const secondImageUrl = secondRaw
+                ? (canUseIntegratedText ? secondRaw : await overlayTextOnImage(secondRaw, { ...latest, textRenderMode: 'canvas' }, plan?.designSystem))
+                : '';
             if (asCandidate && latest.imageUrl) {
                 updateImage(seg.id, {
                     candidateImageUrl: imageUrl,
@@ -1491,7 +1658,7 @@ export const DetailPlanner: React.FC = () => {
                 });
                 return;
             }
-            updateImage(seg.id, {
+            const nextPatch: Partial<GenImage> = {
                 imageUrl,
                 rawImageUrl: raw,
                 isGenerating: false,
@@ -1500,11 +1667,18 @@ export const DetailPlanner: React.FC = () => {
                 textRenderMode: canUseIntegratedText ? 'integrated' : 'canvas',
                 provider: result?.provider,
                 model: result?.model,
-                candidateImageUrl: '',
-                candidateRawImageUrl: '',
+                variantUrls: result?.images || [],
+                candidateImageUrl: secondImageUrl,
+                candidateRawImageUrl: secondRaw || '',
                 previousImageUrl: '',
                 regenerationHint: '',
-            });
+                visionWarnings: [],
+                visionSummary: '',
+                visionRegenerationHint: '',
+                qaChecked: false,
+            };
+            updateImage(seg.id, nextPatch);
+            await runVisionQaForImage({ ...latest, ...nextPatch } as GenImage, imageUrl, raw);
         } catch (error) {
             console.error(error);
             updateImage(seg.id, {
@@ -1522,6 +1696,55 @@ export const DetailPlanner: React.FC = () => {
         const latest = { ...(images.find(img => img.id === seg.id) || seg), textRenderMode: 'canvas' as TextRenderMode };
         const imageUrl = await overlayTextOnImage(seg.rawImageUrl, latest, plan?.designSystem);
         updateImage(seg.id, { imageUrl, isGenerating: false, status: 'done', textRenderMode: 'canvas' });
+    };
+
+    const applyTextPatch = async (seg: GenImage, patch: Partial<Pick<GenImage, 'mainCopy' | 'subCopy' | 'points'>>) => {
+        const latest = {
+            ...(images.find(img => img.id === seg.id) || seg),
+            ...patch,
+            textRenderMode: 'canvas' as TextRenderMode,
+        };
+        if (!seg.rawImageUrl) {
+            updateImage(seg.id, latest);
+            return;
+        }
+        updateImage(seg.id, { ...patch, isGenerating: true, status: 'generating', errorMessage: '', textRenderMode: 'canvas' });
+        const imageUrl = await overlayTextOnImage(seg.rawImageUrl, latest, plan?.designSystem);
+        updateImage(seg.id, { ...patch, imageUrl, isGenerating: false, status: 'done', textRenderMode: 'canvas' });
+    };
+
+    const shouldRunVisionQa = (seg: GenImage): boolean => (
+        seg.number === 1 ||
+        seg.layoutPreset === 'cta' ||
+        seg.bundleRequirement === 'both-items' ||
+        seg.bundleRequirement === 'before-no-current-product' ||
+        isFeatureBenefitImage(seg) ||
+        ['product', 'detail', 'texture', 'cta', 'package'].includes(seg.shotType || '')
+    );
+
+    const runVisionQaForImage = async (seg: GenImage, imageUrl: string, rawImageUrl?: string) => {
+        if (!shouldRunVisionQa(seg)) return;
+        const result = await analyzeImageVision({
+            image: rawImageUrl || imageUrl,
+            referenceImages,
+            mode: 'qa',
+            productName: info.name,
+            sectionRole: seg.role,
+            shotType: seg.shotType,
+            combinationCount: getCombinationCount(info.combinationType),
+            genderLock: getVisualLockWithReferenceProfiles(getActiveVisualLock()).genderLock,
+            expectedNoText: seg.textRenderMode !== 'integrated',
+            expectedProductOnly: !!seg.shotType && !isModelShot(seg.shotType),
+            expectedProblemScene: seg.bundleRequirement === 'before-no-current-product' || isProblemContrastSection(seg),
+        });
+        if (!result) return;
+        updateImage(seg.id, {
+            visionWarnings: result.warnings,
+            visionSummary: result.summary,
+            visionRegenerationHint: result.regenerationHint,
+            qaChecked: true,
+            regenerationHint: result.warnings.length > 0 ? result.regenerationHint || seg.regenerationHint : seg.regenerationHint,
+        });
     };
 
     const changeTextPosition = async (seg: GenImage, textPosition: 'top' | 'middle' | 'bottom') => {
@@ -1602,7 +1825,7 @@ export const DetailPlanner: React.FC = () => {
     // ── STEP 2 → 전체 이미지 생성 ──
     const handleGenerateAll = async () => {
         setStep(3);
-        const visualLock = getActiveVisualLock();
+        const visualLock = getVisualLockWithReferenceProfiles(getActiveVisualLock());
         setProductVisualLock(visualLock);
         const snapshot = images.map(img => ({
             ...img,
@@ -1632,9 +1855,22 @@ export const DetailPlanner: React.FC = () => {
     const handleRetryFailed = async () => {
         const failed = images.filter(img => img.status === 'failed');
         if (failed.length === 0) return;
-        const visualLock = getActiveVisualLock();
+        const visualLock = getVisualLockWithReferenceProfiles(getActiveVisualLock());
         const masters = useHybridReferences ? await generateMasterReferences(visualLock) : {};
         await Promise.all(sortImagesByGenerationPriority(failed).map(seg => generateOne(seg, true, masters, visualLock, true)));
+    };
+
+    const handleRetryVisionWarnings = async () => {
+        const warningTargets = images
+            .filter(img => img.status === 'done' && (img.visionWarnings?.length || 0) > 0)
+            .map(img => ({
+                ...img,
+                regenerationHint: img.visionRegenerationHint || img.regenerationHint || 'Fix the detected product QA problems while preserving the section role and product identity.',
+            }));
+        if (warningTargets.length === 0) return;
+        const visualLock = getVisualLockWithReferenceProfiles(getActiveVisualLock());
+        const masters = useHybridReferences ? await generateMasterReferences(visualLock) : {};
+        await Promise.all(sortImagesByGenerationPriority(warningTargets).map(seg => generateOne(seg, true, masters, visualLock, true)));
     };
 
     const handleDownloadAll = () => {
@@ -1660,18 +1896,21 @@ export const DetailPlanner: React.FC = () => {
     const modelShotCount = images.filter(i => isModelShot(i.shotType)).length;
     const maxRecommendedModelShots = images.length >= 8 ? 3 : Math.max(1, Math.ceil(images.length * 0.4));
     const qualityWarningCount = images.reduce((sum, img) => sum + (img.qualityWarnings?.length || 0), 0);
-    const warningImageCount = images.filter(i => (i.qualityWarnings?.length || 0) > 0 || (i.qaTags?.length || 0) > 0).length;
+    const visionWarningCount = images.reduce((sum, img) => sum + (img.visionWarnings?.length || 0), 0);
+    const qaCheckedCount = images.filter(i => i.qaChecked).length;
+    const warningImageCount = images.filter(i => (i.qualityWarnings?.length || 0) > 0 || (i.qaTags?.length || 0) > 0 || (i.visionWarnings?.length || 0) > 0).length;
     const missingCount = images.filter(i => !i.imageUrl).length;
     const filteredImages = images.filter(img => {
         if (imageFilter === 'failed') return img.status === 'failed';
         if (imageFilter === 'done') return img.status === 'done' && !!img.imageUrl;
-        if (imageFilter === 'warning') return (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0;
+        if (imageFilter === 'warning') return (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0 || (img.visionWarnings?.length || 0) > 0;
         return true;
     });
     const qaWarnings = [
         ...(failedCount > 0 ? [`생성 실패 이미지 ${failedCount}장이 있습니다.`] : []),
         ...(missingCount > 0 ? [`아직 완성되지 않은 이미지 ${missingCount}장이 있습니다.`] : []),
         ...(qualityWarningCount > 0 ? [`카피/기획 QA 경고 ${qualityWarningCount}건이 있습니다.`] : []),
+        ...(visionWarningCount > 0 ? [`비전 QA 경고 ${visionWarningCount}건이 있습니다.`] : []),
         ...(!images.some(isFeatureBenefitImage) ? ['상품 특장점 전용 이미지가 없습니다. 기획안을 다시 생성하거나 한 장을 특장점 섹션으로 수정하세요.'] : []),
         ...(integratedTextCount > 0 ? [`AI 통합 텍스트 이미지 ${integratedTextCount}장은 한글 오타·뭉개짐을 눈으로 확인해주세요.`] : []),
         ...(modelShotCount > maxRecommendedModelShots ? [`모델컷이 ${modelShotCount}장입니다. 권장 최대 ${maxRecommendedModelShots}장보다 많습니다.`] : []),
@@ -1908,15 +2147,33 @@ export const DetailPlanner: React.FC = () => {
                             </div>
                             <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleFiles(e.target.files)} />
                             {referenceImages.length > 0 && (
-                                <div className="flex flex-wrap gap-3 mt-4">
+                                <div className="mt-4 space-y-3">
+                                <div className="flex flex-wrap gap-3">
                                     {referenceImages.map((img, idx) => (
                                         <div key={idx} className="relative w-20 h-20">
                                             <img src={img} alt="" className="w-full h-full object-cover rounded-lg border border-slate-200" />
+                                            {referenceProfiles[idx] && (
+                                                <span className="absolute bottom-1 left-1 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9px] font-black text-white">QA</span>
+                                            )}
                                             <button onClick={() => removeImage(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5">
                                                 <X className="w-3.5 h-3.5" />
                                             </button>
                                         </div>
                                     ))}
+                                </div>
+                                {referenceAnalyzing && (
+                                    <div className="flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" /> 레퍼런스 제품 보존 요소 분석 중...
+                                    </div>
+                                )}
+                                {referenceProfiles.length > 0 && (
+                                    <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-800">
+                                        <p className="mb-1 font-black">레퍼런스 분석 반영됨</p>
+                                        {referenceProfiles.slice(0, 3).map(profile => (
+                                            <p key={profile.index} className="line-clamp-2">• {profile.summary || profile.preserveProfile}</p>
+                                        ))}
+                                    </div>
+                                )}
                                 </div>
                             )}
                         </div>
@@ -1924,7 +2181,7 @@ export const DetailPlanner: React.FC = () => {
                         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                         <button onClick={handleGeneratePlan} disabled={loading || referenceImages.length < 1}
                             className="w-full bg-slate-950 hover:bg-slate-800 disabled:bg-slate-300 text-white font-black py-3.5 px-8 rounded-xl flex items-center justify-center transition-colors">
-                            {loading ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> 기획안 생성 중...</> : <><Wand2 className="w-5 h-5 mr-2" /> 기획안 생성</>}
+                            {loading ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> {referenceAnalyzing ? '레퍼런스 분석 중...' : '기획안 생성 중...'}</> : <><Wand2 className="w-5 h-5 mr-2" /> 기획안 생성</>}
                         </button>
                         </div>
                     </div>
@@ -2109,7 +2366,7 @@ export const DetailPlanner: React.FC = () => {
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
                                             <label className="block text-xs font-medium text-slate-500 mb-1">메인 카피</label>
-                                            <textarea value={img.mainCopy} onChange={e => updateImage(img.id, { mainCopy: formatMainCopy(e.target.value) })} rows={4}
+                                            <textarea value={img.mainCopy} onChange={e => updateImage(img.id, { mainCopy: e.target.value })} rows={4}
                                                 className="w-full p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                                             <label className="block text-xs font-medium text-slate-500 mb-1 mt-2">서브 카피</label>
                                             <input value={img.subCopy} onChange={e => updateImage(img.id, { subCopy: e.target.value })}
@@ -2185,6 +2442,9 @@ export const DetailPlanner: React.FC = () => {
                             <button onClick={handleRetryFailed} disabled={failedCount === 0 || generatingCount > 0} className="text-amber-700 hover:text-amber-800 disabled:text-slate-300 font-bold py-2.5 px-5 rounded-xl border border-amber-200 disabled:border-slate-200 flex items-center gap-1">
                                 <RefreshCw className="w-4 h-4" /> 실패분 재시도 ({failedCount})
                             </button>
+                            <button onClick={handleRetryVisionWarnings} disabled={visionWarningCount === 0 || generatingCount > 0} className="text-blue-700 hover:text-blue-800 disabled:text-slate-300 font-bold py-2.5 px-5 rounded-xl border border-blue-200 disabled:border-slate-200 flex items-center gap-1">
+                                <RefreshCw className="w-4 h-4" /> QA 경고 재생성 ({visionWarningCount})
+                            </button>
                             <button onClick={handleDownloadAll} disabled={generatedCount === 0} className="bg-slate-950 hover:bg-slate-800 disabled:bg-slate-300 text-white font-black py-2.5 px-5 rounded-xl flex items-center shadow-sm">
                                 <Download className="w-5 h-5 mr-2" /> 전체 다운로드
                             </button>
@@ -2235,6 +2495,7 @@ export const DetailPlanner: React.FC = () => {
                                 { label: '이미지 생성 완료', ok: generatedCount === images.length && images.length > 0 },
                                 { label: '실패 이미지 없음', ok: failedCount === 0 },
                                 { label: '카피/기획 경고 확인', ok: qualityWarningCount === 0 },
+                                { label: `비전 QA ${qaCheckedCount}장 검사`, ok: visionWarningCount === 0 },
                                 { label: `컷별 QA 태그 ${warningImageCount}장`, ok: images.length > 0 },
                                 { label: `모델컷 ${modelShotCount}/${maxRecommendedModelShots}장`, ok: modelShotCount <= maxRecommendedModelShots },
                                 { label: 'AI 통합 텍스트 확인', ok: integratedTextCount === 0 },
@@ -2244,10 +2505,10 @@ export const DetailPlanner: React.FC = () => {
                                 </div>
                             ))}
                         </div>
-                        {images.some(img => (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0) && (
+                        {images.some(img => (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0 || (img.visionWarnings?.length || 0) > 0) && (
                             <div className="mt-4 flex flex-wrap gap-2">
                                 {images
-                                    .filter(img => (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0)
+                                    .filter(img => (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0 || (img.visionWarnings?.length || 0) > 0)
                                     .slice(0, 8)
                                     .map(img => (
                                         <button key={img.id} onClick={() => scrollToImage(img.id)} className="rounded-full bg-white/80 px-3 py-1 text-xs font-bold text-amber-800 ring-1 ring-amber-200 hover:bg-white">
@@ -2319,8 +2580,79 @@ export const DetailPlanner: React.FC = () => {
                                                 ? 'AI가 이미지 안에 메인 카피를 직접 넣었습니다. 오타, 뭉개짐, 잘림이 보이면 안전 모드로 다시 적용하세요.'
                                                 : '한글 카피를 별도 합성해 선명도와 오타 위험을 줄인 안전 모드입니다.'}
                                         </div>
-                                        <textarea value={seg.mainCopy} onChange={e => updateImage(seg.id, { mainCopy: formatMainCopy(e.target.value) })} rows={4}
+                                        <textarea value={seg.mainCopy} onChange={e => updateImage(seg.id, { mainCopy: e.target.value })} rows={4}
                                             className="w-full p-2 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none" placeholder="메인 카피" />
+                                        <div className="rounded-lg border border-slate-100 p-2">
+                                            <div className="mb-1.5 flex items-center justify-between gap-2">
+                                                <p className="text-[11px] font-black text-slate-600">서브/포인트 문구 편집</p>
+                                                <div className="flex gap-1">
+                                                    <button
+                                                        onClick={() => applyTextPatch(seg, { subCopy: seg.subCopy, points: (seg.points || []).map(point => point.trim()).filter(Boolean) })}
+                                                        disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
+                                                        className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
+                                                    >
+                                                        적용
+                                                    </button>
+                                                    <button
+                                                        onClick={() => applyTextPatch(seg, { subCopy: '', points: [] })}
+                                                        disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || (!seg.subCopy && (!seg.points || seg.points.length === 0))}
+                                                        className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-100 disabled:opacity-40"
+                                                    >
+                                                        서브/포인트 전체 제거
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <input
+                                                value={seg.subCopy}
+                                                onChange={e => updateImage(seg.id, { subCopy: e.target.value })}
+                                                className="mb-1.5 w-full rounded-lg border border-slate-200 p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                                                placeholder="서브 카피"
+                                            />
+                                            <div className="mb-1.5 space-y-1">
+                                                {(seg.points || []).map((point, index) => (
+                                                    <div key={index} className="flex gap-1">
+                                                        <input
+                                                            value={point}
+                                                            onChange={e => updateImage(seg.id, {
+                                                                points: (seg.points || []).map((item, pointIndex) => pointIndex === index ? e.target.value : item),
+                                                            })}
+                                                            className="min-w-0 flex-1 rounded-lg border border-slate-200 p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                                                            placeholder={`포인트 ${index + 1}`}
+                                                        />
+                                                        <button
+                                                            onClick={() => applyTextPatch(seg, { points: (seg.points || []).filter((_, pointIndex) => pointIndex !== index) })}
+                                                            disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
+                                                            className="rounded-lg bg-slate-100 px-2 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                                                        >
+                                                            삭제
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <div className="flex flex-wrap gap-1.5">
+                                                <button
+                                                    onClick={() => updateImage(seg.id, { points: [...(seg.points || []), ''] })}
+                                                    disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || (seg.points || []).length >= 3}
+                                                    className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
+                                                >
+                                                    포인트 추가
+                                                </button>
+                                                <button
+                                                    onClick={() => applyTextPatch(seg, { subCopy: '' })}
+                                                    disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || !seg.subCopy}
+                                                    className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                                                >
+                                                    서브 제거
+                                                </button>
+                                                <button
+                                                    onClick={() => applyTextPatch(seg, { points: [] })}
+                                                    disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || !seg.points || seg.points.length === 0}
+                                                    className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
+                                                >
+                                                    포인트 제거
+                                                </button>
+                                            </div>
+                                        </div>
                                         <div>
                                             <p className="mb-1 text-[11px] font-bold text-slate-500">텍스트 위치</p>
                                             <div className="grid grid-cols-3 gap-1.5">
@@ -2343,6 +2675,23 @@ export const DetailPlanner: React.FC = () => {
                                         {seg.qualityWarnings && seg.qualityWarnings.length > 0 && (
                                             <div className="rounded-lg bg-amber-50 p-2 text-[11px] text-amber-700">
                                                 {seg.qualityWarnings.slice(0, 2).map((warning, i) => <p key={i}>• {warning}</p>)}
+                                            </div>
+                                        )}
+                                        {seg.qaChecked && (
+                                            <div className={`rounded-lg border p-2 text-[11px] ${seg.visionWarnings?.length ? 'border-rose-100 bg-rose-50 text-rose-700' : 'border-emerald-100 bg-emerald-50 text-emerald-700'}`}>
+                                                <p className="mb-1 font-black">{seg.visionWarnings?.length ? '비전 QA 경고' : '비전 QA 통과'}</p>
+                                                {seg.visionWarnings?.length
+                                                    ? seg.visionWarnings.slice(0, 4).map((warning, i) => <p key={i}>• {warning}</p>)
+                                                    : <p>{seg.visionSummary || '제품 보존 기준을 통과했습니다.'}</p>}
+                                                {seg.visionWarnings?.length > 0 && (
+                                                    <button
+                                                        onClick={() => regenerateWithPreset(seg, seg.visionRegenerationHint || 'Fix the detected QA problems while preserving exact reference product identity.')}
+                                                        disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
+                                                        className="mt-2 rounded-full bg-white px-2 py-1 text-[10px] font-black text-rose-700 ring-1 ring-rose-100 hover:bg-rose-100 disabled:opacity-50"
+                                                    >
+                                                        QA 기준으로 재생성
+                                                    </button>
+                                                )}
                                             </div>
                                         )}
                                         {seg.qaTags && seg.qaTags.length > 0 && (

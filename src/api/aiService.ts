@@ -707,6 +707,22 @@ type ImagePacingMode = 'auto';
 
 export interface GeneratedImageResult {
   image: string;
+  images?: string[];
+  provider?: 'openai' | 'gemini';
+  model?: string;
+}
+
+export interface VisionAnalysisResult {
+  ok: boolean;
+  warnings: string[];
+  summary: string;
+  preserveProfile?: string;
+  regenerationHint?: string;
+  detectedColors?: string[];
+  detectedSurface?: 'printed' | 'plain' | 'unknown';
+  detectedProductCount?: number;
+  detectedModelCount?: number;
+  hasUnexpectedText?: boolean;
   provider?: 'openai' | 'gemini';
   model?: string;
 }
@@ -800,7 +816,7 @@ export const generateImage = async (
         recordImageSuccess(data?.provider);
         // 사용량/비용 로깅은 서버리스에서 처리 → 클라이언트 중복 기록 안 함
         return data.image
-          ? { image: data.image, provider: data.provider, model: data.model }
+          ? { image: data.image, images: data.images, provider: data.provider, model: data.model }
           : undefined;
       }
 
@@ -826,5 +842,40 @@ export const generateImage = async (
   } catch (error) {
     console.error("Image generation failed:", error);
     return undefined;
+  }
+};
+
+export const analyzeImageVision = async (payload: {
+  image: string;
+  referenceImages?: string[];
+  mode: 'reference' | 'qa';
+  productName?: string;
+  sectionRole?: string;
+  shotType?: string;
+  combinationCount?: number;
+  genderLock?: string;
+  expectedNoText?: boolean;
+  expectedProductOnly?: boolean;
+  expectedProblemScene?: boolean;
+}): Promise<VisionAnalysisResult | null> => {
+  try {
+    await trackUsage();
+    const token = getToken();
+    if (!token) throw new Error('로그인이 필요합니다.');
+
+    const res = await fetch('/api/analyze-image', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || '이미지 QA 분석에 실패했습니다.');
+    return data;
+  } catch (error) {
+    console.warn('Vision analysis skipped:', error);
+    return null;
   }
 };

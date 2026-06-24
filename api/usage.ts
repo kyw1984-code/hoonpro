@@ -52,6 +52,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const action = (req.query.action as string) || req.body?.action || 'track';
 
+  if (action === 'config') {
+    const { data, error } = await supabase
+      .from('app_config')
+      .select('key, value')
+      .eq('key', 'ai_integrated_text_enabled')
+      .maybeSingle();
+
+    if (error) {
+      return res.status(200).json({ aiIntegratedTextEnabled: false });
+    }
+
+    return res.status(200).json({
+      aiIntegratedTextEnabled: data?.value === 'true',
+    });
+  }
+
   // 사용량 호출 기록 (비용/모델 로깅)
   if (action === 'log') {
     const { feature, model, inputTokens, outputTokens } = req.body ?? {};

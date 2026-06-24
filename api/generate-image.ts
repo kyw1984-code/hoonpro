@@ -161,6 +161,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : '';
   const isBundleReferenceRequest = Array.isArray(referenceRoles)
     && referenceRoles.some((role: any) => /bundle item|bundle-|조합|set/i.test(String(role || '')));
+  const isPureWhiteCatalogMode = /PURE SOLID WHITE|WHITE CATALOG MODE|#FFFFFF|pure white vacuum/i.test(prompt)
+    && /product-only|NO props|NO accessories|NO EXTRA OBJECTS|제품컷/i.test(prompt);
   const referenceLock = referenceImages.length > 0
     ? [
         'REFERENCE PRODUCT LOCK:',
@@ -173,13 +175,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : '',
       ].join('\n')
     : '';
-  const designerDetailPageDirection = [
-    'DETAIL PAGE DESIGN DIRECTION:',
-    '- The result should look like a professional Korean ecommerce detail-page designer created a full visual section, not a basic product listing photo.',
-    '- Avoid plain white background, isolated catalog cutout, blank studio sweep, centered marketplace product photo, and empty background.',
-    '- Use layered composition, dimensional background color/texture, premium lighting, realistic shadows, product scale hierarchy, tasteful category-relevant props, pedestal/platform/surface when useful, and designed negative space.',
-    '- If the prompt says no model/no person/product only, keep it product-only but still use a rich designer-made set and premium commercial art direction.',
-  ].join('\n');
+  const designerDetailPageDirection = isPureWhiteCatalogMode
+    ? [
+        'PURE WHITE CATALOG THUMBNAIL MODE:',
+        '- Follow the user prompt over any general ecommerce styling direction.',
+        '- Keep a pure solid white #FFFFFF empty background.',
+        '- Product only. No props, no accessories, no decoration, no pedestal, no platform, no surface, no table, no shadows, no extra objects.',
+        '- Do not add lifestyle styling or detail-page set design in this mode.',
+      ].join('\n')
+    : [
+        'DETAIL PAGE DESIGN DIRECTION:',
+        '- The result should look like a professional Korean ecommerce detail-page designer created a full visual section, not a basic product listing photo.',
+        '- Avoid plain white background, isolated catalog cutout, blank studio sweep, centered marketplace product photo, and empty background.',
+        '- Use layered composition, dimensional background color/texture, premium lighting, realistic shadows, product scale hierarchy, tasteful category-relevant props, pedestal/platform/surface when useful, and designed negative space.',
+        '- If the prompt says no model/no person/product only, keep it product-only but still use a rich designer-made set and premium commercial art direction.',
+      ].join('\n');
   const wantsNoAddedText = /SAFE CANVAS TEXT MODE|NO TEXT|The app will overlay Korean typography later|app will overlay all Korean copy later/i.test(prompt);
   const textRenderingPolicy = wantsNoAddedText
     ? [

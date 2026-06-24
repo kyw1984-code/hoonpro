@@ -85,26 +85,30 @@ export const ThumbnailGenerator: React.FC = () => {
     const handleGenerate = async () => {
         setLoading(true);
         try {
-            let prompt = "High quality e-commerce product thumbnail. Clean and professional style.";
+            const referenceCount = referenceImages.length;
+            let prompt = "High quality e-commerce product thumbnail. Clean and professional style. SINGLE UNIFIED IMAGE ONLY: no collage, no split-screen, no divided panels, no duplicated same model in multiple poses, no side-by-side separate photos, no vertical divider line, no before/after layout.";
             
             if (shotType === 'model') {
-                prompt += ` A professional ${modelEthnicity === 'asian' ? 'Asian' : 'Western'} ${modelGender} fashion model posing elegantly with the product. 
+                const modelCount = Math.max(1, referenceCount);
+                prompt += ` A professional ${modelEthnicity === 'asian' ? 'Asian' : 'Western'} ${modelGender} fashion model thumbnail with the product. 
                 CRITICAL INSTRUCTIONS: 
                 1. The model must have a COMPLETELY UNIQUE and FRESH face with ZERO resemblance to any person in the attached reference images. 
                 2. Every generation MUST use a DIFFERENT facial structure, hairstyle, and appearance to ensure variety. 
-                3. If multiple products are referenced, PLEASE GENERATE TWO SEPARATE MODELS in the same scene, with each model wearing one of the products respectively.`;
+                3. Exact model count lock: generate exactly ${modelCount} model${modelCount > 1 ? 's' : ''}, not more and not fewer.
+                4. If there is only one reference image, generate exactly ONE model wearing/using that one product. Do NOT duplicate the same model, do NOT show the same model in multiple poses, and do NOT create a split layout.
+                5. If multiple product reference images are attached, generate exactly ${modelCount} models in one unified scene, one model per reference product/color. The models should share the same camera angle, scale, lighting, background, styling, and pose family so the image feels cohesive.`;
             } else {
-                prompt += " A professional product shot. CRITICAL: NO mannequins, NO hangers, NO hands, NO stands, and NO human limbs. The product should be displayed as a clean flat lay or naturally draped in the scene.";
+                prompt += " A professional product-only shot. CRITICAL: NO mannequins, NO hangers, NO hands, NO stands, NO human limbs, NO props, NO accessories, NO decoration, NO jewelry, NO flowers, NO plants, NO boxes, NO fabric, NO ribbons, NO tools, NO extra objects. Show only the product itself.";
             }
 
             if (backgroundType === 'white') {
-                prompt += " CRITICAL: The background MUST be a PURE SOLID WHITE (#FFFFFF) EMPTY SPACE. ABSOLUTELY NO SHADOWS, NO GRAY TONES, NO GRADIENTS, NO STUDIO WALLS, and NO FLOOR LINES. The subject must float in a pure white vacuum. The background must be 100% flat white hex #FFFFFF.";
+                prompt += " CRITICAL WHITE CATALOG MODE: The background MUST be a PURE SOLID WHITE (#FFFFFF) EMPTY SPACE. ABSOLUTELY NO SHADOWS, NO GRAY TONES, NO GRADIENTS, NO STUDIO WALLS, NO FLOOR LINES, NO TABLE, NO PEDESTAL, NO PLATFORM, NO SURFACE, NO PROPS, NO ACCESSORIES, NO DECORATION, and NO EXTRA OBJECTS. The subject must float in a pure white vacuum. The background must be 100% flat white hex #FFFFFF.";
             } else {
-                prompt += " Create a SINGLE UNIFIED SCENE with a SEAMLESS CONSISTENT natural background captured in A SINGLE CONTINUOUS PHOTOGRAPH. ABSOLUTELY NO COLLAGE, NO SPLIT-SCREEN, NO SIDE-BY-SIDE PANELS, and NO VERTICAL DIVIDER LINES IN THE CENTER. Both models/items must coexist naturally in the EXACT SAME 3D environmental space with continuous flooring and walls.";
+                prompt += " Create a SINGLE UNIFIED SCENE with a SEAMLESS CONSISTENT natural background captured in A SINGLE CONTINUOUS PHOTOGRAPH. ABSOLUTELY NO COLLAGE, NO SPLIT-SCREEN, NO SIDE-BY-SIDE PANELS, and NO VERTICAL DIVIDER LINES IN THE CENTER. All models/items must coexist naturally in the EXACT SAME 3D environmental space with continuous flooring and walls.";
             }
 
             if (shotType === 'product') {
-                prompt += " All subjects MUST be centered and occupy 70-80% of the square frame. Maintain a 10% safety margin from the edges. DO NOT CROP any part of the product (sleeves, collar, etc.). Ensure the ENTIRE product is visible.";
+                prompt += " Product-only catalog composition. All subjects MUST be centered and occupy 70-80% of the square frame. Maintain a 10% safety margin from the edges. DO NOT CROP any part of the product (sleeves, collar, etc.). Ensure the ENTIRE product is visible. No styling objects around it.";
             } else {
                 prompt += " Maintain a tight portrait scale (waist-up or half-body portrait). The product size MUST be SMALL and REALISTIC relative to the model's hand and body. DO NOT enlarge the product. CRITICAL: The FRONT FACE and key features of the product must be ORIENTED TOWARD THE CAMERA for maximum visibility. Ensure the product is shown from its BEST HERO ANGLE.";
             }
@@ -123,13 +127,19 @@ export const ThumbnailGenerator: React.FC = () => {
 
             if (referenceImages.length > 0) {
                 if (referenceImages.length > 1) {
-                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract ALL items (front, back, or different colors) and place them BOTH together in A SINGLE UNIFIED COMPOSITION. If shotType is 'model', generate TWO DIFFERENT models, one for each product. Ensure they are in a SINGLE unified scene with a CONSISTENT background. Every model MUST have a NEW, UNIQUE face.`;
+                    prompt += ` IMPORTANT: I have attached ${referenceImages.length} different reference images. You MUST extract ALL items (front, back, or different colors) and place them together in A SINGLE UNIFIED COMPOSITION. If shotType is 'model', generate exactly ${referenceImages.length} models, one model wearing one different referenced product/color. Do not create extra models and do not duplicate one reference product while ignoring another. If shotType is 'product', show only the referenced products themselves, with no accessories or extra objects. Ensure they are in a SINGLE unified scene with a CONSISTENT background. Every model MUST have a NEW, UNIQUE face.`;
                 } else {
-                    prompt += " Use the attached image ONLY as the product detail reference. Focus on the product's shape, texture, and color. If there is a person in the reference, DO NOT use their likeness. Generate a COMPLETELY NEW face and person.";
+                    prompt += " Use the attached image ONLY as the product detail reference. Focus on the product's shape, texture, and color. If shotType is 'model', generate exactly ONE model only, wearing or using the single referenced product. If there is a person in the reference, DO NOT use their likeness. Generate a COMPLETELY NEW face and person.";
                 }
             }
 
-            const result = await generateImage(prompt, referenceImages, "1:1");
+            const result = await generateImage(prompt, referenceImages, "1:1", undefined, {
+                referenceRoles: referenceImages.map((_, idx) => (
+                    referenceImages.length > 1
+                        ? `Image ${idx + 1}: thumbnail bundle item ${idx + 1} reference - preserve as a separate product/color in the unified thumbnail`
+                        : `Image ${idx + 1}: single thumbnail product reference - use one model only if model cut`
+                )),
+            });
             const imageUrl = result?.image;
             if (imageUrl) {
                 const resizedUrl = await new Promise<string>((resolve) => {
