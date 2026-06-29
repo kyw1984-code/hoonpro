@@ -6,6 +6,7 @@ import { UsageStats } from './UsageStats';
 interface UserRow {
   id: string;
   name: string;
+  cohort?: string | null;
   phone: string;
   email: string;
   status: 'pending' | 'approved' | 'rejected';
@@ -220,7 +221,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
           <table className="w-full text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {['성함', '연락처', '이메일', '상태', '오늘 사용', '가입일', '관리'].map(h => (
+                {['성함', '라이브 기수', '연락처', '이메일', '상태', '오늘 사용', '가입일', '관리'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -229,6 +230,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
               {filtered.map(user => (
                 <tr key={user.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-3 font-medium text-slate-900">{user.name}</td>
+                  <td className="px-4 py-3 text-slate-600">{user.cohort || '-'}</td>
                   <td className="px-4 py-3 text-slate-600">{user.phone}</td>
                   <td className="px-4 py-3 text-slate-600">{user.email}</td>
                   <td className="px-4 py-3">

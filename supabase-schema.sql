@@ -2,11 +2,15 @@
 create table if not exists users (
   id uuid default gen_random_uuid() primary key,
   name text not null,
+  cohort text,
   phone text not null,
   email text unique not null,
   status text default 'pending' check (status in ('pending', 'approved', 'rejected')),
   created_at timestamptz default now()
 );
+
+-- 기존 테이블에 cohort 컬럼 추가 (이미 존재하면 무시)
+alter table users add column if not exists cohort text;
 
 -- 2. API 사용량 테이블
 create table if not exists api_usage (

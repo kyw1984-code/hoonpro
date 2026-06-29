@@ -15,6 +15,7 @@ export function AuthGate({ onSuccess }: Props) {
 
   const [loginEmail, setLoginEmail] = useState('');
   const [signupName, setSignupName] = useState('');
+  const [signupCohort, setSignupCohort] = useState('');
   const [signupPhone, setSignupPhone] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
 
@@ -40,7 +41,7 @@ export function AuthGate({ onSuccess }: Props) {
   };
 
   const handleSignup = async () => {
-    if (!signupName.trim() || !signupPhone.trim() || !signupEmail.trim()) {
+    if (!signupName.trim() || !signupCohort.trim() || !signupPhone.trim() || !signupEmail.trim()) {
       return setMessage({ text: '모든 항목을 입력해주세요.', type: 'error' });
     }
     setLoading(true);
@@ -49,12 +50,12 @@ export function AuthGate({ onSuccess }: Props) {
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: signupName.trim(), phone: signupPhone.trim(), email: signupEmail.trim().toLowerCase() }),
+        body: JSON.stringify({ name: signupName.trim(), cohort: signupCohort.trim(), phone: signupPhone.trim(), email: signupEmail.trim().toLowerCase() }),
       });
       const data = await res.json();
       if (!res.ok) return setMessage({ text: data.error, type: 'error' });
       setMessage({ text: data.message, type: 'success' });
-      setSignupName(''); setSignupPhone(''); setSignupEmail('');
+      setSignupName(''); setSignupCohort(''); setSignupPhone(''); setSignupEmail('');
     } catch {
       setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
     } finally {
@@ -115,6 +116,13 @@ export function AuthGate({ onSuccess }: Props) {
               placeholder="성함"
               className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               autoFocus
+            />
+            <input
+              type="text"
+              value={signupCohort}
+              onChange={e => setSignupCohort(e.target.value)}
+              placeholder="라이브 기수 (예: 쇼크트리 7기)"
+              className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
             />
             <input
               type="tel"
