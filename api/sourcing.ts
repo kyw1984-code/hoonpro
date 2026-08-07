@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createHmac } from "crypto";
 
 export const config = { maxDuration: 60 };
 
@@ -7,8 +6,6 @@ export const config = { maxDuration: 60 };
 const NAVER_CLIENT_ID = (process.env.NAVER_CLIENT_ID || process.env.NAVER_API_CLIENT_ID || "").trim();
 const NAVER_CLIENT_SECRET = (process.env.NAVER_CLIENT_SECRET || process.env.NAVER_API_CLIENT_SECRET || "").trim();
 const COUPANG_COOKIE = (process.env.COUPANG_COOKIE || "").trim();
-const COUPANG_ACCESS_KEY = (process.env.COUPANG_ACCESS_KEY || "").trim();
-const COUPANG_SECRET_KEY = (process.env.COUPANG_SECRET_KEY || "").trim();
 
 // NAVER API HUB(NCP) 이관 대응 — 개발자센터(openapi.naver.com)가 기본값이고,
 // HUB로 옮긴 뒤에는 환경변수만 바꿔 붙일 수 있게 호출 정보를 설정으로 뺐다.
@@ -31,7 +28,7 @@ function naverConfigured(): boolean {
 // ─── 업스트림 호출 진단 ───────────────────────────────────────────────────────
 // 검색이 0건으로 끝났을 때 "네이버가 왜 실패했는지"를 구분하기 위해 모든 호출 결과를 기록한다.
 interface CallDiag {
-  source: "naver-shop" | "naver-datalab" | "coupang-partners";
+  source: "naver-shop" | "naver-datalab";
   query?: string;
   sort?: string;
   start?: number;
@@ -156,60 +153,6 @@ async function fetchCoupangViaNaver(keyword: string, diags: CallDiag[]): Promise
     byId.set(productId, product); products.push(product);
   }
   return products;
-}
-
-// ─── 대체 소스: 쿠팡 파트너스 Open API ────────────────────────────────────────
-// 네이버 쇼핑 검색 API가 응답하지 않을 때 쓰는 예비 경로.
-// COUPANG_ACCESS_KEY / COUPANG_SECRET_KEY 가 설정된 경우에만 동작한다.
-function coupangSignedHeaders(method: string, path: string, query: string) {
-  const now = new Date();
-  const p2 = (n: number) => String(n).padStart(2, "0");
-  const datetime =
-    String(now.getUTCFullYear()).slice(2) + p2(now.getUTCMonth() + 1) + p2(now.getUTCDate()) +
-    "T" + p2(now.getUTCHours()) + p2(now.getUTCMinutes()) + p2(now.getUTCSeconds()) + "Z";
-  const signature = createHmac("sha256", COUPANG_SECRET_KEY).update(datetime + method + path + query).digest("hex");
-  return {
-    Authorization: `CEA algorithm=HmacSHA256, access-key=${COUPANG_ACCESS_KEY}, signed-date=${datetime}, signature=${signature}`,
-    "Content-Type": "application/json;charset=UTF-8",
-  };
-}
-
-async function fetchCoupangViaPartners(keyword: string, diags: CallDiag[], limit = 50): Promise<any[]> {
-  if (!COUPANG_ACCESS_KEY || !COUPANG_SECRET_KEY) return [];
-  const path = "/v2/providers/affiliate_open_api/apis/openapi/products/search";
-  const query = `keyword=${encodeURIComponent(keyword)}&limit=${limit}`;
-  try {
-    const res = await fetch(`https://api-gateway.coupang.com${path}?${query}`, {
-      headers: coupangSignedHeaders("GET", path, query),
-    });
-    const body = await res.text();
-    if (!res.ok) {
-      diags.push({ source: "coupang-partners", query: keyword, status: res.status, count: 0, ...parseUpstreamError(body) });
-      return [];
-    }
-    const data = JSON.parse(body);
-    if (data.rCode !== "0" && data.rCode !== 0) {
-      diags.push({ source: "coupang-partners", query: keyword, status: res.status, count: 0, errorCode: String(data.rCode), errorMessage: data.rMessage });
-      return [];
-    }
-    const list: any[] = data.data?.productData ?? [];
-    diags.push({ source: "coupang-partners", query: keyword, status: res.status, count: list.length });
-    return list.map((p, i) => {
-      const name = stripHtml(p.productName || "");
-      const isRocket = !!(p.isRocket ?? p.rocketBadge);
-      const detected = detectDelivery(name);
-      return {
-        productId: p.productId, productName: name, productPrice: p.productPrice ?? 0,
-        productImage: p.productImage ?? "", productUrl: p.productUrl ?? p.landingUrl ?? "#",
-        rating: 0, ratingCount: 0, isRocket,
-        deliveryType: detected !== "general" ? detected : isRocket ? "rocket" : "general",
-        rank: i + 1, source: "coupang-partners", brand: "", category: p.categoryName || "",
-      };
-    }).filter(p => p.productName && p.productPrice > 0 && p.productId);
-  } catch (e: any) {
-    diags.push({ source: "coupang-partners", query: keyword, status: 0, count: 0, errorMessage: e?.message || "fetch failed" });
-    return [];
-  }
 }
 
 const UA_LIST = [
@@ -338,34 +281,23 @@ function cleanImageUrl(url: string): string {
 // 업스트림 실패 원인을 사용자가 조치할 수 있는 문구로 변환한다.
 function describeSearchFailure(diags: CallDiag[]): { status: number; reason: string; error: string } {
   const naver = diags.filter(d => d.source === "naver-shop");
-  const partners = diags.filter(d => d.source === "coupang-partners");
   const hasNaverOk = naver.some(d => d.status === 200);
 
   const unavailable = naver.find(d => d.errorCode === "SE05" || d.status === 404);
   if (unavailable) {
     return {
       status: 502, reason: "naver_shop_api_unavailable",
-      error: "네이버 쇼핑 검색 API가 더 이상 제공되지 않습니다 (SE05: 존재하지 않는 검색 api). 개발자센터의 쇼핑 검색은 NAVER API HUB로 이관됐습니다 — API HUB에서 키를 발급받아 NAVER_API_BASE_URL / NAVER_APIGW_API_KEY_ID / NAVER_APIGW_API_KEY를 설정하거나, 쿠팡 파트너스 키(COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY)를 등록해주세요.",
+      error: "네이버 쇼핑 검색 API가 더 이상 제공되지 않습니다 (SE05: 존재하지 않는 검색 api). 상품 검색용 데이터 소스를 다시 연결해야 합니다.",
     };
   }
   if (naver.some(d => d.status === 401 || d.status === 403)) {
     return {
       status: 502, reason: "naver_auth_failed",
-      error: "네이버 API 인증에 실패했습니다. Vercel 환경변수의 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 값을 확인해주세요.",
+      error: "네이버 API 인증에 실패했습니다. Vercel 환경변수의 네이버 키 설정을 확인해주세요.",
     };
   }
   if (naver.some(d => d.status === 429)) {
     return { status: 503, reason: "naver_rate_limited", error: "네이버 API 호출 한도를 초과했습니다. 잠시 후 다시 시도해주세요." };
-  }
-  if (partners.length > 0 && partners.every(d => d.count === 0)) {
-    const p = partners[0];
-    return {
-      status: 502, reason: "coupang_partners_failed",
-      error: `쿠팡 파트너스 API 호출에 실패했습니다${p.errorMessage ? ` (${p.errorMessage})` : ""}. 키와 승인 상태를 확인해주세요.`,
-    };
-  }
-  if (partners.some(d => d.count > 0)) {
-    return { status: 200, reason: "no_usable_items", error: "쿠팡 API 응답에서 사용할 수 있는 상품을 찾지 못했습니다. 다른 키워드로 시도해보세요." };
   }
   if (hasNaverOk) {
     return { status: 200, reason: "no_coupang_items", error: "네이버 검색 결과에 쿠팡 상품이 없습니다. 다른 키워드로 시도해보세요." };
@@ -380,19 +312,15 @@ async function handleProducts(req: VercelRequest, res: VercelResponse) {
   const wantDebug = req.query.debug === "1";
   if (!keyword) return res.status(400).json({ error: "keyword is required" });
 
-  const hasNaver = naverConfigured();
-  const hasPartners = !!(COUPANG_ACCESS_KEY && COUPANG_SECRET_KEY);
-  if (!hasNaver && !hasPartners) {
+  if (!naverConfigured()) {
     return res.status(500).json({
-      error: "상품 검색용 API 키가 설정되지 않았습니다. Vercel 환경변수에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 또는 COUPANG_ACCESS_KEY / COUPANG_SECRET_KEY를 등록해주세요.",
+      error: "네이버 API 키가 설정되지 않았습니다. Vercel 환경변수에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET (또는 API HUB 키)를 등록해주세요.",
       reason: "no_api_keys",
     });
   }
 
   const diags: CallDiag[] = [];
-  let raw = hasNaver ? await fetchCoupangViaNaver(keyword, diags) : [];
-  // 네이버가 0건이면 쿠팡 파트너스 API로 대체 검색
-  if (raw.length === 0 && hasPartners) raw = await fetchCoupangViaPartners(keyword, diags);
+  const raw = await fetchCoupangViaNaver(keyword, diags);
 
   if (raw.length === 0) {
     const f = describeSearchFailure(diags);
@@ -549,8 +477,6 @@ async function handleDiag(_req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  if (COUPANG_ACCESS_KEY && COUPANG_SECRET_KEY) await fetchCoupangViaPartners("테스트", diags, 1);
-
   return res.status(200).json({
     env: {
       naverConfigured: hasNaver,
@@ -558,7 +484,6 @@ async function handleDiag(_req: VercelRequest, res: VercelResponse) {
       naverAuthMode: NAVER_APIGW_API_KEY_ID && NAVER_APIGW_API_KEY ? "apigw (API HUB)" : "client-id/secret (개발자센터)",
       naverIdLength: NAVER_CLIENT_ID.length,
       naverSecretLength: NAVER_CLIENT_SECRET.length,
-      coupangPartnersConfigured: !!(COUPANG_ACCESS_KEY && COUPANG_SECRET_KEY),
       coupangCookieConfigured: !!COUPANG_COOKIE,
     },
     calls: diags,
