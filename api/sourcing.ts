@@ -10,6 +10,24 @@ const COUPANG_COOKIE = (process.env.COUPANG_COOKIE || "").trim();
 const COUPANG_ACCESS_KEY = (process.env.COUPANG_ACCESS_KEY || "").trim();
 const COUPANG_SECRET_KEY = (process.env.COUPANG_SECRET_KEY || "").trim();
 
+// NAVER API HUB(NCP) 이관 대응 — 개발자센터(openapi.naver.com)가 기본값이고,
+// HUB로 옮긴 뒤에는 환경변수만 바꿔 붙일 수 있게 호출 정보를 설정으로 뺐다.
+const NAVER_API_BASE_URL = (process.env.NAVER_API_BASE_URL || "https://openapi.naver.com").trim().replace(/\/+$/, "");
+const NAVER_APIGW_API_KEY_ID = (process.env.NAVER_APIGW_API_KEY_ID || "").trim();
+const NAVER_APIGW_API_KEY = (process.env.NAVER_APIGW_API_KEY || "").trim();
+
+function naverAuthHeaders(): Record<string, string> {
+  // API HUB용 키가 설정돼 있으면 APIGW 헤더를, 아니면 개발자센터 헤더를 사용한다.
+  if (NAVER_APIGW_API_KEY_ID && NAVER_APIGW_API_KEY) {
+    return { "X-NCP-APIGW-API-KEY-ID": NAVER_APIGW_API_KEY_ID, "X-NCP-APIGW-API-KEY": NAVER_APIGW_API_KEY };
+  }
+  return { "X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET };
+}
+
+function naverConfigured(): boolean {
+  return !!((NAVER_CLIENT_ID && NAVER_CLIENT_SECRET) || (NAVER_APIGW_API_KEY_ID && NAVER_APIGW_API_KEY));
+}
+
 // ─── 업스트림 호출 진단 ───────────────────────────────────────────────────────
 // 검색이 0건으로 끝났을 때 "네이버가 왜 실패했는지"를 구분하기 위해 모든 호출 결과를 기록한다.
 interface CallDiag {
@@ -48,11 +66,9 @@ async function searchNaverShopping(
   keyword: string, start = 1, display = 100,
   sort: "sim" | "date" | "asc" | "dsc" = "sim", diags: CallDiag[] = [], retryCount = 0
 ): Promise<NaverShopItem[]> {
-  const url = `https://openapi.naver.com/v1/search/shop.json?query=${encodeURIComponent(keyword)}&display=${display}&start=${start}&sort=${sort}`;
+  const url = `${NAVER_API_BASE_URL}/v1/search/shop.json?query=${encodeURIComponent(keyword)}&display=${display}&start=${start}&sort=${sort}`;
   try {
-    const res = await fetch(url, {
-      headers: { "X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET },
-    });
+    const res = await fetch(url, { headers: naverAuthHeaders() });
     if (res.status === 429 && retryCount < 2) {
       await new Promise(r => setTimeout(r, 600 + retryCount * 800));
       return searchNaverShopping(keyword, start, display, sort, diags, retryCount + 1);
@@ -103,7 +119,7 @@ function isFatalNaverDiag(d: CallDiag): boolean {
 }
 
 async function fetchCoupangViaNaver(keyword: string, diags: CallDiag[]): Promise<any[]> {
-  if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) return [];
+  if (!naverConfigured()) return [];
   const queries: { kw: string; sort: "sim" | "date" }[] = [
     { kw: keyword, sort: "sim" }, { kw: `${keyword} 쿠팡`, sort: "sim" }, { kw: keyword, sort: "date" },
   ];
@@ -329,7 +345,7 @@ function describeSearchFailure(diags: CallDiag[]): { status: number; reason: str
   if (unavailable) {
     return {
       status: 502, reason: "naver_shop_api_unavailable",
-      error: "네이버 쇼핑 검색 API를 사용할 수 없습니다 (SE05: 존재하지 않는 검색 api). 네이버 개발자센터 > 내 애플리케이션 > API 설정에서 '검색' API 사용 여부를 확인해주세요. 대신 쿠팡 파트너스 키(COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY)를 등록하면 쿠팡 API로 검색합니다.",
+      error: "네이버 쇼핑 검색 API가 더 이상 제공되지 않습니다 (SE05: 존재하지 않는 검색 api). 개발자센터의 쇼핑 검색은 NAVER API HUB로 이관됐습니다 — API HUB에서 키를 발급받아 NAVER_API_BASE_URL / NAVER_APIGW_API_KEY_ID / NAVER_APIGW_API_KEY를 설정하거나, 쿠팡 파트너스 키(COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY)를 등록해주세요.",
     };
   }
   if (naver.some(d => d.status === 401 || d.status === 403)) {
@@ -364,7 +380,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse) {
   const wantDebug = req.query.debug === "1";
   if (!keyword) return res.status(400).json({ error: "keyword is required" });
 
-  const hasNaver = !!(NAVER_CLIENT_ID && NAVER_CLIENT_SECRET);
+  const hasNaver = naverConfigured();
   const hasPartners = !!(COUPANG_ACCESS_KEY && COUPANG_SECRET_KEY);
   if (!hasNaver && !hasPartners) {
     return res.status(500).json({
@@ -442,12 +458,12 @@ async function handleStats(req: VercelRequest, res: VercelResponse) {
   let trendData: number[] = [];
   let trendSource: "naver" | "fallback" = "fallback";
   const trendDiags: CallDiag[] = [];
-  if (NAVER_CLIENT_ID && NAVER_CLIENT_SECRET) {
+  if (naverConfigured()) {
     try {
       const today = new Date(); const lastYear = new Date(); lastYear.setFullYear(today.getFullYear() - 1);
-      const naverRes = await fetch("https://openapi.naver.com/v1/datalab/search", {
+      const naverRes = await fetch(`${NAVER_API_BASE_URL}/v1/datalab/search`, {
         method: "POST",
-        headers: { "X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET, "Content-Type": "application/json" },
+        headers: { ...naverAuthHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ startDate: lastYear.toISOString().split("T")[0], endDate: today.toISOString().split("T")[0], timeUnit: "month", keywordGroups: [{ groupName: keyword, keywords: [keyword] }] }),
       });
       if (naverRes.ok) {
@@ -490,10 +506,7 @@ async function probeNaver(label: string, url: string, diags: CallDiag[], init?: 
   try {
     const r = await fetch(url, {
       ...init,
-      headers: {
-        "X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-      },
+      headers: { ...naverAuthHeaders(), ...(init?.body ? { "Content-Type": "application/json" } : {}) },
     });
     const body = await r.text();
     let count = 0;
@@ -509,17 +522,17 @@ async function probeNaver(label: string, url: string, diags: CallDiag[], init?: 
 
 async function handleDiag(_req: VercelRequest, res: VercelResponse) {
   const diags: CallDiag[] = [];
-  const naverConfigured = !!(NAVER_CLIENT_ID && NAVER_CLIENT_SECRET);
+  const hasNaver = naverConfigured();
 
-  if (naverConfigured) {
-    // 개발자센터 검색 API 중 어떤 vertical이 남아있는지 확인
+  if (hasNaver) {
+    // 검색 API 중 어떤 vertical이 남아있는지 확인
     const q = encodeURIComponent("테스트");
     for (const v of ["shop", "blog", "news", "book", "image", "webkr"]) {
-      await probeNaver(`search/${v}.json`, `https://openapi.naver.com/v1/search/${v}.json?query=${q}&display=1`, diags);
+      await probeNaver(`search/${v}.json`, `${NAVER_API_BASE_URL}/v1/search/${v}.json?query=${q}&display=1`, diags);
     }
     // 검색어 트렌드(데이터랩)
     const today = new Date(); const lastMonth = new Date(); lastMonth.setMonth(today.getMonth() - 1);
-    await probeNaver("datalab/search (검색어 트렌드)", "https://openapi.naver.com/v1/datalab/search", diags, {
+    await probeNaver("datalab/search (검색어 트렌드)", `${NAVER_API_BASE_URL}/v1/datalab/search`, diags, {
       method: "POST",
       body: JSON.stringify({
         startDate: lastMonth.toISOString().split("T")[0], endDate: today.toISOString().split("T")[0],
@@ -527,7 +540,7 @@ async function handleDiag(_req: VercelRequest, res: VercelResponse) {
       }),
     });
     // 쇼핑인사이트
-    await probeNaver("datalab/shopping/categories (쇼핑인사이트)", "https://openapi.naver.com/v1/datalab/shopping/categories", diags, {
+    await probeNaver("datalab/shopping/categories (쇼핑인사이트)", `${NAVER_API_BASE_URL}/v1/datalab/shopping/categories`, diags, {
       method: "POST",
       body: JSON.stringify({
         startDate: lastMonth.toISOString().split("T")[0], endDate: today.toISOString().split("T")[0],
@@ -540,7 +553,9 @@ async function handleDiag(_req: VercelRequest, res: VercelResponse) {
 
   return res.status(200).json({
     env: {
-      naverConfigured,
+      naverConfigured: hasNaver,
+      naverBaseUrl: NAVER_API_BASE_URL,
+      naverAuthMode: NAVER_APIGW_API_KEY_ID && NAVER_APIGW_API_KEY ? "apigw (API HUB)" : "client-id/secret (개발자센터)",
       naverIdLength: NAVER_CLIENT_ID.length,
       naverSecretLength: NAVER_CLIENT_SECRET.length,
       coupangPartnersConfigured: !!(COUPANG_ACCESS_KEY && COUPANG_SECRET_KEY),
