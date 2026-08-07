@@ -21,6 +21,20 @@ function naverAuthHeaders(): Record<string, string> {
   return { "X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET };
 }
 
+// 쿠팡은 데이터센터 IP(Vercel iad1·icn1 모두)를 403으로 차단한다.
+// 국내 주거용 IP 풀을 제공하는 스크래핑 프록시를 앞단에 두면 우회할 수 있어,
+// 업체에 종속되지 않도록 URL 템플릿만 환경변수로 받는다.
+//   예) https://api.scraperapi.com/?api_key=KEY&country_code=kr&url={url}
+//   {url} 자리에 대상 주소가 URL 인코딩되어 들어간다. {url}이 없으면 뒤에 붙인다.
+const SCRAPER_PROXY_URL = (process.env.SCRAPER_PROXY_URL || "").trim();
+
+function viaProxy(target: string): string {
+  if (!SCRAPER_PROXY_URL) return target;
+  return SCRAPER_PROXY_URL.includes("{url}")
+    ? SCRAPER_PROXY_URL.replace("{url}", encodeURIComponent(target))
+    : SCRAPER_PROXY_URL + encodeURIComponent(target);
+}
+
 function naverConfigured(): boolean {
   return !!((NAVER_CLIENT_ID && NAVER_CLIENT_SECRET) || (NAVER_APIGW_API_KEY_ID && NAVER_APIGW_API_KEY));
 }
@@ -28,7 +42,7 @@ function naverConfigured(): boolean {
 // ─── 업스트림 호출 진단 ───────────────────────────────────────────────────────
 // 검색이 0건으로 끝났을 때 "네이버가 왜 실패했는지"를 구분하기 위해 모든 호출 결과를 기록한다.
 interface CallDiag {
-  source: "naver-shop" | "naver-datalab";
+  source: "naver-shop" | "naver-datalab" | "coupang-search";
   query?: string;
   sort?: string;
   start?: number;
@@ -155,6 +169,112 @@ async function fetchCoupangViaNaver(keyword: string, diags: CallDiag[]): Promise
   return products;
 }
 
+// ─── 상품 소스: 쿠팡 검색 결과 파싱 ──────────────────────────────────────────
+// 네이버 쇼핑 검색 API 종료 후의 상품 목록 경로.
+// SCRAPER_PROXY_URL 없이 직접 호출하면 쿠팡이 403을 돌려주므로 사실상 프록시 필수.
+
+function decodeEntities(s: string): string {
+  return s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d))).trim();
+}
+
+function firstMatch(block: string, patterns: RegExp[]): string | null {
+  for (const p of patterns) { const m = block.match(p); if (m) return m[1]; }
+  return null;
+}
+
+// 쿠팡 검색 HTML은 상품 하나가 data-product-id를 가진 <li>로 반복된다.
+// 클래스명이 자주 바뀌므로 항목마다 여러 패턴을 순서대로 시도한다.
+function parseCoupangSearchHtml(html: string): { products: any[]; parseNote: string } {
+  const blocks = html.split(/<li[^>]*data-product-id=/i).slice(1);
+  if (blocks.length === 0) return { products: [], parseNote: "data-product-id 항목을 찾지 못함" };
+
+  const products: any[] = [];
+  const seen = new Set<string>();
+  for (const [i, chunk] of blocks.entries()) {
+    const idMatch = chunk.match(/^["']?(\d+)["']?/);
+    if (!idMatch) continue;
+    const productId = idMatch[1];
+    if (seen.has(productId)) continue;
+
+    const block = chunk.slice(0, 6000);
+    const rawName = firstMatch(block, [
+      /class="[^"]*\bname\b[^"]*"[^>]*>([^<]+)</i,
+      /<img[^>]+alt="([^"]+)"/i,
+      /class="[^"]*product-name[^"]*"[^>]*>([^<]+)</i,
+    ]);
+    const rawPrice = firstMatch(block, [
+      /class="[^"]*price-value[^"]*"[^>]*>([\d,]+)/i,
+      /class="[^"]*\bprice\b[^"]*"[^>]*>[\s\S]{0,80}?([\d,]{3,})\s*원/i,
+      /"salePrice"\s*:\s*(\d+)/i,
+    ]);
+    if (!rawName || !rawPrice) continue;
+
+    const price = parseInt(rawPrice.replace(/,/g, ""), 10) || 0;
+    const name = decodeEntities(rawName);
+    if (!name || price <= 0) continue;
+
+    const image = firstMatch(block, [/<img[^>]+src="([^"]+)"/i, /<img[^>]+data-img-src="([^"]+)"/i]) || "";
+    const rating = parseFloat(firstMatch(block, [/class="[^"]*\brating\b[^"]*"[^>]*>([\d.]+)/i]) || "0") || 0;
+    const ratingCount = parseInt((firstMatch(block, [
+      /class="[^"]*rating-total-count[^"]*"[^>]*>\(?([\d,]+)/i,
+      /리뷰\s*\(?([\d,]+)/i,
+    ]) || "0").replace(/,/g, ""), 10) || 0;
+
+    const isRocketFresh = /로켓프레시/.test(block);
+    const isJet = /판매자로켓|로켓그로스/.test(block);
+    const isRocket = /로켓배송|badge[^"]*rocket|rocket-logo/i.test(block);
+    const deliveryType = isJet ? "jet" : (isRocket || isRocketFresh) ? "rocket" : "general";
+
+    seen.add(productId);
+    products.push({
+      productId, productName: name, productPrice: price,
+      productImage: image.startsWith("//") ? "https:" + image : image,
+      productUrl: `https://www.coupang.com/vp/products/${productId}`,
+      rating, ratingCount, reviewEnriched: ratingCount > 0,
+      isRocket: deliveryType !== "general", deliveryType,
+      rank: i + 1, source: "coupang-search", brand: "", category: "",
+    });
+  }
+  return {
+    products,
+    parseNote: `블록 ${blocks.length}개 중 ${products.length}개 파싱`,
+  };
+}
+
+async function fetchCoupangSearch(keyword: string, diags: CallDiag[], pages = 2): Promise<any[]> {
+  const all: any[] = [];
+  const seenIds = new Set<string>();
+  for (let page = 1; page <= pages; page++) {
+    const target = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&listSize=72&page=${page}`;
+    try {
+      const res: any = await withTimeout(fetch(viaProxy(target), { headers: BROWSER_HEADERS }) as any, 20000, null);
+      if (!res) { diags.push({ source: "coupang-search", query: `page ${page}`, status: 0, count: 0, errorMessage: "timeout(20s)" }); break; }
+      const body = await res.text();
+      if (!res.ok || /Access Denied|Request Rejected/i.test(body)) {
+        diags.push({
+          source: "coupang-search", query: `page ${page}`, status: res.status, count: 0,
+          errorMessage: SCRAPER_PROXY_URL ? "프록시를 거쳤지만 쿠팡이 차단함" : "쿠팡이 데이터센터 IP를 차단함 (SCRAPER_PROXY_URL 미설정)",
+        });
+        break;
+      }
+      const { products, parseNote } = parseCoupangSearchHtml(body);
+      diags.push({ source: "coupang-search", query: `page ${page}`, status: res.status, count: products.length, errorMessage: products.length === 0 ? parseNote : undefined });
+      if (products.length === 0) break;
+      const fresh = products.filter(p => !seenIds.has(p.productId));
+      fresh.forEach(p => seenIds.add(p.productId));
+      // 같은 목록이 반복되면 더 넘길 페이지가 없다는 뜻
+      if (fresh.length === 0) break;
+      all.push(...fresh);
+    } catch (e: any) {
+      diags.push({ source: "coupang-search", query: `page ${page}`, status: 0, count: 0, errorMessage: e?.message || "fetch failed" });
+      break;
+    }
+  }
+  return all.map((p, i) => ({ ...p, rank: i + 1 }));
+}
+
 const UA_LIST = [
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
@@ -172,7 +292,7 @@ async function fetchReviewSummary(productId: string | number): Promise<{ rating:
   const url = `https://www.coupang.com/vp/products/reviews?productId=${pid}&page=1&size=1&sortBy=ORDER_SCORE_ASC&ratingSummary=true`;
   const ua = UA_LIST[Math.floor(Math.random() * UA_LIST.length)];
   try {
-    const res = await fetch(url, {
+    const res = await fetch(viaProxy(url), {
       headers: {
         "User-Agent": ua, "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8", "Referer": `https://www.coupang.com/vp/products/${pid}`,
@@ -281,7 +401,27 @@ function cleanImageUrl(url: string): string {
 // 업스트림 실패 원인을 사용자가 조치할 수 있는 문구로 변환한다.
 function describeSearchFailure(diags: CallDiag[]): { status: number; reason: string; error: string } {
   const naver = diags.filter(d => d.source === "naver-shop");
+  const coupang = diags.filter(d => d.source === "coupang-search");
   const hasNaverOk = naver.some(d => d.status === 200);
+
+  // 쿠팡이 차단한 경우 — 지금 구조에서 가장 흔한 실패
+  const cpBlocked = coupang.find(d => d.status === 403 || d.status === 0);
+  if (cpBlocked && !hasNaverOk) {
+    return {
+      status: 502, reason: SCRAPER_PROXY_URL ? "coupang_blocked_via_proxy" : "coupang_blocked_no_proxy",
+      error: SCRAPER_PROXY_URL
+        ? "쿠팡이 프록시 요청까지 차단했습니다. 프록시 설정(국가·주거용 IP 옵션)을 확인해주세요."
+        : "쿠팡이 서버 IP를 차단해 상품을 가져올 수 없습니다. SCRAPER_PROXY_URL 환경변수에 국내 IP 프록시를 설정해주세요.",
+    };
+  }
+  // 응답은 받았는데 파싱이 0건 — 쿠팡 HTML 구조 변경 신호
+  const cpParseFail = coupang.find(d => d.status === 200 && d.count === 0);
+  if (cpParseFail) {
+    return {
+      status: 502, reason: "coupang_parse_failed",
+      error: `쿠팡 응답을 받았지만 상품을 추출하지 못했습니다 (${cpParseFail.errorMessage || "구조 변경 의심"}). 파서 점검이 필요합니다.`,
+    };
+  }
 
   const unavailable = naver.find(d => d.errorCode === "SE05" || d.status === 404);
   if (unavailable) {
@@ -312,22 +452,20 @@ async function handleProducts(req: VercelRequest, res: VercelResponse) {
   const wantDebug = req.query.debug === "1";
   if (!keyword) return res.status(400).json({ error: "keyword is required" });
 
-  if (!naverConfigured()) {
-    return res.status(500).json({
-      error: "네이버 API 키가 설정되지 않았습니다. Vercel 환경변수에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET (또는 API HUB 키)를 등록해주세요.",
-      reason: "no_api_keys",
-    });
-  }
-
   const diags: CallDiag[] = [];
-  const raw = await fetchCoupangViaNaver(keyword, diags);
+  // 1순위: 쿠팡 검색 결과 직접 수집 (프록시 경유)
+  let raw = await fetchCoupangSearch(keyword, diags);
+  // 2순위: 네이버 쇼핑 검색 API — 현재 종료 상태지만 복구·이관 시 자동으로 다시 쓰인다
+  if (raw.length === 0 && naverConfigured()) raw = await fetchCoupangViaNaver(keyword, diags);
 
   if (raw.length === 0) {
     const f = describeSearchFailure(diags);
     return res.status(f.status).json({ error: f.error, reason: f.reason, ...(wantDebug ? { debug: diags } : {}) });
   }
 
-  await enrichReviewCounts(raw.slice(0, 20));
+  // 쿠팡 검색 결과에는 평점·리뷰수가 이미 들어있다 — 없는 것만 개별 보강
+  const needReview = raw.filter(p => !p.reviewEnriched).slice(0, 20);
+  if (needReview.length > 0) await enrichReviewCounts(needReview);
   let result = filterAndScore(raw, minPrice, maxPrice, keyword);
   result = result.map(p => ({ ...p, productImage: cleanImageUrl(p.productImage) }));
   if (result.length === 0) {
@@ -540,16 +678,24 @@ async function handleProbe(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  // B. 쿠팡 자체 페이지 접근 가능 여부
-  await probeUrl("coupang 검색 HTML", `https://www.coupang.com/np/search?q=${q}&channel=user`, { headers: BROWSER_HEADERS }, out);
-  await probeUrl("coupang 모바일 검색", `https://m.coupang.com/nm/search?q=${q}`, { headers: BROWSER_HEADERS }, out);
+  // B. 쿠팡 자체 페이지 접근 가능 여부 (직접 / 프록시 경유)
+  const cpSearch = `https://www.coupang.com/np/search?q=${q}&channel=user&listSize=72`;
+  await probeUrl("coupang 검색 HTML (직접)", cpSearch, { headers: BROWSER_HEADERS }, out);
+  await probeUrl("coupang 모바일 검색 (직접)", `https://m.coupang.com/nm/search?q=${q}`, { headers: BROWSER_HEADERS }, out);
+  if (SCRAPER_PROXY_URL) {
+    await probeUrl("coupang 검색 HTML (프록시)", viaProxy(cpSearch), { headers: BROWSER_HEADERS }, out);
+    // 프록시가 뚫렸다면 파서가 실제로 상품을 뽑아내는지까지 확인
+    const parseDiags: CallDiag[] = [];
+    const parsed = await fetchCoupangSearch(keyword, parseDiags, 1);
+    out.push({ label: "파서 결과", parsedProducts: parsed.length, sample: parsed[0] || null, diags: parseDiags });
+  }
 
   // C. 네이버 쇼핑 웹 내부 API
   await probeUrl("네이버쇼핑 웹 내부 API",
     `https://search.shopping.naver.com/api/search/all?query=${q}&pagingIndex=1&pagingSize=40&productSet=total`,
     { headers: { ...BROWSER_HEADERS, Accept: "application/json", Referer: `https://search.shopping.naver.com/search/all?query=${q}` } }, out);
 
-  return res.status(200).json({ keyword, results: out });
+  return res.status(200).json({ keyword, proxyConfigured: !!SCRAPER_PROXY_URL, results: out });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
