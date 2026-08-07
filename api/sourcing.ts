@@ -491,6 +491,68 @@ async function handleDiag(_req: VercelRequest, res: VercelResponse) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// PROBE (type=probe) — 쇼핑 검색 API 대체 후보 경로들의 실제 응답 확인
+// 쇼핑 검색 API 종료 후 상품 목록을 어디서 가져올 수 있는지 실측하기 위한 임시 도구.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const BROWSER_HEADERS = {
+  "User-Agent": UA_LIST[0],
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+  "Upgrade-Insecure-Requests": "1",
+};
+
+function analyzeBody(body: string) {
+  const productIds = new Set((body.match(/\/vp\/products\/(\d+)/g) || []).map(m => m.split("/").pop()!));
+  return {
+    bytes: body.length,
+    blocked: /Access Denied|보안 확인|Request Rejected|captcha|akamai/i.test(body),
+    coupangProductLinks: productIds.size,
+    sampleProductId: [...productIds][0] || null,
+    snippet: body.slice(0, 160).replace(/\s+/g, " "),
+  };
+}
+
+async function probeUrl(label: string, url: string, init: RequestInit, out: any[]) {
+  const started = Date.now();
+  try {
+    const r: any = await withTimeout(fetch(url, init) as any, 9000, null);
+    if (!r) { out.push({ label, url, status: 0, note: "timeout(9s)" }); return; }
+    const body = await r.text();
+    out.push({ label, url, status: r.status, contentType: r.headers.get("content-type"), ms: Date.now() - started, ...analyzeBody(body) });
+  } catch (e: any) {
+    out.push({ label, url, status: 0, ms: Date.now() - started, note: e?.message || "fetch failed" });
+  }
+}
+
+async function handleProbe(req: VercelRequest, res: VercelResponse) {
+  const keyword = (typeof req.query.keyword === "string" && req.query.keyword) || "요가매트";
+  const q = encodeURIComponent(keyword);
+  const out: any[] = [];
+
+  // A. 살아있는 네이버 검색 vertical로 쿠팡 상품 URL을 건질 수 있는지
+  if (naverConfigured()) {
+    for (const [label, url] of [
+      ["naver webkr (쿠팡)", `${NAVER_API_BASE_URL}/v1/search/webkr.json?query=${encodeURIComponent(keyword + " 쿠팡")}&display=50`],
+      ["naver image (쿠팡)", `${NAVER_API_BASE_URL}/v1/search/image.json?query=${encodeURIComponent(keyword + " 쿠팡")}&display=50`],
+    ] as const) {
+      await probeUrl(label, url, { headers: naverAuthHeaders() }, out);
+    }
+  }
+
+  // B. 쿠팡 자체 페이지 접근 가능 여부
+  await probeUrl("coupang 검색 HTML", `https://www.coupang.com/np/search?q=${q}&channel=user`, { headers: BROWSER_HEADERS }, out);
+  await probeUrl("coupang 모바일 검색", `https://m.coupang.com/nm/search?q=${q}`, { headers: BROWSER_HEADERS }, out);
+
+  // C. 네이버 쇼핑 웹 내부 API
+  await probeUrl("네이버쇼핑 웹 내부 API",
+    `https://search.shopping.naver.com/api/search/all?query=${q}&pagingIndex=1&pagingSize=40&productSet=total`,
+    { headers: { ...BROWSER_HEADERS, Accept: "application/json", Referer: `https://search.shopping.naver.com/search/all?query=${q}` } }, out);
+
+  return res.status(200).json({ keyword, results: out });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // 메인 핸들러 — ?type=products | ?type=stats
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -505,5 +567,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (type === "products") return handleProducts(req, res);
   if (type === "stats") return handleStats(req, res);
   if (type === "diag") return handleDiag(req, res);
+  if (type === "probe") return handleProbe(req, res);
   return res.status(400).json({ error: "type=products 또는 type=stats 가 필요합니다." });
 }
