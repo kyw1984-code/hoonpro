@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createHmac } from "crypto";
 
 export const config = { maxDuration: 60 };
 
@@ -6,6 +7,33 @@ export const config = { maxDuration: 60 };
 const NAVER_CLIENT_ID = (process.env.NAVER_CLIENT_ID || process.env.NAVER_API_CLIENT_ID || "").trim();
 const NAVER_CLIENT_SECRET = (process.env.NAVER_CLIENT_SECRET || process.env.NAVER_API_CLIENT_SECRET || "").trim();
 const COUPANG_COOKIE = (process.env.COUPANG_COOKIE || "").trim();
+const COUPANG_ACCESS_KEY = (process.env.COUPANG_ACCESS_KEY || "").trim();
+const COUPANG_SECRET_KEY = (process.env.COUPANG_SECRET_KEY || "").trim();
+
+// ─── 업스트림 호출 진단 ───────────────────────────────────────────────────────
+// 검색이 0건으로 끝났을 때 "네이버가 왜 실패했는지"를 구분하기 위해 모든 호출 결과를 기록한다.
+interface CallDiag {
+  source: "naver-shop" | "naver-datalab" | "coupang-partners";
+  query?: string;
+  sort?: string;
+  start?: number;
+  status: number;
+  errorCode?: string;
+  errorMessage?: string;
+  count: number;
+}
+
+function parseUpstreamError(body: string): { errorCode?: string; errorMessage?: string } {
+  try {
+    const j = JSON.parse(body);
+    return {
+      errorCode: j.errorCode || j.rCode || undefined,
+      errorMessage: j.errorMessage || j.rMessage || j.message || undefined,
+    };
+  } catch {
+    return { errorMessage: body.slice(0, 200) || undefined };
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PRODUCTS (type=products) — 네이버 쇼핑 API → 쿠팡 상품 검색·점수화
@@ -18,7 +46,7 @@ interface NaverShopItem {
 
 async function searchNaverShopping(
   keyword: string, start = 1, display = 100,
-  sort: "sim" | "date" | "asc" | "dsc" = "sim", retryCount = 0
+  sort: "sim" | "date" | "asc" | "dsc" = "sim", diags: CallDiag[] = [], retryCount = 0
 ): Promise<NaverShopItem[]> {
   const url = `https://openapi.naver.com/v1/search/shop.json?query=${encodeURIComponent(keyword)}&display=${display}&start=${start}&sort=${sort}`;
   try {
@@ -27,12 +55,21 @@ async function searchNaverShopping(
     });
     if (res.status === 429 && retryCount < 2) {
       await new Promise(r => setTimeout(r, 600 + retryCount * 800));
-      return searchNaverShopping(keyword, start, display, sort, retryCount + 1);
+      return searchNaverShopping(keyword, start, display, sort, diags, retryCount + 1);
     }
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      diags.push({ source: "naver-shop", query: keyword, sort, start, status: res.status, count: 0, ...parseUpstreamError(body) });
+      return [];
+    }
     const data = await res.json();
-    return Array.isArray(data.items) ? data.items : [];
-  } catch { return []; }
+    const items = Array.isArray(data.items) ? data.items : [];
+    diags.push({ source: "naver-shop", query: keyword, sort, start, status: res.status, count: items.length });
+    return items;
+  } catch (e: any) {
+    diags.push({ source: "naver-shop", query: keyword, sort, start, status: 0, count: 0, errorMessage: e?.message || "fetch failed" });
+    return [];
+  }
 }
 
 function stripHtml(s: string): string {
@@ -60,16 +97,26 @@ function detectDelivery(title: string): "rocket" | "jet" | "general" {
   return "general";
 }
 
-async function fetchCoupangViaNaver(keyword: string): Promise<any[]> {
+// 더 호출해봐야 같은 이유로 실패할 응답들 — 남은 페이지 요청을 중단한다.
+function isFatalNaverDiag(d: CallDiag): boolean {
+  return d.status === 401 || d.status === 403 || d.status === 404 || d.errorCode === "SE05";
+}
+
+async function fetchCoupangViaNaver(keyword: string, diags: CallDiag[]): Promise<any[]> {
   if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) return [];
   const queries: { kw: string; sort: "sim" | "date" }[] = [
     { kw: keyword, sort: "sim" }, { kw: `${keyword} 쿠팡`, sort: "sim" }, { kw: keyword, sort: "date" },
   ];
   const pageStarts = [1, 101, 201, 301];
   const allItems: NaverShopItem[] = [];
-  for (const q of queries) {
+  outer: for (const q of queries) {
     for (const start of pageStarts) {
-      allItems.push(...await searchNaverShopping(q.kw, start, 100, q.sort));
+      allItems.push(...await searchNaverShopping(q.kw, start, 100, q.sort, diags));
+      const last = diags[diags.length - 1];
+      // 인증 실패·API 미제공은 재시도해도 동일하므로 즉시 중단(불필요한 12회 왕복 방지)
+      if (last && isFatalNaverDiag(last)) break outer;
+      // start 값이 허용 범위를 벗어나면 다음 페이지는 더 볼 필요가 없다
+      if (last && last.errorCode === "SE03") break;
       await new Promise(r => setTimeout(r, 200));
     }
   }
@@ -93,6 +140,60 @@ async function fetchCoupangViaNaver(keyword: string): Promise<any[]> {
     byId.set(productId, product); products.push(product);
   }
   return products;
+}
+
+// ─── 대체 소스: 쿠팡 파트너스 Open API ────────────────────────────────────────
+// 네이버 쇼핑 검색 API가 응답하지 않을 때 쓰는 예비 경로.
+// COUPANG_ACCESS_KEY / COUPANG_SECRET_KEY 가 설정된 경우에만 동작한다.
+function coupangSignedHeaders(method: string, path: string, query: string) {
+  const now = new Date();
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  const datetime =
+    String(now.getUTCFullYear()).slice(2) + p2(now.getUTCMonth() + 1) + p2(now.getUTCDate()) +
+    "T" + p2(now.getUTCHours()) + p2(now.getUTCMinutes()) + p2(now.getUTCSeconds()) + "Z";
+  const signature = createHmac("sha256", COUPANG_SECRET_KEY).update(datetime + method + path + query).digest("hex");
+  return {
+    Authorization: `CEA algorithm=HmacSHA256, access-key=${COUPANG_ACCESS_KEY}, signed-date=${datetime}, signature=${signature}`,
+    "Content-Type": "application/json;charset=UTF-8",
+  };
+}
+
+async function fetchCoupangViaPartners(keyword: string, diags: CallDiag[], limit = 50): Promise<any[]> {
+  if (!COUPANG_ACCESS_KEY || !COUPANG_SECRET_KEY) return [];
+  const path = "/v2/providers/affiliate_open_api/apis/openapi/products/search";
+  const query = `keyword=${encodeURIComponent(keyword)}&limit=${limit}`;
+  try {
+    const res = await fetch(`https://api-gateway.coupang.com${path}?${query}`, {
+      headers: coupangSignedHeaders("GET", path, query),
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      diags.push({ source: "coupang-partners", query: keyword, status: res.status, count: 0, ...parseUpstreamError(body) });
+      return [];
+    }
+    const data = JSON.parse(body);
+    if (data.rCode !== "0" && data.rCode !== 0) {
+      diags.push({ source: "coupang-partners", query: keyword, status: res.status, count: 0, errorCode: String(data.rCode), errorMessage: data.rMessage });
+      return [];
+    }
+    const list: any[] = data.data?.productData ?? [];
+    diags.push({ source: "coupang-partners", query: keyword, status: res.status, count: list.length });
+    return list.map((p, i) => {
+      const name = stripHtml(p.productName || "");
+      const isRocket = !!(p.isRocket ?? p.rocketBadge);
+      const detected = detectDelivery(name);
+      return {
+        productId: p.productId, productName: name, productPrice: p.productPrice ?? 0,
+        productImage: p.productImage ?? "", productUrl: p.productUrl ?? p.landingUrl ?? "#",
+        rating: 0, ratingCount: 0, isRocket,
+        deliveryType: detected !== "general" ? detected : isRocket ? "rocket" : "general",
+        rank: i + 1, source: "coupang-partners", brand: "", category: p.categoryName || "",
+      };
+    }).filter(p => p.productName && p.productPrice > 0 && p.productId);
+  } catch (e: any) {
+    diags.push({ source: "coupang-partners", query: keyword, status: 0, count: 0, errorMessage: e?.message || "fetch failed" });
+    return [];
+  }
 }
 
 const UA_LIST = [
@@ -218,20 +319,73 @@ function cleanImageUrl(url: string): string {
   return url.startsWith("//") ? "https:" + url : url;
 }
 
+// 업스트림 실패 원인을 사용자가 조치할 수 있는 문구로 변환한다.
+function describeSearchFailure(diags: CallDiag[]): { status: number; reason: string; error: string } {
+  const naver = diags.filter(d => d.source === "naver-shop");
+  const partners = diags.filter(d => d.source === "coupang-partners");
+  const hasNaverOk = naver.some(d => d.status === 200);
+
+  const unavailable = naver.find(d => d.errorCode === "SE05" || d.status === 404);
+  if (unavailable) {
+    return {
+      status: 502, reason: "naver_shop_api_unavailable",
+      error: "네이버 쇼핑 검색 API를 사용할 수 없습니다 (SE05: 존재하지 않는 검색 api). 네이버 개발자센터 > 내 애플리케이션 > API 설정에서 '검색' API 사용 여부를 확인해주세요. 대신 쿠팡 파트너스 키(COUPANG_ACCESS_KEY, COUPANG_SECRET_KEY)를 등록하면 쿠팡 API로 검색합니다.",
+    };
+  }
+  if (naver.some(d => d.status === 401 || d.status === 403)) {
+    return {
+      status: 502, reason: "naver_auth_failed",
+      error: "네이버 API 인증에 실패했습니다. Vercel 환경변수의 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 값을 확인해주세요.",
+    };
+  }
+  if (naver.some(d => d.status === 429)) {
+    return { status: 503, reason: "naver_rate_limited", error: "네이버 API 호출 한도를 초과했습니다. 잠시 후 다시 시도해주세요." };
+  }
+  if (partners.length > 0 && partners.every(d => d.count === 0)) {
+    const p = partners[0];
+    return {
+      status: 502, reason: "coupang_partners_failed",
+      error: `쿠팡 파트너스 API 호출에 실패했습니다${p.errorMessage ? ` (${p.errorMessage})` : ""}. 키와 승인 상태를 확인해주세요.`,
+    };
+  }
+  if (hasNaverOk) {
+    return { status: 200, reason: "no_coupang_items", error: "네이버 검색 결과에 쿠팡 상품이 없습니다. 다른 키워드로 시도해보세요." };
+  }
+  return { status: 502, reason: "upstream_failed", error: "검색 결과를 가져오지 못했습니다. 잠시 후 다시 시도해주세요." };
+}
+
 async function handleProducts(req: VercelRequest, res: VercelResponse) {
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword : "";
   const minPrice = Number(req.query.minPrice) || 15000;
   const maxPrice = Number(req.query.maxPrice) || Number.MAX_SAFE_INTEGER;
+  const wantDebug = req.query.debug === "1";
   if (!keyword) return res.status(400).json({ error: "keyword is required" });
-  if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
-    return res.status(500).json({ error: "네이버 API 키가 설정되지 않았습니다. Vercel 환경변수에 NAVER_CLIENT_ID, NAVER_CLIENT_SECRET을 등록해주세요." });
+
+  const hasNaver = !!(NAVER_CLIENT_ID && NAVER_CLIENT_SECRET);
+  const hasPartners = !!(COUPANG_ACCESS_KEY && COUPANG_SECRET_KEY);
+  if (!hasNaver && !hasPartners) {
+    return res.status(500).json({
+      error: "상품 검색용 API 키가 설정되지 않았습니다. Vercel 환경변수에 NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 또는 COUPANG_ACCESS_KEY / COUPANG_SECRET_KEY를 등록해주세요.",
+      reason: "no_api_keys",
+    });
   }
-  const raw = await fetchCoupangViaNaver(keyword);
-  if (raw.length === 0) return res.status(500).json({ error: "검색 결과를 가져오지 못했습니다. 잠시 후 다시 시도해주세요." });
+
+  const diags: CallDiag[] = [];
+  let raw = hasNaver ? await fetchCoupangViaNaver(keyword, diags) : [];
+  // 네이버가 0건이면 쿠팡 파트너스 API로 대체 검색
+  if (raw.length === 0 && hasPartners) raw = await fetchCoupangViaPartners(keyword, diags);
+
+  if (raw.length === 0) {
+    const f = describeSearchFailure(diags);
+    return res.status(f.status).json({ error: f.error, reason: f.reason, ...(wantDebug ? { debug: diags } : {}) });
+  }
+
   await enrichReviewCounts(raw.slice(0, 20));
   let result = filterAndScore(raw, minPrice, maxPrice, keyword);
   result = result.map(p => ({ ...p, productImage: cleanImageUrl(p.productImage) }));
-  if (result.length === 0) return res.status(200).json({ error: "필터링 후 검색 결과가 없습니다." });
+  if (result.length === 0) {
+    return res.status(200).json({ error: "필터링 후 검색 결과가 없습니다.", reason: "filtered_out", ...(wantDebug ? { debug: diags } : {}) });
+  }
   return res.status(200).json(result);
 }
 
@@ -283,6 +437,8 @@ async function handleStats(req: VercelRequest, res: VercelResponse) {
   const maxPrice = Math.floor(baseAvgPrice * (1.8 + (hash % 10) * 0.05));
 
   let trendData: number[] = [];
+  let trendSource: "naver" | "fallback" = "fallback";
+  const trendDiags: CallDiag[] = [];
   if (NAVER_CLIENT_ID && NAVER_CLIENT_SECRET) {
     try {
       const today = new Date(); const lastYear = new Date(); lastYear.setFullYear(today.getFullYear() - 1);
@@ -294,13 +450,20 @@ async function handleStats(req: VercelRequest, res: VercelResponse) {
       if (naverRes.ok) {
         const data = await naverRes.json();
         const results = data.results?.[0]?.data || [];
+        trendDiags.push({ source: "naver-datalab", query: keyword, status: naverRes.status, count: results.length });
         if (results.length > 0) {
           trendData = results.map((d: any) => Math.floor(searchVolume * (Math.max(d.ratio, 5) / 100)));
           while (trendData.length < 12) trendData.unshift(Math.floor(searchVolume * 0.3));
           if (trendData.length > 12) trendData = trendData.slice(-12);
+          trendSource = "naver";
         }
+      } else {
+        const body = await naverRes.text().catch(() => "");
+        trendDiags.push({ source: "naver-datalab", query: keyword, status: naverRes.status, count: 0, ...parseUpstreamError(body) });
       }
-    } catch {}
+    } catch (e: any) {
+      trendDiags.push({ source: "naver-datalab", query: keyword, status: 0, count: 0, errorMessage: e?.message || "fetch failed" });
+    }
   }
 
   if (!trendData || trendData.length === 0) {
@@ -308,7 +471,50 @@ async function handleStats(req: VercelRequest, res: VercelResponse) {
   }
 
   const marketTrend = searchVolume > 30000 ? "Volume Burst" : grade === "Excellent" ? "Niche Gold" : "Steady Growth";
-  return res.status(200).json({ keyword, searchVolume, totalProducts, competitionRate: parseFloat(competitionRate), grade, averagePrice: baseAvgPrice, minPrice, maxPrice, trendData, marketTrend, top10VolumeIndex: Math.floor((hash % 30) * 5 + 30) });
+  return res.status(200).json({
+    keyword, searchVolume, totalProducts, competitionRate: parseFloat(competitionRate), grade,
+    averagePrice: baseAvgPrice, minPrice, maxPrice, trendData, trendSource, marketTrend,
+    top10VolumeIndex: Math.floor((hash % 30) * 5 + 30),
+    ...(req.query.debug === "1" ? { debug: trendDiags } : {}),
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DIAG (type=diag) — 업스트림 API 상태 점검 (키 값은 노출하지 않음)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function handleDiag(_req: VercelRequest, res: VercelResponse) {
+  const diags: CallDiag[] = [];
+  const naverConfigured = !!(NAVER_CLIENT_ID && NAVER_CLIENT_SECRET);
+
+  if (naverConfigured) {
+    await searchNaverShopping("테스트", 1, 1, "sim", diags);
+    // 블로그 검색은 살아있는 엔드포인트 — 여기서도 실패하면 키 자체 문제다.
+    try {
+      const r = await fetch("https://openapi.naver.com/v1/search/blog.json?query=%ED%85%8C%EC%8A%A4%ED%8A%B8&display=1", {
+        headers: { "X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET },
+      });
+      const body = await r.text();
+      let count = 0;
+      try { count = (JSON.parse(body).items || []).length; } catch {}
+      diags.push({ source: "naver-shop", query: "blog.json probe", status: r.status, count, ...(r.ok ? {} : parseUpstreamError(body)) });
+    } catch (e: any) {
+      diags.push({ source: "naver-shop", query: "blog.json probe", status: 0, count: 0, errorMessage: e?.message });
+    }
+  }
+
+  if (COUPANG_ACCESS_KEY && COUPANG_SECRET_KEY) await fetchCoupangViaPartners("테스트", diags, 1);
+
+  return res.status(200).json({
+    env: {
+      naverConfigured,
+      naverIdLength: NAVER_CLIENT_ID.length,
+      naverSecretLength: NAVER_CLIENT_SECRET.length,
+      coupangPartnersConfigured: !!(COUPANG_ACCESS_KEY && COUPANG_SECRET_KEY),
+      coupangCookieConfigured: !!COUPANG_COOKIE,
+    },
+    calls: diags,
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -325,5 +531,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const type = typeof req.query.type === "string" ? req.query.type : "";
   if (type === "products") return handleProducts(req, res);
   if (type === "stats") return handleStats(req, res);
+  if (type === "diag") return handleDiag(req, res);
   return res.status(400).json({ error: "type=products 또는 type=stats 가 필요합니다." });
 }

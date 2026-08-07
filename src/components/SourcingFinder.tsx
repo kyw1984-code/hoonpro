@@ -252,10 +252,19 @@ export function SourcingFinder() {
     try {
       const query = new URLSearchParams({ type: 'products', keyword: kw, minPrice, maxPrice });
       const response = await fetch(`/api/sourcing?${query.toString()}`);
-      const data = await response.json();
+      const raw = await response.text();
+      let data: any;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        // 서버리스 함수 타임아웃 등으로 JSON이 아닌 응답(HTML 오류 페이지)이 온 경우
+        setSearchError(`검색 요청이 실패했습니다 (HTTP ${response.status}). 잠시 후 다시 시도해주세요.`);
+        setProducts([]); setKeywordStats(null);
+        return;
+      }
 
-      if (!response.ok || data.error) {
-        setSearchError(data.error || '검색 실패');
+      if (!response.ok || data.error || !Array.isArray(data)) {
+        setSearchError(data.error || `검색 실패 (HTTP ${response.status})`);
         setProducts([]); setKeywordStats(null);
         return;
       }
@@ -274,12 +283,17 @@ export function SourcingFinder() {
       const general = topProducts.filter((p: Product) => p.deliveryType === 'general' || (!p.isRocket && !p.deliveryType)).length;
       const sellerDist = JSON.stringify({ rocketPct: (rocket / total) * 100, jetPct: (jet / total) * 100, generalPct: (general / total) * 100 });
 
-      const statsRes = await fetch(`/api/sourcing?type=stats&keyword=${encodeURIComponent(kw)}&sellerDistribution=${encodeURIComponent(sellerDist)}`);
-      const statsData = await statsRes.json();
-      setKeywordStats(statsData);
+      // 통계는 부가 정보 — 실패해도 이미 받아온 상품 목록은 유지한다
+      try {
+        const statsRes = await fetch(`/api/sourcing?type=stats&keyword=${encodeURIComponent(kw)}&sellerDistribution=${encodeURIComponent(sellerDist)}`);
+        const statsData = await statsRes.json();
+        setKeywordStats(statsRes.ok && !statsData.error ? statsData : null);
+      } catch {
+        setKeywordStats(null);
+      }
     } catch (error: any) {
-      setSearchError(error.message);
-      setProducts([]);
+      setSearchError(`검색 중 오류가 발생했습니다: ${error?.message || '네트워크 오류'}`);
+      setProducts([]); setKeywordStats(null);
     } finally {
       setLoading(false);
     }
