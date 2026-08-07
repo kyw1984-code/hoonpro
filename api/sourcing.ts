@@ -348,6 +348,9 @@ function describeSearchFailure(diags: CallDiag[]): { status: number; reason: str
       error: `쿠팡 파트너스 API 호출에 실패했습니다${p.errorMessage ? ` (${p.errorMessage})` : ""}. 키와 승인 상태를 확인해주세요.`,
     };
   }
+  if (partners.some(d => d.count > 0)) {
+    return { status: 200, reason: "no_usable_items", error: "쿠팡 API 응답에서 사용할 수 있는 상품을 찾지 못했습니다. 다른 키워드로 시도해보세요." };
+  }
   if (hasNaverOk) {
     return { status: 200, reason: "no_coupang_items", error: "네이버 검색 결과에 쿠팡 상품이 없습니다. 다른 키워드로 시도해보세요." };
   }
