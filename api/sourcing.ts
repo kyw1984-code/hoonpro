@@ -486,24 +486,54 @@ async function handleStats(req: VercelRequest, res: VercelResponse) {
 // DIAG (type=diag) — 업스트림 API 상태 점검 (키 값은 노출하지 않음)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+async function probeNaver(label: string, url: string, diags: CallDiag[], init?: RequestInit) {
+  try {
+    const r = await fetch(url, {
+      ...init,
+      headers: {
+        "X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      },
+    });
+    const body = await r.text();
+    let count = 0;
+    try {
+      const j = JSON.parse(body);
+      count = (j.items || j.results?.[0]?.data || []).length;
+    } catch {}
+    diags.push({ source: "naver-shop", query: label, status: r.status, count, ...(r.ok ? {} : parseUpstreamError(body)) });
+  } catch (e: any) {
+    diags.push({ source: "naver-shop", query: label, status: 0, count: 0, errorMessage: e?.message });
+  }
+}
+
 async function handleDiag(_req: VercelRequest, res: VercelResponse) {
   const diags: CallDiag[] = [];
   const naverConfigured = !!(NAVER_CLIENT_ID && NAVER_CLIENT_SECRET);
 
   if (naverConfigured) {
-    await searchNaverShopping("테스트", 1, 1, "sim", diags);
-    // 블로그 검색은 살아있는 엔드포인트 — 여기서도 실패하면 키 자체 문제다.
-    try {
-      const r = await fetch("https://openapi.naver.com/v1/search/blog.json?query=%ED%85%8C%EC%8A%A4%ED%8A%B8&display=1", {
-        headers: { "X-Naver-Client-Id": NAVER_CLIENT_ID, "X-Naver-Client-Secret": NAVER_CLIENT_SECRET },
-      });
-      const body = await r.text();
-      let count = 0;
-      try { count = (JSON.parse(body).items || []).length; } catch {}
-      diags.push({ source: "naver-shop", query: "blog.json probe", status: r.status, count, ...(r.ok ? {} : parseUpstreamError(body)) });
-    } catch (e: any) {
-      diags.push({ source: "naver-shop", query: "blog.json probe", status: 0, count: 0, errorMessage: e?.message });
+    // 개발자센터 검색 API 중 어떤 vertical이 남아있는지 확인
+    const q = encodeURIComponent("테스트");
+    for (const v of ["shop", "blog", "news", "book", "image", "webkr"]) {
+      await probeNaver(`search/${v}.json`, `https://openapi.naver.com/v1/search/${v}.json?query=${q}&display=1`, diags);
     }
+    // 검색어 트렌드(데이터랩)
+    const today = new Date(); const lastMonth = new Date(); lastMonth.setMonth(today.getMonth() - 1);
+    await probeNaver("datalab/search (검색어 트렌드)", "https://openapi.naver.com/v1/datalab/search", diags, {
+      method: "POST",
+      body: JSON.stringify({
+        startDate: lastMonth.toISOString().split("T")[0], endDate: today.toISOString().split("T")[0],
+        timeUnit: "month", keywordGroups: [{ groupName: "테스트", keywords: ["테스트"] }],
+      }),
+    });
+    // 쇼핑인사이트
+    await probeNaver("datalab/shopping/categories (쇼핑인사이트)", "https://openapi.naver.com/v1/datalab/shopping/categories", diags, {
+      method: "POST",
+      body: JSON.stringify({
+        startDate: lastMonth.toISOString().split("T")[0], endDate: today.toISOString().split("T")[0],
+        timeUnit: "month", category: [{ name: "패션의류", param: ["50000000"] }],
+      }),
+    });
   }
 
   if (COUPANG_ACCESS_KEY && COUPANG_SECRET_KEY) await fetchCoupangViaPartners("테스트", diags, 1);
