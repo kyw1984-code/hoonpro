@@ -592,9 +592,24 @@ async function handleDiag(_req: VercelRequest, res: VercelResponse) {
 
   if (hasNaver) {
     // 검색 API 중 어떤 vertical이 남아있는지 확인
+    // movie는 이미 종료된 것이 확실한 API — SE05가 "종료" 신호인지 판별하는 대조군
     const q = encodeURIComponent("테스트");
-    for (const v of ["shop", "blog", "news", "book", "image", "webkr"]) {
+    for (const v of [
+      "shop", "blog", "news", "book", "image", "webkr",
+      "local", "kin", "cafearticle", "encyc", "doc", "adult", "errata", "movie",
+    ]) {
       await probeNaver(`search/${v}.json`, `${NAVER_API_BASE_URL}/v1/search/${v}.json?query=${q}&display=1`, diags);
+    }
+    // 쇼핑 검색이 "이름만 바뀐" 것인지 확인 — 있을 법한 대체 명칭들
+    for (const [label, path] of [
+      ["search/shop.xml", `/v1/search/shop.xml?query=${q}&display=1`],
+      ["search/shopping.json", `/v1/search/shopping.json?query=${q}&display=1`],
+      ["search/product.json", `/v1/search/product.json?query=${q}&display=1`],
+      ["search/goods.json", `/v1/search/goods.json?query=${q}&display=1`],
+      ["search/shop (확장자 없음)", `/v1/search/shop?query=${q}&display=1`],
+      ["v2 search/shop.json", `/v2/search/shop.json?query=${q}&display=1`],
+    ] as const) {
+      await probeNaver(label, `${NAVER_API_BASE_URL}${path}`, diags);
     }
     // 검색어 트렌드(데이터랩)
     const today = new Date(); const lastMonth = new Date(); lastMonth.setMonth(today.getMonth() - 1);
