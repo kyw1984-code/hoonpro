@@ -58,6 +58,124 @@ const getKeywordTypes = (grade: string, growth: number, margin: number, competit
   return Array.from(new Set(types));
 };
 
+const competitorNamePools: Record<string, string[]> = {
+  스포츠: [
+    '나이키 드라이핏 UV 페이스커버 스포츠 마스크',
+    '아르메데스 자외선차단 쿨링 스포츠 마스크',
+    '락브로스 라이딩 냉감 바라클라바 마스크',
+    '아디다스 러닝 자외선 차단 스포츠 마스크',
+    'K2 아이스 멀티 스카프 쿨링 마스크',
+    '블랙야크 냉감 팔토시 자외선 차단 토시',
+    '프로스펙스 스포츠 쿨 팔토시 2p',
+    '밀레 UV 차단 등산 쿨토시',
+    '캠핑문 접이식 캠핑 선반 우드쉘프',
+    '코멧 아웃도어 캠핑 식기 건조망',
+  ],
+  자동차: [
+    '메이튼 차량용 자석 햇빛가리개',
+    '불스원 자동차 앞유리 햇빛가리개',
+    '카템 차량용 접이식 햇빛가리개',
+    '훠링 차량용 틈새 수납 포켓',
+    '벤딕트 자동차 시트 틈새 수납함',
+    '차싹 차량용 무선 청소기 필터',
+    '오토반 차량용 컵홀더 틈새 수납함',
+    '카템 자동차 사이드 햇빛가리개',
+    '코멧 차량용 무선 충전 거치대',
+    '불스원 차량용 방향제 리필 세트',
+  ],
+  생활: [
+    '코멧 홈 냉감 침대패드',
+    '듀라론 여름 냉감 패드',
+    '홈플래닛 저소음 탁상용 선풍기',
+    '신일 저소음 탁상 선풍기',
+    '오아 휴대용 신발건조기',
+    '한경희생활과학 신발 건조 살균기',
+    '코멧 무타공 욕실 선반',
+    '생활공식 욕실 곰팡이 제거젤',
+    '탐사 프리미엄 빨래 건조볼',
+    '홈앤하우스 접이식 장바구니 캐리어',
+  ],
+  주방: [
+    '코멧 키친 실리콘 음식덮개',
+    '락앤락 실리콘 에어프라이어 용기',
+    '모던하우스 실리콘 주방 조리도구 세트',
+    '키친아트 싱크대 배수구 거름망',
+    '리빙공감 싱크대 배수망 세트',
+    '네이쳐리빙 실리콘 밀폐 덮개',
+    '바겐슈타이거 에어프라이어 종이호일 대체 용기',
+    '코멧 키친 다용도 채반 트레이',
+    '벨라쿠진 실리콘 조리도구 세트',
+    '홈플래닛 주방 싱크대 배수구 캡',
+  ],
+  반려동물: [
+    '딩동펫 반려동물 쿨매트',
+    '리스펫 강아지 쿨방석',
+    '페스룸 산책 물병',
+    '딩동펫 강아지 휴대용 물병',
+    '펫츠맘 고양이 창문 해먹',
+    '딩동펫 고양이 창문 해먹',
+    '탐사 반려동물 쿨매트',
+    '리스펫 강아지 산책 물통',
+    '펫트리움 고양이 창문 침대',
+    '펫초이스 반려동물 여름 쿨패드',
+  ],
+  육아: [
+    '아가드 모서리 보호대',
+    '아이끌레 유아 안전 모서리 보호대',
+    '퍼기 이유식 큐브 트레이',
+    '락앤락 바로한끼 이유식 큐브',
+    '마더케이 실리콘 이유식 보관용기',
+    '베베락 이유식 냉동 보관용기',
+    '아가드 코너 보호대 투명',
+    '일상공감 아이 안전 모서리 가드',
+    '릿첼 이유식 냉동 큐브',
+    '돗투돗 실리콘 이유식 큐브',
+  ],
+  문구: [
+    '시스맥스 데스크 정리 트레이',
+    '카파맥스 데스크 오거나이저',
+    '네임코코 방수 네임스티커',
+    '쁘띠팬시 방수 네임스티커',
+    '모닝글로리 데스크 정리함',
+    '아트박스 책상 정리 트레이',
+    '오피스존 데스크 서류 트레이',
+    '꼬모네임 방수 이름 스티커',
+    '델리 데스크 오거나이저',
+    '아이코닉 라벨 네임스티커',
+  ],
+  DIY: [
+    '생활공식 케이블 정리함',
+    '탐사 멀티탭 케이블 정리함',
+    '코멧 가구 이동 슬라이더 패드',
+    '생활공작소 가구 이동 패드',
+    '3M 케이블 클립 정리 홀더',
+    '다이소형 멀티탭 정리 박스',
+    '홈앤하우스 가구 이동 바퀴 패드',
+    '리빙듀오 케이블 정리함',
+    '이지앤프리 가구 이동 패드',
+    '아이정 멀티탭 케이블 정리함',
+  ],
+  패션: [
+    '나이키 UV 차단 러닝 캡',
+    '아디다스 자외선 차단 스포츠 모자',
+    'K2 여름 등산 햇빛차단 모자',
+    '블랙야크 냉감 자외선 차단 모자',
+    '네파 여성 UV 차단 썬캡',
+    '휠라 스포츠 메쉬 볼캡',
+    '밀레 여름 등산 모자',
+    '프로스펙스 러닝 메쉬 캡',
+    '코오롱스포츠 햇빛차단 모자',
+    '아이더 냉감 썬캡',
+  ],
+};
+
+const getCompetitorName = (category: string, productName: string, rank: number) => {
+  const pool = competitorNamePools[category] || competitorNamePools.생활;
+  return pool[(rank + productName.length) % pool.length];
+};
+
+const getCoupangSearchUrl = (keyword: string) => `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}`;
+
 export const sourcingProducts: SourcingProduct[] = seeds.map((seed, index) => {
   const [name, category, price, supplierCost, avgReview, searchVolume, growth30d, estimatedSales, competitionLevel, rocketRatio, adRatio, difficulty] = seed;
   const shippingCost = 3000;
@@ -100,14 +218,18 @@ export const sourcingProducts: SourcingProduct[] = seeds.map((seed, index) => {
     difficulty,
     score,
     status: index < 8 ? '발견' : index < 14 ? '분석중' : index < 20 ? '보류' : '샘플 주문',
-    competitors: Array.from({ length: 10 }, (_, rank) => ({
-      rank: rank + 1,
-      name: `${name} 경쟁상품 ${rank + 1}`,
-      price: Math.round(price * (0.88 + rank * 0.025) / 100) * 100,
-      reviews: Math.max(12, avgReview + (rank - 4) * 18),
-      estimatedSales: Math.max(80, estimatedSales - rank * 75),
-      delivery: rank % 4 === 0 ? '판매자로켓' : rank % 3 === 0 ? '로켓' : '일반',
-    })),
+    competitors: Array.from({ length: 10 }, (_, rank) => {
+      const competitorName = getCompetitorName(category, name, rank);
+      return {
+        rank: rank + 1,
+        name: competitorName,
+        productUrl: getCoupangSearchUrl(competitorName),
+        price: Math.round(price * (0.88 + rank * 0.025) / 100) * 100,
+        reviews: Math.max(12, avgReview + (rank - 4) * 18),
+        estimatedSales: Math.max(80, estimatedSales - rank * 75),
+        delivery: rank % 4 === 0 ? '판매자로켓' : rank % 3 === 0 ? '로켓' : '일반',
+      };
+    }),
     suppliers: [
       {
         id: `sp-${index + 1}-1`,
