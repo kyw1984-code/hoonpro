@@ -170,6 +170,9 @@ export function SourcingFinder() {
   const runSourcing = async () => {
     setIsSourcingLoading(true);
     setSourcingProgress(8);
+    setHasRunSourcing(false);
+    setProducts([]);
+    setView('dashboard');
     setSourcingMessage('쿠팡 실제 상품 데이터를 불러오는 중입니다.');
     try {
       const liveProducts = await sourcingProvider.searchProducts(filters, { onProgress: (progress, message) => {
@@ -181,6 +184,8 @@ export function SourcingFinder() {
       setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
     } catch (error) {
       const message = error instanceof Error ? error.message : '실제 데이터 분석이 아직 완료되지 않았습니다.';
+      setProducts([]);
+      setHasRunSourcing(false);
       setSourcingMessage(message);
     } finally {
       setIsSourcingLoading(false);
@@ -192,6 +197,9 @@ export function SourcingFinder() {
     setSegment(nextSegment);
     setIsSourcingLoading(true);
     setSourcingProgress(8);
+    setHasRunSourcing(false);
+    setProducts([]);
+    setView('dashboard');
     setSourcingMessage('쿠팡 실제 상품 데이터를 불러오는 중입니다.');
     try {
       const liveProducts = await sourcingProvider.searchProducts(filters, { onProgress: (progress, message) => {
@@ -210,6 +218,8 @@ export function SourcingFinder() {
       setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
     } catch (error) {
       const message = error instanceof Error ? error.message : '실제 데이터 분석이 아직 완료되지 않았습니다.';
+      setProducts([]);
+      setHasRunSourcing(false);
       setSourcingMessage(message);
     } finally {
       setIsSourcingLoading(false);
