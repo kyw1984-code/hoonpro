@@ -109,6 +109,10 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const readLiveProductsResponse = async (params: URLSearchParams) => {
   const response = await fetch(`/api/sourcing?${params.toString()}`);
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error('Vercel Preview 보호 설정으로 API 응답이 차단되었습니다.');
+  }
   const data = await response.json();
   return { response, data };
 };
@@ -198,9 +202,10 @@ export class MockSourcingProvider implements KeywordProvider, ProductProvider, S
 export class LiveSourcingProvider extends MockSourcingProvider {
   async searchProducts(filters: SourcingFilters, options: FetchLiveOptions = {}) {
     const baseProducts = await super.searchProducts(filters);
+    const liveReadyProducts = baseProducts.filter((product) => coupangCategoryUrls[product.category]);
     const candidates = filters.query.trim()
       ? baseProducts.filter((product) => normalize(product.name).includes(normalize(filters.query))).slice(0, 1)
-      : baseProducts.slice(0, 1);
+      : (liveReadyProducts.length > 0 ? liveReadyProducts : baseProducts).slice(0, 1);
     const liveProducts = await Promise.all(candidates.map(async (seed, index) => {
       const keyword = filters.query.trim() || seed.name;
       options.onProgress?.(18, 'Bright Data 수집 작업 생성중');
