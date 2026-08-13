@@ -347,7 +347,7 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
   const debug = req.query.debug === "true";
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
   const excludeBrands = req.query.excludeBrands !== "false";
-  if (!keyword && !categoryUrl && !snapshotId) return res.status(400).json({ error: "keyword, categoryUrl or snapshotId is required" });
+  if (!keyword && !categoryUrl && categoryUrls.length === 0 && !snapshotId) return res.status(400).json({ error: "keyword, categoryUrl, categoryUrls or snapshotId is required" });
 
   try {
     const inputUrls = categoryUrls.length > 0 ? categoryUrls : [categoryUrl || buildCoupangSearchUrl(keyword)];
