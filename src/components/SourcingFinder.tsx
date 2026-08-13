@@ -149,7 +149,7 @@ export function SourcingFinder() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = 'hunpro-ai-sourcing.csv';
+    link.download = '훈프로-AI-소싱분석기.csv';
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -180,7 +180,7 @@ export function SourcingFinder() {
       <div className="flex min-h-screen">
         <aside className="sticky top-16 h-[calc(100vh-4rem)] w-64 border-r border-slate-200 bg-white px-4 py-6">
           <div className="mb-7">
-            <p className="text-xs font-black text-blue-600">HUNPRO AI SOURCING</p>
+            <p className="text-xs font-black text-blue-600">훈프로 AI 소싱분석기</p>
             <h2 className="mt-1 text-lg font-black tracking-tight">AI 상품 소싱 시스템</h2>
           </div>
           <nav className="space-y-1">
@@ -195,7 +195,7 @@ export function SourcingFinder() {
         <main className="flex-1 px-8 py-7">
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-black tracking-tight">HUNPRO AI SOURCING</h1>
+              <h1 className="text-2xl font-black tracking-tight">훈프로 AI 소싱분석기</h1>
               <p className="mt-1 text-sm font-medium text-slate-500">상품 발굴부터 소싱, 마진, 판매전략까지 한 화면 흐름으로 확인합니다.</p>
             </div>
             <div className="flex items-center gap-2">
