@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { createMockAiStrategy } from '../lib/sourcing/aiStrategy';
 import { providerStatuses, sourcingProducts } from '../lib/sourcing/mockData';
+import { sourcingProvider } from '../lib/sourcing/providers';
 import type { Difficulty, KeywordType, SourcingFilters, SourcingProduct, SourcingStatus } from '../lib/sourcing/types';
 
 type View = 'dashboard' | 'sourcing' | 'results' | 'detail' | 'suppliers' | 'favorites' | 'calculator' | 'admin' | 'settings';
@@ -73,9 +74,9 @@ function SeasonBars({ product }: { product: SourcingProduct }) {
   );
 }
 
-const getFilteredProducts = (filters: SourcingFilters, segment: Segment) => {
+const getFilteredProducts = (products: SourcingProduct[], filters: SourcingFilters, segment: Segment) => {
   const query = filters.query.trim().toLowerCase();
-  return sourcingProducts
+  return products
     .filter((product) => product.difficulty === filters.difficulty)
     .filter((product) => filters.category === '기타' || product.category === filters.category || Boolean(query))
     .filter((product) => product.price >= filters.minPrice && product.price <= filters.maxPrice)
@@ -107,10 +108,13 @@ export function SourcingFinder() {
   const [calcOther, setCalcOther] = useState(500);
   const [uploadedRows, setUploadedRows] = useState(0);
   const [hasRunSourcing, setHasRunSourcing] = useState(false);
+  const [products, setProducts] = useState<SourcingProduct[]>(sourcingProducts);
+  const [isSourcingLoading, setIsSourcingLoading] = useState(false);
+  const [sourcingMessage, setSourcingMessage] = useState('실제 데이터 Provider 대기 중');
 
   const filteredProducts = useMemo(() => {
-    return getFilteredProducts(filters, segment);
-  }, [filters, segment]);
+    return getFilteredProducts(products, filters, segment);
+  }, [filters, products, segment]);
 
   const resultSummary = useMemo(() => {
     const totalSales = filteredProducts.reduce((sum, product) => sum + product.estimatedSales, 0);
@@ -130,9 +134,9 @@ export function SourcingFinder() {
     };
   }, [filteredProducts]);
 
-  const selectedProduct = sourcingProducts.find((product) => product.id === selectedProductId) || sourcingProducts[0];
+  const selectedProduct = products.find((product) => product.id === selectedProductId) || products[0] || sourcingProducts[0];
   const aiStrategy = createMockAiStrategy(selectedProduct);
-  const calcProduct = sourcingProducts.find((product) => product.id === calcProductId) || sourcingProducts[0];
+  const calcProduct = products.find((product) => product.id === calcProductId) || sourcingProducts.find((product) => product.id === calcProductId) || sourcingProducts[0];
   const coupangFee = Math.round(calcProduct.price * 0.12);
   const adCost = Math.round(calcProduct.price * (calcAd / 100));
   const totalCost = calcSupply + calcProduct.shippingCost + coupangFee + adCost + calcOther;
@@ -150,10 +154,11 @@ export function SourcingFinder() {
     setView('detail');
   };
 
-  const runSourcing = () => {
-    const products = getFilteredProducts(filters, '전체');
-    const first = products[0] || sourcingProducts[0];
-    setSegment('전체');
+  const applyProducts = (nextProducts: SourcingProduct[], nextSegment: Segment) => {
+    setProducts(nextProducts);
+    const nextFiltered = getFilteredProducts(nextProducts, filters, nextSegment);
+    const first = nextFiltered[0] || nextProducts[0] || sourcingProducts[0];
+    setSegment(nextSegment);
     setSelectedProductId(first.id);
     setCalcProductId(first.id);
     setCalcSupply(first.supplierCost);
@@ -161,15 +166,42 @@ export function SourcingFinder() {
     setView('results');
   };
 
-  const runSourcingBySegment = (nextSegment: Segment) => {
+  const runSourcing = async () => {
+    setIsSourcingLoading(true);
+    setSourcingMessage('쿠팡 실제 상품 데이터를 불러오는 중입니다.');
+    try {
+      const liveProducts = await sourcingProvider.searchProducts(filters);
+      applyProducts(liveProducts, '전체');
+      setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
+    } catch {
+      applyProducts(sourcingProducts, '전체');
+      setSourcingMessage('실제 API 연결 실패로 mock fallback을 표시합니다.');
+    } finally {
+      setIsSourcingLoading(false);
+    }
+  };
+
+  const runSourcingBySegment = async (nextSegment: Segment) => {
     setSegment(nextSegment);
-    const products = getFilteredProducts(filters, nextSegment);
-    const first = products[0] || sourcingProducts[0];
-    setSelectedProductId(first.id);
-    setCalcProductId(first.id);
-    setCalcSupply(first.supplierCost);
-    setHasRunSourcing(true);
-    setView('results');
+    setIsSourcingLoading(true);
+    setSourcingMessage('쿠팡 실제 상품 데이터를 불러오는 중입니다.');
+    try {
+      const liveProducts = await sourcingProvider.searchProducts(filters);
+      setProducts(liveProducts);
+      const nextFiltered = getFilteredProducts(liveProducts, filters, nextSegment);
+      const first = nextFiltered[0] || liveProducts[0] || sourcingProducts[0];
+      setSelectedProductId(first.id);
+      setCalcProductId(first.id);
+      setCalcSupply(first.supplierCost);
+      setHasRunSourcing(true);
+      setView('results');
+      setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
+    } catch {
+      setProducts(sourcingProducts);
+      setSourcingMessage('실제 API 연결 실패로 mock fallback을 표시합니다.');
+    } finally {
+      setIsSourcingLoading(false);
+    }
   };
 
   const toggleType = (type: KeywordType) => {
@@ -247,7 +279,7 @@ export function SourcingFinder() {
             </div>
             <div className="flex items-center gap-2">
               <button onClick={exportCsv} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-100"><Download className="h-4 w-4" />CSV</button>
-              <button onClick={runSourcing} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-slate-800"><Sparkles className="h-4 w-4" />AI 소싱 시작</button>
+              <button onClick={runSourcing} disabled={isSourcingLoading} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"><Sparkles className="h-4 w-4" />{isSourcingLoading ? '실제 데이터 분석중' : 'AI 소싱 시작'}</button>
             </div>
           </div>
 
@@ -274,12 +306,12 @@ export function SourcingFinder() {
                     <p className="text-sm font-black text-slate-950">{filters.difficulty} 기준으로 분석 대기 중</p>
                     <p className="mt-1 text-xs font-bold text-slate-500">시작 전에는 추천 키워드를 숨겨두고, 실행 후 결과 화면에서 공개합니다.</p>
                   </div>
-                  <button onClick={runSourcing} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700"><Sparkles className="h-4 w-4" />소싱 시작</button>
+                  <button onClick={runSourcing} disabled={isSourcingLoading} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"><Sparkles className="h-4 w-4" />{isSourcingLoading ? '실제 데이터 분석중' : '소싱 시작'}</button>
                 </div>
               </div>
               <div className="grid grid-cols-6 gap-3">
                 {segmentButtons.slice(1).map(([label, Icon]) => (
-                  <button key={label} onClick={() => runSourcingBySegment(label)} className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-blue-200 hover:bg-blue-50">
+                  <button key={label} onClick={() => runSourcingBySegment(label)} disabled={isSourcingLoading} className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-blue-200 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
                     <Icon className="h-5 w-5 text-blue-600" />
                     <p className="mt-3 text-sm font-black">{label}</p>
                     <p className="mt-1 text-xs font-bold text-slate-500">클릭 시 바로 소싱</p>
@@ -300,7 +332,7 @@ export function SourcingFinder() {
                   <div className="grid grid-cols-2 gap-3"><label><span className="text-xs font-black text-slate-500">최소 판매가</span><input type="number" value={filters.minPrice} onChange={(event) => setFilter('minPrice', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none" /></label><label><span className="text-xs font-black text-slate-500">최대 판매가</span><input type="number" value={filters.maxPrice} onChange={(event) => setFilter('maxPrice', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none" /></label></div>
                   <label className="block"><span className="text-xs font-black text-slate-500">최대 리뷰</span><select value={filters.maxReview} onChange={(event) => setFilter('maxReview', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{[100, 300, 500, 1000, 5000].map((item) => <option key={item} value={item}>{fmt(item)}개</option>)}</select></label>
                   <div><p className="text-xs font-black text-slate-500">키워드 유형</p><div className="mt-2 grid grid-cols-2 gap-2">{keywordTypes.map((type) => <button key={type} onClick={() => toggleType(type)} className={`rounded-lg px-3 py-2 text-left text-xs font-black ring-1 ${filters.keywordTypes.includes(type) ? 'bg-orange-50 text-orange-700 ring-orange-200' : 'bg-white text-slate-500 ring-slate-200'}`}>{filters.keywordTypes.includes(type) ? '선택됨 · ' : ''}{type}</button>)}</div></div>
-                  <button onClick={runSourcing} className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700"><Sparkles className="h-4 w-4" />AI 훈프로 찾기</button>
+                  <button onClick={runSourcing} disabled={isSourcingLoading} className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"><Sparkles className="h-4 w-4" />{isSourcingLoading ? '실제 데이터 분석중' : 'AI 훈프로 찾기'}</button>
                 </div>
               </div>
               <div className="space-y-5">
@@ -329,7 +361,7 @@ export function SourcingFinder() {
           {view === 'results' && (
             <section className="space-y-4">
               <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <SectionTitle title={`${filters.difficulty} 추천 키워드 TOP ${hasRunSourcing ? filteredProducts.length : 0}`} desc={hasRunSourcing ? '쿠팡 상품수 100개 이하 중 월 판매량과 매출이 높은 순서로 추론했습니다.' : '대시보드에서 난이도를 선택하고 소싱 시작을 눌러주세요.'} />
+                <SectionTitle title={`${filters.difficulty} 추천 키워드 TOP ${hasRunSourcing ? filteredProducts.length : 0}`} desc={hasRunSourcing ? sourcingMessage : '대시보드에서 난이도를 선택하고 소싱 시작을 눌러주세요.'} />
                 <div className="flex gap-2">{segmentButtons.map(([label, Icon]) => <button key={label} onClick={() => setSegment(label)} className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-black ${segment === label ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}</div>
               </div>
               {hasRunSourcing ? (
@@ -424,7 +456,7 @@ export function SourcingFinder() {
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                   <SectionTitle title="경쟁상품 TOP 10" desc="브랜드 상품은 제외하고, 가격·리뷰·판매량은 비브랜드 후보 기준 추정값으로 표시합니다." />
-                  <table className="mt-4 w-full text-sm"><thead className="bg-slate-50 text-xs font-black text-slate-500"><tr><th className="px-3 py-3 text-left">순위</th><th className="px-3 py-3 text-left">상품</th><th className="px-3 py-3 text-right">가격</th><th className="px-3 py-3 text-right">리뷰 추정</th><th className="px-3 py-3 text-right">판매량 추정</th><th className="px-3 py-3 text-center">배송</th></tr></thead><tbody>{selectedProduct.competitors.map((competitor) => <tr key={`${competitor.rank}-${competitor.name}`} className="border-b border-slate-100 hover:bg-blue-50/60"><td className="px-3 py-3 font-bold">{competitor.rank}</td><td className="px-3 py-3 font-bold"><a href={competitor.productUrl} target="_blank" rel="noopener noreferrer" title="브랜드 제외 키워드로 쿠팡 검색" className="text-blue-700 underline-offset-2 hover:underline">{competitor.name}</a></td><td className="px-3 py-3 text-right">{won(competitor.price)}</td><td className="px-3 py-3 text-right">{fmt(competitor.reviews)}</td><td className="px-3 py-3 text-right">{fmt(competitor.estimatedSales)}</td><td className="px-3 py-3 text-center">{competitor.delivery}</td></tr>)}</tbody></table>
+                  <table className="mt-4 w-full text-sm"><thead className="bg-slate-50 text-xs font-black text-slate-500"><tr><th className="px-3 py-3 text-left">순위</th><th className="px-3 py-3 text-left">상품</th><th className="px-3 py-3 text-right">가격</th><th className="px-3 py-3 text-right">리뷰 추정</th><th className="px-3 py-3 text-right">판매량 추정</th><th className="px-3 py-3 text-center">배송</th></tr></thead><tbody>{selectedProduct.competitors.map((competitor) => <tr key={`${competitor.rank}-${competitor.name}`} className="border-b border-slate-100 hover:bg-blue-50/60"><td className="px-3 py-3 font-bold">{competitor.rank}</td><td className="px-3 py-3 font-bold">{competitor.productUrl ? <a href={competitor.productUrl} target="_blank" rel="noopener noreferrer" title="쿠팡 상품 상세페이지 열기" className="text-blue-700 underline-offset-2 hover:underline">{competitor.name}</a> : <span className="text-slate-700">{competitor.name}</span>}</td><td className="px-3 py-3 text-right">{won(competitor.price)}</td><td className="px-3 py-3 text-right">{fmt(competitor.reviews)}</td><td className="px-3 py-3 text-right">{fmt(competitor.estimatedSales)}</td><td className="px-3 py-3 text-center">{competitor.delivery}</td></tr>)}</tbody></table>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle title="시즌성 예측" /><div className="mt-4"><SeasonBars product={selectedProduct} /></div></div>
               </div>
@@ -447,14 +479,14 @@ export function SourcingFinder() {
 
           {view === 'favorites' && (
             <section className="space-y-4">
-              <div className="grid grid-cols-3 gap-4"><MetricCard label="S급" value={`${sourcingProducts.filter((product) => favorites.includes(product.id) && product.grade === 'S').length}개`} /><MetricCard label="A급" value={`${sourcingProducts.filter((product) => favorites.includes(product.id) && product.grade === 'A').length}개`} /><MetricCard label="보류" value={`${sourcingProducts.filter((product) => favorites.includes(product.id) && (statusById[product.id] || product.status) === '보류').length}개`} /></div>
-              <div className="rounded-lg border border-slate-200 bg-white shadow-sm">{sourcingProducts.filter((product) => favorites.includes(product.id)).map((product) => <div key={product.id} className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div className="flex items-center gap-3"><Bookmark className="h-5 w-5 text-red-500" fill="currentColor" /><div><p className="font-black">{product.name}</p><p className="text-xs font-bold text-slate-500">{product.grade}등급 · {product.score.total}점</p></div></div><select value={statusById[product.id] || product.status} onChange={(event) => setStatusById((current) => ({ ...current, [product.id]: event.target.value as SourcingStatus }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold">{statuses.map((status) => <option key={status}>{status}</option>)}</select></div>)}</div>
+              <div className="grid grid-cols-3 gap-4"><MetricCard label="S급" value={`${products.filter((product) => favorites.includes(product.id) && product.grade === 'S').length}개`} /><MetricCard label="A급" value={`${products.filter((product) => favorites.includes(product.id) && product.grade === 'A').length}개`} /><MetricCard label="보류" value={`${products.filter((product) => favorites.includes(product.id) && (statusById[product.id] || product.status) === '보류').length}개`} /></div>
+              <div className="rounded-lg border border-slate-200 bg-white shadow-sm">{products.filter((product) => favorites.includes(product.id)).map((product) => <div key={product.id} className="flex items-center justify-between border-b border-slate-100 px-5 py-4"><div className="flex items-center gap-3"><Bookmark className="h-5 w-5 text-red-500" fill="currentColor" /><div><p className="font-black">{product.name}</p><p className="text-xs font-bold text-slate-500">{product.grade}등급 · {product.score.total}점</p></div></div><select value={statusById[product.id] || product.status} onChange={(event) => setStatusById((current) => ({ ...current, [product.id]: event.target.value as SourcingStatus }))} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold">{statuses.map((status) => <option key={status}>{status}</option>)}</select></div>)}</div>
             </section>
           )}
 
           {view === 'calculator' && (
             <section className="grid grid-cols-[420px_1fr] gap-5">
-              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle title="마진 계산기" /><div className="mt-5 space-y-4"><label className="block"><span className="text-xs font-black text-slate-500">상품</span><select value={calcProductId} onChange={(event) => { const product = sourcingProducts.find((item) => item.id === event.target.value) || sourcingProducts[0]; setCalcProductId(product.id); setCalcSupply(product.supplierCost); }} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold">{sourcingProducts.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label><label className="block"><span className="text-xs font-black text-slate-500">공급가격</span><input type="number" value={calcSupply} onChange={(event) => setCalcSupply(Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" /></label><label className="block"><span className="text-xs font-black text-slate-500">광고비 %</span><input type="number" value={calcAd} onChange={(event) => setCalcAd(Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" /></label><label className="block"><span className="text-xs font-black text-slate-500">기타 비용</span><input type="number" value={calcOther} onChange={(event) => setCalcOther(Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" /></label></div></div>
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle title="마진 계산기" /><div className="mt-5 space-y-4"><label className="block"><span className="text-xs font-black text-slate-500">상품</span><select value={calcProductId} onChange={(event) => { const product = products.find((item) => item.id === event.target.value) || sourcingProducts[0]; setCalcProductId(product.id); setCalcSupply(product.supplierCost); }} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold">{products.map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}</select></label><label className="block"><span className="text-xs font-black text-slate-500">공급가격</span><input type="number" value={calcSupply} onChange={(event) => setCalcSupply(Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" /></label><label className="block"><span className="text-xs font-black text-slate-500">광고비 %</span><input type="number" value={calcAd} onChange={(event) => setCalcAd(Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" /></label><label className="block"><span className="text-xs font-black text-slate-500">기타 비용</span><input type="number" value={calcOther} onChange={(event) => setCalcOther(Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold" /></label></div></div>
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle title={calcProduct.name} desc="쿠팡 수수료는 MVP 기준 12%로 계산합니다." /><div className="mt-5 grid grid-cols-2 gap-4"><MetricCard label="판매가격" value={won(calcProduct.price)} /><MetricCard label="총 비용" value={won(totalCost)} /><MetricCard label="예상 순이익" value={won(netProfit)} /><MetricCard label="예상 마진율" value={`${netMargin}%`} /></div><div className={`mt-5 rounded-lg p-5 ${netMargin >= 30 ? 'bg-emerald-50 text-emerald-800' : 'bg-orange-50 text-orange-800'}`}><div className="flex items-center gap-2 font-black">{netMargin >= 30 ? <CheckCircle2 className="h-5 w-5" /> : <ShieldAlert className="h-5 w-5" />}{netMargin >= 30 ? '마진 구조 양호' : '원가 또는 광고비 재검토'}</div><p className="mt-2 text-sm font-semibold">총 비용 = 공급가 + 배송비 + 쿠팡 수수료 + 광고비 + 기타 비용입니다.</p></div></div>
             </section>
           )}

@@ -73,9 +73,7 @@ async function fetchCoupangViaNaver(keyword: string): Promise<any[]> {
       await new Promise(r => setTimeout(r, 200));
     }
   }
-  const coupangOnly = allItems.filter(item =>
-    (item.link && /coupang\.com/i.test(item.link)) || (item.mallName && /쿠팡|coupang/i.test(item.mallName))
-  );
+  const coupangOnly = allItems.filter(item => item.link && /coupang\.com/i.test(item.link));
   const byId = new Map<string, any>();
   const products: any[] = [];
   for (const item of coupangOnly) {

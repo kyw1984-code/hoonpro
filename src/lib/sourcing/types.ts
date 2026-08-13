@@ -7,7 +7,7 @@ export type KeywordType = '블루오션' | '급상승' | '시즌상품' | '신�
 export type CompetitorProduct = {
   rank: number;
   name: string;
-  productUrl: string;
+  productUrl?: string;
   price: number;
   reviews: number;
   estimatedSales: number;
