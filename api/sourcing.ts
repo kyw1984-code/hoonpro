@@ -300,12 +300,19 @@ function normalizeBrightDataRecord(record: Record<string, unknown>, index: numbe
   };
 }
 
-async function triggerBrightData(inputUrl: string) {
-  const url = `${BRIGHTDATA_API_BASE}/trigger?dataset_id=${encodeURIComponent(BRIGHTDATA_COUPANG_DATASET_ID)}&include_errors=true`;
+async function triggerBrightData(inputUrl: string, limit: number) {
+  const params = new URLSearchParams({
+    dataset_id: BRIGHTDATA_COUPANG_DATASET_ID,
+    notify: "false",
+    include_errors: "true",
+    type: "discover_new",
+    discover_by: "cateogry_url",
+  });
+  const url = `${BRIGHTDATA_API_BASE}/trigger?${params.toString()}`;
   const response = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify([{ url: inputUrl }]),
+    body: JSON.stringify({ input: [{ url: inputUrl }], limit_per_input: limit }),
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data?.message || data?.error || `Bright Data scrape failed: ${response.status}`);
@@ -341,12 +348,12 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
 
   try {
     const inputUrl = categoryUrl || buildCoupangSearchUrl(keyword);
-    const raw = snapshotId ? { snapshot_id: snapshotId } : await triggerBrightData(inputUrl);
+    const raw = snapshotId ? { snapshot_id: snapshotId } : await triggerBrightData(inputUrl, limit);
     const meta = {
       tokenConfigured: Boolean(BRIGHTDATA_API_TOKEN),
       datasetId: BRIGHTDATA_COUPANG_DATASET_ID,
       inputUrl,
-      mode: "brightdata-trigger",
+      mode: "brightdata-discover-category",
       snapshotId: String(raw?.snapshot_id || snapshotId || ""),
     };
     if (!snapshotId && raw?.snapshot_id) return res.status(202).json({ pending: true, snapshotId: String(raw.snapshot_id), meta });
