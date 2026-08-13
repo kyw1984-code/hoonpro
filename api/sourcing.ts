@@ -336,13 +336,14 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
   if (!BRIGHTDATA_API_TOKEN) return res.status(500).json({ error: "BRIGHTDATA_API_TOKEN is not configured" });
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
   const categoryUrl = typeof req.query.categoryUrl === "string" ? normalizeCoupangUrl(req.query.categoryUrl.trim()) : "";
+  const snapshotId = typeof req.query.snapshotId === "string" ? req.query.snapshotId.trim() : "";
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
   const excludeBrands = req.query.excludeBrands !== "false";
-  if (!keyword && !categoryUrl) return res.status(400).json({ error: "keyword or categoryUrl is required" });
+  if (!keyword && !categoryUrl && !snapshotId) return res.status(400).json({ error: "keyword, categoryUrl or snapshotId is required" });
 
   try {
     const inputUrl = categoryUrl || buildCoupangSearchUrl(keyword);
-    const raw = await triggerBrightData(inputUrl);
+    const raw = snapshotId ? { snapshot_id: snapshotId } : await triggerBrightData(inputUrl);
     const payload = raw?.snapshot_id ? await downloadBrightDataSnapshot(String(raw.snapshot_id)) : raw;
     if (payload?.pending) return res.status(202).json(payload);
 

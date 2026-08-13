@@ -51,6 +51,10 @@ type CoupangApiProduct = {
   };
 };
 
+type FetchLiveOptions = {
+  onProgress?: (progress: number, message: string) => void;
+};
+
 const estimateSales = (product: CoupangApiProduct, rank: number) => {
   const reviewCount = Number(product.ratingCount ?? product.reviewCount ?? 0);
   const saleIndex = Number(product.calculated?.saleIndex ?? 0);
@@ -101,7 +105,15 @@ const buildLiveProduct = (seed: SourcingProduct, apiProducts: CoupangApiProduct[
   };
 };
 
-const fetchLiveProducts = async (keyword: string, category: string, filters: SourcingFilters) => {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const readLiveProductsResponse = async (params: URLSearchParams) => {
+  const response = await fetch(`/api/sourcing?${params.toString()}`);
+  const data = await response.json();
+  return { response, data };
+};
+
+const fetchLiveProducts = async (keyword: string, category: string, filters: SourcingFilters, options: FetchLiveOptions = {}) => {
   const params = new URLSearchParams({
     keyword,
     limit: '10',
@@ -110,9 +122,24 @@ const fetchLiveProducts = async (keyword: string, category: string, filters: Sou
   const categoryUrl = coupangCategoryUrls[category];
   if (categoryUrl) params.set('categoryUrl', categoryUrl);
   params.set('type', 'shopping-data');
-  const response = await fetch(`/api/sourcing?${params.toString()}`);
+
+  let { response, data } = await readLiveProductsResponse(params);
+  let snapshotId = data?.snapshotId;
+  for (let attempt = 0; response.status === 202 && snapshotId && attempt < 8; attempt += 1) {
+    const progress = Math.min(96, 28 + attempt * 8);
+    options.onProgress?.(progress, `쿠팡 상품 ${progress}% 분석중`);
+    await sleep(7000);
+    const retryParams = new URLSearchParams({
+      type: 'shopping-data',
+      snapshotId,
+      limit: '10',
+      excludeBrands: 'true',
+    });
+    ({ response, data } = await readLiveProductsResponse(retryParams));
+    snapshotId = data?.snapshotId;
+  }
+
   if (!response.ok) return [];
-  const data = await response.json();
   if (data?.pending) return [];
   if (Array.isArray(data?.products)) {
     return (data.products as CoupangApiProduct[]).filter((product) => {
@@ -169,15 +196,17 @@ export class MockSourcingProvider implements KeywordProvider, ProductProvider, S
 }
 
 export class LiveSourcingProvider extends MockSourcingProvider {
-  async searchProducts(filters: SourcingFilters) {
+  async searchProducts(filters: SourcingFilters, options: FetchLiveOptions = {}) {
     const baseProducts = await super.searchProducts(filters);
     const candidates = filters.query.trim()
       ? baseProducts.filter((product) => normalize(product.name).includes(normalize(filters.query))).slice(0, 1)
-      : baseProducts.slice(0, 6);
+      : baseProducts.slice(0, 1);
     const liveProducts = await Promise.all(candidates.map(async (seed, index) => {
       const keyword = filters.query.trim() || seed.name;
-      const apiProducts = await fetchLiveProducts(keyword, seed.category, filters);
+      options.onProgress?.(18, 'Bright Data 수집 작업 생성중');
+      const apiProducts = await fetchLiveProducts(keyword, seed.category, filters, options);
       if (apiProducts.length === 0) return null;
+      options.onProgress?.(98, '상품 URL과 리뷰 데이터 정리중');
       return buildLiveProduct(seed, apiProducts, index);
     }));
     const usableProducts = liveProducts.filter((product): product is SourcingProduct => Boolean(product));

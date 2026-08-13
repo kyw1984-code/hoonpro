@@ -110,6 +110,7 @@ export function SourcingFinder() {
   const [hasRunSourcing, setHasRunSourcing] = useState(false);
   const [products, setProducts] = useState<SourcingProduct[]>(sourcingProducts);
   const [isSourcingLoading, setIsSourcingLoading] = useState(false);
+  const [sourcingProgress, setSourcingProgress] = useState(0);
   const [sourcingMessage, setSourcingMessage] = useState('실제 데이터 Provider 대기 중');
 
   const filteredProducts = useMemo(() => {
@@ -168,9 +169,14 @@ export function SourcingFinder() {
 
   const runSourcing = async () => {
     setIsSourcingLoading(true);
+    setSourcingProgress(8);
     setSourcingMessage('쿠팡 실제 상품 데이터를 불러오는 중입니다.');
     try {
-      const liveProducts = await sourcingProvider.searchProducts(filters);
+      const liveProducts = await sourcingProvider.searchProducts(filters, { onProgress: (progress, message) => {
+        setSourcingProgress(progress);
+        setSourcingMessage(message);
+      } });
+      setSourcingProgress(100);
       applyProducts(liveProducts, '전체');
       setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
     } catch {
@@ -178,15 +184,21 @@ export function SourcingFinder() {
       setSourcingMessage('실제 API 연결 실패로 mock fallback을 표시합니다.');
     } finally {
       setIsSourcingLoading(false);
+      window.setTimeout(() => setSourcingProgress(0), 900);
     }
   };
 
   const runSourcingBySegment = async (nextSegment: Segment) => {
     setSegment(nextSegment);
     setIsSourcingLoading(true);
+    setSourcingProgress(8);
     setSourcingMessage('쿠팡 실제 상품 데이터를 불러오는 중입니다.');
     try {
-      const liveProducts = await sourcingProvider.searchProducts(filters);
+      const liveProducts = await sourcingProvider.searchProducts(filters, { onProgress: (progress, message) => {
+        setSourcingProgress(progress);
+        setSourcingMessage(message);
+      } });
+      setSourcingProgress(100);
       setProducts(liveProducts);
       const nextFiltered = getFilteredProducts(liveProducts, filters, nextSegment);
       const first = nextFiltered[0] || liveProducts[0] || sourcingProducts[0];
@@ -201,6 +213,7 @@ export function SourcingFinder() {
       setSourcingMessage('실제 API 연결 실패로 mock fallback을 표시합니다.');
     } finally {
       setIsSourcingLoading(false);
+      window.setTimeout(() => setSourcingProgress(0), 900);
     }
   };
 
@@ -301,12 +314,19 @@ export function SourcingFinder() {
                     </button>
                   ))}
                 </div>
-                <div className="mt-6 flex items-center justify-between rounded-lg bg-slate-50 px-5 py-4">
+                <div className={`mt-6 overflow-hidden rounded-lg border px-5 py-4 transition ${isSourcingLoading ? 'border-blue-200 bg-blue-50 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]' : 'border-transparent bg-slate-50'}`}>
+                  {isSourcingLoading && (
+                    <div className="mb-4 h-2 overflow-hidden rounded-full bg-white">
+                      <div className="h-full rounded-full bg-blue-600 transition-all duration-700 ease-out" style={{ width: `${sourcingProgress}%` }} />
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-black text-slate-950">{filters.difficulty} 기준으로 분석 대기 중</p>
-                    <p className="mt-1 text-xs font-bold text-slate-500">시작 전에는 추천 키워드를 숨겨두고, 실행 후 결과 화면에서 공개합니다.</p>
+                    <p className="text-sm font-black text-slate-950">{isSourcingLoading ? `${sourcingProgress}% 실제 데이터 분석중` : `${filters.difficulty} 기준으로 분석 대기 중`}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">{isSourcingLoading ? sourcingMessage : '시작 전에는 추천 키워드를 숨겨두고, 실행 후 결과 화면에서 공개합니다.'}</p>
                   </div>
                   <button onClick={runSourcing} disabled={isSourcingLoading} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"><Sparkles className="h-4 w-4" />{isSourcingLoading ? '실제 데이터 분석중' : '소싱 시작'}</button>
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-6 gap-3">
