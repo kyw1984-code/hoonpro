@@ -67,16 +67,29 @@ function SeasonBars({ product }: { product: SourcingProduct }) {
   );
 }
 
+const getFilteredProducts = (filters: SourcingFilters, segment: Segment) => {
+  const query = filters.query.trim().toLowerCase();
+  return sourcingProducts
+    .filter((product) => filters.difficulty === '프로' || product.difficulty === filters.difficulty)
+    .filter((product) => filters.category === '기타' || product.category === filters.category || Boolean(query))
+    .filter((product) => product.price >= filters.minPrice && product.price <= filters.maxPrice)
+    .filter((product) => product.avgReview <= filters.maxReview)
+    .filter((product) => filters.keywordTypes.length === 0 || filters.keywordTypes.some((type) => product.keywordTypes.includes(type)))
+    .filter((product) => segment === '전체' || product.keywordTypes.includes(segment as KeywordType))
+    .filter((product) => !query || product.name.toLowerCase().includes(query) || product.category.toLowerCase().includes(query))
+    .sort((a, b) => b.score.total - a.score.total);
+};
+
 export function SourcingFinder() {
   const [view, setView] = useState<View>('dashboard');
   const [segment, setSegment] = useState<Segment>('전체');
   const [filters, setFilters] = useState<SourcingFilters>({
     difficulty: '아마추어',
-    category: '생활',
+    category: '기타',
     minPrice: 10000,
     maxPrice: 50000,
-    maxReview: 300,
-    keywordTypes: ['블루오션', '급상승', '시즌상품'],
+    maxReview: 1000,
+    keywordTypes: [],
     query: '',
   });
   const [selectedProductId, setSelectedProductId] = useState(sourcingProducts[0].id);
@@ -90,16 +103,7 @@ export function SourcingFinder() {
   const [hasRunSourcing, setHasRunSourcing] = useState(false);
 
   const filteredProducts = useMemo(() => {
-    const query = filters.query.trim().toLowerCase();
-    return sourcingProducts
-      .filter((product) => filters.difficulty === '프로' || product.difficulty === filters.difficulty)
-      .filter((product) => filters.category === '기타' || product.category === filters.category || Boolean(query))
-      .filter((product) => product.price >= filters.minPrice && product.price <= filters.maxPrice)
-      .filter((product) => product.avgReview <= filters.maxReview)
-      .filter((product) => filters.keywordTypes.length === 0 || filters.keywordTypes.some((type) => product.keywordTypes.includes(type)))
-      .filter((product) => segment === '전체' || product.keywordTypes.includes(segment as KeywordType))
-      .filter((product) => !query || product.name.toLowerCase().includes(query) || product.category.toLowerCase().includes(query))
-      .sort((a, b) => b.score.total - a.score.total);
+    return getFilteredProducts(filters, segment);
   }, [filters, segment]);
 
   const selectedProduct = sourcingProducts.find((product) => product.id === selectedProductId) || sourcingProducts[0];
@@ -123,7 +127,9 @@ export function SourcingFinder() {
   };
 
   const runSourcing = () => {
-    const first = filteredProducts[0] || sourcingProducts[0];
+    const products = getFilteredProducts(filters, '전체');
+    const first = products[0] || sourcingProducts[0];
+    setSegment('전체');
     setSelectedProductId(first.id);
     setCalcProductId(first.id);
     setCalcSupply(first.supplierCost);
@@ -133,16 +139,7 @@ export function SourcingFinder() {
 
   const runSourcingBySegment = (nextSegment: Segment) => {
     setSegment(nextSegment);
-    const query = filters.query.trim().toLowerCase();
-    const products = sourcingProducts
-      .filter((product) => filters.difficulty === '프로' || product.difficulty === filters.difficulty)
-      .filter((product) => filters.category === '기타' || product.category === filters.category || Boolean(query))
-      .filter((product) => product.price >= filters.minPrice && product.price <= filters.maxPrice)
-      .filter((product) => product.avgReview <= filters.maxReview)
-      .filter((product) => filters.keywordTypes.length === 0 || filters.keywordTypes.some((type) => product.keywordTypes.includes(type)))
-      .filter((product) => nextSegment === '전체' || product.keywordTypes.includes(nextSegment as KeywordType))
-      .filter((product) => !query || product.name.toLowerCase().includes(query) || product.category.toLowerCase().includes(query))
-      .sort((a, b) => b.score.total - a.score.total);
+    const products = getFilteredProducts(filters, nextSegment);
     const first = products[0] || sourcingProducts[0];
     setSelectedProductId(first.id);
     setCalcProductId(first.id);
