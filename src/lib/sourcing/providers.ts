@@ -129,10 +129,10 @@ const fetchLiveProducts = async (keyword: string, category: string, filters: Sou
 
   let { response, data } = await readLiveProductsResponse(params);
   let snapshotId = data?.snapshotId;
-  for (let attempt = 0; response.status === 202 && snapshotId && attempt < 8; attempt += 1) {
-    const progress = Math.min(96, 28 + attempt * 8);
-    options.onProgress?.(progress, `쿠팡 상품 ${progress}% 분석중`);
-    await sleep(7000);
+  for (let attempt = 0; response.status === 202 && snapshotId && attempt < 60; attempt += 1) {
+    const progress = Math.min(96, 18 + Math.round((attempt / 60) * 78));
+    options.onProgress?.(progress, `쿠팡 상품 수집중 · ${attempt + 1}번째 확인`);
+    await sleep(8000);
     const retryParams = new URLSearchParams({
       type: 'shopping-data',
       snapshotId,
@@ -143,15 +143,15 @@ const fetchLiveProducts = async (keyword: string, category: string, filters: Sou
     snapshotId = data?.snapshotId;
   }
 
-  if (!response.ok) return [];
-  if (data?.pending) return [];
+  if (!response.ok) throw new Error(data?.error || 'Bright Data API 호출에 실패했습니다.');
+  if (data?.pending) throw new Error('Bright Data 수집이 아직 완료되지 않았습니다. 잠시 후 다시 시도해주세요.');
   if (Array.isArray(data?.products)) {
     return (data.products as CoupangApiProduct[]).filter((product) => {
       const price = Number(product.productPrice) || 0;
       return price >= filters.minPrice && price <= filters.maxPrice;
     });
   }
-  return [];
+  throw new Error('Bright Data 결과에서 상품 데이터를 찾지 못했습니다.');
 };
 
 export class MockSourcingProvider implements KeywordProvider, ProductProvider, SupplierProvider, TrendProvider {
@@ -210,12 +210,12 @@ export class LiveSourcingProvider extends MockSourcingProvider {
       const keyword = filters.query.trim() || seed.name;
       options.onProgress?.(18, 'Bright Data 수집 작업 생성중');
       const apiProducts = await fetchLiveProducts(keyword, seed.category, filters, options);
-      if (apiProducts.length === 0) return null;
       options.onProgress?.(98, '상품 URL과 리뷰 데이터 정리중');
       return buildLiveProduct(seed, apiProducts, index);
     }));
     const usableProducts = liveProducts.filter((product): product is SourcingProduct => Boolean(product));
-    return usableProducts.length > 0 ? usableProducts.sort(sortByOpportunity) : baseProducts;
+    if (usableProducts.length === 0) throw new Error('실제 상품 데이터를 아직 가져오지 못했습니다.');
+    return usableProducts.sort(sortByOpportunity);
   }
 }
 

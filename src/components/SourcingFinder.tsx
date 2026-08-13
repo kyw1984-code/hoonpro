@@ -179,9 +179,9 @@ export function SourcingFinder() {
       setSourcingProgress(100);
       applyProducts(liveProducts, '전체');
       setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
-    } catch {
-      applyProducts(sourcingProducts, '전체');
-      setSourcingMessage('실제 API 연결 실패로 mock fallback을 표시합니다.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '실제 데이터 분석이 아직 완료되지 않았습니다.';
+      setSourcingMessage(message);
     } finally {
       setIsSourcingLoading(false);
       window.setTimeout(() => setSourcingProgress(0), 900);
@@ -208,9 +208,9 @@ export function SourcingFinder() {
       setHasRunSourcing(true);
       setView('results');
       setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
-    } catch {
-      setProducts(sourcingProducts);
-      setSourcingMessage('실제 API 연결 실패로 mock fallback을 표시합니다.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '실제 데이터 분석이 아직 완료되지 않았습니다.';
+      setSourcingMessage(message);
     } finally {
       setIsSourcingLoading(false);
       window.setTimeout(() => setSourcingProgress(0), 900);
@@ -323,7 +323,7 @@ export function SourcingFinder() {
                   <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-black text-slate-950">{isSourcingLoading ? `${sourcingProgress}% 실제 데이터 분석중` : `${filters.difficulty} 기준으로 분석 대기 중`}</p>
-                    <p className="mt-1 text-xs font-bold text-slate-500">{isSourcingLoading ? sourcingMessage : '시작 전에는 추천 키워드를 숨겨두고, 실행 후 결과 화면에서 공개합니다.'}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">{isSourcingLoading || sourcingMessage !== '실제 데이터 Provider 대기 중' ? sourcingMessage : '시작 전에는 추천 키워드를 숨겨두고, 실행 후 결과 화면에서 공개합니다.'}</p>
                   </div>
                   <button onClick={runSourcing} disabled={isSourcingLoading} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"><Sparkles className="h-4 w-4" />{isSourcingLoading ? '실제 데이터 분석중' : '소싱 시작'}</button>
                   </div>

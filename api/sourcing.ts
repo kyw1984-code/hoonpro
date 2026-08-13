@@ -313,21 +313,18 @@ async function triggerBrightData(inputUrl: string) {
 }
 
 async function downloadBrightDataSnapshot(snapshotId: string) {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const progressResponse = await fetch(`${BRIGHTDATA_API_BASE}/progress/${snapshotId}`, {
+  const progressResponse = await fetch(`${BRIGHTDATA_API_BASE}/progress/${snapshotId}`, {
+    headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}` },
+  });
+  const progress = await progressResponse.json();
+  if (progress.status === "failed") throw new Error(progress.error_message || "Bright Data snapshot failed");
+  if (progress.status === "ready") {
+    const snapshotResponse = await fetch(`${BRIGHTDATA_API_BASE}/snapshot/${snapshotId}?format=json`, {
       headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}` },
     });
-    const progress = await progressResponse.json();
-    if (progress.status === "failed") throw new Error(progress.error_message || "Bright Data snapshot failed");
-    if (progress.status === "ready") {
-      const snapshotResponse = await fetch(`${BRIGHTDATA_API_BASE}/snapshot/${snapshotId}?format=json`, {
-        headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}` },
-      });
-      const snapshot = await snapshotResponse.json();
-      if (!snapshotResponse.ok) throw new Error(snapshot?.message || snapshot?.error || "Bright Data snapshot download failed");
-      return snapshot;
-    }
-    await new Promise(resolve => setTimeout(resolve, 2500));
+    const snapshot = await snapshotResponse.json();
+    if (!snapshotResponse.ok) throw new Error(snapshot?.message || snapshot?.error || "Bright Data snapshot download failed");
+    return snapshot;
   }
   return { pending: true, snapshotId };
 }
