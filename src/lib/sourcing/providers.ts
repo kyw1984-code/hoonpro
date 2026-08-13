@@ -41,7 +41,7 @@ export class MockSourcingProvider implements KeywordProvider, ProductProvider, S
   async searchProducts(filters: SourcingFilters) {
     const query = normalize(filters.query);
     return sourcingProducts
-      .filter((product) => filters.difficulty === '프로' || product.difficulty === filters.difficulty)
+      .filter((product) => product.difficulty === filters.difficulty)
       .filter((product) => filters.category === '기타' || product.category === filters.category || Boolean(query))
       .filter((product) => product.price >= filters.minPrice && product.price <= filters.maxPrice)
       .filter((product) => product.avgReview <= filters.maxReview)

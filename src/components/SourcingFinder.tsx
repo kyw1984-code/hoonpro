@@ -70,7 +70,7 @@ function SeasonBars({ product }: { product: SourcingProduct }) {
 const getFilteredProducts = (filters: SourcingFilters, segment: Segment) => {
   const query = filters.query.trim().toLowerCase();
   return sourcingProducts
-    .filter((product) => filters.difficulty === '프로' || product.difficulty === filters.difficulty)
+    .filter((product) => product.difficulty === filters.difficulty)
     .filter((product) => filters.category === '기타' || product.category === filters.category || Boolean(query))
     .filter((product) => product.price >= filters.minPrice && product.price <= filters.maxPrice)
     .filter((product) => product.avgReview <= filters.maxReview)

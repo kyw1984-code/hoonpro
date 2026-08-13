@@ -58,123 +58,73 @@ const getKeywordTypes = (grade: string, growth: number, margin: number, competit
   return Array.from(new Set(types));
 };
 
-const competitorNamePools: Record<string, string[]> = {
-  스포츠: [
-    '나이키 드라이핏 UV 페이스커버 스포츠 마스크',
-    '아르메데스 자외선차단 쿨링 스포츠 마스크',
-    '락브로스 라이딩 냉감 바라클라바 마스크',
-    '아디다스 러닝 자외선 차단 스포츠 마스크',
-    'K2 아이스 멀티 스카프 쿨링 마스크',
-    '블랙야크 냉감 팔토시 자외선 차단 토시',
-    '프로스펙스 스포츠 쿨 팔토시 2p',
-    '밀레 UV 차단 등산 쿨토시',
-    '캠핑문 접이식 캠핑 선반 우드쉘프',
-    '코멧 아웃도어 캠핑 식기 건조망',
-  ],
-  자동차: [
-    '메이튼 차량용 자석 햇빛가리개',
-    '불스원 자동차 앞유리 햇빛가리개',
-    '카템 차량용 접이식 햇빛가리개',
-    '훠링 차량용 틈새 수납 포켓',
-    '벤딕트 자동차 시트 틈새 수납함',
-    '차싹 차량용 무선 청소기 필터',
-    '오토반 차량용 컵홀더 틈새 수납함',
-    '카템 자동차 사이드 햇빛가리개',
-    '코멧 차량용 무선 충전 거치대',
-    '불스원 차량용 방향제 리필 세트',
-  ],
-  생활: [
-    '코멧 홈 냉감 침대패드',
-    '듀라론 여름 냉감 패드',
-    '홈플래닛 저소음 탁상용 선풍기',
-    '신일 저소음 탁상 선풍기',
-    '오아 휴대용 신발건조기',
-    '한경희생활과학 신발 건조 살균기',
-    '코멧 무타공 욕실 선반',
-    '생활공식 욕실 곰팡이 제거젤',
-    '탐사 프리미엄 빨래 건조볼',
-    '홈앤하우스 접이식 장바구니 캐리어',
-  ],
-  주방: [
-    '코멧 키친 실리콘 음식덮개',
-    '락앤락 실리콘 에어프라이어 용기',
-    '모던하우스 실리콘 주방 조리도구 세트',
-    '키친아트 싱크대 배수구 거름망',
-    '리빙공감 싱크대 배수망 세트',
-    '네이쳐리빙 실리콘 밀폐 덮개',
-    '바겐슈타이거 에어프라이어 종이호일 대체 용기',
-    '코멧 키친 다용도 채반 트레이',
-    '벨라쿠진 실리콘 조리도구 세트',
-    '홈플래닛 주방 싱크대 배수구 캡',
-  ],
-  반려동물: [
-    '딩동펫 반려동물 쿨매트',
-    '리스펫 강아지 쿨방석',
-    '페스룸 산책 물병',
-    '딩동펫 강아지 휴대용 물병',
-    '펫츠맘 고양이 창문 해먹',
-    '딩동펫 고양이 창문 해먹',
-    '탐사 반려동물 쿨매트',
-    '리스펫 강아지 산책 물통',
-    '펫트리움 고양이 창문 침대',
-    '펫초이스 반려동물 여름 쿨패드',
-  ],
-  육아: [
-    '아가드 모서리 보호대',
-    '아이끌레 유아 안전 모서리 보호대',
-    '퍼기 이유식 큐브 트레이',
-    '락앤락 바로한끼 이유식 큐브',
-    '마더케이 실리콘 이유식 보관용기',
-    '베베락 이유식 냉동 보관용기',
-    '아가드 코너 보호대 투명',
-    '일상공감 아이 안전 모서리 가드',
-    '릿첼 이유식 냉동 큐브',
-    '돗투돗 실리콘 이유식 큐브',
-  ],
-  문구: [
-    '시스맥스 데스크 정리 트레이',
-    '카파맥스 데스크 오거나이저',
-    '네임코코 방수 네임스티커',
-    '쁘띠팬시 방수 네임스티커',
-    '모닝글로리 데스크 정리함',
-    '아트박스 책상 정리 트레이',
-    '오피스존 데스크 서류 트레이',
-    '꼬모네임 방수 이름 스티커',
-    '델리 데스크 오거나이저',
-    '아이코닉 라벨 네임스티커',
-  ],
-  DIY: [
-    '생활공식 케이블 정리함',
-    '탐사 멀티탭 케이블 정리함',
-    '코멧 가구 이동 슬라이더 패드',
-    '생활공작소 가구 이동 패드',
-    '3M 케이블 클립 정리 홀더',
-    '다이소형 멀티탭 정리 박스',
-    '홈앤하우스 가구 이동 바퀴 패드',
-    '리빙듀오 케이블 정리함',
-    '이지앤프리 가구 이동 패드',
-    '아이정 멀티탭 케이블 정리함',
-  ],
-  패션: [
-    '나이키 UV 차단 러닝 캡',
-    '아디다스 자외선 차단 스포츠 모자',
-    'K2 여름 등산 햇빛차단 모자',
-    '블랙야크 냉감 자외선 차단 모자',
-    '네파 여성 UV 차단 썬캡',
-    '휠라 스포츠 메쉬 볼캡',
-    '밀레 여름 등산 모자',
-    '프로스펙스 러닝 메쉬 캡',
-    '코오롱스포츠 햇빛차단 모자',
-    '아이더 냉감 썬캡',
-  ],
+const competitorBrands: Record<string, string[]> = {
+  스포츠: ['나이키', '아디다스', 'K2', '블랙야크', '아르메데스', '락브로스', '프로스펙스', '밀레', '코멧 아웃도어', '트렉스타'],
+  자동차: ['메이튼', '불스원', '카템', '훠링', '벤딕트', '차싹', '오토반', '아이빌', '로드몬스터', '킨톤'],
+  생활: ['코멧 홈', '홈플래닛', '생활공식', '오아', '한경희생활과학', '듀라론', '탐사', '네이쳐리빙', '홈앤하우스', '일상공감'],
+  주방: ['코멧 키친', '락앤락', '키친아트', '모던하우스', '리빙공감', '네이쳐리빙', '바겐슈타이거', '벨라쿠진', '글라스락', '실리쿡'],
+  반려동물: ['딩동펫', '리스펫', '페스룸', '펫츠맘', '탐사', '펫트리움', '펫초이스', '멍냥이랑', '도그아이', '캣츠모리'],
+  육아: ['아가드', '아이끌레', '퍼기', '락앤락 바로한끼', '마더케이', '베베락', '릿첼', '돗투돗', '베이비앙', '꿈비'],
+  문구: ['시스맥스', '카파맥스', '네임코코', '쁘띠팬시', '모닝글로리', '아트박스', '오피스존', '꼬모네임', '델리', '아이코닉'],
+  DIY: ['생활공식', '탐사', '코멧', '생활공작소', '3M', '홈앤하우스', '리빙듀오', '이지앤프리', '아이정', '다용도공방'],
+  패션: ['나이키', '아디다스', 'K2', '블랙야크', '네파', '휠라', '밀레', '프로스펙스', '코오롱스포츠', '아이더'],
+};
+
+const competitorModifiers: Record<string, string[]> = {
+  스포츠: ['자외선 차단', '냉감', '러닝용', '등산용', '통기성', '여름용', '초경량', 'UV 차단', '쿨링', '땀흡수'],
+  자동차: ['차량용', '접이식', '자석형', '틈새형', '고정형', '여름용', '대형', '간편설치', '햇빛차단', '실내관리'],
+  생활: ['프리미엄', '저소음', '무타공', '여름용', '공간절약', '생활편의', '실속형', '대용량', '간편설치', '살림템'],
+  주방: ['실리콘', '다용도', '세척쉬운', '내열', '밀폐형', '위생', '싱크대', '에어프라이어', '주방정리', '반복사용'],
+  반려동물: ['강아지', '고양이', '휴대용', '여름용', '쿨링', '산책용', '반려동물', '접이식', '안전한', '대형'],
+  육아: ['유아용', '안전', '실리콘', '무독성', '선물용', '신생아', '투명', '간편세척', '말랑한', '보관용'],
+  문구: ['방수', '데스크', '사무용', '학생용', '라벨형', '정리용', '투명', '컬러', '대용량', '심플'],
+  DIY: ['셀프', '다용도', '케이블', '가구', '미끄럼방지', '정리형', '간편설치', '튼튼한', '홈수리', '보호'],
+  패션: ['자외선 차단', '여름', '스포츠', '등산', '러닝', '메쉬', '냉감', '남녀공용', '경량', 'UV 차단'],
+};
+
+const productNouns = [
+  '마스크', '햇빛가리개', '신발건조기', '침대패드', '팔토시', '음식덮개', '접이식 선반', '쿨매트', '모서리 보호대',
+  '욕실 선반', '탁상 선풍기', '넥쿨러', '틈새 수납함', '빨래 건조볼', '무릎보호대', '배수망', '산책 물병',
+  '케이블 정리함', '데스크 정리 트레이', '장바구니 캐리어', '자외선 차단 모자', '이유식 큐브 트레이',
+  '무선 청소기 필터', '식기 건조망', '네임스티커', '창문 해먹', '에어프라이어 용기', '곰팡이 제거젤', '가구 이동 패드', '방수팩',
+];
+
+const competitorSuffixes = [
+  '1개입', '2개 세트', '대형', '소형', '블랙', '화이트', '가성비형', '프리미엄형', '휴대용', '쿠팡 인기 구성',
+];
+
+const getProductCore = (productName: string) => {
+  const noun = productNouns.find((item) => productName.includes(item));
+  return noun || productName.split(' ').slice(-2).join(' ');
 };
 
 const getCompetitorName = (category: string, productName: string, rank: number) => {
-  const pool = competitorNamePools[category] || competitorNamePools.생활;
-  return pool[(rank + productName.length) % pool.length];
+  const brands = competitorBrands[category] || competitorBrands.생활;
+  const modifiers = competitorModifiers[category] || competitorModifiers.생활;
+  const core = getProductCore(productName);
+  return `${brands[rank % brands.length]} ${modifiers[(rank + productName.length) % modifiers.length]} ${core} ${competitorSuffixes[(rank + category.length) % competitorSuffixes.length]}`;
 };
 
 const getCoupangSearchUrl = (keyword: string) => `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}`;
+
+const getGeneratedKeywords = (name: string, category: string, types: KeywordType[]) => {
+  const core = getProductCore(name).replace(/\s/g, '');
+  const byType: Partial<Record<KeywordType, string>> = {
+    블루오션: `${core}블루오션`,
+    급상승: `${core}급상승`,
+    시즌상품: `${core}시즌`,
+    신규시장: `${core}신규상품`,
+    고마진: `${core}고마진`,
+    저경쟁: `${core}저경쟁`,
+    '리뷰장벽 낮음': `${core}리뷰낮음`,
+  };
+  return Array.from(new Set([
+    name.replace(/\s/g, ''),
+    `${category}${core}`,
+    `${core}추천`,
+    ...types.map((type) => byType[type]).filter((keyword): keyword is string => Boolean(keyword)),
+  ])).slice(0, 6);
+};
 
 export const sourcingProducts: SourcingProduct[] = seeds.map((seed, index) => {
   const [name, category, price, supplierCost, avgReview, searchVolume, growth30d, estimatedSales, competitionLevel, rocketRatio, adRatio, difficulty] = seed;
@@ -191,13 +141,14 @@ export const sourcingProducts: SourcingProduct[] = seeds.map((seed, index) => {
     supplierReliability: supplierCost < price * 0.35 ? 5 : 4,
   });
   const baseSeason = [12, 14, 20, 34, 58, 83, 100, 92, 46, 24, 14, 11];
+  const productKeywordTypes = getKeywordTypes(score.grade, growth30d, margin, competitionLevel, category);
 
   return {
     id: `hp-${index + 1}`,
     keyword: name,
     name,
     category,
-    keywordTypes: getKeywordTypes(score.grade, growth30d, margin, competitionLevel, category),
+    keywordTypes: productKeywordTypes,
     price,
     supplierCost,
     shippingCost,
@@ -267,7 +218,7 @@ export const sourcingProducts: SourcingProduct[] = seeds.map((seed, index) => {
     competitorWeaknesses: ['색상 선택 부족', '세트 구성 부족', '사이즈/사용 안내 부족', '기능성 근거 부족'],
     strategies: ['2개 세트 구성', '전용 보관 파우치 또는 사은품', '기능성 테스트 문구 강조', '러닝/골프/출퇴근 등 사용 장면 이미지'],
     generatedNames: [`${name} 자외선차단 실사용 세트`, `${name} 쿠팡 인기형 가성비 구성`, `${name} 초보 셀러 추천 소싱템`],
-    generatedKeywords: [name.replace(/\s/g, ''), `${category}추천`, '쿠팡소싱', '초보셀러', '고마진상품', '저경쟁키워드'],
+    generatedKeywords: getGeneratedKeywords(name, category, productKeywordTypes),
     differentiation: ['2개 세트', '전용 보관 파우치', '남녀 공용 컬러', '기능성 근거 강조', '실사용 비교 이미지', '초보자용 상세 안내'],
     risks: competitionLevel > 50 ? ['상위 판매 집중도가 높아 광고비가 올라갈 수 있음', '로켓 상품 비율이 높아 배송 경쟁력 필요'] : ['공급처 품질 확인 필요', '시즌 피크 전 재고 준비 필요'],
     grade: score.grade,
