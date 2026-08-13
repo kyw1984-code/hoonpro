@@ -1,6 +1,6 @@
 import type { ProductGrade, ProductScoreBreakdown } from '../scoring/calculateProductScore';
 
-export type Difficulty = '초보' | '중수' | '고수';
+export type Difficulty = '아마추어' | '준프로' | '프로';
 export type SourcingStatus = '발견' | '분석중' | '샘플 주문' | '소싱 완료' | '상품 등록' | '판매중' | '보류' | '실패';
 export type KeywordType = '블루오션' | '급상승' | '시즌상품' | '신규시장' | '고마진' | '저경쟁' | '리뷰장벽 낮음';
 

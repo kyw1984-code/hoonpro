@@ -70,7 +70,7 @@ export function SourcingFinder() {
   const [view, setView] = useState<View>('dashboard');
   const [segment, setSegment] = useState<Segment>('전체');
   const [filters, setFilters] = useState<SourcingFilters>({
-    difficulty: '초보',
+    difficulty: '아마추어',
     category: '생활',
     minPrice: 10000,
     maxPrice: 50000,
@@ -90,7 +90,7 @@ export function SourcingFinder() {
   const filteredProducts = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
     return sourcingProducts
-      .filter((product) => filters.difficulty === '고수' || product.difficulty === filters.difficulty)
+      .filter((product) => filters.difficulty === '프로' || product.difficulty === filters.difficulty)
       .filter((product) => filters.category === '기타' || product.category === filters.category || Boolean(query))
       .filter((product) => product.price >= filters.minPrice && product.price <= filters.maxPrice)
       .filter((product) => product.avgReview <= filters.maxReview)
@@ -260,7 +260,7 @@ export function SourcingFinder() {
                 <div className="mb-5 flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-blue-600" /><SectionTitle title="검색 조건" /></div>
                 <div className="space-y-5">
                   <label className="block"><span className="text-xs font-black text-slate-500">키워드</span><div className="mt-2 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2"><Search className="h-4 w-4 text-slate-400" /><input value={filters.query} onChange={(event) => setFilter('query', event.target.value)} placeholder="예: 냉감 마스크" className="w-full bg-transparent text-sm font-bold outline-none" /></div></label>
-                  <div><p className="text-xs font-black text-slate-500">판매 난이도</p><div className="mt-2 grid grid-cols-3 gap-2">{(['초보', '중수', '고수'] as Difficulty[]).map((item) => <button key={item} onClick={() => setFilter('difficulty', item)} className={`rounded-lg px-3 py-2 text-sm font-black ${filters.difficulty === item ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{item}</button>)}</div></div>
+                  <div><p className="text-xs font-black text-slate-500">판매 난이도</p><div className="mt-2 grid grid-cols-3 gap-2">{(['아마추어', '준프로', '프로'] as Difficulty[]).map((item) => <button key={item} onClick={() => setFilter('difficulty', item)} className={`rounded-lg px-3 py-2 text-sm font-black ${filters.difficulty === item ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{item}</button>)}</div></div>
                   <label className="block"><span className="text-xs font-black text-slate-500">카테고리</span><select value={filters.category} onChange={(event) => setFilter('category', event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
                   <div className="grid grid-cols-2 gap-3"><label><span className="text-xs font-black text-slate-500">최소 판매가</span><input type="number" value={filters.minPrice} onChange={(event) => setFilter('minPrice', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none" /></label><label><span className="text-xs font-black text-slate-500">최대 판매가</span><input type="number" value={filters.maxPrice} onChange={(event) => setFilter('maxPrice', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none" /></label></div>
                   <label className="block"><span className="text-xs font-black text-slate-500">최대 리뷰</span><select value={filters.maxReview} onChange={(event) => setFilter('maxReview', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{[100, 300, 500, 1000, 5000].map((item) => <option key={item} value={item}>{fmt(item)}개</option>)}</select></label>
