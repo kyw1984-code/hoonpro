@@ -32,6 +32,11 @@ const coupangCategoryUrls: Record<string, string> = {
   DIY: 'https://www.coupang.com/np/categories/520663',
 };
 
+const liveCategoryPriority: Record<string, number> = {
+  DIY: 0,
+  패션: 1,
+};
+
 type CoupangApiProduct = {
   productId: string | number;
   productName: string;
@@ -202,7 +207,9 @@ export class MockSourcingProvider implements KeywordProvider, ProductProvider, S
 export class LiveSourcingProvider extends MockSourcingProvider {
   async searchProducts(filters: SourcingFilters, options: FetchLiveOptions = {}) {
     const baseProducts = await super.searchProducts(filters);
-    const liveReadyProducts = baseProducts.filter((product) => coupangCategoryUrls[product.category]);
+    const liveReadyProducts = baseProducts
+      .filter((product) => coupangCategoryUrls[product.category])
+      .sort((a, b) => (liveCategoryPriority[a.category] ?? 99) - (liveCategoryPriority[b.category] ?? 99));
     const candidates = filters.query.trim()
       ? baseProducts.filter((product) => normalize(product.name).includes(normalize(filters.query))).slice(0, 1)
       : (liveReadyProducts.length > 0 ? liveReadyProducts : baseProducts).slice(0, 1);
