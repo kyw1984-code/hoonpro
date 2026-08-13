@@ -112,6 +112,24 @@ export function SourcingFinder() {
     return getFilteredProducts(filters, segment);
   }, [filters, segment]);
 
+  const resultSummary = useMemo(() => {
+    const totalSales = filteredProducts.reduce((sum, product) => sum + product.estimatedSales, 0);
+    const totalReviews = filteredProducts.reduce((sum, product) => sum + product.avgReview, 0);
+    const totalRevenue = filteredProducts.reduce((sum, product) => sum + product.estimatedRevenue, 0);
+    const totalPrice = filteredProducts.reduce((sum, product) => sum + product.price, 0);
+    const avgPrice = filteredProducts.length ? Math.round((totalPrice / filteredProducts.length) / 100) * 100 : 0;
+    const lowCompetitionCount = filteredProducts.filter((product) => product.coupangProductCount <= 2500).length;
+
+    return {
+      avgPrice,
+      lowCompetitionCount,
+      productCount: filteredProducts.length,
+      totalRevenue,
+      totalReviews,
+      totalSales,
+    };
+  }, [filteredProducts]);
+
   const selectedProduct = sourcingProducts.find((product) => product.id === selectedProductId) || sourcingProducts[0];
   const aiStrategy = createMockAiStrategy(selectedProduct);
   const calcProduct = sourcingProducts.find((product) => product.id === calcProductId) || sourcingProducts[0];
@@ -315,11 +333,69 @@ export function SourcingFinder() {
                 <div className="flex gap-2">{segmentButtons.map(([label, Icon]) => <button key={label} onClick={() => setSegment(label)} className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-black ${segment === label ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}</div>
               </div>
               {hasRunSourcing ? (
-                <div className="grid grid-cols-3 gap-4">{filteredProducts.map((product) => (
-                  <React.Fragment key={product.id}>
-                    <ProductCard product={product} favorites={favorites} onFavorite={toggleFavorite} onOpen={openDetail} />
-                  </React.Fragment>
-                ))}</div>
+                <div className="space-y-5">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+                    <MetricCard label="총판매량" value={`${fmt(resultSummary.totalSales)}개`} sub="월 판매량 추정 합산" />
+                    <MetricCard label="총리뷰수" value={fmt(resultSummary.totalReviews)} sub="상위권 리뷰 장벽 합산" />
+                    <MetricCard label="상품수" value={`${fmt(resultSummary.productCount)}개`} sub={`저경쟁 ${fmt(resultSummary.lowCompetitionCount)}개`} />
+                    <MetricCard label="평균가" value={won(resultSummary.avgPrice)} sub="추천 키워드 평균 판매가" />
+                    <MetricCard label="총 월매출" value={`${fmt(Math.round(resultSummary.totalRevenue / 10000))}만원`} sub={`Top ${fmt(filteredProducts[0]?.estimatedSales || 0)}개/월`} />
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <SectionTitle title="효자상품 리스트" desc={`상품수는 적고 월판매가 높은 순서 Top ${Math.min(7, filteredProducts.length)}입니다.`} />
+                      <span className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Low Competition</span>
+                    </div>
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full min-w-[860px] text-sm">
+                        <thead className="bg-slate-50 text-xs font-black text-slate-500">
+                          <tr>
+                            <th className="px-3 py-3 text-left">상품명</th>
+                            <th className="px-3 py-3 text-right">가격</th>
+                            <th className="px-3 py-3 text-right">리뷰</th>
+                            <th className="px-3 py-3 text-right">월판매</th>
+                            <th className="px-3 py-3 text-right">월매출</th>
+                            <th className="px-3 py-3 text-center">AI</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredProducts.slice(0, 7).map((product, index) => (
+                            <tr key={product.id} className="border-b border-slate-100 hover:bg-blue-50/60">
+                              <td className="px-3 py-4">
+                                <div className="flex items-center gap-3">
+                                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded bg-slate-100 text-xs font-black text-slate-600">{index + 1}</span>
+                                  <div>
+                                    <p className="font-black text-slate-900">{product.name}</p>
+                                    <p className="mt-1 text-xs font-bold text-slate-500">쿠팡 상품수 {fmt(product.coupangProductCount)}개 · 기회점수 {product.opportunityScore}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-3 py-4 text-right font-bold">{won(product.price)}</td>
+                              <td className="px-3 py-4 text-right font-bold text-slate-600">{fmt(product.avgReview)}</td>
+                              <td className="px-3 py-4 text-right text-base font-black text-slate-950">{fmt(product.estimatedSales)}</td>
+                              <td className="px-3 py-4 text-right font-black text-amber-600">{fmt(Math.round(product.estimatedRevenue / 10000))}만원</td>
+                              <td className="px-3 py-4 text-center">
+                                <button onClick={() => openDetail(product)} className="inline-grid h-9 w-9 place-items-center rounded-full bg-slate-950 text-white hover:bg-blue-600" aria-label={`${product.name} 상세분석`}>
+                                  <ChevronRight className="h-4 w-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <SectionTitle title="추천 카드" desc="상세 분석, 즐겨찾기, 상태 관리를 위한 카드형 보기입니다." />
+                    <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">{filteredProducts.map((product) => (
+                      <React.Fragment key={product.id}>
+                        <ProductCard product={product} favorites={favorites} onFavorite={toggleFavorite} onOpen={openDetail} />
+                      </React.Fragment>
+                    ))}</div>
+                  </div>
+                </div>
               ) : (
                 <div className="grid h-72 place-items-center rounded-lg border border-dashed border-slate-300 bg-white text-center">
                   <div>
