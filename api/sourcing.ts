@@ -301,7 +301,7 @@ function normalizeBrightDataRecord(record: Record<string, unknown>, index: numbe
 }
 
 async function triggerBrightData(inputUrl: string) {
-  const url = `${BRIGHTDATA_API_BASE}/scrape?dataset_id=${encodeURIComponent(BRIGHTDATA_COUPANG_DATASET_ID)}&format=json`;
+  const url = `${BRIGHTDATA_API_BASE}/trigger?dataset_id=${encodeURIComponent(BRIGHTDATA_COUPANG_DATASET_ID)}&include_errors=true`;
   const response = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" },
@@ -344,6 +344,7 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
   try {
     const inputUrl = categoryUrl || buildCoupangSearchUrl(keyword);
     const raw = snapshotId ? { snapshot_id: snapshotId } : await triggerBrightData(inputUrl);
+    if (!snapshotId && raw?.snapshot_id) return res.status(202).json({ pending: true, snapshotId: String(raw.snapshot_id) });
     const payload = raw?.snapshot_id ? await downloadBrightDataSnapshot(String(raw.snapshot_id)) : raw;
     if (payload?.pending) return res.status(202).json(payload);
 
