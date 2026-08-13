@@ -126,6 +126,19 @@ const getGeneratedKeywords = (name: string, category: string, types: KeywordType
   ])).slice(0, 6);
 };
 
+const getCoupangProductCount = (competitionLevel: number, searchVolume: number, index: number) => {
+  const marketSize = Math.round(searchVolume / 210);
+  const competitionWeight = competitionLevel * 18;
+  return Math.max(80, marketSize + competitionWeight + (index % 6) * 55);
+};
+
+const getOpportunityScore = (estimatedSales: number, coupangProductCount: number, growth30d: number) => {
+  const salesScore = Math.min(55, Math.round(estimatedSales / 28));
+  const scarcityScore = Math.min(35, Math.round(42000 / coupangProductCount));
+  const growthScore = Math.min(10, Math.round(growth30d / 8));
+  return Math.min(100, salesScore + scarcityScore + growthScore);
+};
+
 export const sourcingProducts: SourcingProduct[] = seeds.map((seed, index) => {
   const [name, category, price, supplierCost, avgReview, searchVolume, growth30d, estimatedSales, competitionLevel, rocketRatio, adRatio, difficulty] = seed;
   const shippingCost = 3000;
@@ -142,6 +155,8 @@ export const sourcingProducts: SourcingProduct[] = seeds.map((seed, index) => {
   });
   const baseSeason = [12, 14, 20, 34, 58, 83, 100, 92, 46, 24, 14, 11];
   const productKeywordTypes = getKeywordTypes(score.grade, growth30d, margin, competitionLevel, category);
+  const coupangProductCount = getCoupangProductCount(competitionLevel, searchVolume, index);
+  const opportunityScore = getOpportunityScore(estimatedSales, coupangProductCount, growth30d);
 
   return {
     id: `hp-${index + 1}`,
@@ -160,6 +175,8 @@ export const sourcingProducts: SourcingProduct[] = seeds.map((seed, index) => {
     growth90d: Math.round(growth30d * 1.8),
     estimatedSales,
     estimatedRevenue: price * estimatedSales,
+    coupangProductCount,
+    opportunityScore,
     competitionLevel,
     rocketRatio,
     adRatio,

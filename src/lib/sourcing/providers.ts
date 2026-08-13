@@ -21,6 +21,11 @@ export interface TrendProvider {
 }
 
 const normalize = (value: string) => value.trim().toLowerCase();
+const sortByOpportunity = (a: SourcingProduct, b: SourcingProduct) => {
+  if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
+  if (b.estimatedSales !== a.estimatedSales) return b.estimatedSales - a.estimatedSales;
+  return a.coupangProductCount - b.coupangProductCount;
+};
 
 export class MockSourcingProvider implements KeywordProvider, ProductProvider, SupplierProvider, TrendProvider {
   async searchKeyword(keyword: string) {
@@ -47,7 +52,7 @@ export class MockSourcingProvider implements KeywordProvider, ProductProvider, S
       .filter((product) => product.avgReview <= filters.maxReview)
       .filter((product) => filters.keywordTypes.length === 0 || filters.keywordTypes.some((type) => product.keywordTypes.includes(type)))
       .filter((product) => !query || normalize(product.name).includes(query) || normalize(product.category).includes(query))
-      .sort((a, b) => b.score.total - a.score.total);
+      .sort(sortByOpportunity);
   }
 
   async getProductDetail(productId: string) {

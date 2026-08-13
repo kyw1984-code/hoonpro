@@ -19,6 +19,12 @@ const difficultyOptions: Difficulty[] = ['아마추어', '준프로', '프로'];
 const keywordTypes: KeywordType[] = ['블루오션', '급상승', '시즌상품', '신규시장', '고마진', '저경쟁', '리뷰장벽 낮음'];
 const statuses: SourcingStatus[] = ['발견', '분석중', '샘플 주문', '소싱 완료', '상품 등록', '판매중', '보류', '실패'];
 
+const sortByOpportunity = (a: SourcingProduct, b: SourcingProduct) => {
+  if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
+  if (b.estimatedSales !== a.estimatedSales) return b.estimatedSales - a.estimatedSales;
+  return a.coupangProductCount - b.coupangProductCount;
+};
+
 const gradeClass = {
   S: 'bg-red-50 text-red-700 ring-red-200',
   A: 'bg-orange-50 text-orange-700 ring-orange-200',
@@ -77,7 +83,7 @@ const getFilteredProducts = (filters: SourcingFilters, segment: Segment) => {
     .filter((product) => filters.keywordTypes.length === 0 || filters.keywordTypes.some((type) => product.keywordTypes.includes(type)))
     .filter((product) => segment === '전체' || product.keywordTypes.includes(segment as KeywordType))
     .filter((product) => !query || product.name.toLowerCase().includes(query) || product.category.toLowerCase().includes(query))
-    .sort((a, b) => b.score.total - a.score.total);
+    .sort(sortByOpportunity);
 };
 
 export function SourcingFinder() {
@@ -157,10 +163,13 @@ export function SourcingFinder() {
   };
 
   const exportCsv = () => {
-    const rows = [['상품명', '등급', 'AI점수', '예상월매출', '평균리뷰', '예상마진'], ...filteredProducts.map((product) => [
+    const rows = [['상품명', '등급', '기회점수', 'AI점수', '월판매량추정', '쿠팡상품수추정', '예상월매출', '평균리뷰', '예상마진'], ...filteredProducts.map((product) => [
       product.name,
       product.grade,
+      String(product.opportunityScore),
       String(product.score.total),
+      String(product.estimatedSales),
+      String(product.coupangProductCount),
       String(product.estimatedRevenue),
       String(product.avgReview),
       `${Math.round(((product.price - product.supplierCost - product.shippingCost - product.price * 0.12) / product.price) * 100)}%`,
@@ -302,7 +311,7 @@ export function SourcingFinder() {
           {view === 'results' && (
             <section className="space-y-4">
               <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <SectionTitle title={`${filters.difficulty} 추천 키워드 TOP ${hasRunSourcing ? filteredProducts.length : 0}`} desc={hasRunSourcing ? 'S/A/B 등급과 추천 판단을 먼저 확인하세요.' : '대시보드에서 난이도를 선택하고 소싱 시작을 눌러주세요.'} />
+                <SectionTitle title={`${filters.difficulty} 추천 키워드 TOP ${hasRunSourcing ? filteredProducts.length : 0}`} desc={hasRunSourcing ? '쿠팡 상품수는 적고 월 판매량은 많은 순서로 정렬했습니다.' : '대시보드에서 난이도를 선택하고 소싱 시작을 눌러주세요.'} />
                 <div className="flex gap-2">{segmentButtons.map(([label, Icon]) => <button key={label} onClick={() => setSegment(label)} className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-black ${segment === label ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}</div>
               </div>
               {hasRunSourcing ? (
@@ -331,7 +340,7 @@ export function SourcingFinder() {
                     <div><GradeBadge grade={selectedProduct.grade} /><h3 className="mt-3 text-2xl font-black">{selectedProduct.name}</h3><p className="mt-1 text-sm font-bold text-slate-500">{selectedProduct.difficulty} 추천 · {selectedProduct.recommendation}</p></div>
                     <span className="text-4xl font-black text-blue-600">{selectedProduct.score.total}</span>
                   </div>
-                  <div className="mt-5 grid grid-cols-4 gap-3"><MetricCard label="월 검색량" value={fmt(selectedProduct.searchVolume)} /><MetricCard label="30일 성장률" value={`+${selectedProduct.growth30d}%`} /><MetricCard label="평균 판매가" value={won(selectedProduct.price)} /><MetricCard label="예상 월매출" value={won(selectedProduct.estimatedRevenue)} /></div>
+                  <div className="mt-5 grid grid-cols-4 gap-3"><MetricCard label="월 판매량 추정" value={`${fmt(selectedProduct.estimatedSales)}개`} /><MetricCard label="쿠팡 상품수 추정" value={`${fmt(selectedProduct.coupangProductCount)}개`} /><MetricCard label="기회점수" value={`${selectedProduct.opportunityScore}점`} /><MetricCard label="예상 월매출" value={won(selectedProduct.estimatedRevenue)} /></div>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                   <SectionTitle title="AI SCORE 세부 점수" desc="총점 100점, 계산 함수는 UI와 분리되어 있습니다." />
@@ -405,7 +414,7 @@ function ProductCard({ product, favorites, onFavorite, onOpen }: ProductCardProp
     <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between"><GradeBadge grade={product.grade} /><button onClick={() => onFavorite(product.id)} className={`rounded-lg p-2 ${favorites.includes(product.id) ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}><Heart className="h-4 w-4" fill={favorites.includes(product.id) ? 'currentColor' : 'none'} /></button></div>
       <p className="mt-4 text-lg font-black">{product.name}</p>
-      <div className="mt-3 grid grid-cols-2 gap-2 text-sm"><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">AI SCORE</span><b>{product.score.total} / 100</b></p><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">추천</span><b>{product.recommendation}</b></p><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">예상 월매출</span><b>{won(product.estimatedRevenue)}</b></p><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">평균 리뷰</span><b>{fmt(product.avgReview)}개</b></p></div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-sm"><p className="rounded-md bg-blue-50 p-2 text-blue-800"><span className="block text-xs font-bold">기회점수</span><b>{product.opportunityScore} / 100</b></p><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">월 판매량 추정</span><b>{fmt(product.estimatedSales)}개</b></p><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">쿠팡 상품수 추정</span><b>{fmt(product.coupangProductCount)}개</b></p><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">AI SCORE</span><b>{product.score.total}점</b></p></div>
       <button onClick={() => onOpen(product)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 py-2.5 text-sm font-black text-white">상세 분석 <ChevronRight className="h-4 w-4" /></button>
     </article>
   );

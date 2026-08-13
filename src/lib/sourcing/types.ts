@@ -50,6 +50,8 @@ export type SourcingProduct = {
   growth90d: number;
   estimatedSales: number;
   estimatedRevenue: number;
+  coupangProductCount: number;
+  opportunityScore: number;
   competitionLevel: number;
   rocketRatio: number;
   adRatio: number;
