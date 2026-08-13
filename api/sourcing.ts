@@ -6,6 +6,9 @@ export const config = { maxDuration: 60 };
 const NAVER_CLIENT_ID = (process.env.NAVER_CLIENT_ID || process.env.NAVER_API_CLIENT_ID || "").trim();
 const NAVER_CLIENT_SECRET = (process.env.NAVER_CLIENT_SECRET || process.env.NAVER_API_CLIENT_SECRET || "").trim();
 const COUPANG_COOKIE = (process.env.COUPANG_COOKIE || "").trim();
+const BRIGHTDATA_API_TOKEN = (process.env.BRIGHTDATA_API_TOKEN || "").trim();
+const BRIGHTDATA_COUPANG_DATASET_ID = (process.env.BRIGHTDATA_COUPANG_DATASET_ID || "gd_mcsxmfqptpufr191p").trim();
+const BRIGHTDATA_API_BASE = "https://api.brightdata.com/datasets/v3";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PRODUCTS (type=products) — 네이버 쇼핑 API → 쿠팡 상품 검색·점수화
@@ -216,6 +219,146 @@ function cleanImageUrl(url: string): string {
   return url.startsWith("//") ? "https:" + url : url;
 }
 
+function asString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function asNumber(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[^\d.]/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function buildCoupangSearchUrl(keyword: string) {
+  return `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}`;
+}
+
+function normalizeCoupangUrl(value: string) {
+  if (/^https:\/\/(www\.)?coupang\.com\//i.test(value) || /^https:\/\/shop\.coupang\.com\//i.test(value)) return value;
+  return "";
+}
+
+function extractRecords(payload: unknown): Record<string, unknown>[] {
+  if (Array.isArray(payload)) return payload.flatMap(extractRecords);
+  if (!payload || typeof payload !== "object") return [];
+  const record = payload as Record<string, unknown>;
+  const nested = ["products", "items", "results", "data", "records"].flatMap(key => extractRecords(record[key]));
+  return nested.length > 0 ? nested : [record];
+}
+
+function isBrightDataProductUrl(url: string) {
+  return /coupang\.com\/(vp|np)\/products\//i.test(url);
+}
+
+function getBrightDataProductUrl(record: Record<string, unknown>) {
+  const candidates = [record.url, record.product_url, record.productUrl, record.link, record.final_url, record.resolved_url]
+    .map(asString).filter(Boolean);
+  return candidates.find(isBrightDataProductUrl) || candidates.find(url => /coupang\.com/i.test(url)) || "";
+}
+
+function getBrightDataDeliveryType(record: Record<string, unknown>) {
+  const shippingDetails = Array.isArray(record.shipping_details) ? record.shipping_details.map(asString).join(" ") : "";
+  const text = `${asString(record.delivery)} ${asString(record.shipping)} ${asString(record.shipping_company)} ${shippingDetails} ${asString(record.badge)} ${asString(record.delivery_type)}`.toLowerCase();
+  if (text.includes("판매자로켓") || text.includes("seller rocket") || text.includes("jet")) return "jet";
+  if (text.includes("로켓") || text.includes("rocket")) return "rocket";
+  return "general";
+}
+
+function normalizeBrightDataRecord(record: Record<string, unknown>, index: number) {
+  const productName = asString(record.title) || asString(record.product_title) || asString(record.productName) || asString(record.name);
+  const productUrl = getBrightDataProductUrl(record);
+  const productPrice = asNumber(record.final_price) || asNumber(record.price) || asNumber(record.productPrice) || asNumber(record.sale_price);
+  const ratingCount = asNumber(record.reviews_count) || asNumber(record.review_count) || asNumber(record.reviews) || asNumber(record.ratingCount);
+  const rating = asNumber(record.rating) || asNumber(record.star_rating);
+  const brand = asString(record.brand) || asString(record.brand_name);
+  const productImage = asString(record.main_image) || asString(record.image) || asString(record.image_url) || asString(record.thumbnail) || asString(record.productImage);
+  const sellerName = asString(record.seller) || asString(record.seller_name) || asString(record.vendor) || asString(record.store);
+  const lowerName = productName.toLowerCase();
+  const lowerBrand = brand.toLowerCase();
+  const hasExcludedBrand = BRAND_EXCLUDE.some(brandName => lowerName.includes(brandName.toLowerCase()) || lowerBrand.includes(brandName.toLowerCase()));
+
+  return {
+    productId: asString(record.id) || asString(record.product_id) || asString(record.productId) || productUrl || `brightdata-${index + 1}`,
+    productName,
+    productPrice,
+    productImage,
+    productUrl,
+    rating,
+    ratingCount,
+    reviewCount: ratingCount,
+    rank: index + 1,
+    salesRank: index + 1,
+    deliveryType: getBrightDataDeliveryType(record),
+    sellerName,
+    brand,
+    source: "brightdata",
+    calculated: { saleIndex: Math.max(0, Math.round(100 - Math.log10(Math.max(1, index + 1)) * 38)) },
+    hasExcludedBrand,
+  };
+}
+
+async function triggerBrightData(inputUrl: string) {
+  const url = `${BRIGHTDATA_API_BASE}/scrape?dataset_id=${encodeURIComponent(BRIGHTDATA_COUPANG_DATASET_ID)}&format=json`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify([{ url: inputUrl }]),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data?.message || data?.error || `Bright Data scrape failed: ${response.status}`);
+  return data;
+}
+
+async function downloadBrightDataSnapshot(snapshotId: string) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const progressResponse = await fetch(`${BRIGHTDATA_API_BASE}/progress/${snapshotId}`, {
+      headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}` },
+    });
+    const progress = await progressResponse.json();
+    if (progress.status === "failed") throw new Error(progress.error_message || "Bright Data snapshot failed");
+    if (progress.status === "ready") {
+      const snapshotResponse = await fetch(`${BRIGHTDATA_API_BASE}/snapshot/${snapshotId}?format=json`, {
+        headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}` },
+      });
+      const snapshot = await snapshotResponse.json();
+      if (!snapshotResponse.ok) throw new Error(snapshot?.message || snapshot?.error || "Bright Data snapshot download failed");
+      return snapshot;
+    }
+    await new Promise(resolve => setTimeout(resolve, 2500));
+  }
+  return { pending: true, snapshotId };
+}
+
+async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
+  if (!BRIGHTDATA_API_TOKEN) return res.status(500).json({ error: "BRIGHTDATA_API_TOKEN is not configured" });
+  const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
+  const categoryUrl = typeof req.query.categoryUrl === "string" ? normalizeCoupangUrl(req.query.categoryUrl.trim()) : "";
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+  const excludeBrands = req.query.excludeBrands !== "false";
+  if (!keyword && !categoryUrl) return res.status(400).json({ error: "keyword or categoryUrl is required" });
+
+  try {
+    const inputUrl = categoryUrl || buildCoupangSearchUrl(keyword);
+    const raw = await triggerBrightData(inputUrl);
+    const payload = raw?.snapshot_id ? await downloadBrightDataSnapshot(String(raw.snapshot_id)) : raw;
+    if (payload?.pending) return res.status(202).json(payload);
+
+    const products = extractRecords(payload)
+      .map(normalizeBrightDataRecord)
+      .filter(product => product.productName && product.productUrl && product.productPrice > 0)
+      .filter(product => !excludeBrands || !product.hasExcludedBrand)
+      .slice(0, limit);
+
+    return res.status(200).json({ provider: "brightdata", keyword, inputUrl, products });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown Bright Data error";
+    return res.status(502).json({ error: message, provider: "brightdata" });
+  }
+}
+
 async function handleProducts(req: VercelRequest, res: VercelResponse) {
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword : "";
   const minPrice = Number(req.query.minPrice) || 15000;
@@ -310,7 +453,7 @@ async function handleStats(req: VercelRequest, res: VercelResponse) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 메인 핸들러 — ?type=products | ?type=stats
+// 메인 핸들러 — ?type=products | ?type=stats | ?type=shopping-data
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -323,5 +466,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const type = typeof req.query.type === "string" ? req.query.type : "";
   if (type === "products") return handleProducts(req, res);
   if (type === "stats") return handleStats(req, res);
-  return res.status(400).json({ error: "type=products 또는 type=stats 가 필요합니다." });
+  if (type === "shopping-data") return handleShoppingData(req, res);
+  return res.status(400).json({ error: "type=products, type=stats 또는 type=shopping-data 가 필요합니다." });
 }

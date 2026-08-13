@@ -109,7 +109,8 @@ const fetchLiveProducts = async (keyword: string, category: string, filters: Sou
   });
   const categoryUrl = coupangCategoryUrls[category];
   if (categoryUrl) params.set('categoryUrl', categoryUrl);
-  const response = await fetch(`/api/shopping-data?${params.toString()}`);
+  params.set('type', 'shopping-data');
+  const response = await fetch(`/api/sourcing?${params.toString()}`);
   if (!response.ok) return [];
   const data = await response.json();
   if (data?.pending) return [];
