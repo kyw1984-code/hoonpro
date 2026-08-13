@@ -344,7 +344,7 @@ export function SourcingFinder() {
 
                   <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <SectionTitle title="효자상품 리스트" desc={`상품수는 적고 월판매가 높은 순서 Top ${Math.min(7, filteredProducts.length)}입니다.`} />
+                      <SectionTitle title="대박 상품 리스트" desc={`상품수는 적고 월판매가 높은 순서 Top ${Math.min(7, filteredProducts.length)}입니다.`} />
                       <span className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Low Competition</span>
                     </div>
                     <div className="mt-4 overflow-x-auto">
