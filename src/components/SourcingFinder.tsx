@@ -118,7 +118,7 @@ export function SourcingFinder() {
     const totalRevenue = filteredProducts.reduce((sum, product) => sum + product.estimatedRevenue, 0);
     const totalPrice = filteredProducts.reduce((sum, product) => sum + product.price, 0);
     const avgPrice = filteredProducts.length ? Math.round((totalPrice / filteredProducts.length) / 100) * 100 : 0;
-    const lowCompetitionCount = filteredProducts.filter((product) => product.coupangProductCount <= 2500).length;
+    const lowCompetitionCount = filteredProducts.filter((product) => product.coupangProductCount <= 100).length;
 
     return {
       avgPrice,
@@ -329,7 +329,7 @@ export function SourcingFinder() {
           {view === 'results' && (
             <section className="space-y-4">
               <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <SectionTitle title={`${filters.difficulty} 추천 키워드 TOP ${hasRunSourcing ? filteredProducts.length : 0}`} desc={hasRunSourcing ? '쿠팡 상품수는 적고 월 판매량은 많은 순서로 정렬했습니다.' : '대시보드에서 난이도를 선택하고 소싱 시작을 눌러주세요.'} />
+                <SectionTitle title={`${filters.difficulty} 추천 키워드 TOP ${hasRunSourcing ? filteredProducts.length : 0}`} desc={hasRunSourcing ? '쿠팡 상품수 100개 이하 중 월 판매량과 매출이 높은 순서로 추론했습니다.' : '대시보드에서 난이도를 선택하고 소싱 시작을 눌러주세요.'} />
                 <div className="flex gap-2">{segmentButtons.map(([label, Icon]) => <button key={label} onClick={() => setSegment(label)} className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-black ${segment === label ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}</div>
               </div>
               {hasRunSourcing ? (
@@ -344,8 +344,8 @@ export function SourcingFinder() {
 
                   <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <SectionTitle title="대박 상품 리스트" desc={`상품수는 적고 월판매가 높은 순서 Top ${Math.min(7, filteredProducts.length)}입니다.`} />
-                      <span className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">Low Competition</span>
+                      <SectionTitle title="대박 상품 리스트" desc={`쿠팡 상품수 100개 이하에서 월판매와 월매출이 높은 순서 Top ${Math.min(7, filteredProducts.length)}입니다.`} />
+                      <span className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">상품수 100개 이하</span>
                     </div>
                     <div className="mt-4 overflow-x-auto">
                       <table className="w-full min-w-[860px] text-sm">

@@ -127,14 +127,15 @@ const getGeneratedKeywords = (name: string, category: string, types: KeywordType
 };
 
 const getCoupangProductCount = (competitionLevel: number, searchVolume: number, index: number) => {
-  const marketSize = Math.round(searchVolume / 210);
-  const competitionWeight = competitionLevel * 18;
-  return Math.max(80, marketSize + competitionWeight + (index % 6) * 55);
+  const demandPressure = Math.round(searchVolume / 3800);
+  const competitionWeight = competitionLevel * 4;
+  const variance = (index % 9) * 3;
+  return Math.min(98, Math.max(18, demandPressure + competitionWeight + variance));
 };
 
 const getOpportunityScore = (estimatedSales: number, coupangProductCount: number, growth30d: number) => {
-  const salesScore = Math.min(55, Math.round(estimatedSales / 28));
-  const scarcityScore = Math.min(35, Math.round(42000 / coupangProductCount));
+  const salesScore = Math.min(50, Math.round(estimatedSales / 32));
+  const scarcityScore = coupangProductCount <= 100 ? Math.min(40, Math.round((110 - coupangProductCount) / 2.2)) : 0;
   const growthScore = Math.min(10, Math.round(growth30d / 8));
   return Math.min(100, salesScore + scarcityScore + growthScore);
 };
