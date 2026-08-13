@@ -300,7 +300,7 @@ function normalizeBrightDataRecord(record: Record<string, unknown>, index: numbe
   };
 }
 
-async function triggerBrightData(inputUrl: string, limit: number) {
+async function triggerBrightData(inputUrls: string[], limit: number) {
   const params = new URLSearchParams({
     dataset_id: BRIGHTDATA_COUPANG_DATASET_ID,
     notify: "false",
@@ -312,7 +312,7 @@ async function triggerBrightData(inputUrl: string, limit: number) {
   const response = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ input: [{ url: inputUrl }], limit_per_input: limit }),
+    body: JSON.stringify({ input: inputUrls.map(url => ({ url })), limit_per_input: limit }),
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data?.message || data?.error || `Bright Data scrape failed: ${response.status}`);
@@ -340,6 +340,9 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
   if (!BRIGHTDATA_API_TOKEN) return res.status(500).json({ error: "BRIGHTDATA_API_TOKEN is not configured" });
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
   const categoryUrl = typeof req.query.categoryUrl === "string" ? normalizeCoupangUrl(req.query.categoryUrl.trim()) : "";
+  const categoryUrls = typeof req.query.categoryUrls === "string"
+    ? req.query.categoryUrls.split(",").map(url => normalizeCoupangUrl(url.trim())).filter(Boolean)
+    : [];
   const snapshotId = typeof req.query.snapshotId === "string" ? req.query.snapshotId.trim() : "";
   const debug = req.query.debug === "true";
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
@@ -347,12 +350,14 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
   if (!keyword && !categoryUrl && !snapshotId) return res.status(400).json({ error: "keyword, categoryUrl or snapshotId is required" });
 
   try {
-    const inputUrl = categoryUrl || buildCoupangSearchUrl(keyword);
-    const raw = snapshotId ? { snapshot_id: snapshotId } : await triggerBrightData(inputUrl, limit);
+    const inputUrls = categoryUrls.length > 0 ? categoryUrls : [categoryUrl || buildCoupangSearchUrl(keyword)];
+    const inputUrl = inputUrls[0];
+    const raw = snapshotId ? { snapshot_id: snapshotId } : await triggerBrightData(inputUrls, limit);
     const meta = {
       tokenConfigured: Boolean(BRIGHTDATA_API_TOKEN),
       datasetId: BRIGHTDATA_COUPANG_DATASET_ID,
       inputUrl,
+      inputUrls,
       mode: "brightdata-discover-category",
       snapshotId: String(raw?.snapshot_id || snapshotId || ""),
     };

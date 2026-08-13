@@ -27,9 +27,14 @@ const sortByOpportunity = (a: SourcingProduct, b: SourcingProduct) => {
   return a.coupangProductCount - b.coupangProductCount;
 };
 
-const coupangCategoryUrls: Record<string, string> = {
-  패션: 'https://www.coupang.com/np/categories/525715',
-  DIY: 'https://www.coupang.com/np/categories/520663',
+const coupangCategoryUrls: Record<string, string[]> = {
+  패션: ['https://www.coupang.com/np/categories/525715'],
+  DIY: [
+    'https://www.coupang.com/np/categories/520663',
+    'https://www.coupang.com/np/categories/184060',
+    'https://www.coupang.com/np/categories/401027',
+    'https://www.coupang.com/np/categories/497873',
+  ],
 };
 
 const liveCategoryPriority: Record<string, number> = {
@@ -170,8 +175,8 @@ const fetchLiveProducts = async (keyword: string, category: string, filters: Sou
     limit: '30',
     excludeBrands: 'true',
   });
-  const categoryUrl = coupangCategoryUrls[category];
-  if (categoryUrl) params.set('categoryUrl', categoryUrl);
+  const categoryUrls = coupangCategoryUrls[category] || [];
+  if (categoryUrls.length > 0) params.set('categoryUrls', categoryUrls.join(','));
   params.set('type', 'shopping-data');
 
   let { response, data } = await readLiveProductsResponse(params);

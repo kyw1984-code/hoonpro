@@ -87,6 +87,26 @@ const getFilteredProducts = (products: SourcingProduct[], filters: SourcingFilte
     .sort(sortByOpportunity);
 };
 
+const SOURCING_CACHE_KEY = 'hoonpro:sourcing-cache:v1';
+const SOURCING_CACHE_ENABLED_KEY = 'hoonpro:sourcing-cache-enabled';
+
+type CachedSourcing = {
+  savedAt: number;
+  products: SourcingProduct[];
+};
+
+const readSourcingCache = (): CachedSourcing | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SOURCING_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CachedSourcing;
+    return Array.isArray(parsed.products) && parsed.products.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
 export function SourcingFinder() {
   const [view, setView] = useState<View>('dashboard');
   const [segment, setSegment] = useState<Segment>('전체');
@@ -112,6 +132,11 @@ export function SourcingFinder() {
   const [isSourcingLoading, setIsSourcingLoading] = useState(false);
   const [sourcingProgress, setSourcingProgress] = useState(0);
   const [sourcingMessage, setSourcingMessage] = useState('실제 데이터 Provider 대기 중');
+  const [cacheEnabled, setCacheEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem(SOURCING_CACHE_ENABLED_KEY) !== 'off';
+  });
+  const [cacheInfo, setCacheInfo] = useState<CachedSourcing | null>(() => readSourcingCache());
 
   const filteredProducts = useMemo(() => {
     return getFilteredProducts(products, filters, segment);
@@ -167,7 +192,33 @@ export function SourcingFinder() {
     setView('results');
   };
 
-  const runSourcing = async () => {
+  const saveSourcingCache = (nextProducts: SourcingProduct[]) => {
+    if (!cacheEnabled || typeof window === 'undefined' || nextProducts.length === 0) return;
+    const nextCache = { savedAt: Date.now(), products: nextProducts };
+    window.localStorage.setItem(SOURCING_CACHE_KEY, JSON.stringify(nextCache));
+    setCacheInfo(nextCache);
+  };
+
+  const clearSourcingCache = () => {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(SOURCING_CACHE_KEY);
+    setCacheInfo(null);
+    setSourcingMessage('관리자가 소싱 캐시를 비웠습니다.');
+  };
+
+  const updateCacheEnabled = (enabled: boolean) => {
+    setCacheEnabled(enabled);
+    if (typeof window !== 'undefined') window.localStorage.setItem(SOURCING_CACHE_ENABLED_KEY, enabled ? 'on' : 'off');
+    setSourcingMessage(enabled ? '소싱 캐시 사용이 켜졌습니다.' : '소싱 캐시 사용이 꺼졌습니다.');
+  };
+
+  const runSourcing = async (options?: { bypassCache?: boolean }) => {
+    const cached = cacheEnabled && !options?.bypassCache ? readSourcingCache() : null;
+    if (cached) {
+      setCacheInfo(cached);
+      applyProducts(cached.products, '전체');
+      setSourcingMessage(`캐시된 Bright Data 결과 ${cached.products.length}개를 즉시 표시했습니다. 저장 ${new Date(cached.savedAt).toLocaleString('ko-KR')}`);
+      return;
+    }
     setIsSourcingLoading(true);
     setSourcingProgress(8);
     setHasRunSourcing(false);
@@ -180,6 +231,7 @@ export function SourcingFinder() {
         setSourcingMessage(message);
       } });
       setSourcingProgress(100);
+      saveSourcingCache(liveProducts);
       applyProducts(liveProducts, '전체');
       setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
     } catch (error) {
@@ -194,6 +246,13 @@ export function SourcingFinder() {
   };
 
   const runSourcingBySegment = async (nextSegment: Segment) => {
+    const cached = cacheEnabled ? readSourcingCache() : null;
+    if (cached) {
+      setCacheInfo(cached);
+      applyProducts(cached.products, nextSegment);
+      setSourcingMessage(`캐시된 Bright Data 결과 ${cached.products.length}개를 즉시 표시했습니다. 저장 ${new Date(cached.savedAt).toLocaleString('ko-KR')}`);
+      return;
+    }
     setSegment(nextSegment);
     setIsSourcingLoading(true);
     setSourcingProgress(8);
@@ -207,6 +266,7 @@ export function SourcingFinder() {
         setSourcingMessage(message);
       } });
       setSourcingProgress(100);
+      saveSourcingCache(liveProducts);
       setProducts(liveProducts);
       const nextFiltered = getFilteredProducts(liveProducts, filters, nextSegment);
       const first = nextFiltered[0] || liveProducts[0] || sourcingProducts[0];
@@ -524,6 +584,29 @@ export function SourcingFinder() {
           {view === 'admin' && (
             <section className="space-y-5">
               <div className="grid grid-cols-4 gap-4"><MetricCard label="회원" value="128" /><MetricCard label="분석 횟수" value="9,842" /><MetricCard label="AI 사용량" value="3,106" /><MetricCard label="저장상품" value={`${favorites.length}`} /></div>
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <SectionTitle title="Bright Data 캐시 제어" desc="사용자는 캐시된 최신 결과를 즉시 보고, 관리자는 필요할 때만 실시간 수집을 강제합니다." />
+                  <button onClick={() => updateCacheEnabled(!cacheEnabled)} className={`rounded-lg px-4 py-2 text-sm font-black ${cacheEnabled ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-700'}`}>
+                    캐시 {cacheEnabled ? 'ON' : 'OFF'}
+                  </button>
+                </div>
+                <div className="mt-4 grid grid-cols-3 gap-3">
+                  <div className="rounded-lg bg-slate-50 p-4">
+                    <p className="text-xs font-black text-slate-500">캐시 상태</p>
+                    <p className="mt-2 text-lg font-black">{cacheInfo ? `${cacheInfo.products.length}개 저장` : '비어 있음'}</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">{cacheInfo ? new Date(cacheInfo.savedAt).toLocaleString('ko-KR') : '실시간 수집 완료 후 자동 저장'}</p>
+                  </div>
+                  <button onClick={() => runSourcing({ bypassCache: true })} disabled={isSourcingLoading} className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-left text-blue-800 disabled:opacity-50">
+                    <p className="text-sm font-black">실시간 강제 갱신</p>
+                    <p className="mt-2 text-xs font-bold">Bright Data를 새로 호출하고 성공 시 캐시에 저장합니다.</p>
+                  </button>
+                  <button onClick={clearSourcingCache} className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-left text-slate-700">
+                    <p className="text-sm font-black">캐시 비우기</p>
+                    <p className="mt-2 text-xs font-bold">저장된 결과를 삭제하고 다음 소싱 때 새로 수집합니다.</p>
+                  </button>
+                </div>
+              </div>
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle title="관리자 지표" desc="회원, 분석 횟수, 인기 키워드, 검색 횟수, 저장상품, 사용자 활동을 확인합니다." /><div className="mt-4 grid grid-cols-3 gap-3">{['안경김서림 방지 냉감 귀걸이 마스크', '차박용 자석 암막 사이드 햇빛가리개', '목뒤 밀착형 PCM 아이스 넥쿨러', '종이호일 대체 사각 실리콘 에어프라이어 용기', '스노쿨링 터치가능 스마트폰 방수팩', '독서실용 무드등 겸 저소음 탁상 선풍기'].map((keyword, index) => <div key={keyword} className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-bold text-slate-500">인기 키워드 {index + 1}</p><p className="mt-1 font-black">{keyword}</p></div>)}</div></div>
             </section>
           )}
