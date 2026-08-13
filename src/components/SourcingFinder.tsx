@@ -15,6 +15,7 @@ type Segment = '전체' | '급상승' | '블루오션' | '시즌상품' | '고�
 const fmt = (value: number) => value.toLocaleString('ko-KR');
 const won = (value: number) => `${fmt(value)}원`;
 const categories = ['생활', '주방', '패션', '스포츠', '자동차', '반려동물', '육아', '문구', 'DIY', '기타'];
+const difficultyOptions: Difficulty[] = ['아마추어', '준프로', '프로'];
 const keywordTypes: KeywordType[] = ['블루오션', '급상승', '시즌상품', '신규시장', '고마진', '저경쟁', '리뷰장벽 낮음'];
 const statuses: SourcingStatus[] = ['발견', '분석중', '샘플 주문', '소싱 완료', '상품 등록', '판매중', '보류', '실패'];
 
@@ -86,6 +87,7 @@ export function SourcingFinder() {
   const [calcAd, setCalcAd] = useState(10);
   const [calcOther, setCalcOther] = useState(500);
   const [uploadedRows, setUploadedRows] = useState(0);
+  const [hasRunSourcing, setHasRunSourcing] = useState(false);
 
   const filteredProducts = useMemo(() => {
     const query = filters.query.trim().toLowerCase();
@@ -125,6 +127,27 @@ export function SourcingFinder() {
     setSelectedProductId(first.id);
     setCalcProductId(first.id);
     setCalcSupply(first.supplierCost);
+    setHasRunSourcing(true);
+    setView('results');
+  };
+
+  const runSourcingBySegment = (nextSegment: Segment) => {
+    setSegment(nextSegment);
+    const query = filters.query.trim().toLowerCase();
+    const products = sourcingProducts
+      .filter((product) => filters.difficulty === '프로' || product.difficulty === filters.difficulty)
+      .filter((product) => filters.category === '기타' || product.category === filters.category || Boolean(query))
+      .filter((product) => product.price >= filters.minPrice && product.price <= filters.maxPrice)
+      .filter((product) => product.avgReview <= filters.maxReview)
+      .filter((product) => filters.keywordTypes.length === 0 || filters.keywordTypes.some((type) => product.keywordTypes.includes(type)))
+      .filter((product) => nextSegment === '전체' || product.keywordTypes.includes(nextSegment as KeywordType))
+      .filter((product) => !query || product.name.toLowerCase().includes(query) || product.category.toLowerCase().includes(query))
+      .sort((a, b) => b.score.total - a.score.total);
+    const first = products[0] || sourcingProducts[0];
+    setSelectedProductId(first.id);
+    setCalcProductId(first.id);
+    setCalcSupply(first.supplierCost);
+    setHasRunSourcing(true);
     setView('results');
   };
 
@@ -200,7 +223,7 @@ export function SourcingFinder() {
             </div>
             <div className="flex items-center gap-2">
               <button onClick={exportCsv} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-100"><Download className="h-4 w-4" />CSV</button>
-              <button onClick={() => setView('sourcing')} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-slate-800"><Sparkles className="h-4 w-4" />AI 소싱 시작</button>
+              <button onClick={runSourcing} className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-slate-800"><Sparkles className="h-4 w-4" />AI 소싱 시작</button>
             </div>
           </div>
 
@@ -212,42 +235,30 @@ export function SourcingFinder() {
                 <MetricCard label="S등급 상품" value={`${sourcingProducts.filter((product) => product.grade === 'S').length}`} sub="90점 이상" />
                 <MetricCard label="신규 급상승" value="38" sub="30일 성장률 기준" />
               </div>
-              <div className="grid grid-cols-[1.15fr_0.85fr] gap-5">
-                <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="mb-4 flex items-center justify-between">
-                    <SectionTitle title="오늘의 훈프로 TOP 5" desc="판단 결과를 먼저 보고 상세 숫자는 클릭 후 확인합니다." />
-                    <button onClick={() => setView('results')} className="text-sm font-black text-blue-600">전체 보기</button>
-                  </div>
-                  <div className="space-y-3">
-                    {sourcingProducts.slice(0, 5).map((product, index) => (
-                      <button key={product.id} onClick={() => openDetail(product)} className="flex w-full items-center justify-between rounded-lg border border-slate-100 px-4 py-3 text-left hover:border-blue-200 hover:bg-blue-50">
-                        <div className="flex items-center gap-3">
-                          <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-950 text-sm font-black text-white">{index + 1}</span>
-                          <div><p className="font-black text-slate-950">{product.name}</p><p className="text-xs font-medium text-slate-500">{product.category} · {product.recommendation}</p></div>
-                        </div>
-                        <div className="flex items-center gap-3"><GradeBadge grade={product.grade} /><span className="text-lg font-black text-blue-600">{product.score.total}점</span></div>
-                      </button>
-                    ))}
-                  </div>
+              <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+                <SectionTitle title="판매 난이도 선택" desc="셀러 레벨을 고르면 그 조건에 맞는 소싱 키워드를 찾아드립니다." />
+                <div className="mt-5 grid grid-cols-3 gap-3">
+                  {difficultyOptions.map((item) => (
+                    <button key={item} onClick={() => setFilter('difficulty', item)} className={`rounded-lg border px-5 py-5 text-left transition ${filters.difficulty === item ? 'border-blue-600 bg-blue-50 text-blue-800 ring-1 ring-blue-200' : 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-slate-50'}`}>
+                      <span className="text-xl font-black">{item}</span>
+                      <span className="mt-2 block text-sm font-bold text-slate-500">{item === '아마추어' ? '리뷰 장벽 낮은 저위험 상품' : item === '준프로' ? '마진과 성장성이 균형 잡힌 상품' : '경쟁까지 감수하는 고수익 상품'}</span>
+                    </button>
+                  ))}
                 </div>
-                <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <SectionTitle title="V1 성공 흐름" desc="사용자가 해야 하는 행동을 7단계로 단순화했습니다." />
-                  <div className="mt-4 space-y-3">
-                    {['AI 소싱 클릭', '조건 선택', 'AI 훈프로 찾기', 'S급 상품 확인', '상세 분석', '마진 확인', '소싱 후보 저장'].map((step, index) => (
-                      <div key={step} className="flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2">
-                        <span className="grid h-7 w-7 place-items-center rounded-md bg-blue-600 text-xs font-black text-white">{index + 1}</span>
-                        <span className="text-sm font-black text-slate-700">{step}</span>
-                      </div>
-                    ))}
+                <div className="mt-6 flex items-center justify-between rounded-lg bg-slate-50 px-5 py-4">
+                  <div>
+                    <p className="text-sm font-black text-slate-950">{filters.difficulty} 기준으로 분석 대기 중</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">시작 전에는 추천 키워드를 숨겨두고, 실행 후 결과 화면에서 공개합니다.</p>
                   </div>
+                  <button onClick={runSourcing} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700"><Sparkles className="h-4 w-4" />소싱 시작</button>
                 </div>
               </div>
               <div className="grid grid-cols-6 gap-3">
                 {segmentButtons.slice(1).map(([label, Icon]) => (
-                  <button key={label} onClick={() => { setSegment(label); setView('results'); }} className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-blue-200 hover:bg-blue-50">
+                  <button key={label} onClick={() => runSourcingBySegment(label)} className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-blue-200 hover:bg-blue-50">
                     <Icon className="h-5 w-5 text-blue-600" />
                     <p className="mt-3 text-sm font-black">{label}</p>
-                    <p className="mt-1 text-xs font-bold text-slate-500">{sourcingProducts.filter((product) => product.keywordTypes.includes(label as KeywordType)).length}개 후보</p>
+                    <p className="mt-1 text-xs font-bold text-slate-500">클릭 시 바로 소싱</p>
                   </button>
                 ))}
               </div>
@@ -260,7 +271,7 @@ export function SourcingFinder() {
                 <div className="mb-5 flex items-center gap-2"><SlidersHorizontal className="h-5 w-5 text-blue-600" /><SectionTitle title="검색 조건" /></div>
                 <div className="space-y-5">
                   <label className="block"><span className="text-xs font-black text-slate-500">키워드</span><div className="mt-2 flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2"><Search className="h-4 w-4 text-slate-400" /><input value={filters.query} onChange={(event) => setFilter('query', event.target.value)} placeholder="예: 냉감 마스크" className="w-full bg-transparent text-sm font-bold outline-none" /></div></label>
-                  <div><p className="text-xs font-black text-slate-500">판매 난이도</p><div className="mt-2 grid grid-cols-3 gap-2">{(['아마추어', '준프로', '프로'] as Difficulty[]).map((item) => <button key={item} onClick={() => setFilter('difficulty', item)} className={`rounded-lg px-3 py-2 text-sm font-black ${filters.difficulty === item ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{item}</button>)}</div></div>
+                  <div><p className="text-xs font-black text-slate-500">판매 난이도</p><div className="mt-2 grid grid-cols-3 gap-2">{difficultyOptions.map((item) => <button key={item} onClick={() => setFilter('difficulty', item)} className={`rounded-lg px-3 py-2 text-sm font-black ${filters.difficulty === item ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{item}</button>)}</div></div>
                   <label className="block"><span className="text-xs font-black text-slate-500">카테고리</span><select value={filters.category} onChange={(event) => setFilter('category', event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
                   <div className="grid grid-cols-2 gap-3"><label><span className="text-xs font-black text-slate-500">최소 판매가</span><input type="number" value={filters.minPrice} onChange={(event) => setFilter('minPrice', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none" /></label><label><span className="text-xs font-black text-slate-500">최대 판매가</span><input type="number" value={filters.maxPrice} onChange={(event) => setFilter('maxPrice', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none" /></label></div>
                   <label className="block"><span className="text-xs font-black text-slate-500">최대 리뷰</span><select value={filters.maxReview} onChange={(event) => setFilter('maxReview', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{[100, 300, 500, 1000, 5000].map((item) => <option key={item} value={item}>{fmt(item)}개</option>)}</select></label>
@@ -270,12 +281,13 @@ export function SourcingFinder() {
               </div>
               <div className="space-y-5">
                 <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <SectionTitle title="검색 전 미리보기" desc={`조건에 맞는 추천 후보 ${filteredProducts.length}개가 준비되었습니다.`} />
-                  <div className="mt-5 grid grid-cols-3 gap-4">{filteredProducts.slice(0, 6).map((product) => (
-                    <React.Fragment key={product.id}>
-                      <ProductCard product={product} favorites={favorites} onFavorite={toggleFavorite} onOpen={openDetail} />
-                    </React.Fragment>
-                  ))}</div>
+                  <SectionTitle title="분석 대기" desc="조건을 정한 뒤 AI 훈프로 찾기를 누르면 추천 키워드가 표시됩니다." />
+                  <div className="mt-5 grid h-48 place-items-center rounded-lg bg-slate-50 text-center">
+                    <div>
+                      <PackageSearch className="mx-auto h-8 w-8 text-blue-600" />
+                      <p className="mt-3 text-sm font-black text-slate-700">{filters.difficulty} 기준 조건 설정 중</p>
+                    </div>
+                  </div>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                   <SectionTitle title="CSV / Excel 업로드 분석" desc="V1에서는 업로드 파일을 mock 후보와 매칭하는 흐름까지 제공합니다." />
@@ -293,14 +305,24 @@ export function SourcingFinder() {
           {view === 'results' && (
             <section className="space-y-4">
               <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <SectionTitle title={`추천 상품 TOP ${filteredProducts.length}`} desc="S/A/B 등급과 추천 판단을 먼저 확인하세요." />
+                <SectionTitle title={`${filters.difficulty} 추천 키워드 TOP ${hasRunSourcing ? filteredProducts.length : 0}`} desc={hasRunSourcing ? 'S/A/B 등급과 추천 판단을 먼저 확인하세요.' : '대시보드에서 난이도를 선택하고 소싱 시작을 눌러주세요.'} />
                 <div className="flex gap-2">{segmentButtons.map(([label, Icon]) => <button key={label} onClick={() => setSegment(label)} className={`inline-flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-black ${segment === label ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}><Icon className="h-3.5 w-3.5" />{label}</button>)}</div>
               </div>
-              <div className="grid grid-cols-3 gap-4">{filteredProducts.map((product) => (
-                <React.Fragment key={product.id}>
-                  <ProductCard product={product} favorites={favorites} onFavorite={toggleFavorite} onOpen={openDetail} />
-                </React.Fragment>
-              ))}</div>
+              {hasRunSourcing ? (
+                <div className="grid grid-cols-3 gap-4">{filteredProducts.map((product) => (
+                  <React.Fragment key={product.id}>
+                    <ProductCard product={product} favorites={favorites} onFavorite={toggleFavorite} onOpen={openDetail} />
+                  </React.Fragment>
+                ))}</div>
+              ) : (
+                <div className="grid h-72 place-items-center rounded-lg border border-dashed border-slate-300 bg-white text-center">
+                  <div>
+                    <Sparkles className="mx-auto h-8 w-8 text-blue-600" />
+                    <p className="mt-3 text-base font-black text-slate-800">아직 소싱을 시작하지 않았습니다.</p>
+                    <button onClick={() => setView('dashboard')} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white">난이도 선택하기</button>
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
