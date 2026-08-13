@@ -326,7 +326,7 @@ async function downloadBrightDataSnapshot(snapshotId: string) {
     if (!snapshotResponse.ok) throw new Error(snapshot?.message || snapshot?.error || "Bright Data snapshot download failed");
     return snapshot;
   }
-  return { pending: true, snapshotId };
+  return { pending: true, snapshotId, progressStatus: progress.status || "running" };
 }
 
 async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
@@ -334,6 +334,7 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
   const categoryUrl = typeof req.query.categoryUrl === "string" ? normalizeCoupangUrl(req.query.categoryUrl.trim()) : "";
   const snapshotId = typeof req.query.snapshotId === "string" ? req.query.snapshotId.trim() : "";
+  const debug = req.query.debug === "true";
   const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
   const excludeBrands = req.query.excludeBrands !== "false";
   if (!keyword && !categoryUrl && !snapshotId) return res.status(400).json({ error: "keyword, categoryUrl or snapshotId is required" });
@@ -341,17 +342,50 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
   try {
     const inputUrl = categoryUrl || buildCoupangSearchUrl(keyword);
     const raw = snapshotId ? { snapshot_id: snapshotId } : await triggerBrightData(inputUrl);
-    if (!snapshotId && raw?.snapshot_id) return res.status(202).json({ pending: true, snapshotId: String(raw.snapshot_id) });
+    const meta = {
+      tokenConfigured: Boolean(BRIGHTDATA_API_TOKEN),
+      datasetId: BRIGHTDATA_COUPANG_DATASET_ID,
+      inputUrl,
+      mode: "brightdata-trigger",
+      snapshotId: String(raw?.snapshot_id || snapshotId || ""),
+    };
+    if (!snapshotId && raw?.snapshot_id) return res.status(202).json({ pending: true, snapshotId: String(raw.snapshot_id), meta });
     const payload = raw?.snapshot_id ? await downloadBrightDataSnapshot(String(raw.snapshot_id)) : raw;
-    if (payload?.pending) return res.status(202).json(payload);
+    if (payload?.pending) return res.status(202).json({ ...payload, meta });
 
-    const products = extractRecords(payload)
+    const records = extractRecords(payload);
+    const normalizedProducts = records
       .map(normalizeBrightDataRecord)
-      .filter(product => product.productName && product.productUrl && product.productPrice > 0)
+      .filter(product => product.productName && product.productUrl && product.productPrice > 0);
+    const products = normalizedProducts
       .filter(product => !excludeBrands || !product.hasExcludedBrand)
       .slice(0, limit);
+    const errors = records.filter(record => record.error || record.error_code);
+    const debugPayload = debug ? {
+      rawSample: records.slice(0, 5).map(record => ({
+        title: asString(record.title),
+        url: asString(record.url),
+        final_price: asString(record.final_price),
+        reviews: record.reviews,
+        error: asString(record.error),
+        error_code: asString(record.error_code),
+      })),
+    } : {};
 
-    return res.status(200).json({ provider: "brightdata", keyword, inputUrl, products });
+    return res.status(200).json({
+      provider: "brightdata",
+      keyword,
+      inputUrl,
+      meta: {
+        ...meta,
+        rawRecordCount: records.length,
+        candidateCount: normalizedProducts.length,
+        filteredCount: products.length,
+        errorCount: errors.length,
+      },
+      products,
+      ...debugPayload,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Bright Data error";
     return res.status(502).json({ error: message, provider: "brightdata" });

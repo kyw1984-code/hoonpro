@@ -110,6 +110,48 @@ const buildLiveProduct = (seed: SourcingProduct, apiProducts: CoupangApiProduct[
   };
 };
 
+const buildLiveProducts = (seed: SourcingProduct, apiProducts: CoupangApiProduct[]): SourcingProduct[] => {
+  const competitors = apiProducts.slice(0, 10).map((product, rank) => ({
+    rank: rank + 1,
+    name: product.productName,
+    productUrl: product.productUrl,
+    price: Number(product.productPrice) || seed.price,
+    reviews: Number(product.ratingCount ?? product.reviewCount ?? 0),
+    estimatedSales: estimateSales(product, rank + 1),
+    delivery: getDeliveryLabel(product.deliveryType),
+  }));
+  const avgReview = Math.round(competitors.reduce((sum, product) => sum + product.reviews, 0) / Math.max(1, competitors.length));
+
+  return apiProducts.slice(0, 7).map((product, index) => {
+    const price = Number(product.productPrice) || seed.price;
+    const reviews = Number(product.ratingCount ?? product.reviewCount ?? 0);
+    const estimatedSales = estimateSales(product, index + 1);
+    const opportunityScore = Math.max(0, Math.min(100, Math.round(72 - reviews / 18 + Math.max(0, 10 - index) * 1.8)));
+    return {
+      ...seed,
+      id: `live-${String(product.productId || index + 1)}`,
+      keyword: product.productName,
+      name: product.productName,
+      price,
+      avgReview: reviews,
+      estimatedSales,
+      estimatedRevenue: price * estimatedSales,
+      coupangProductCount: apiProducts.length,
+      opportunityScore,
+      competitors,
+      recommendation: 'Bright Data Coupang Scraper 실제 수집 상품입니다.',
+      score: {
+        ...seed.score,
+        demand: Math.max(10, Math.min(20, Math.round(estimatedSales / 90))),
+        competition: Math.max(8, Math.min(20, Math.round((100 - reviews / 2) / 5))),
+        review: Math.max(6, Math.min(15, Math.round((180 - reviews) / 12))),
+        total: Math.max(45, Math.min(95, opportunityScore + 8)),
+      },
+      grade: opportunityScore >= 80 ? 'S' : opportunityScore >= 65 ? 'A' : opportunityScore >= 52 ? 'B' : 'C',
+    };
+  });
+};
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const readLiveProductsResponse = async (params: URLSearchParams) => {
@@ -125,7 +167,7 @@ const readLiveProductsResponse = async (params: URLSearchParams) => {
 const fetchLiveProducts = async (keyword: string, category: string, filters: SourcingFilters, options: FetchLiveOptions = {}) => {
   const params = new URLSearchParams({
     keyword,
-    limit: '10',
+    limit: '30',
     excludeBrands: 'true',
   });
   const categoryUrl = coupangCategoryUrls[category];
@@ -141,7 +183,7 @@ const fetchLiveProducts = async (keyword: string, category: string, filters: Sou
     const retryParams = new URLSearchParams({
       type: 'shopping-data',
       snapshotId,
-      limit: '10',
+      limit: '30',
       excludeBrands: 'true',
     });
     ({ response, data } = await readLiveProductsResponse(retryParams));
@@ -218,9 +260,9 @@ export class LiveSourcingProvider extends MockSourcingProvider {
       options.onProgress?.(18, 'Bright Data 수집 작업 생성중');
       const apiProducts = await fetchLiveProducts(keyword, seed.category, filters, options);
       options.onProgress?.(98, '상품 URL과 리뷰 데이터 정리중');
-      return buildLiveProduct(seed, apiProducts, index);
+      return buildLiveProducts(seed, apiProducts);
     }));
-    const usableProducts = liveProducts.filter((product): product is SourcingProduct => Boolean(product));
+    const usableProducts = liveProducts.flat().filter((product): product is SourcingProduct => Boolean(product));
     if (usableProducts.length === 0) throw new Error('실제 상품 데이터를 아직 가져오지 못했습니다.');
     return usableProducts.sort(sortByOpportunity);
   }
