@@ -70,3 +70,137 @@ create index if not exists idx_api_calls_feature on api_calls(feature);
 create index if not exists idx_api_calls_model on api_calls(model);
 
 alter table api_calls disable row level security;
+
+-- 6. HUNPRO AI SOURCING V1 데이터 모델
+create table if not exists keywords (
+  id uuid default gen_random_uuid() primary key,
+  keyword text not null,
+  category text not null,
+  search_volume integer default 0,
+  growth_7d numeric default 0,
+  growth_30d numeric default 0,
+  growth_90d numeric default 0,
+  competition_score numeric default 0,
+  seasonality_score numeric default 0,
+  ai_score numeric default 0,
+  grade text check (grade in ('S', 'A', 'B', 'C', 'D')),
+  created_at timestamptz default now()
+);
+
+create table if not exists products (
+  id uuid default gen_random_uuid() primary key,
+  keyword_id uuid references keywords(id) on delete set null,
+  product_name text not null,
+  category text not null,
+  price integer default 0,
+  review_count integer default 0,
+  rating numeric default 0,
+  seller text,
+  delivery_type text,
+  product_url text,
+  image_url text,
+  estimated_sales integer default 0,
+  estimated_revenue integer default 0,
+  created_at timestamptz default now()
+);
+
+create table if not exists product_metrics (
+  id uuid default gen_random_uuid() primary key,
+  product_id uuid references products(id) on delete cascade,
+  search_volume integer default 0,
+  growth_30d numeric default 0,
+  avg_review integer default 0,
+  rocket_ratio numeric default 0,
+  ad_ratio numeric default 0,
+  brand_ratio numeric default 0,
+  top_concentration numeric default 0,
+  created_at timestamptz default now()
+);
+
+create table if not exists competitors (
+  id uuid default gen_random_uuid() primary key,
+  product_id uuid references products(id) on delete cascade,
+  rank integer not null,
+  product_name text not null,
+  price integer default 0,
+  review_count integer default 0,
+  estimated_sales integer default 0,
+  delivery_type text,
+  created_at timestamptz default now()
+);
+
+create table if not exists suppliers (
+  id uuid default gen_random_uuid() primary key,
+  product_name text not null,
+  supplier text not null,
+  cost integer default 0,
+  shipping_cost integer default 0,
+  moq integer default 0,
+  url text,
+  image_url text,
+  created_at timestamptz default now()
+);
+
+create table if not exists sourcing_products (
+  id uuid default gen_random_uuid() primary key,
+  product_id uuid references products(id) on delete cascade,
+  supplier_id uuid references suppliers(id) on delete set null,
+  text_similarity numeric default 0,
+  image_similarity numeric default 0,
+  total_similarity numeric default 0,
+  status text default '발견',
+  created_at timestamptz default now()
+);
+
+create table if not exists analysis (
+  id uuid default gen_random_uuid() primary key,
+  product_id uuid references products(id) on delete cascade,
+  demand_score integer default 0,
+  competition_score integer default 0,
+  review_score integer default 0,
+  growth_score integer default 0,
+  margin_score integer default 0,
+  price_stability_score integer default 0,
+  season_score integer default 0,
+  supplier_score integer default 0,
+  total_score integer default 0,
+  grade text check (grade in ('S', 'A', 'B', 'C', 'D')),
+  ai_summary text,
+  ai_strategy jsonb default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+
+create table if not exists favorites (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references users(id) on delete cascade,
+  product_id uuid references products(id) on delete cascade,
+  status text default '발견',
+  memo text,
+  created_at timestamptz default now(),
+  unique(user_id, product_id)
+);
+
+create table if not exists projects (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references users(id) on delete cascade,
+  name text not null,
+  description text,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_keywords_grade on keywords(grade);
+create index if not exists idx_keywords_category on keywords(category);
+create index if not exists idx_products_category on products(category);
+create index if not exists idx_products_keyword_id on products(keyword_id);
+create index if not exists idx_analysis_product_id on analysis(product_id);
+create index if not exists idx_favorites_user_id on favorites(user_id);
+
+alter table keywords disable row level security;
+alter table products disable row level security;
+alter table product_metrics disable row level security;
+alter table competitors disable row level security;
+alter table suppliers disable row level security;
+alter table sourcing_products disable row level security;
+alter table analysis disable row level security;
+alter table favorites disable row level security;
+alter table projects disable row level security;
