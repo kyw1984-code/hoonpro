@@ -91,6 +91,34 @@ const getDeliveryLabel = (deliveryType: CoupangApiProduct['deliveryType']): '로
   return '일반';
 };
 
+const normalizeProductFamily = (name: string) => {
+  return normalize(name)
+    .replace(/\d+(\.\d+)?\s?(cm|mm|m|kg|g|개|p|pcs|호|번|종|세트|set)/gi, ' ')
+    .replace(/\b\d{5,}\b/g, ' ')
+    .replace(/[,_/()[\]{}+\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter((word) => word.length > 1)
+    .slice(0, 5)
+    .join(' ');
+};
+
+const uniqueApiProducts = (apiProducts: CoupangApiProduct[]) => {
+  const seenIds = new Set<string>();
+  const familyCounts = new Map<string, number>();
+  return apiProducts.filter((product) => {
+    const id = String(product.productId || product.productUrl || '').trim();
+    if (id && seenIds.has(id)) return false;
+    const family = normalizeProductFamily(product.productName);
+    const count = familyCounts.get(family) || 0;
+    if (family && count >= 1) return false;
+    if (id) seenIds.add(id);
+    if (family) familyCounts.set(family, count + 1);
+    return true;
+  });
+};
+
 const buildLiveProduct = (seed: SourcingProduct, apiProducts: CoupangApiProduct[], index: number): SourcingProduct => {
   const competitors = apiProducts.slice(0, 10).map((product, rank) => {
     const estimatedSales = estimateSales(product, rank + 1);
@@ -129,7 +157,9 @@ const buildLiveProduct = (seed: SourcingProduct, apiProducts: CoupangApiProduct[
 };
 
 const buildLiveProducts = (seed: SourcingProduct, apiProducts: CoupangApiProduct[]): SourcingProduct[] => {
-  const competitors = apiProducts.slice(0, 10).map((product, rank) => ({
+  const uniqueProducts = uniqueApiProducts(apiProducts);
+  const productsForDisplay = uniqueProducts;
+  const competitors = productsForDisplay.slice(0, 10).map((product, rank) => ({
     rank: rank + 1,
     name: product.productName,
     productUrl: product.productUrl,
@@ -140,7 +170,7 @@ const buildLiveProducts = (seed: SourcingProduct, apiProducts: CoupangApiProduct
   }));
   const avgReview = Math.round(competitors.reduce((sum, product) => sum + product.reviews, 0) / Math.max(1, competitors.length));
 
-  return apiProducts.slice(0, 7).map((product, index) => {
+  return productsForDisplay.slice(0, 7).map((product, index) => {
     const price = Number(product.productPrice) || seed.price;
     const reviews = Number(product.ratingCount ?? product.reviewCount ?? 0);
     const estimatedSales = estimateSales(product, index + 1);
@@ -150,11 +180,12 @@ const buildLiveProducts = (seed: SourcingProduct, apiProducts: CoupangApiProduct
       id: `live-${String(product.productId || index + 1)}`,
       keyword: product.productName,
       name: product.productName,
+      productUrl: product.productUrl,
       price,
       avgReview: reviews,
       estimatedSales,
       estimatedRevenue: price * estimatedSales,
-      coupangProductCount: apiProducts.length,
+      coupangProductCount: productsForDisplay.length,
       opportunityScore,
       competitors,
       recommendation: 'Bright Data Coupang Scraper 실제 수집 상품입니다.',

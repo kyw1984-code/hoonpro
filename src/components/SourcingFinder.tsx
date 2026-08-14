@@ -87,9 +87,9 @@ const getFilteredProducts = (products: SourcingProduct[], filters: SourcingFilte
     .sort(sortByOpportunity);
 };
 
-const SOURCING_CACHE_KEY = 'hoonpro:sourcing-cache:v1';
+const SOURCING_CACHE_KEY = 'hoonpro:sourcing-cache:v2';
 const SOURCING_CACHE_ENABLED_KEY = 'hoonpro:sourcing-cache-enabled';
-const PENDING_SOURCING_KEY = 'hoonpro:sourcing-pending:v1';
+const PENDING_SOURCING_KEY = 'hoonpro:sourcing-pending:v2';
 
 type CachedSourcing = {
   savedAt: number;
@@ -580,7 +580,15 @@ export function SourcingFinder() {
                                 <div className="flex items-center gap-3">
                                   <span className="grid h-6 w-6 shrink-0 place-items-center rounded bg-slate-100 text-xs font-black text-slate-600">{index + 1}</span>
                                   <div>
-                                    <p className="font-black text-slate-900">{product.name}</p>
+                                    {product.productUrl ? (
+                                      <a href={product.productUrl} target="_blank" rel="noopener noreferrer" className="font-black text-blue-700 underline-offset-2 hover:underline">
+                                        {product.name}
+                                      </a>
+                                    ) : (
+                                      <button onClick={() => openDetail(product)} className="text-left font-black text-slate-900 hover:text-blue-700">
+                                        {product.name}
+                                      </button>
+                                    )}
                                     <p className="mt-1 text-xs font-bold text-slate-500">쿠팡 상품수 {fmt(product.coupangProductCount)}개 · 기회점수 {product.opportunityScore}</p>
                                   </div>
                                 </div>
@@ -590,9 +598,15 @@ export function SourcingFinder() {
                               <td className="px-3 py-4 text-right text-base font-black text-slate-950">{fmt(product.estimatedSales)}</td>
                               <td className="px-3 py-4 text-right font-black text-amber-600">{fmt(Math.round(product.estimatedRevenue / 10000))}만원</td>
                               <td className="px-3 py-4 text-center">
-                                <button onClick={() => openDetail(product)} className="inline-grid h-9 w-9 place-items-center rounded-full bg-slate-950 text-white hover:bg-blue-600" aria-label={`${product.name} 상세분석`}>
+                                {product.productUrl ? (
+                                  <a href={product.productUrl} target="_blank" rel="noopener noreferrer" className="inline-grid h-9 w-9 place-items-center rounded-full bg-slate-950 text-white hover:bg-blue-600" aria-label={`${product.name} 쿠팡 상품 열기`}>
+                                    <ChevronRight className="h-4 w-4" />
+                                  </a>
+                                ) : (
+                                  <button onClick={() => openDetail(product)} className="inline-grid h-9 w-9 place-items-center rounded-full bg-slate-950 text-white hover:bg-blue-600" aria-label={`${product.name} 상세분석`}>
                                   <ChevronRight className="h-4 w-4" />
-                                </button>
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -738,7 +752,13 @@ function ProductCard({ product, favorites, onFavorite, onOpen }: ProductCardProp
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between"><GradeBadge grade={product.grade} /><button onClick={() => onFavorite(product.id)} className={`rounded-lg p-2 ${favorites.includes(product.id) ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}><Heart className="h-4 w-4" fill={favorites.includes(product.id) ? 'currentColor' : 'none'} /></button></div>
-      <p className="mt-4 text-lg font-black">{product.name}</p>
+      {product.productUrl ? (
+        <a href={product.productUrl} target="_blank" rel="noopener noreferrer" className="mt-4 block text-lg font-black text-blue-700 underline-offset-2 hover:underline">
+          {product.name}
+        </a>
+      ) : (
+        <p className="mt-4 text-lg font-black">{product.name}</p>
+      )}
       <div className="mt-3 grid grid-cols-2 gap-2 text-sm"><p className="rounded-md bg-blue-50 p-2 text-blue-800"><span className="block text-xs font-bold">기회점수</span><b>{product.opportunityScore} / 100</b></p><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">월 판매량 추정</span><b>{fmt(product.estimatedSales)}개</b></p><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">쿠팡 상품수 추정</span><b>{fmt(product.coupangProductCount)}개</b></p><p className="rounded-md bg-slate-50 p-2"><span className="block text-xs font-bold text-slate-500">AI SCORE</span><b>{product.score.total}점</b></p></div>
       <button onClick={() => onOpen(product)} className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 py-2.5 text-sm font-black text-white">상세 분석 <ChevronRight className="h-4 w-4" /></button>
     </article>

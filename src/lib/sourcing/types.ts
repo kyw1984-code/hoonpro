@@ -37,6 +37,7 @@ export type SourcingProduct = {
   id: string;
   keyword: string;
   name: string;
+  productUrl?: string;
   category: string;
   keywordTypes: KeywordType[];
   price: number;
