@@ -63,6 +63,19 @@ type CoupangApiProduct = {
 
 type FetchLiveOptions = {
   onProgress?: (progress: number, message: string) => void;
+  onSnapshot?: (snapshotId: string, meta?: Record<string, unknown>) => void;
+};
+
+export type BrightDataRefreshResult = {
+  snapshotId?: string;
+  meta?: Record<string, unknown>;
+  products?: SourcingProduct[];
+};
+
+type BrightDataRawRefreshResult = {
+  snapshotId?: string;
+  meta?: Record<string, unknown>;
+  apiProducts?: CoupangApiProduct[];
 };
 
 const estimateSales = (product: CoupangApiProduct, rank: number) => {
@@ -169,7 +182,7 @@ const readLiveProductsResponse = async (params: URLSearchParams) => {
   return { response, data };
 };
 
-const fetchLiveProducts = async (keyword: string, category: string, filters: SourcingFilters, options: FetchLiveOptions = {}) => {
+const buildLiveParams = (keyword: string, category: string) => {
   const params = new URLSearchParams({
     keyword,
     limit: '30',
@@ -178,9 +191,33 @@ const fetchLiveProducts = async (keyword: string, category: string, filters: Sou
   const categoryUrls = coupangCategoryUrls[category] || [];
   if (categoryUrls.length > 0) params.set('categoryUrls', categoryUrls.join(','));
   params.set('type', 'shopping-data');
+  return params;
+};
 
-  let { response, data } = await readLiveProductsResponse(params);
-  let snapshotId = data?.snapshotId;
+const filterLiveProductsByPrice = (products: CoupangApiProduct[], filters: SourcingFilters) => {
+  return products.filter((product) => {
+    const price = Number(product.productPrice) || 0;
+    return price >= filters.minPrice && price <= filters.maxPrice;
+  });
+};
+
+const startLiveRefresh = async (keyword: string, category: string, filters: SourcingFilters, options: FetchLiveOptions = {}): Promise<BrightDataRawRefreshResult> => {
+  const params = buildLiveParams(keyword, category);
+  const { response, data } = await readLiveProductsResponse(params);
+  const snapshotId = data?.snapshotId ? String(data.snapshotId) : '';
+  if (snapshotId) options.onSnapshot?.(snapshotId, data?.meta);
+  if (response.status === 202 && snapshotId) return { snapshotId, meta: data?.meta };
+  if (!response.ok) throw new Error(data?.error || 'Bright Data API 호출에 실패했습니다.');
+  if (Array.isArray(data?.products)) {
+    return { apiProducts: filterLiveProductsByPrice(data.products as CoupangApiProduct[], filters), meta: data?.meta };
+  }
+  throw new Error('Bright Data 결과에서 상품 데이터를 찾지 못했습니다.');
+};
+
+const fetchLiveProducts = async (keyword: string, category: string, filters: SourcingFilters, options: FetchLiveOptions = {}) => {
+  let { response, data } = await readLiveProductsResponse(buildLiveParams(keyword, category));
+  let snapshotId = data?.snapshotId ? String(data.snapshotId) : '';
+  if (snapshotId) options.onSnapshot?.(snapshotId, data?.meta);
   for (let attempt = 0; response.status === 202 && snapshotId && attempt < 60; attempt += 1) {
     const progress = Math.min(96, 18 + Math.round((attempt / 60) * 78));
     options.onProgress?.(progress, `쿠팡 상품 수집중 · ${attempt + 1}번째 확인`);
@@ -192,17 +229,28 @@ const fetchLiveProducts = async (keyword: string, category: string, filters: Sou
       excludeBrands: 'true',
     });
     ({ response, data } = await readLiveProductsResponse(retryParams));
-    snapshotId = data?.snapshotId;
+    snapshotId = data?.snapshotId ? String(data.snapshotId) : snapshotId;
   }
 
   if (!response.ok) throw new Error(data?.error || 'Bright Data API 호출에 실패했습니다.');
   if (data?.pending) throw new Error('Bright Data 수집이 아직 완료되지 않았습니다. 잠시 후 다시 시도해주세요.');
   if (Array.isArray(data?.products)) {
-    return (data.products as CoupangApiProduct[]).filter((product) => {
-      const price = Number(product.productPrice) || 0;
-      return price >= filters.minPrice && price <= filters.maxPrice;
-    });
+    return filterLiveProductsByPrice(data.products as CoupangApiProduct[], filters);
   }
+  throw new Error('Bright Data 결과에서 상품 데이터를 찾지 못했습니다.');
+};
+
+const fetchSnapshotProducts = async (snapshotId: string, filters: SourcingFilters) => {
+  const retryParams = new URLSearchParams({
+    type: 'shopping-data',
+    snapshotId,
+    limit: '30',
+    excludeBrands: 'true',
+  });
+  const { response, data } = await readLiveProductsResponse(retryParams);
+  if (!response.ok) throw new Error(data?.error || 'Bright Data snapshot 확인에 실패했습니다.');
+  if (data?.pending) throw new Error('Bright Data 수집이 아직 완료되지 않았습니다. 잠시 후 다시 완료 확인을 눌러주세요.');
+  if (Array.isArray(data?.products)) return filterLiveProductsByPrice(data.products as CoupangApiProduct[], filters);
   throw new Error('Bright Data 결과에서 상품 데이터를 찾지 못했습니다.');
 };
 
@@ -252,7 +300,7 @@ export class MockSourcingProvider implements KeywordProvider, ProductProvider, S
 }
 
 export class LiveSourcingProvider extends MockSourcingProvider {
-  async searchProducts(filters: SourcingFilters, options: FetchLiveOptions = {}) {
+  private async getLiveSeed(filters: SourcingFilters) {
     const baseProducts = await super.searchProducts(filters);
     const liveReadyProducts = baseProducts
       .filter((product) => coupangCategoryUrls[product.category])
@@ -260,7 +308,32 @@ export class LiveSourcingProvider extends MockSourcingProvider {
     const candidates = filters.query.trim()
       ? baseProducts.filter((product) => normalize(product.name).includes(normalize(filters.query))).slice(0, 1)
       : (liveReadyProducts.length > 0 ? liveReadyProducts : baseProducts).slice(0, 1);
-    const liveProducts = await Promise.all(candidates.map(async (seed, index) => {
+    return candidates[0] || baseProducts[0] || sourcingProducts[0];
+  }
+
+  async startRefresh(filters: SourcingFilters, options: FetchLiveOptions = {}): Promise<BrightDataRefreshResult> {
+    const seed = await this.getLiveSeed(filters);
+    const keyword = filters.query.trim() || seed.name;
+    options.onProgress?.(18, 'Bright Data 수집 작업 생성중');
+    const result = await startLiveRefresh(keyword, seed.category, filters, options);
+    if (result.apiProducts && result.apiProducts.length > 0) {
+      const products = buildLiveProducts(seed, result.apiProducts).sort(sortByOpportunity);
+      return { ...result, products };
+    }
+    return result;
+  }
+
+  async resumeSnapshot(snapshotId: string, filters: SourcingFilters): Promise<SourcingProduct[]> {
+    const seed = await this.getLiveSeed(filters);
+    const apiProducts = await fetchSnapshotProducts(snapshotId, filters);
+    const products = buildLiveProducts(seed, apiProducts).sort(sortByOpportunity);
+    if (products.length === 0) throw new Error('완료된 snapshot에서 표시할 대박 상품을 찾지 못했습니다.');
+    return products;
+  }
+
+  async searchProducts(filters: SourcingFilters, options: FetchLiveOptions = {}) {
+    const seed = await this.getLiveSeed(filters);
+    const liveProducts = await Promise.all([seed].map(async (seed, index) => {
       const keyword = filters.query.trim() || seed.name;
       options.onProgress?.(18, 'Bright Data 수집 작업 생성중');
       const apiProducts = await fetchLiveProducts(keyword, seed.category, filters, options);

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { createMockAiStrategy } from '../lib/sourcing/aiStrategy';
 import { providerStatuses, sourcingProducts } from '../lib/sourcing/mockData';
-import { sourcingProvider } from '../lib/sourcing/providers';
+import { sourcingProvider, type BrightDataRefreshResult } from '../lib/sourcing/providers';
 import type { Difficulty, KeywordType, SourcingFilters, SourcingProduct, SourcingStatus } from '../lib/sourcing/types';
 
 type View = 'dashboard' | 'sourcing' | 'results' | 'detail' | 'suppliers' | 'favorites' | 'calculator' | 'admin' | 'settings';
@@ -89,10 +89,17 @@ const getFilteredProducts = (products: SourcingProduct[], filters: SourcingFilte
 
 const SOURCING_CACHE_KEY = 'hoonpro:sourcing-cache:v1';
 const SOURCING_CACHE_ENABLED_KEY = 'hoonpro:sourcing-cache-enabled';
+const PENDING_SOURCING_KEY = 'hoonpro:sourcing-pending:v1';
 
 type CachedSourcing = {
   savedAt: number;
   products: SourcingProduct[];
+};
+
+type PendingSourcing = {
+  snapshotId: string;
+  startedAt: number;
+  meta?: Record<string, unknown>;
 };
 
 const readSourcingCache = (): CachedSourcing | null => {
@@ -102,6 +109,18 @@ const readSourcingCache = (): CachedSourcing | null => {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedSourcing;
     return Array.isArray(parsed.products) && parsed.products.length > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const readPendingSourcing = (): PendingSourcing | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PENDING_SOURCING_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PendingSourcing;
+    return parsed.snapshotId ? parsed : null;
   } catch {
     return null;
   }
@@ -137,6 +156,7 @@ export function SourcingFinder() {
     return window.localStorage.getItem(SOURCING_CACHE_ENABLED_KEY) !== 'off';
   });
   const [cacheInfo, setCacheInfo] = useState<CachedSourcing | null>(() => readSourcingCache());
+  const [pendingSourcing, setPendingSourcing] = useState<PendingSourcing | null>(() => readPendingSourcing());
 
   const filteredProducts = useMemo(() => {
     return getFilteredProducts(products, filters, segment);
@@ -199,6 +219,18 @@ export function SourcingFinder() {
     setCacheInfo(nextCache);
   };
 
+  const savePendingSourcing = (snapshotId: string, meta?: Record<string, unknown>) => {
+    if (typeof window === 'undefined' || !snapshotId) return;
+    const nextPending = { snapshotId, startedAt: Date.now(), meta };
+    window.localStorage.setItem(PENDING_SOURCING_KEY, JSON.stringify(nextPending));
+    setPendingSourcing(nextPending);
+  };
+
+  const clearPendingSourcing = () => {
+    if (typeof window !== 'undefined') window.localStorage.removeItem(PENDING_SOURCING_KEY);
+    setPendingSourcing(null);
+  };
+
   const clearSourcingCache = () => {
     if (typeof window !== 'undefined') window.localStorage.removeItem(SOURCING_CACHE_KEY);
     setCacheInfo(null);
@@ -211,12 +243,77 @@ export function SourcingFinder() {
     setSourcingMessage(enabled ? '소싱 캐시 사용이 켜졌습니다.' : '소싱 캐시 사용이 꺼졌습니다.');
   };
 
-  const runSourcing = async (options?: { bypassCache?: boolean }) => {
-    const cached = cacheEnabled && !options?.bypassCache ? readSourcingCache() : null;
+  const importSnapshotToCache = async (snapshotId: string) => {
+    setIsSourcingLoading(true);
+    setSourcingProgress(72);
+    setSourcingMessage('Bright Data snapshot 완료 여부를 확인중입니다.');
+    try {
+      const liveProducts = await sourcingProvider.resumeSnapshot(snapshotId, filters);
+      setSourcingProgress(100);
+      saveSourcingCache(liveProducts);
+      clearPendingSourcing();
+      applyProducts(liveProducts, '전체');
+      setSourcingMessage(`Bright Data 완료 결과 ${liveProducts.length}개를 캐시에 저장했습니다.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Bright Data snapshot 확인에 실패했습니다.';
+      setSourcingMessage(message);
+    } finally {
+      setIsSourcingLoading(false);
+      window.setTimeout(() => setSourcingProgress(0), 900);
+    }
+  };
+
+  const handleRefreshResult = (result: BrightDataRefreshResult) => {
+    if (result.products && result.products.length > 0) {
+      saveSourcingCache(result.products);
+      clearPendingSourcing();
+      applyProducts(result.products, '전체');
+      setSourcingMessage(`Bright Data 결과 ${result.products.length}개를 캐시에 저장했습니다.`);
+      return;
+    }
+    if (result.snapshotId) {
+      savePendingSourcing(result.snapshotId, result.meta);
+      setSourcingMessage(`Bright Data 수집을 시작했습니다. snapshot ${result.snapshotId} 완료 후 관리자에서 완료 확인을 눌러주세요.`);
+      return;
+    }
+    setSourcingMessage('Bright Data 수집 요청은 완료됐지만 snapshot ID를 받지 못했습니다.');
+  };
+
+  const startAdminRefresh = async () => {
+    setIsSourcingLoading(true);
+    setSourcingProgress(12);
+    setSourcingMessage('Bright Data 수집 작업을 등록중입니다.');
+    try {
+      const result = await sourcingProvider.startRefresh(filters, {
+        onProgress: (progress, message) => {
+          setSourcingProgress(progress);
+          setSourcingMessage(message);
+        },
+        onSnapshot: (snapshotId, meta) => savePendingSourcing(snapshotId, meta),
+      });
+      setSourcingProgress(result.products?.length ? 100 : 32);
+      handleRefreshResult(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Bright Data 수집 작업 등록에 실패했습니다.';
+      setSourcingMessage(message);
+    } finally {
+      setIsSourcingLoading(false);
+      window.setTimeout(() => setSourcingProgress(0), 900);
+    }
+  };
+
+  const runSourcing = async () => {
+    const cached = cacheEnabled ? readSourcingCache() : null;
     if (cached) {
       setCacheInfo(cached);
       applyProducts(cached.products, '전체');
       setSourcingMessage(`캐시된 Bright Data 결과 ${cached.products.length}개를 즉시 표시했습니다. 저장 ${new Date(cached.savedAt).toLocaleString('ko-KR')}`);
+      return;
+    }
+    const pending = readPendingSourcing();
+    if (pending) {
+      setPendingSourcing(pending);
+      await importSnapshotToCache(pending.snapshotId);
       return;
     }
     setIsSourcingLoading(true);
@@ -224,25 +321,9 @@ export function SourcingFinder() {
     setHasRunSourcing(false);
     setProducts([]);
     setView('dashboard');
-    setSourcingMessage('쿠팡 실제 상품 데이터를 불러오는 중입니다.');
-    try {
-      const liveProducts = await sourcingProvider.searchProducts(filters, { onProgress: (progress, message) => {
-        setSourcingProgress(progress);
-        setSourcingMessage(message);
-      } });
-      setSourcingProgress(100);
-      saveSourcingCache(liveProducts);
-      applyProducts(liveProducts, '전체');
-      setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '실제 데이터 분석이 아직 완료되지 않았습니다.';
-      setProducts([]);
-      setHasRunSourcing(false);
-      setSourcingMessage(message);
-    } finally {
-      setIsSourcingLoading(false);
-      window.setTimeout(() => setSourcingProgress(0), 900);
-    }
+    setSourcingMessage('캐시된 대박 상품이 없습니다. 관리자에서 실시간 강제 갱신을 먼저 실행해주세요.');
+    setIsSourcingLoading(false);
+    window.setTimeout(() => setSourcingProgress(0), 900);
   };
 
   const runSourcingBySegment = async (nextSegment: Segment) => {
@@ -253,7 +334,24 @@ export function SourcingFinder() {
       setSourcingMessage(`캐시된 Bright Data 결과 ${cached.products.length}개를 즉시 표시했습니다. 저장 ${new Date(cached.savedAt).toLocaleString('ko-KR')}`);
       return;
     }
+    const pending = readPendingSourcing();
+    if (pending) {
+      setPendingSourcing(pending);
+      await importSnapshotToCache(pending.snapshotId);
+      return;
+    }
     setSegment(nextSegment);
+    setIsSourcingLoading(true);
+    setSourcingProgress(8);
+    setHasRunSourcing(false);
+    setProducts([]);
+    setView('dashboard');
+    setSourcingMessage('캐시된 대박 상품이 없습니다. 관리자에서 실시간 강제 갱신을 먼저 실행해주세요.');
+    setIsSourcingLoading(false);
+    window.setTimeout(() => setSourcingProgress(0), 900);
+  };
+
+  const runLiveSourcingForDebug = async () => {
     setIsSourcingLoading(true);
     setSourcingProgress(8);
     setHasRunSourcing(false);
@@ -264,17 +362,11 @@ export function SourcingFinder() {
       const liveProducts = await sourcingProvider.searchProducts(filters, { onProgress: (progress, message) => {
         setSourcingProgress(progress);
         setSourcingMessage(message);
-      } });
+      }, onSnapshot: (snapshotId, meta) => savePendingSourcing(snapshotId, meta) });
       setSourcingProgress(100);
       saveSourcingCache(liveProducts);
-      setProducts(liveProducts);
-      const nextFiltered = getFilteredProducts(liveProducts, filters, nextSegment);
-      const first = nextFiltered[0] || liveProducts[0] || sourcingProducts[0];
-      setSelectedProductId(first.id);
-      setCalcProductId(first.id);
-      setCalcSupply(first.supplierCost);
-      setHasRunSourcing(true);
-      setView('results');
+      clearPendingSourcing();
+      applyProducts(liveProducts, '전체');
       setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
     } catch (error) {
       const message = error instanceof Error ? error.message : '실제 데이터 분석이 아직 완료되지 않았습니다.';
@@ -591,21 +683,33 @@ export function SourcingFinder() {
                     캐시 {cacheEnabled ? 'ON' : 'OFF'}
                   </button>
                 </div>
-                <div className="mt-4 grid grid-cols-3 gap-3">
+                <div className="mt-4 grid grid-cols-4 gap-3">
                   <div className="rounded-lg bg-slate-50 p-4">
                     <p className="text-xs font-black text-slate-500">캐시 상태</p>
                     <p className="mt-2 text-lg font-black">{cacheInfo ? `${cacheInfo.products.length}개 저장` : '비어 있음'}</p>
                     <p className="mt-1 text-xs font-bold text-slate-500">{cacheInfo ? new Date(cacheInfo.savedAt).toLocaleString('ko-KR') : '실시간 수집 완료 후 자동 저장'}</p>
                   </div>
-                  <button onClick={() => runSourcing({ bypassCache: true })} disabled={isSourcingLoading} className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-left text-blue-800 disabled:opacity-50">
+                  <button onClick={startAdminRefresh} disabled={isSourcingLoading} className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-left text-blue-800 disabled:opacity-50">
                     <p className="text-sm font-black">실시간 강제 갱신</p>
-                    <p className="mt-2 text-xs font-bold">Bright Data를 새로 호출하고 성공 시 캐시에 저장합니다.</p>
+                    <p className="mt-2 text-xs font-bold">Bright Data snapshot을 시작하고 ID를 저장합니다.</p>
+                  </button>
+                  <button onClick={() => pendingSourcing && importSnapshotToCache(pendingSourcing.snapshotId)} disabled={isSourcingLoading || !pendingSourcing} className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-left text-emerald-800 disabled:opacity-50">
+                    <p className="text-sm font-black">완료 확인</p>
+                    <p className="mt-2 text-xs font-bold">{pendingSourcing ? `대기중 ${pendingSourcing.snapshotId}` : '진행중인 snapshot 없음'}</p>
                   </button>
                   <button onClick={clearSourcingCache} className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-left text-slate-700">
                     <p className="text-sm font-black">캐시 비우기</p>
                     <p className="mt-2 text-xs font-bold">저장된 결과를 삭제하고 다음 소싱 때 새로 수집합니다.</p>
                   </button>
                 </div>
+                {pendingSourcing && (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
+                    Bright Data 수집 진행중 · 시작 {new Date(pendingSourcing.startedAt).toLocaleString('ko-KR')} · 완료 후 “완료 확인”을 누르면 대박 상품 리스트가 캐시에 저장됩니다.
+                  </div>
+                )}
+                <button onClick={runLiveSourcingForDebug} disabled={isSourcingLoading} className="mt-3 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-600 disabled:opacity-50">
+                  장시간 직접 수집 테스트
+                </button>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle title="관리자 지표" desc="회원, 분석 횟수, 인기 키워드, 검색 횟수, 저장상품, 사용자 활동을 확인합니다." /><div className="mt-4 grid grid-cols-3 gap-3">{['안경김서림 방지 냉감 귀걸이 마스크', '차박용 자석 암막 사이드 햇빛가리개', '목뒤 밀착형 PCM 아이스 넥쿨러', '종이호일 대체 사각 실리콘 에어프라이어 용기', '스노쿨링 터치가능 스마트폰 방수팩', '독서실용 무드등 겸 저소음 탁상 선풍기'].map((keyword, index) => <div key={keyword} className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-bold text-slate-500">인기 키워드 {index + 1}</p><p className="mt-1 font-black">{keyword}</p></div>)}</div></div>
             </section>
