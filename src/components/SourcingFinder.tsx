@@ -87,9 +87,9 @@ const getFilteredProducts = (products: SourcingProduct[], filters: SourcingFilte
     .sort(sortByOpportunity);
 };
 
-const SOURCING_CACHE_KEY = 'hoonpro:sourcing-cache:v2';
+const SOURCING_CACHE_KEY = 'hoonpro:sourcing-cache:v3';
 const SOURCING_CACHE_ENABLED_KEY = 'hoonpro:sourcing-cache-enabled';
-const PENDING_SOURCING_KEY = 'hoonpro:sourcing-pending:v2';
+const PENDING_SOURCING_KEY = 'hoonpro:sourcing-pending:v3';
 
 type CachedSourcing = {
   savedAt: number;

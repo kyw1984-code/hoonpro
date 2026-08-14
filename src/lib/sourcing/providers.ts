@@ -104,17 +104,36 @@ const normalizeProductFamily = (name: string) => {
     .join(' ');
 };
 
+const familyStopWords = new Set([
+  '국산', '고급', '초경량', '프리미엄', '대형', '소형', '중형', '세트', '1개', '2개', '신형',
+  '정품', '무료배송', '로켓배송', '특가', '할인', '가정용', '휴대용', '다용도', '일체형',
+]);
+
+const getFamilyBrandToken = (name: string) => {
+  return normalize(name)
+    .replace(/\d+(\.\d+)?\s?(cm|mm|m|kg|g|개|p|pcs|호|번|종|세트|set)/gi, ' ')
+    .replace(/\b\d{5,}\b/g, ' ')
+    .replace(/[,_/()[\]{}+\-]/g, ' ')
+    .split(/\s+/)
+    .find((word) => word.length > 1 && !familyStopWords.has(word)) || '';
+};
+
 const uniqueApiProducts = (apiProducts: CoupangApiProduct[]) => {
   const seenIds = new Set<string>();
   const familyCounts = new Map<string, number>();
+  const brandTokenCounts = new Map<string, number>();
   return apiProducts.filter((product) => {
     const id = String(product.productId || product.productUrl || '').trim();
     if (id && seenIds.has(id)) return false;
     const family = normalizeProductFamily(product.productName);
+    const brandToken = getFamilyBrandToken(product.productName);
     const count = familyCounts.get(family) || 0;
+    const brandTokenCount = brandTokenCounts.get(brandToken) || 0;
     if (family && count >= 1) return false;
+    if (brandToken && brandTokenCount >= 1) return false;
     if (id) seenIds.add(id);
     if (family) familyCounts.set(family, count + 1);
+    if (brandToken) brandTokenCounts.set(brandToken, brandTokenCount + 1);
     return true;
   });
 };
