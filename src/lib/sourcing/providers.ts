@@ -54,19 +54,40 @@ const defaultCoupangCategoryUrls: Record<string, string[]> = {
 
 const CATEGORY_URL_STORAGE_KEY = 'hoonpro:sourcing-category-urls:v1';
 
+/**
+ * 붙여넣은 쿠팡 주소에서 카테고리 URL을 뽑아냅니다.
+ * 쿼리스트링이 붙었거나 m.coupang.com 형태여도 받아들입니다.
+ */
+export const normalizeCategoryUrl = (input: string): string => {
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+  const idMatch = trimmed.match(/\/np\/categories\/(\d+)/);
+  if (idMatch) return `https://www.coupang.com/np/categories/${idMatch[1]}`;
+  // 숫자만 붙여넣은 경우도 카테고리 ID로 받아줍니다.
+  if (/^\d{4,}$/.test(trimmed)) return `https://www.coupang.com/np/categories/${trimmed}`;
+  if (/^https:\/\/(www\.|m\.)?coupang\.com\//i.test(trimmed)) return trimmed;
+  return '';
+};
+
+/**
+ * 저장된 설정이 있으면 그것만 사용하고, 없으면 기본값을 씁니다.
+ *
+ * 이전에는 기본값과 저장값을 병합하면서 빈 항목이면 기본값을 지웠는데,
+ * 화면에 보이는 목록과 실제 수집 대상이 어긋나 보이기 쉬웠습니다.
+ * 저장한 내용이 곧 등록 목록이 되도록 단순하게 바꿉니다.
+ */
 export const readCategoryUrlConfig = (): Record<string, string[]> => {
   if (typeof window === 'undefined') return { ...defaultCoupangCategoryUrls };
   try {
     const raw = window.localStorage.getItem(CATEGORY_URL_STORAGE_KEY);
     if (!raw) return { ...defaultCoupangCategoryUrls };
     const parsed = JSON.parse(raw) as Record<string, string[]>;
-    const merged = { ...defaultCoupangCategoryUrls };
+    const config: Record<string, string[]> = {};
     for (const [category, urls] of Object.entries(parsed)) {
-      const valid = (Array.isArray(urls) ? urls : []).filter((url) => /^https:\/\/(www\.)?coupang\.com\//i.test(url));
-      if (valid.length > 0) merged[category] = valid;
-      else delete merged[category];
+      const valid = (Array.isArray(urls) ? urls : []).map(normalizeCategoryUrl).filter(Boolean);
+      if (valid.length > 0) config[category] = valid;
     }
-    return merged;
+    return Object.keys(config).length > 0 ? config : { ...defaultCoupangCategoryUrls };
   } catch {
     return { ...defaultCoupangCategoryUrls };
   }

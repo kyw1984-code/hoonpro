@@ -546,57 +546,104 @@ async function handleStats(req: VercelRequest, res: VercelResponse) {
  * 쿠팡 첫 화면의 카테고리 메뉴에서 카테고리 ID와 이름을 뽑아옵니다.
  * 관리자가 카테고리 번호를 직접 찾아 붙여넣지 않아도 되게 하려는 용도입니다.
  */
-async function handleCategories(_req: VercelRequest, res: VercelResponse) {
-  const ua = UA_LIST[Math.floor(Math.random() * UA_LIST.length)];
-  try {
-    const response = await fetch("https://www.coupang.com/", {
-      headers: {
-        "User-Agent": ua,
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
-        ...(COUPANG_COOKIE ? { Cookie: COUPANG_COOKIE } : {}),
-      },
-    });
+function extractCategoryLinks(html: string) {
+  const seen = new Map<string, string>();
 
-    if (!response.ok) {
-      return res.status(502).json({ error: `쿠팡 응답 오류 (${response.status}). 카테고리 URL을 직접 입력해주세요.` });
-    }
-
-    const html = await response.text();
-    if (html.includes("Access Denied") || html.includes("보안 확인")) {
-      return res.status(502).json({ error: "쿠팡이 자동 조회를 차단했습니다. 카테고리 URL을 직접 입력해주세요." });
-    }
-
-    const seen = new Map<string, string>();
-    const linkPattern = /href="\/np\/categories\/(\d+)"[^>]*>([\s\S]{0,200}?)<\/a>/g;
-    let match: RegExpExecArray | null;
-    while ((match = linkPattern.exec(html)) !== null) {
-      const id = match[1];
-      // 링크 안에 NEW 같은 배지가 함께 들어있는 경우가 있어, 태그로 끊은 뒤
-      // 첫 번째 문자열만 카테고리 이름으로 씁니다.
-      const name = match[2]
-        .split(/<[^>]*>/)
-        .map(segment => stripHtml(segment).replace(/\s+/g, " ").trim())
-        .find(Boolean) || "";
-      if (!name || name.length > 30) continue;
-      if (!seen.has(id)) seen.set(id, name);
-    }
-
-    const categories = Array.from(seen, ([id, name]) => ({
-      id,
-      name,
-      url: `https://www.coupang.com/np/categories/${id}`,
-    }));
-
-    if (categories.length === 0) {
-      return res.status(502).json({ error: "카테고리 목록을 찾지 못했습니다. 쿠팡 화면 구조가 바뀌었을 수 있습니다." });
-    }
-
-    return res.status(200).json({ categories, count: categories.length });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "쿠팡 카테고리 조회에 실패했습니다.";
-    return res.status(502).json({ error: message });
+  // 1) 일반 링크 형태
+  const linkPattern = /href="\/np\/categories\/(\d+)"[^>]*>([\s\S]{0,200}?)<\/a>/g;
+  let match: RegExpExecArray | null;
+  while ((match = linkPattern.exec(html)) !== null) {
+    const id = match[1];
+    // 링크 안에 NEW 같은 배지가 함께 들어있는 경우가 있어, 태그로 끊은 뒤
+    // 첫 번째 문자열만 카테고리 이름으로 씁니다.
+    const name = match[2]
+      .split(/<[^>]*>/)
+      .map(segment => stripHtml(segment).replace(/\s+/g, " ").trim())
+      .find(Boolean) || "";
+    if (!name || name.length > 30) continue;
+    if (!seen.has(id)) seen.set(id, name);
   }
+
+  // 2) 메뉴가 JSON으로 심어져 있는 경우 ("categoryId":123,"name":"..." 형태)
+  const jsonPattern = /"categoryId"\s*:\s*"?(\d+)"?[^{}]{0,120}?"(?:name|categoryName|displayName)"\s*:\s*"([^"]{1,30})"/g;
+  while ((match = jsonPattern.exec(html)) !== null) {
+    const [, id, rawName] = match;
+    const name = stripHtml(rawName).trim();
+    if (name && !seen.has(id)) seen.set(id, name);
+  }
+
+  return seen;
+}
+
+async function handleCategories(req: VercelRequest, res: VercelResponse) {
+  const debug = req.query.debug === "true";
+  // 첫 화면에서 못 찾으면 카테고리 페이지에도 전체 메뉴가 실려 있는지 확인합니다.
+  const entryUrls = [
+    "https://www.coupang.com/",
+    "https://www.coupang.com/np/categories/194276",
+  ];
+
+  const attempts: Record<string, unknown>[] = [];
+
+  for (const entryUrl of entryUrls) {
+    const ua = UA_LIST[Math.floor(Math.random() * UA_LIST.length)];
+    try {
+      const response = await fetch(entryUrl, {
+        headers: {
+          "User-Agent": ua,
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+          "Accept-Encoding": "gzip, deflate, br",
+          "Upgrade-Insecure-Requests": "1",
+          ...(COUPANG_COOKIE ? { Cookie: COUPANG_COOKIE } : {}),
+        },
+      });
+
+      const html = response.ok ? await response.text() : "";
+      const blocked = /Access Denied|보안 확인|비정상적인 접근|captcha/i.test(html);
+      const found = blocked ? new Map<string, string>() : extractCategoryLinks(html);
+
+      attempts.push({
+        entryUrl,
+        status: response.status,
+        htmlLength: html.length,
+        blocked,
+        found: found.size,
+      });
+
+      if (found.size > 0) {
+        const categories = Array.from(found, ([id, name]) => ({
+          id,
+          name,
+          url: `https://www.coupang.com/np/categories/${id}`,
+        }));
+        return res.status(200).json({
+          categories,
+          count: categories.length,
+          ...(debug ? { attempts } : {}),
+        });
+      }
+    } catch (error) {
+      attempts.push({
+        entryUrl,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  // 어떤 경로로도 못 찾았을 때, 왜 실패했는지 알 수 있게 시도 내역을 함께 돌려줍니다.
+  const blockedSomewhere = attempts.some(attempt => attempt.blocked === true);
+  const gotHtml = attempts.some(attempt => Number(attempt.htmlLength || 0) > 5000);
+  const reason = blockedSomewhere
+    ? "쿠팡이 서버 접근을 차단했습니다."
+    : gotHtml
+      ? "쿠팡 화면은 받았지만 카테고리 링크가 없습니다. 메뉴가 JavaScript로 그려지는 것으로 보입니다."
+      : "쿠팡 응답을 받지 못했습니다.";
+
+  return res.status(502).json({
+    error: `${reason} 카테고리 주소를 직접 붙여넣어 등록해주세요.`,
+    attempts,
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

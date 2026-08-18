@@ -13,6 +13,7 @@ import {
   getDefaultCategoryUrls,
   readCategoryUrlConfig,
   resetCategoryUrlConfig,
+  normalizeCategoryUrl,
   saveCategoryUrlConfig,
   sourcingProvider,
   type BrightDataRefreshResult,
@@ -198,13 +199,20 @@ export function SourcingFinder() {
 
   const saveCategoryUrls = () => {
     const next: Record<string, string[]> = {};
+    const invalid: string[] = [];
     for (const [category, raw] of Object.entries(categoryUrlDraft)) {
-      const urls = String(raw).split('\n').map((url) => url.trim()).filter(Boolean);
-      if (urls.length > 0) next[category] = urls;
+      const entries = String(raw).split('\n').map((url) => url.trim()).filter(Boolean);
+      // 주소창에서 복사하면 쿼리스트링이 붙거나 m.coupang.com 형태일 수 있어 정규화합니다.
+      const urls = entries.map(normalizeCategoryUrl).filter(Boolean);
+      invalid.push(...entries.filter((entry) => !normalizeCategoryUrl(entry)));
+      if (urls.length > 0) next[category] = Array.from(new Set(urls));
     }
-    const invalid = Object.values(next).flat().filter((url) => !/^https:\/\/(www\.)?coupang\.com\//i.test(url));
     if (invalid.length > 0) {
-      setSourcingMessage(`쿠팡 주소가 아닌 항목이 있어 저장하지 않았습니다: ${invalid[0]}`);
+      setSourcingMessage(`쿠팡 카테고리 주소로 인식되지 않는 항목이 있어 저장하지 않았습니다: ${invalid[0]}`);
+      return;
+    }
+    if (Object.keys(next).length === 0) {
+      setSourcingMessage('등록할 카테고리가 없습니다. 최소 한 개는 입력해주세요.');
       return;
     }
     saveCategoryUrlConfig(next);
@@ -220,16 +228,13 @@ export function SourcingFinder() {
     [categoryConfigVersion],
   );
 
-  const toggleCollectCategory = (category: string) => {
-    setFilters((current) => {
-      const selected = current.categories || [];
-      return {
-        ...current,
-        categories: selected.includes(category)
-          ? selected.filter((item) => item !== category)
-          : [...selected, category],
-      };
-    });
+  /** 수집 카테고리는 하나만 고릅니다. 한 카테고리에 수집 한도를 몰아줘야
+   *  그 카테고리 상품이 더 많이 나옵니다. 같은 걸 다시 누르면 해제됩니다. */
+  const selectCollectCategory = (category: string) => {
+    setFilters((current) => ({
+      ...current,
+      categories: (current.categories || [])[0] === category ? [] : [category],
+    }));
   };
 
   const loadCoupangCategories = async () => {
@@ -241,7 +246,7 @@ export function SourcingFinder() {
       setSourcingMessage(`쿠팡 카테고리 ${options.length}개를 불러왔습니다. 추가할 카테고리를 눌러주세요.`);
     } catch (error) {
       setCoupangCategories([]);
-      setSourcingMessage(error instanceof Error ? error.message : '쿠팡 카테고리 조회에 실패했습니다.');
+      setSourcingMessage(`${error instanceof Error ? error.message : '쿠팡 카테고리 조회에 실패했습니다.'} 아래 입력칸에 쿠팡 카테고리 주소를 붙여넣어 등록할 수 있습니다.`);
     } finally {
       setIsLoadingCategories(false);
     }
@@ -660,7 +665,7 @@ export function SourcingFinder() {
                 <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                   <SectionTitle
                     title="수집할 카테고리 선택"
-                    desc="선택한 카테고리를 한 번의 수집으로 함께 훑습니다. 아무것도 고르지 않으면 등록된 카테고리를 모두 수집합니다."
+                    desc="한 카테고리만 선택하면 수집 한도를 그 카테고리에 몰아줘서 상품이 가장 많이 나옵니다. 선택하지 않으면 등록된 카테고리를 함께 훑습니다."
                   />
                   {collectableCategories.length === 0 ? (
                     <p className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
@@ -674,7 +679,7 @@ export function SourcingFinder() {
                           return (
                             <button
                               key={category}
-                              onClick={() => toggleCollectCategory(category)}
+                              onClick={() => selectCollectCategory(category)}
                               className={`rounded-lg px-4 py-2 text-sm font-black ring-1 transition ${selected ? 'bg-blue-600 text-white ring-blue-600' : 'bg-white text-slate-600 ring-slate-200 hover:ring-blue-300'}`}
                             >
                               {selected ? '✓ ' : ''}{category}
@@ -684,9 +689,8 @@ export function SourcingFinder() {
                       </div>
                       <p className="mt-3 text-xs font-bold text-slate-500">
                         {(filters.categories || []).length > 0
-                          ? `${(filters.categories || []).length}개 카테고리를 수집합니다.`
-                          : `전체 ${collectableCategories.length}개 카테고리를 수집합니다.`}
-                        {' '}카테고리를 늘릴수록 상품 수와 난이도 분포가 넓어집니다.
+                          ? `“${(filters.categories || [])[0]}” 카테고리만 수집합니다. 한 곳에 수집 한도를 몰아주므로 그 카테고리 상품이 가장 많이 나옵니다.`
+                          : `카테고리를 고르지 않으면 등록된 ${collectableCategories.length}개를 함께 수집합니다. 한 카테고리를 깊게 보려면 하나만 선택하세요.`}
                       </p>
                     </>
                   )}
