@@ -44,6 +44,8 @@ export type MarketOpportunity = {
   reviewEdge: number;
   priceEdge: number;
   deliveryEdge: number;
+  /** 수요 미검증 감점 */
+  demandPenalty: number;
   marketOpenness: number;
 };
 
@@ -177,13 +179,26 @@ export const deliveryEdgePoints = (delivery: MarketProductInput['delivery']) => 
   return 3;
 };
 
+/**
+ * 리뷰가 하나도 없는 상품은 "경쟁이 없는" 게 아니라 "팔린 적이 없는" 상품입니다.
+ * 리뷰 장벽 점수만 보면 신규 등록 상품이 항상 만점을 받아 목록 상단을 차지하므로,
+ * 수요가 검증되지 않은 만큼 감점합니다. (0-25)
+ */
+export const demandEvidencePenalty = (reviews: number) => {
+  if (reviews <= 0) return 25;
+  if (reviews < 3) return 14;
+  if (reviews < 10) return 6;
+  return 0;
+};
+
 export function scoreProductInMarket(product: MarketProductInput, cohort: MarketCohort): MarketOpportunity {
   const marketOpenness = 100 - cohort.competitionLevel;
   const reviewEdge = reviewEdgePoints(product.reviews, cohort.medianReviews);
   const priceEdge = priceEdgePoints(product.price);
   const deliveryEdge = deliveryEdgePoints(product.delivery);
+  const demandPenalty = demandEvidencePenalty(product.reviews);
 
-  const rawScore = clamp(marketOpenness * 0.5 + reviewEdge + priceEdge + deliveryEdge, 0, 100);
+  const rawScore = clamp(marketOpenness * 0.5 + reviewEdge + priceEdge + deliveryEdge - demandPenalty, 0, 100);
   const opportunityScore = Math.round(clamp(50 + (rawScore - 50) * cohort.confidence, 0, 100));
 
   return {
@@ -192,9 +207,23 @@ export function scoreProductInMarket(product: MarketProductInput, cohort: Market
     reviewEdge,
     priceEdge,
     deliveryEdge,
+    demandPenalty,
     marketOpenness,
   };
 }
+
+/**
+ * 이 상품을 추월하는 데 필요한 난이도입니다.
+ *
+ * 이전에는 난이도가 mock seed에 붙어 있어서, 수집 결과 전체가 seed의 난이도
+ * 하나를 그대로 물려받았습니다. 그래서 아마추어로 수집하면 준프로·프로 탭이
+ * 항상 비었습니다. 리뷰 장벽은 상품마다 다르므로 상품 단위로 판정합니다.
+ */
+export const deriveDifficulty = (reviews: number): '아마추어' | '준프로' | '프로' => {
+  if (reviews <= 50) return '아마추어';
+  if (reviews <= 500) return '준프로';
+  return '프로';
+};
 
 /**
  * 실측 가능한 축만으로 AI SCORE를 만듭니다.

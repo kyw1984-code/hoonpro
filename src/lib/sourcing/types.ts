@@ -45,6 +45,8 @@ export type SourcingProduct = {
   shippingCost: number;
   avgReview: number;
   rating: number;
+  /** 이 상품 자체의 배송 유형 (수집 데이터 기준) */
+  delivery?: '로켓' | '판매자로켓' | '일반';
   searchVolume: number;
   growth7d: number;
   growth30d: number;

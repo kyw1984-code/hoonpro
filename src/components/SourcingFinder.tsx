@@ -7,7 +7,15 @@ import {
 } from 'lucide-react';
 import { createMockAiStrategy } from '../lib/sourcing/aiStrategy';
 import { providerStatuses, sourcingProducts } from '../lib/sourcing/mockData';
-import { describeDiagnostics, sourcingProvider, type BrightDataRefreshResult } from '../lib/sourcing/providers';
+import {
+  describeDiagnostics,
+  getDefaultCategoryUrls,
+  readCategoryUrlConfig,
+  resetCategoryUrlConfig,
+  saveCategoryUrlConfig,
+  sourcingProvider,
+  type BrightDataRefreshResult,
+} from '../lib/sourcing/providers';
 import type { Difficulty, KeywordType, SourcingFilters, SourcingProduct, SourcingStatus } from '../lib/sourcing/types';
 
 type View = 'dashboard' | 'sourcing' | 'results' | 'detail' | 'suppliers' | 'favorites' | 'calculator' | 'admin' | 'settings';
@@ -33,6 +41,23 @@ const gradeClass = {
   C: 'bg-slate-100 text-slate-700 ring-slate-200',
   D: 'bg-zinc-100 text-zinc-600 ring-zinc-200',
 } as const;
+
+const LIST_ROW_LIMIT = 15;
+
+const deliveryClass: Record<string, string> = {
+  '로켓': 'bg-sky-50 text-sky-700 ring-sky-200',
+  '판매자로켓': 'bg-violet-50 text-violet-700 ring-violet-200',
+  '일반': 'bg-slate-100 text-slate-600 ring-slate-200',
+};
+
+function DeliveryBadge({ delivery }: { delivery?: string }) {
+  if (!delivery) return <span className="text-xs font-bold text-slate-300">—</span>;
+  return (
+    <span className={`inline-flex whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-black ring-1 ${deliveryClass[delivery] || deliveryClass['일반']}`}>
+      {delivery}
+    </span>
+  );
+}
 
 function GradeBadge({ grade }: { grade: keyof typeof gradeClass }) {
   return <span className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-black ring-1 ${gradeClass[grade]}`}>{grade}등급</span>;
@@ -158,6 +183,34 @@ export function SourcingFinder() {
   });
   const [cacheInfo, setCacheInfo] = useState<CachedSourcing | null>(() => readSourcingCache());
   const [pendingSourcing, setPendingSourcing] = useState<PendingSourcing | null>(() => readPendingSourcing());
+  const [categoryUrlDraft, setCategoryUrlDraft] = useState<Record<string, string>>(() => {
+    const config = readCategoryUrlConfig();
+    return Object.fromEntries(categories.map((category) => [category, (config[category] || []).join('\n')]));
+  });
+
+  const saveCategoryUrls = () => {
+    const next: Record<string, string[]> = {};
+    for (const [category, raw] of Object.entries(categoryUrlDraft)) {
+      const urls = String(raw).split('\n').map((url) => url.trim()).filter(Boolean);
+      if (urls.length > 0) next[category] = urls;
+    }
+    const invalid = Object.values(next).flat().filter((url) => !/^https:\/\/(www\.)?coupang\.com\//i.test(url));
+    if (invalid.length > 0) {
+      setSourcingMessage(`쿠팡 주소가 아닌 항목이 있어 저장하지 않았습니다: ${invalid[0]}`);
+      return;
+    }
+    saveCategoryUrlConfig(next);
+    const saved = readCategoryUrlConfig();
+    setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (saved[category] || []).join('\n')])));
+    setSourcingMessage(`수집 카테고리를 저장했습니다. 등록된 카테고리 ${Object.keys(saved).length}개.`);
+  };
+
+  const restoreDefaultCategoryUrls = () => {
+    resetCategoryUrlConfig();
+    const defaults = getDefaultCategoryUrls();
+    setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (defaults[category] || []).join('\n')])));
+    setSourcingMessage('수집 카테고리를 기본값으로 되돌렸습니다.');
+  };
 
   const filteredProducts = useMemo(() => {
     return getFilteredProducts(products, filters, segment);
@@ -632,7 +685,7 @@ export function SourcingFinder() {
 
                   <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <SectionTitle title="대박 상품 리스트" desc={`기회점수가 높은 순서 Top ${Math.min(7, filteredProducts.length)}입니다. 경쟁도는 수집된 표본 전체에서 계산합니다.`} />
+                      <SectionTitle title="대박 상품 리스트" desc={`기회점수가 높은 순서 Top ${Math.min(LIST_ROW_LIMIT, filteredProducts.length)}입니다. 경쟁도는 수집된 표본 전체에서 계산하고, 리뷰가 없는 상품은 수요 미검증으로 감점합니다.`} />
                       <span className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">표본 {fmt(filteredProducts[0]?.coupangProductCount || 0)}개 · 경쟁도 {filteredProducts[0]?.competitionLevel ?? 0}</span>
                     </div>
                     <div className="mt-4 overflow-x-auto">
@@ -640,6 +693,8 @@ export function SourcingFinder() {
                         <thead className="bg-slate-50 text-xs font-black text-slate-500">
                           <tr>
                             <th className="px-3 py-3 text-left">상품명</th>
+                            <th className="px-3 py-3 text-center">배송</th>
+                            <th className="px-3 py-3 text-center">난이도</th>
                             <th className="px-3 py-3 text-right">가격</th>
                             <th className="px-3 py-3 text-right">리뷰</th>
                             <th className="px-3 py-3 text-right">누적판매</th>
@@ -648,7 +703,7 @@ export function SourcingFinder() {
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredProducts.slice(0, 7).map((product, index) => (
+                          {filteredProducts.slice(0, LIST_ROW_LIMIT).map((product, index) => (
                             <tr key={product.id} className="border-b border-slate-100 hover:bg-blue-50/60">
                               <td className="px-3 py-4">
                                 <div className="flex items-center gap-3">
@@ -667,10 +722,12 @@ export function SourcingFinder() {
                                   </div>
                                 </div>
                               </td>
+                              <td className="px-3 py-4 text-center"><DeliveryBadge delivery={product.delivery} /></td>
+                              <td className="px-3 py-4 text-center text-xs font-black text-slate-600">{product.difficulty}</td>
                               <td className="px-3 py-4 text-right font-bold">{won(product.price)}</td>
                               <td className="px-3 py-4 text-right font-bold text-slate-600">{fmt(product.avgReview)}</td>
-                              <td className="px-3 py-4 text-right text-base font-black text-slate-950">{fmt(product.estimatedSales)}</td>
-                              <td className="px-3 py-4 text-right font-black text-amber-600">{fmt(Math.round(product.estimatedRevenue / 10000))}만원</td>
+                              <td className="px-3 py-4 text-right text-base font-black text-slate-950">{product.avgReview > 0 ? fmt(product.estimatedSales) : <span className="text-sm font-bold text-slate-400">미검증</span>}</td>
+                              <td className="px-3 py-4 text-right font-black text-amber-600">{product.avgReview > 0 ? `${fmt(Math.round(product.estimatedRevenue / 10000))}만원` : <span className="text-sm font-bold text-slate-400">—</span>}</td>
                               <td className="px-3 py-4 text-center">
                                 {product.productUrl ? (
                                   <a href={product.productUrl} target="_blank" rel="noopener noreferrer" className="inline-grid h-9 w-9 place-items-center rounded-full bg-slate-950 text-white hover:bg-blue-600" aria-label={`${product.name} 쿠팡 상품 열기`}>
@@ -820,6 +877,45 @@ export function SourcingFinder() {
                 <button onClick={runLiveSourcingForDebug} disabled={isSourcingLoading} className="mt-3 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-600 disabled:opacity-50">
                   장시간 직접 수집 테스트
                 </button>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <SectionTitle
+                  title="수집 카테고리 관리"
+                  desc="쿠팡에서 카테고리를 연 뒤 주소창의 https://www.coupang.com/np/categories/... 주소를 그대로 붙여넣으세요. 한 줄에 하나씩, 여러 개를 넣으면 함께 수집합니다."
+                />
+                <div className="mt-4 space-y-3">
+                  {categories.filter((category) => category !== '기타').map((category) => {
+                    const urls = categoryUrlDraft[category] || '';
+                    const count = urls.split('\n').map((url) => url.trim()).filter(Boolean).length;
+                    return (
+                      <div key={category} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-black text-slate-800">{category}</p>
+                          <span className={`rounded-md px-2 py-0.5 text-[11px] font-black ${count > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                            {count > 0 ? `${count}개 URL · 수집 가능` : '미설정'}
+                          </span>
+                        </div>
+                        <textarea
+                          value={urls}
+                          onChange={(event) => setCategoryUrlDraft((current) => ({ ...current, [category]: event.target.value }))}
+                          rows={Math.max(2, Math.min(5, count + 1))}
+                          placeholder="https://www.coupang.com/np/categories/1234567"
+                          className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-700"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button onClick={saveCategoryUrls} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white">
+                    카테고리 저장
+                  </button>
+                  <button onClick={restoreDefaultCategoryUrls} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600">
+                    기본값으로 되돌리기
+                  </button>
+                  <p className="text-xs font-bold text-slate-500">저장 후 “새로 시작”으로 수집하면 해당 카테고리에서 상품을 가져옵니다.</p>
+                </div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle title="관리자 지표" desc="회원, 분석 횟수, 인기 키워드, 검색 횟수, 저장상품, 사용자 활동을 확인합니다." /><div className="mt-4 grid grid-cols-3 gap-3">{['안경김서림 방지 냉감 귀걸이 마스크', '차박용 자석 암막 사이드 햇빛가리개', '목뒤 밀착형 PCM 아이스 넥쿨러', '종이호일 대체 사각 실리콘 에어프라이어 용기', '스노쿨링 터치가능 스마트폰 방수팩', '독서실용 무드등 겸 저소음 탁상 선풍기'].map((keyword, index) => <div key={keyword} className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-bold text-slate-500">인기 키워드 {index + 1}</p><p className="mt-1 font-black">{keyword}</p></div>)}</div></div>
             </section>

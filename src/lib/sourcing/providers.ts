@@ -2,6 +2,7 @@ import { getGrade, getRecommendation } from '../scoring/calculateProductScore';
 import {
   computeMarketCohort,
   computeMeasuredScore,
+  deriveDifficulty,
   scoreProductInMarket,
   type MarketProductInput,
 } from './marketScore';
@@ -34,7 +35,14 @@ const sortByOpportunity = (a: SourcingProduct, b: SourcingProduct) => {
   return a.coupangProductCount - b.coupangProductCount;
 };
 
-const coupangCategoryUrls: Record<string, string[]> = {
+/**
+ * 카테고리별 쿠팡 카테고리 URL. 관리자 화면에서 추가/수정할 수 있고,
+ * 저장된 값이 있으면 아래 기본값 대신 사용합니다.
+ *
+ * 카테고리 ID는 쿠팡에서 해당 카테고리를 열었을 때 주소창의
+ * https://www.coupang.com/np/categories/{숫자} 에서 그대로 복사하면 됩니다.
+ */
+const defaultCoupangCategoryUrls: Record<string, string[]> = {
   패션: ['https://www.coupang.com/np/categories/525715'],
   DIY: [
     'https://www.coupang.com/np/categories/520663',
@@ -44,10 +52,37 @@ const coupangCategoryUrls: Record<string, string[]> = {
   ],
 };
 
-const liveCategoryPriority: Record<string, number> = {
-  DIY: 0,
-  패션: 1,
+const CATEGORY_URL_STORAGE_KEY = 'hoonpro:sourcing-category-urls:v1';
+
+export const readCategoryUrlConfig = (): Record<string, string[]> => {
+  if (typeof window === 'undefined') return { ...defaultCoupangCategoryUrls };
+  try {
+    const raw = window.localStorage.getItem(CATEGORY_URL_STORAGE_KEY);
+    if (!raw) return { ...defaultCoupangCategoryUrls };
+    const parsed = JSON.parse(raw) as Record<string, string[]>;
+    const merged = { ...defaultCoupangCategoryUrls };
+    for (const [category, urls] of Object.entries(parsed)) {
+      const valid = (Array.isArray(urls) ? urls : []).filter((url) => /^https:\/\/(www\.)?coupang\.com\//i.test(url));
+      if (valid.length > 0) merged[category] = valid;
+      else delete merged[category];
+    }
+    return merged;
+  } catch {
+    return { ...defaultCoupangCategoryUrls };
+  }
 };
+
+export const saveCategoryUrlConfig = (config: Record<string, string[]>) => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(CATEGORY_URL_STORAGE_KEY, JSON.stringify(config));
+};
+
+export const resetCategoryUrlConfig = () => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.removeItem(CATEGORY_URL_STORAGE_KEY);
+};
+
+export const getDefaultCategoryUrls = () => ({ ...defaultCoupangCategoryUrls });
 
 type CoupangApiProduct = {
   productId: string | number;
@@ -181,6 +216,9 @@ const buildLiveProducts = (seed: SourcingProduct, apiProducts: CoupangApiProduct
       price: marketInput.price,
       avgReview: marketInput.reviews,
       rating: Number(product.rating ?? 0),
+      delivery: marketInput.delivery,
+      // 난이도는 seed가 아니라 이 상품의 리뷰 장벽에서 판정합니다.
+      difficulty: deriveDifficulty(marketInput.reviews),
       estimatedSales,
       estimatedRevenue: marketInput.price * estimatedSales,
       coupangProductCount: cohort.sampleSize,
@@ -231,7 +269,7 @@ const buildLiveParams = (keyword: string, category: string, filters?: SourcingFi
     params.set('minPrice', String(filters.minPrice));
     params.set('maxPrice', String(filters.maxPrice));
   }
-  const categoryUrls = coupangCategoryUrls[category] || [];
+  const categoryUrls = readCategoryUrlConfig()[category] || [];
   if (categoryUrls.length > 0) params.set('categoryUrls', categoryUrls.join(','));
   params.set('type', 'shopping-data');
   return params;
@@ -380,15 +418,29 @@ export class MockSourcingProvider implements KeywordProvider, ProductProvider, S
 }
 
 export class LiveSourcingProvider extends MockSourcingProvider {
+  /**
+   * 수집에 쓸 seed를 고릅니다. seed의 카테고리가 어떤 쿠팡 카테고리 URL로
+   * 수집할지를 결정하므로, 사용자가 고른 카테고리에 URL이 등록돼 있으면
+   * 그 카테고리를 우선합니다.
+   *
+   * 난이도(filters.difficulty)로는 seed를 좁히지 않습니다. 난이도는 수집한
+   * 상품마다 리뷰 장벽으로 다시 판정하므로, 여기서 좁히면 한 난이도의
+   * 결과만 수집되어 나머지 탭이 비게 됩니다.
+   */
   private async getLiveSeed(filters: SourcingFilters) {
-    const baseProducts = await super.searchProducts(filters);
-    const liveReadyProducts = baseProducts
-      .filter((product) => coupangCategoryUrls[product.category])
-      .sort((a, b) => (liveCategoryPriority[a.category] ?? 99) - (liveCategoryPriority[b.category] ?? 99));
-    const candidates = filters.query.trim()
-      ? baseProducts.filter((product) => normalize(product.name).includes(normalize(filters.query))).slice(0, 1)
-      : (liveReadyProducts.length > 0 ? liveReadyProducts : baseProducts).slice(0, 1);
-    return candidates[0] || baseProducts[0] || sourcingProducts[0];
+    const configured = readCategoryUrlConfig();
+    const pool = sourcingProducts.filter((product) => configured[product.category]);
+
+    const bySelectedCategory = pool.filter((product) => product.category === filters.category);
+    if (bySelectedCategory.length > 0) return bySelectedCategory[0];
+
+    const query = normalize(filters.query);
+    if (query) {
+      const byQuery = pool.find((product) => normalize(product.name).includes(query));
+      if (byQuery) return byQuery;
+    }
+
+    return pool[0] || sourcingProducts[0];
   }
 
   /**

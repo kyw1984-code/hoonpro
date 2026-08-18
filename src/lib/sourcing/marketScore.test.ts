@@ -4,6 +4,7 @@ import {
   computeMarketCohort,
   computeMeasuredScore,
   deliveryEdgePoints,
+  deriveDifficulty,
   getConfidence,
   priceEdgePoints,
   reviewBarrierPoints,
@@ -98,6 +99,34 @@ test('구성 점수 임계값', () => {
   assert.equal(deliveryEdgePoints('로켓'), 3);
   assert.equal(getConfidence(3), 0.45);
   assert.equal(getConfidence(40), 1);
+});
+
+test('리뷰가 없는 상품은 판매 실적이 있는 상품보다 아래로 간다', () => {
+  // 회귀 테스트: 리뷰 0개와 6개가 똑같이 기회점수 96으로 동점이던 문제.
+  const cohort = computeMarketCohort([
+    ...Array.from({ length: 44 }, (_, i) => product({ reviews: 300 + i * 40, brand: `brand${i}` })),
+    product({ reviews: 6 }),
+    product({ reviews: 0 }),
+  ]);
+
+  const proven = scoreProductInMarket(product({ reviews: 6 }), cohort).opportunityScore;
+  const unproven = scoreProductInMarket(product({ reviews: 0 }), cohort).opportunityScore;
+
+  assert.ok(proven > unproven, `실판매가 있는 쪽이 높아야 함: ${proven} vs ${unproven}`);
+});
+
+test('난이도는 상품마다 리뷰 장벽으로 판정한다', () => {
+  // 회귀 테스트: 난이도가 seed에 고정돼서 준프로·프로 탭이 항상 비던 문제.
+  assert.equal(deriveDifficulty(0), '아마추어');
+  assert.equal(deriveDifficulty(50), '아마추어');
+  assert.equal(deriveDifficulty(51), '준프로');
+  assert.equal(deriveDifficulty(500), '준프로');
+  assert.equal(deriveDifficulty(501), '프로');
+
+  // 한 번 수집한 결과가 세 난이도에 모두 분포해야 합니다.
+  const reviews = [0, 5, 40, 120, 400, 900, 5000];
+  const grades = new Set(reviews.map(deriveDifficulty));
+  assert.equal(grades.size, 3);
 });
 
 test('빈 수집 결과에서도 안전하게 중립값을 반환한다', () => {
