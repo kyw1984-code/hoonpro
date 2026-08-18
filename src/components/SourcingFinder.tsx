@@ -87,9 +87,10 @@ const getFilteredProducts = (products: SourcingProduct[], filters: SourcingFilte
     .sort(sortByOpportunity);
 };
 
-const SOURCING_CACHE_KEY = 'hoonpro:sourcing-cache:v3';
+// 상품 필터링/중복제거 로직이 바뀌면 키 버전을 올려 이전 캐시를 무효화합니다.
+const SOURCING_CACHE_KEY = 'hoonpro:sourcing-cache:v4';
 const SOURCING_CACHE_ENABLED_KEY = 'hoonpro:sourcing-cache-enabled';
-const PENDING_SOURCING_KEY = 'hoonpro:sourcing-pending:v3';
+const PENDING_SOURCING_KEY = 'hoonpro:sourcing-pending:v4';
 
 type CachedSourcing = {
   savedAt: number;
