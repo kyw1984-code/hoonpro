@@ -267,6 +267,16 @@ function getBrightDataDeliveryType(record: Record<string, unknown>) {
   return "general";
 }
 
+function getBrightDataOutOfStock(record: Record<string, unknown>) {
+  if (record.out_of_stock === true || record.is_out_of_stock === true) return true;
+  if (record.in_stock === false || record.is_available === false || record.available === false) return true;
+  const statusText = `${asString(record.availability)} ${asString(record.stock_status)} ${asString(record.availability_status)}`.toLowerCase();
+  if (statusText && /(out of stock|sold out|unavailable|soldout)/.test(statusText)) return true;
+  const badgeText = `${asString(record.badge)} ${asString(record.title)} ${asString(record.stock_message)}`;
+  if (/(품절|일시품절|재입고|판매종료|판매중지)/.test(badgeText)) return true;
+  return false;
+}
+
 function normalizeBrightDataRecord(record: Record<string, unknown>, index: number) {
   const productName = asString(record.title) || asString(record.product_title) || asString(record.productName) || asString(record.name);
   const productUrl = getBrightDataProductUrl(record);
@@ -279,6 +289,7 @@ function normalizeBrightDataRecord(record: Record<string, unknown>, index: numbe
   const lowerName = productName.toLowerCase();
   const lowerBrand = brand.toLowerCase();
   const hasExcludedBrand = BRAND_EXCLUDE.some(brandName => lowerName.includes(brandName.toLowerCase()) || lowerBrand.includes(brandName.toLowerCase()));
+  const outOfStock = getBrightDataOutOfStock(record);
 
   return {
     productId: asString(record.id) || asString(record.product_id) || asString(record.productId) || productUrl || `brightdata-${index + 1}`,
@@ -297,6 +308,7 @@ function normalizeBrightDataRecord(record: Record<string, unknown>, index: numbe
     source: "brightdata",
     calculated: { saleIndex: Math.max(0, Math.round(100 - Math.log10(Math.max(1, index + 1)) * 38)) },
     hasExcludedBrand,
+    outOfStock,
   };
 }
 
@@ -371,7 +383,9 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
       .filter(product => product.productName && product.productUrl && product.productPrice > 0);
     const products = normalizedProducts
       .filter(product => !excludeBrands || !product.hasExcludedBrand)
+      .filter(product => !product.outOfStock)
       .slice(0, limit);
+    const outOfStockCount = normalizedProducts.filter(product => product.outOfStock).length;
     const errors = records.filter(record => record.error || record.error_code);
     const debugPayload = debug ? {
       rawSample: records.slice(0, 5).map(record => ({
@@ -381,6 +395,12 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
         reviews: record.reviews,
         error: asString(record.error),
         error_code: asString(record.error_code),
+        // 재고 관련 필드명이 실제 응답과 다르면 여기서 확인 후 getBrightDataOutOfStock()을 조정하세요.
+        out_of_stock: record.out_of_stock,
+        in_stock: record.in_stock,
+        availability: record.availability,
+        stock_status: record.stock_status,
+        badge: asString(record.badge),
       })),
     } : {};
 
@@ -394,6 +414,7 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
         candidateCount: normalizedProducts.length,
         filteredCount: products.length,
         errorCount: errors.length,
+        outOfStockCount,
       },
       products,
       ...debugPayload,
