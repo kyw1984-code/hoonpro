@@ -9,12 +9,14 @@ import { createMockAiStrategy } from '../lib/sourcing/aiStrategy';
 import { providerStatuses, sourcingProducts } from '../lib/sourcing/mockData';
 import {
   describeDiagnostics,
+  fetchCoupangCategories,
   getDefaultCategoryUrls,
   readCategoryUrlConfig,
   resetCategoryUrlConfig,
   saveCategoryUrlConfig,
   sourcingProvider,
   type BrightDataRefreshResult,
+  type CoupangCategoryOption,
 } from '../lib/sourcing/providers';
 import type { Difficulty, KeywordType, SourcingFilters, SourcingProduct, SourcingStatus } from '../lib/sourcing/types';
 
@@ -183,6 +185,10 @@ export function SourcingFinder() {
   });
   const [cacheInfo, setCacheInfo] = useState<CachedSourcing | null>(() => readSourcingCache());
   const [pendingSourcing, setPendingSourcing] = useState<PendingSourcing | null>(() => readPendingSourcing());
+  const [coupangCategories, setCoupangCategories] = useState<CoupangCategoryOption[]>([]);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(false);
+  const [categoryTarget, setCategoryTarget] = useState<string>('DIY');
+  const [categorySearch, setCategorySearch] = useState('');
   const [categoryUrlDraft, setCategoryUrlDraft] = useState<Record<string, string>>(() => {
     const config = readCategoryUrlConfig();
     return Object.fromEntries(categories.map((category) => [category, (config[category] || []).join('\n')]));
@@ -203,6 +209,32 @@ export function SourcingFinder() {
     const saved = readCategoryUrlConfig();
     setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (saved[category] || []).join('\n')])));
     setSourcingMessage(`수집 카테고리를 저장했습니다. 등록된 카테고리 ${Object.keys(saved).length}개.`);
+  };
+
+  const loadCoupangCategories = async () => {
+    setIsLoadingCategories(true);
+    setSourcingMessage('쿠팡 카테고리 목록을 불러오는 중입니다.');
+    try {
+      const options = await fetchCoupangCategories();
+      setCoupangCategories(options);
+      setSourcingMessage(`쿠팡 카테고리 ${options.length}개를 불러왔습니다. 추가할 카테고리를 눌러주세요.`);
+    } catch (error) {
+      setCoupangCategories([]);
+      setSourcingMessage(error instanceof Error ? error.message : '쿠팡 카테고리 조회에 실패했습니다.');
+    } finally {
+      setIsLoadingCategories(false);
+    }
+  };
+
+  /** 불러온 쿠팡 카테고리를 선택한 앱 카테고리 입력칸에 한 줄 추가합니다. */
+  const appendCategoryUrl = (option: CoupangCategoryOption) => {
+    setCategoryUrlDraft((current) => {
+      const existing = String(current[categoryTarget] || '');
+      const lines = existing.split('\n').map((line) => line.trim()).filter(Boolean);
+      if (lines.includes(option.url)) return current;
+      return { ...current, [categoryTarget]: [...lines, option.url].join('\n') };
+    });
+    setSourcingMessage(`${categoryTarget}에 "${option.name}" 카테고리를 추가했습니다. 저장을 눌러야 반영됩니다.`);
   };
 
   const restoreDefaultCategoryUrls = () => {
@@ -882,8 +914,47 @@ export function SourcingFinder() {
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <SectionTitle
                   title="수집 카테고리 관리"
-                  desc="쿠팡에서 카테고리를 연 뒤 주소창의 https://www.coupang.com/np/categories/... 주소를 그대로 붙여넣으세요. 한 줄에 하나씩, 여러 개를 넣으면 함께 수집합니다."
+                  desc="쿠팡 카테고리를 불러와서 목록에서 고르면 됩니다. 번호를 직접 찾을 필요는 없고, 직접 붙여넣고 싶으면 아래 입력칸에 URL을 넣어도 됩니다."
                 />
+
+                <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50/50 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={loadCoupangCategories} disabled={isLoadingCategories} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">
+                      {isLoadingCategories ? '불러오는 중…' : '쿠팡 카테고리 불러오기'}
+                    </button>
+                    {coupangCategories.length > 0 && (
+                      <>
+                        <span className="text-xs font-black text-slate-500">추가할 곳</span>
+                        <select value={categoryTarget} onChange={(event) => setCategoryTarget(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-black">
+                          {categories.filter((category) => category !== '기타').map((category) => <option key={category}>{category}</option>)}
+                        </select>
+                        <input
+                          value={categorySearch}
+                          onChange={(event) => setCategorySearch(event.target.value)}
+                          placeholder="카테고리 검색"
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                        />
+                      </>
+                    )}
+                  </div>
+                  {coupangCategories.length > 0 && (
+                    <div className="mt-3 flex max-h-52 flex-wrap gap-2 overflow-y-auto">
+                      {coupangCategories
+                        .filter((option) => !categorySearch || option.name.includes(categorySearch))
+                        .map((option) => (
+                          <button
+                            key={option.id}
+                            onClick={() => appendCategoryUrl(option)}
+                            title={option.url}
+                            className="rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-black text-slate-700 hover:border-blue-400 hover:text-blue-700"
+                          >
+                            {option.name} <span className="font-mono text-[10px] text-slate-400">{option.id}</span>
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="mt-4 space-y-3">
                   {categories.filter((category) => category !== '기타').map((category) => {
                     const urls = categoryUrlDraft[category] || '';

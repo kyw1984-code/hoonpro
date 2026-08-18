@@ -534,7 +534,68 @@ async function handleStats(req: VercelRequest, res: VercelResponse) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// 메인 핸들러 — ?type=products | ?type=stats | ?type=shopping-data
+// CATEGORIES (type=categories) — 쿠팡 카테고리 목록 자동 수집
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * 쿠팡 첫 화면의 카테고리 메뉴에서 카테고리 ID와 이름을 뽑아옵니다.
+ * 관리자가 카테고리 번호를 직접 찾아 붙여넣지 않아도 되게 하려는 용도입니다.
+ */
+async function handleCategories(_req: VercelRequest, res: VercelResponse) {
+  const ua = UA_LIST[Math.floor(Math.random() * UA_LIST.length)];
+  try {
+    const response = await fetch("https://www.coupang.com/", {
+      headers: {
+        "User-Agent": ua,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+        ...(COUPANG_COOKIE ? { Cookie: COUPANG_COOKIE } : {}),
+      },
+    });
+
+    if (!response.ok) {
+      return res.status(502).json({ error: `쿠팡 응답 오류 (${response.status}). 카테고리 URL을 직접 입력해주세요.` });
+    }
+
+    const html = await response.text();
+    if (html.includes("Access Denied") || html.includes("보안 확인")) {
+      return res.status(502).json({ error: "쿠팡이 자동 조회를 차단했습니다. 카테고리 URL을 직접 입력해주세요." });
+    }
+
+    const seen = new Map<string, string>();
+    const linkPattern = /href="\/np\/categories\/(\d+)"[^>]*>([\s\S]{0,200}?)<\/a>/g;
+    let match: RegExpExecArray | null;
+    while ((match = linkPattern.exec(html)) !== null) {
+      const id = match[1];
+      // 링크 안에 NEW 같은 배지가 함께 들어있는 경우가 있어, 태그로 끊은 뒤
+      // 첫 번째 문자열만 카테고리 이름으로 씁니다.
+      const name = match[2]
+        .split(/<[^>]*>/)
+        .map(segment => stripHtml(segment).replace(/\s+/g, " ").trim())
+        .find(Boolean) || "";
+      if (!name || name.length > 30) continue;
+      if (!seen.has(id)) seen.set(id, name);
+    }
+
+    const categories = Array.from(seen, ([id, name]) => ({
+      id,
+      name,
+      url: `https://www.coupang.com/np/categories/${id}`,
+    }));
+
+    if (categories.length === 0) {
+      return res.status(502).json({ error: "카테고리 목록을 찾지 못했습니다. 쿠팡 화면 구조가 바뀌었을 수 있습니다." });
+    }
+
+    return res.status(200).json({ categories, count: categories.length });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "쿠팡 카테고리 조회에 실패했습니다.";
+    return res.status(502).json({ error: message });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 메인 핸들러 — ?type=products | ?type=stats | ?type=shopping-data | ?type=categories
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -548,5 +609,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (type === "products") return handleProducts(req, res);
   if (type === "stats") return handleStats(req, res);
   if (type === "shopping-data") return handleShoppingData(req, res);
-  return res.status(400).json({ error: "type=products, type=stats 또는 type=shopping-data 가 필요합니다." });
+  if (type === "categories") return handleCategories(req, res);
+  return res.status(400).json({ error: "type=products, stats, shopping-data 또는 categories 가 필요합니다." });
 }

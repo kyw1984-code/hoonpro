@@ -84,6 +84,24 @@ export const resetCategoryUrlConfig = () => {
 
 export const getDefaultCategoryUrls = () => ({ ...defaultCoupangCategoryUrls });
 
+export type CoupangCategoryOption = {
+  id: string;
+  name: string;
+  url: string;
+};
+
+/** 쿠팡에서 카테고리 목록을 받아옵니다. 관리자가 번호를 직접 찾지 않아도 되게 합니다. */
+export const fetchCoupangCategories = async (): Promise<CoupangCategoryOption[]> => {
+  const response = await fetch('/api/sourcing?type=categories');
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error('Vercel Preview 보호 설정으로 API 응답이 차단되었습니다.');
+  }
+  const data = await response.json();
+  if (!response.ok) throw new Error(data?.error || '쿠팡 카테고리 조회에 실패했습니다.');
+  return Array.isArray(data?.categories) ? (data.categories as CoupangCategoryOption[]) : [];
+};
+
 type CoupangApiProduct = {
   productId: string | number;
   productName: string;
