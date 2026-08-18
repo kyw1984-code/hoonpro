@@ -149,6 +149,7 @@ const BRAND_EXCLUDE = [
   "코오롱","kolon","밀레","millet","네파","nepa","mlb","nba","nfl",
   "삼성","samsung","lg","애플","apple","샤오미","xiaomi","필립스","philips","소니","sony",
   "파나소닉","panasonic","레노버","lenovo","hp","에이수스","asus","캐논","canon","니콘","nikon","다이소","daiso",
+  "트라몬티나","tramontina",
 ];
 
 function filterAndScore(items: any[], minPrice: number, maxPrice: number, searchKeyword: string = "") {
@@ -357,7 +358,7 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
     : [];
   const snapshotId = typeof req.query.snapshotId === "string" ? req.query.snapshotId.trim() : "";
   const debug = req.query.debug === "true";
-  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+  const limit = Math.min(80, Math.max(1, Number(req.query.limit) || 10));
   const excludeBrands = req.query.excludeBrands !== "false";
   if (!keyword && !categoryUrl && categoryUrls.length === 0 && !snapshotId) return res.status(400).json({ error: "keyword, categoryUrl, categoryUrls or snapshotId is required" });
 

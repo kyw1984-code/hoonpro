@@ -216,7 +216,7 @@ const readLiveProductsResponse = async (params: URLSearchParams) => {
 const buildLiveParams = (keyword: string, category: string) => {
   const params = new URLSearchParams({
     keyword,
-    limit: '30',
+    limit: '60',
     excludeBrands: 'true',
   });
   const categoryUrls = coupangCategoryUrls[category] || [];
@@ -256,7 +256,7 @@ const fetchLiveProducts = async (keyword: string, category: string, filters: Sou
     const retryParams = new URLSearchParams({
       type: 'shopping-data',
       snapshotId,
-      limit: '30',
+      limit: '60',
       excludeBrands: 'true',
     });
     ({ response, data } = await readLiveProductsResponse(retryParams));
@@ -275,7 +275,7 @@ const fetchSnapshotProducts = async (snapshotId: string, filters: SourcingFilter
   const retryParams = new URLSearchParams({
     type: 'shopping-data',
     snapshotId,
-    limit: '30',
+    limit: '60',
     excludeBrands: 'true',
   });
   const { response, data } = await readLiveProductsResponse(retryParams);
