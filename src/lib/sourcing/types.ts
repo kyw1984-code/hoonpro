@@ -47,6 +47,8 @@ export type SourcingProduct = {
   rating: number;
   /** 이 상품 자체의 배송 유형 (수집 데이터 기준) */
   delivery?: '로켓' | '판매자로켓' | '일반';
+  /** 쿠팡이 제공한 실제 분류명 (표시용) */
+  sourceCategoryName?: string;
   searchVolume: number;
   growth7d: number;
   growth30d: number;
@@ -82,6 +84,8 @@ export type SourcingProduct = {
 export type SourcingFilters = {
   difficulty: Difficulty;
   category: string;
+  /** 수집 대상 카테고리. 비어 있으면 등록된 카테고리를 모두 수집합니다. */
+  categories?: string[];
   minPrice: number;
   maxPrice: number;
   maxReview: number;

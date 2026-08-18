@@ -287,6 +287,10 @@ function normalizeBrightDataRecord(record: Record<string, unknown>, index: numbe
   const brand = asString(record.brand) || asString(record.brand_name);
   const productImage = asString(record.main_image) || asString(record.image) || asString(record.image_url) || asString(record.thumbnail) || asString(record.productImage);
   const sellerName = asString(record.seller) || asString(record.seller_name) || asString(record.vendor) || asString(record.store);
+  // 여러 카테고리를 한 번에 수집하므로 각 상품이 어느 분류에서 왔는지 남겨둡니다.
+  const sourceCategory = asString(record.category) || asString(record.category_name)
+    || (Array.isArray(record.categories) ? asString(record.categories[record.categories.length - 1]) : "")
+    || (Array.isArray(record.breadcrumbs) ? asString(record.breadcrumbs[record.breadcrumbs.length - 1]) : "");
   const lowerName = productName.toLowerCase();
   const lowerBrand = brand.toLowerCase();
   const hasExcludedBrand = BRAND_EXCLUDE.some(brandName => lowerName.includes(brandName.toLowerCase()) || lowerBrand.includes(brandName.toLowerCase()));
@@ -306,6 +310,7 @@ function normalizeBrightDataRecord(record: Record<string, unknown>, index: numbe
     deliveryType: getBrightDataDeliveryType(record),
     sellerName,
     brand,
+    sourceCategory,
     source: "brightdata",
     calculated: { saleIndex: Math.max(0, Math.round(100 - Math.log10(Math.max(1, index + 1)) * 38)) },
     hasExcludedBrand,
@@ -365,7 +370,7 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
     : [];
   const snapshotId = typeof req.query.snapshotId === "string" ? req.query.snapshotId.trim() : "";
   const debug = req.query.debug === "true";
-  const limit = Math.min(80, Math.max(1, Number(req.query.limit) || 10));
+  const limit = Math.min(300, Math.max(1, Number(req.query.limit) || 10));
   const excludeBrands = req.query.excludeBrands !== "false";
   const minPrice = Math.max(0, Number(req.query.minPrice) || 0);
   const maxPrice = Number(req.query.maxPrice) > 0 ? Number(req.query.maxPrice) : Number.MAX_SAFE_INTEGER;

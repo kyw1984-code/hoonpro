@@ -44,7 +44,7 @@ const gradeClass = {
   D: 'bg-zinc-100 text-zinc-600 ring-zinc-200',
 } as const;
 
-const LIST_ROW_LIMIT = 15;
+const LIST_ROW_LIMIT = 30;
 
 const deliveryClass: Record<string, string> = {
   '로켓': 'bg-sky-50 text-sky-700 ring-sky-200',
@@ -162,8 +162,9 @@ export function SourcingFinder() {
     category: '기타',
     minPrice: 10000,
     maxPrice: 50000,
-    maxReview: 1000,
+    maxReview: 100000,
     keywordTypes: [],
+    categories: [],
     query: '',
   });
   const [selectedProductId, setSelectedProductId] = useState(sourcingProducts[0].id);
@@ -188,6 +189,7 @@ export function SourcingFinder() {
   const [coupangCategories, setCoupangCategories] = useState<CoupangCategoryOption[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
   const [categoryTarget, setCategoryTarget] = useState<string>('DIY');
+  const [categoryConfigVersion, setCategoryConfigVersion] = useState(0);
   const [categorySearch, setCategorySearch] = useState('');
   const [categoryUrlDraft, setCategoryUrlDraft] = useState<Record<string, string>>(() => {
     const config = readCategoryUrlConfig();
@@ -206,9 +208,28 @@ export function SourcingFinder() {
       return;
     }
     saveCategoryUrlConfig(next);
+    setCategoryConfigVersion((v) => v + 1);
     const saved = readCategoryUrlConfig();
     setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (saved[category] || []).join('\n')])));
     setSourcingMessage(`수집 카테고리를 저장했습니다. 등록된 카테고리 ${Object.keys(saved).length}개.`);
+  };
+
+  /** URL이 등록돼 실제로 수집 가능한 카테고리. 관리자 저장 시 갱신됩니다. */
+  const collectableCategories = useMemo(
+    () => sourcingProvider.getCollectableCategories(),
+    [categoryConfigVersion],
+  );
+
+  const toggleCollectCategory = (category: string) => {
+    setFilters((current) => {
+      const selected = current.categories || [];
+      return {
+        ...current,
+        categories: selected.includes(category)
+          ? selected.filter((item) => item !== category)
+          : [...selected, category],
+      };
+    });
   };
 
   const loadCoupangCategories = async () => {
@@ -239,6 +260,7 @@ export function SourcingFinder() {
 
   const restoreDefaultCategoryUrls = () => {
     resetCategoryUrlConfig();
+    setCategoryConfigVersion((v) => v + 1);
     const defaults = getDefaultCategoryUrls();
     setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (defaults[category] || []).join('\n')])));
     setSourcingMessage('수집 카테고리를 기본값으로 되돌렸습니다.');
@@ -635,7 +657,41 @@ export function SourcingFinder() {
                     </button>
                   ))}
                 </div>
-                <div className={`mt-6 overflow-hidden rounded-lg border px-5 py-4 transition ${isSourcingLoading ? 'border-blue-200 bg-blue-50 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]' : 'border-transparent bg-slate-50'}`}>
+                <div className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                  <SectionTitle
+                    title="수집할 카테고리 선택"
+                    desc="선택한 카테고리를 한 번의 수집으로 함께 훑습니다. 아무것도 고르지 않으면 등록된 카테고리를 모두 수집합니다."
+                  />
+                  {collectableCategories.length === 0 ? (
+                    <p className="mt-3 rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+                      등록된 카테고리가 없습니다. 관리자 탭의 “수집 카테고리 관리”에서 먼저 추가해주세요.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {collectableCategories.map((category) => {
+                          const selected = (filters.categories || []).includes(category);
+                          return (
+                            <button
+                              key={category}
+                              onClick={() => toggleCollectCategory(category)}
+                              className={`rounded-lg px-4 py-2 text-sm font-black ring-1 transition ${selected ? 'bg-blue-600 text-white ring-blue-600' : 'bg-white text-slate-600 ring-slate-200 hover:ring-blue-300'}`}
+                            >
+                              {selected ? '✓ ' : ''}{category}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-3 text-xs font-bold text-slate-500">
+                        {(filters.categories || []).length > 0
+                          ? `${(filters.categories || []).length}개 카테고리를 수집합니다.`
+                          : `전체 ${collectableCategories.length}개 카테고리를 수집합니다.`}
+                        {' '}카테고리를 늘릴수록 상품 수와 난이도 분포가 넓어집니다.
+                      </p>
+                    </>
+                  )}
+                </div>
+                <div className={`mt-4 overflow-hidden rounded-lg border px-5 py-4 transition ${isSourcingLoading ? 'border-blue-200 bg-blue-50 shadow-[inset_0_0_0_1px_rgba(37,99,235,0.08)]' : 'border-transparent bg-slate-50'}`}>
                   {isSourcingLoading && (
                     <div className="mb-4 h-2 overflow-hidden rounded-full bg-white">
                       <div className="h-full rounded-full bg-blue-600 transition-all duration-700 ease-out" style={{ width: `${sourcingProgress}%` }} />
@@ -671,7 +727,7 @@ export function SourcingFinder() {
                   <div><p className="text-xs font-black text-slate-500">판매 난이도</p><div className="mt-2 grid grid-cols-3 gap-2">{difficultyOptions.map((item) => <button key={item} onClick={() => setFilter('difficulty', item)} className={`rounded-lg px-3 py-2 text-sm font-black ${filters.difficulty === item ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{item}</button>)}</div></div>
                   <label className="block"><span className="text-xs font-black text-slate-500">카테고리</span><select value={filters.category} onChange={(event) => setFilter('category', event.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
                   <div className="grid grid-cols-2 gap-3"><label><span className="text-xs font-black text-slate-500">최소 판매가</span><input type="number" value={filters.minPrice} onChange={(event) => setFilter('minPrice', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none" /></label><label><span className="text-xs font-black text-slate-500">최대 판매가</span><input type="number" value={filters.maxPrice} onChange={(event) => setFilter('maxPrice', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none" /></label></div>
-                  <label className="block"><span className="text-xs font-black text-slate-500">최대 리뷰</span><select value={filters.maxReview} onChange={(event) => setFilter('maxReview', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{[100, 300, 500, 1000, 5000].map((item) => <option key={item} value={item}>{fmt(item)}개</option>)}</select></label>
+                  <label className="block"><span className="text-xs font-black text-slate-500">최대 리뷰</span><select value={filters.maxReview} onChange={(event) => setFilter('maxReview', Number(event.target.value))} className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold outline-none">{[100, 300, 500, 1000, 5000, 100000].map((item) => <option key={item} value={item}>{item >= 100000 ? '제한 없음' : `${fmt(item)}개`}</option>)}</select></label>
                   <div><p className="text-xs font-black text-slate-500">키워드 유형</p><div className="mt-2 grid grid-cols-2 gap-2">{keywordTypes.map((type) => <button key={type} onClick={() => toggleType(type)} className={`rounded-lg px-3 py-2 text-left text-xs font-black ring-1 ${filters.keywordTypes.includes(type) ? 'bg-orange-50 text-orange-700 ring-orange-200' : 'bg-white text-slate-500 ring-slate-200'}`}>{filters.keywordTypes.includes(type) ? '선택됨 · ' : ''}{type}</button>)}</div></div>
                   <button onClick={runSourcing} disabled={isSourcingLoading} className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 py-3 text-sm font-black text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"><Sparkles className="h-4 w-4" />{isSourcingLoading ? '실제 데이터 분석중' : 'AI 훈프로 찾기'}</button>
                 </div>
@@ -750,7 +806,10 @@ export function SourcingFinder() {
                                         {product.name}
                                       </button>
                                     )}
-                                    <p className="mt-1 text-xs font-bold text-slate-500">수집 표본 {fmt(product.coupangProductCount)}개 · 경쟁도 {product.competitionLevel} · 기회점수 {product.opportunityScore}</p>
+                                    <p className="mt-1 text-xs font-bold text-slate-500">
+                                      {product.sourceCategoryName ? `${product.sourceCategoryName} · ` : ''}
+                                      수집 표본 {fmt(product.coupangProductCount)}개 · 경쟁도 {product.competitionLevel} · 기회점수 {product.opportunityScore}
+                                    </p>
                                   </div>
                                 </div>
                               </td>

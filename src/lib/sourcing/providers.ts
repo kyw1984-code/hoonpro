@@ -114,6 +114,7 @@ type CoupangApiProduct = {
   salesRank?: number;
   sellerName?: string;
   brand?: string;
+  sourceCategory?: string;
   source?: string;
   deliveryType?: 'rocket' | 'jet' | 'general' | string;
   calculated?: {
@@ -192,7 +193,10 @@ const uniqueApiProducts = (apiProducts: CoupangApiProduct[]) => {
 };
 
 /** 화면에 노출할 최대 상품 수 */
-const LIVE_PRODUCT_DISPLAY_LIMIT = 24;
+const LIVE_PRODUCT_DISPLAY_LIMIT = 150;
+
+/** 서버에서 받아올 상품 수. 난이도 3구간으로 나뉘므로 넉넉히 받습니다. */
+const COLLECTION_LIMIT = 250;
 
 const toMarketInput = (product: CoupangApiProduct, fallbackPrice: number): MarketProductInput => ({
   reviews: Number(product.ratingCount ?? product.reviewCount ?? 0),
@@ -230,6 +234,9 @@ const buildLiveProducts = (seed: SourcingProduct, apiProducts: CoupangApiProduct
       id: `live-${String(product.productId || index + 1)}`,
       keyword: product.productName,
       name: product.productName,
+      // 앱 카테고리 필터와 맞물려야 하므로 category는 seed 값을 유지하고,
+      // 쿠팡이 준 실제 분류명은 표시용으로 따로 담습니다.
+      sourceCategoryName: product.sourceCategory || '',
       productUrl: product.productUrl,
       price: marketInput.price,
       avgReview: marketInput.reviews,
@@ -277,18 +284,25 @@ const readLiveProductsResponse = async (params: URLSearchParams) => {
   return { response, data };
 };
 
-const buildLiveParams = (keyword: string, category: string, filters?: SourcingFilters) => {
+/**
+ * 선택한 카테고리들의 쿠팡 URL을 한 번의 수집에 모두 넣습니다.
+ * Bright Data는 input을 여러 개 받으므로, 카테고리마다 따로 1시간씩
+ * 돌리지 않고 한 번에 여러 카테고리를 훑을 수 있습니다.
+ */
+const buildLiveParams = (keyword: string, selectedCategories: string[], filters?: SourcingFilters) => {
   const params = new URLSearchParams({
     keyword,
-    limit: '60',
+    limit: String(COLLECTION_LIMIT),
     excludeBrands: 'true',
   });
   if (filters) {
     params.set('minPrice', String(filters.minPrice));
     params.set('maxPrice', String(filters.maxPrice));
   }
-  const categoryUrls = readCategoryUrlConfig()[category] || [];
-  if (categoryUrls.length > 0) params.set('categoryUrls', categoryUrls.join(','));
+  const config = readCategoryUrlConfig();
+  const categoryUrls = selectedCategories.flatMap((category) => config[category] || []);
+  const uniqueUrls = Array.from(new Set(categoryUrls));
+  if (uniqueUrls.length > 0) params.set('categoryUrls', uniqueUrls.join(','));
   params.set('type', 'shopping-data');
   return params;
 };
@@ -300,8 +314,8 @@ const filterLiveProductsByPrice = (products: CoupangApiProduct[], filters: Sourc
   });
 };
 
-const startLiveRefresh = async (keyword: string, category: string, filters: SourcingFilters, options: FetchLiveOptions = {}): Promise<BrightDataRawRefreshResult> => {
-  const params = buildLiveParams(keyword, category, filters);
+const startLiveRefresh = async (keyword: string, selectedCategories: string[], filters: SourcingFilters, options: FetchLiveOptions = {}): Promise<BrightDataRawRefreshResult> => {
+  const params = buildLiveParams(keyword, selectedCategories, filters);
   const { response, data } = await readLiveProductsResponse(params);
   const snapshotId = data?.snapshotId ? String(data.snapshotId) : '';
   if (snapshotId) options.onSnapshot?.(snapshotId, data?.meta);
@@ -364,7 +378,7 @@ const fetchSnapshotProducts = async (snapshotId: string, filters: SourcingFilter
   const params = new URLSearchParams({
     type: 'shopping-data',
     snapshotId,
-    limit: '60',
+    limit: String(COLLECTION_LIMIT),
     excludeBrands: 'true',
     minPrice: String(filters.minPrice),
     maxPrice: String(filters.maxPrice),
@@ -461,6 +475,21 @@ export class LiveSourcingProvider extends MockSourcingProvider {
     return pool[0] || sourcingProducts[0];
   }
 
+  /** URL이 등록돼 있어 실제로 수집 가능한 카테고리 목록입니다. */
+  getCollectableCategories(): string[] {
+    return Object.keys(readCategoryUrlConfig());
+  }
+
+  /**
+   * 수집 대상 카테고리를 정합니다. 사용자가 고른 게 있으면 그것만,
+   * 없으면 등록된 카테고리 전부를 한 번에 훑습니다.
+   */
+  private resolveTargetCategories(filters: SourcingFilters): string[] {
+    const configured = readCategoryUrlConfig();
+    const selected = (filters.categories || []).filter((category) => configured[category]);
+    return selected.length > 0 ? selected : Object.keys(configured);
+  }
+
   /**
    * 새 수집 작업을 등록합니다.
    *
@@ -485,8 +514,9 @@ export class LiveSourcingProvider extends MockSourcingProvider {
     }
 
     const keyword = filters.query.trim() || seed.name;
-    options.onProgress?.(18, 'Bright Data 수집 작업 생성중');
-    const result = await startLiveRefresh(keyword, seed.category, filters, options);
+    const targetCategories = this.resolveTargetCategories(filters);
+    options.onProgress?.(18, `Bright Data 수집 작업 생성중 · 카테고리 ${targetCategories.length}개`);
+    const result = await startLiveRefresh(keyword, targetCategories, filters, options);
     if (result.apiProducts && result.apiProducts.length > 0) {
       const products = buildLiveProducts(seed, result.apiProducts).sort(sortByOpportunity);
       return { ...result, products };
