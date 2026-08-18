@@ -337,8 +337,14 @@ async function downloadBrightDataSnapshot(snapshotId: string) {
     headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}` },
   });
   const progress = await progressResponse.json();
-  if (progress.status === "failed") throw new Error(progress.error_message || "Bright Data snapshot failed");
-  if (progress.status === "ready") {
+  const status = String(progress?.status || "").trim().toLowerCase();
+
+  if (status === "failed") throw new Error(progress.error_message || "Bright Data snapshot failed");
+
+  // 대시보드가 Ready로 보이는데 여기서 문자열이 정확히 일치하지 않으면
+  // 영원히 대기 상태로 남습니다. 완료를 뜻하는 표현을 모두 완료로 처리합니다.
+  const isReady = status === "ready" || status === "done" || status === "completed" || status === "collected";
+  if (isReady) {
     const snapshotResponse = await fetch(`${BRIGHTDATA_API_BASE}/snapshot/${snapshotId}?format=json`, {
       headers: { Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}` },
     });
@@ -346,7 +352,8 @@ async function downloadBrightDataSnapshot(snapshotId: string) {
     if (!snapshotResponse.ok) throw new Error(snapshot?.message || snapshot?.error || "Bright Data snapshot download failed");
     return snapshot;
   }
-  return { pending: true, snapshotId, progressStatus: progress.status || "running" };
+
+  return { pending: true, snapshotId, progressStatus: status || "running" };
 }
 
 async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
@@ -360,6 +367,8 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
   const debug = req.query.debug === "true";
   const limit = Math.min(80, Math.max(1, Number(req.query.limit) || 10));
   const excludeBrands = req.query.excludeBrands !== "false";
+  const minPrice = Math.max(0, Number(req.query.minPrice) || 0);
+  const maxPrice = Number(req.query.maxPrice) > 0 ? Number(req.query.maxPrice) : Number.MAX_SAFE_INTEGER;
   if (!keyword && !categoryUrl && categoryUrls.length === 0 && !snapshotId) return res.status(400).json({ error: "keyword, categoryUrl, categoryUrls or snapshotId is required" });
 
   try {
@@ -382,10 +391,13 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
     const normalizedProducts = records
       .map(normalizeBrightDataRecord)
       .filter(product => product.productName && product.productUrl && product.productPrice > 0);
-    const products = normalizedProducts
+    // 가격 필터를 limit보다 먼저 적용합니다. 순서가 반대면 60개를 자른 뒤
+    // 가격으로 다시 걸러져서 실제로 쓸 수 있는 상품이 몇 개 안 남습니다.
+    const priceFiltered = normalizedProducts
       .filter(product => !excludeBrands || !product.hasExcludedBrand)
       .filter(product => !product.outOfStock)
-      .slice(0, limit);
+      .filter(product => product.productPrice >= minPrice && product.productPrice <= maxPrice);
+    const products = priceFiltered.slice(0, limit);
     const outOfStockCount = normalizedProducts.filter(product => product.outOfStock).length;
     const errors = records.filter(record => record.error || record.error_code);
     const debugPayload = debug ? {
@@ -413,9 +425,11 @@ async function handleShoppingData(req: VercelRequest, res: VercelResponse) {
         ...meta,
         rawRecordCount: records.length,
         candidateCount: normalizedProducts.length,
+        priceFilteredCount: priceFiltered.length,
         filteredCount: products.length,
         errorCount: errors.length,
         outOfStockCount,
+        priceRange: { min: minPrice, max: maxPrice === Number.MAX_SAFE_INTEGER ? null : maxPrice },
       },
       products,
       ...debugPayload,

@@ -78,6 +78,9 @@ export type BrightDataRefreshResult = {
   snapshotId?: string;
   meta?: Record<string, unknown>;
   products?: SourcingProduct[];
+  /** 아직 수집중일 때 Bright Data가 보고한 상태 */
+  pendingStatus?: string;
+  diagnostics?: SourcingDiagnostics;
 };
 
 type BrightDataRawRefreshResult = {
@@ -208,8 +211,6 @@ const buildLiveProducts = (seed: SourcingProduct, apiProducts: CoupangApiProduct
   });
 };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 const readLiveProductsResponse = async (params: URLSearchParams) => {
   const response = await fetch(`/api/sourcing?${params.toString()}`);
   const contentType = response.headers.get('content-type') || '';
@@ -220,12 +221,16 @@ const readLiveProductsResponse = async (params: URLSearchParams) => {
   return { response, data };
 };
 
-const buildLiveParams = (keyword: string, category: string) => {
+const buildLiveParams = (keyword: string, category: string, filters?: SourcingFilters) => {
   const params = new URLSearchParams({
     keyword,
     limit: '60',
     excludeBrands: 'true',
   });
+  if (filters) {
+    params.set('minPrice', String(filters.minPrice));
+    params.set('maxPrice', String(filters.maxPrice));
+  }
   const categoryUrls = coupangCategoryUrls[category] || [];
   if (categoryUrls.length > 0) params.set('categoryUrls', categoryUrls.join(','));
   params.set('type', 'shopping-data');
@@ -240,7 +245,7 @@ const filterLiveProductsByPrice = (products: CoupangApiProduct[], filters: Sourc
 };
 
 const startLiveRefresh = async (keyword: string, category: string, filters: SourcingFilters, options: FetchLiveOptions = {}): Promise<BrightDataRawRefreshResult> => {
-  const params = buildLiveParams(keyword, category);
+  const params = buildLiveParams(keyword, category, filters);
   const { response, data } = await readLiveProductsResponse(params);
   const snapshotId = data?.snapshotId ? String(data.snapshotId) : '';
   if (snapshotId) options.onSnapshot?.(snapshotId, data?.meta);
@@ -252,44 +257,81 @@ const startLiveRefresh = async (keyword: string, category: string, filters: Sour
   throw new Error('Bright Data 결과에서 상품 데이터를 찾지 못했습니다.');
 };
 
-const fetchLiveProducts = async (keyword: string, category: string, filters: SourcingFilters, options: FetchLiveOptions = {}) => {
-  let { response, data } = await readLiveProductsResponse(buildLiveParams(keyword, category));
-  let snapshotId = data?.snapshotId ? String(data.snapshotId) : '';
-  if (snapshotId) options.onSnapshot?.(snapshotId, data?.meta);
-  for (let attempt = 0; response.status === 202 && snapshotId && attempt < 60; attempt += 1) {
-    const progress = Math.min(96, 18 + Math.round((attempt / 60) * 78));
-    options.onProgress?.(progress, `쿠팡 상품 수집중 · ${attempt + 1}번째 확인`);
-    await sleep(8000);
-    const retryParams = new URLSearchParams({
-      type: 'shopping-data',
-      snapshotId,
-      limit: '60',
-      excludeBrands: 'true',
-    });
-    ({ response, data } = await readLiveProductsResponse(retryParams));
-    snapshotId = data?.snapshotId ? String(data.snapshotId) : snapshotId;
-  }
-
-  if (!response.ok) throw new Error(data?.error || 'Bright Data API 호출에 실패했습니다.');
-  if (data?.pending) throw new Error('Bright Data 수집이 아직 완료되지 않았습니다. 잠시 후 다시 시도해주세요.');
-  if (Array.isArray(data?.products)) {
-    return filterLiveProductsByPrice(data.products as CoupangApiProduct[], filters);
-  }
-  throw new Error('Bright Data 결과에서 상품 데이터를 찾지 못했습니다.');
+/**
+ * 수집 결과가 어느 단계에서 줄어드는지 추적합니다.
+ * 상품이 몇 개 안 나올 때 원인이 수집인지 필터인지 구분하기 위한 값입니다.
+ */
+export type SourcingDiagnostics = {
+  /** Bright Data가 반환한 원본 레코드 수 */
+  rawRecordCount: number;
+  /** 이름·URL·가격이 유효한 레코드 수 */
+  candidateCount: number;
+  /** 품절로 제외된 수 */
+  outOfStockCount: number;
+  /** 브랜드 제외와 limit 적용 후 서버가 내려준 수 */
+  returnedCount: number;
+  /** 가격 필터 적용 후 남은 수 */
+  priceFilteredCount: number;
+  /** 중복 제거 후 최종 수 */
+  dedupedCount: number;
+  priceRange: { min: number; max: number };
 };
 
-const fetchSnapshotProducts = async (snapshotId: string, filters: SourcingFilters) => {
-  const retryParams = new URLSearchParams({
+const readDiagnostics = (data: any, returned: number, priceFiltered: number, filters: SourcingFilters): SourcingDiagnostics => ({
+  rawRecordCount: Number(data?.meta?.rawRecordCount ?? 0),
+  candidateCount: Number(data?.meta?.candidateCount ?? 0),
+  outOfStockCount: Number(data?.meta?.outOfStockCount ?? 0),
+  returnedCount: returned,
+  priceFilteredCount: priceFiltered,
+  dedupedCount: 0,
+  priceRange: { min: filters.minPrice, max: filters.maxPrice },
+});
+
+export const describeDiagnostics = (diagnostics: SourcingDiagnostics) => {
+  const { rawRecordCount, candidateCount, outOfStockCount, returnedCount, priceFilteredCount, dedupedCount, priceRange } = diagnostics;
+  return `수집 ${rawRecordCount} → 유효 ${candidateCount} → 품절제외 -${outOfStockCount} → 브랜드/한도 ${returnedCount} → 가격 ${priceRange.min.toLocaleString('ko-KR')}~${priceRange.max.toLocaleString('ko-KR')}원 ${priceFilteredCount} → 중복제거 ${dedupedCount}`;
+};
+
+export type SnapshotOutcome =
+  | { status: 'pending'; progressStatus: string; meta?: Record<string, unknown> }
+  | { status: 'ready'; apiProducts: CoupangApiProduct[]; diagnostics: SourcingDiagnostics };
+
+export type ResumeOutcome =
+  | { status: 'pending'; progressStatus: string; meta?: Record<string, unknown> }
+  | { status: 'ready'; products: SourcingProduct[]; diagnostics: SourcingDiagnostics };
+
+/**
+ * 완료된 snapshot을 읽어옵니다. 아직 수집중이면 예외를 던지지 않고
+ * pending 상태를 그대로 돌려줘서 호출부가 폴링할 수 있게 합니다.
+ */
+const fetchSnapshotProducts = async (snapshotId: string, filters: SourcingFilters): Promise<SnapshotOutcome> => {
+  const params = new URLSearchParams({
     type: 'shopping-data',
     snapshotId,
     limit: '60',
     excludeBrands: 'true',
+    minPrice: String(filters.minPrice),
+    maxPrice: String(filters.maxPrice),
   });
-  const { response, data } = await readLiveProductsResponse(retryParams);
+  const { response, data } = await readLiveProductsResponse(params);
+
+  if (response.status === 202 || data?.pending) {
+    return {
+      status: 'pending',
+      progressStatus: String(data?.progressStatus || 'running'),
+      meta: data?.meta,
+    };
+  }
   if (!response.ok) throw new Error(data?.error || 'Bright Data snapshot 확인에 실패했습니다.');
-  if (data?.pending) throw new Error('Bright Data 수집이 아직 완료되지 않았습니다. 잠시 후 다시 완료 확인을 눌러주세요.');
-  if (Array.isArray(data?.products)) return filterLiveProductsByPrice(data.products as CoupangApiProduct[], filters);
-  throw new Error('Bright Data 결과에서 상품 데이터를 찾지 못했습니다.');
+  if (!Array.isArray(data?.products)) throw new Error('Bright Data 결과에서 상품 데이터를 찾지 못했습니다.');
+
+  const returned = data.products as CoupangApiProduct[];
+  const priceFiltered = filterLiveProductsByPrice(returned, filters);
+  return {
+    status: 'ready',
+    apiProducts: priceFiltered,
+    diagnostics: readDiagnostics(data, returned.length, priceFiltered.length, filters),
+  };
 };
 
 export class MockSourcingProvider implements KeywordProvider, ProductProvider, SupplierProvider, TrendProvider {
@@ -349,8 +391,29 @@ export class LiveSourcingProvider extends MockSourcingProvider {
     return candidates[0] || baseProducts[0] || sourcingProducts[0];
   }
 
-  async startRefresh(filters: SourcingFilters, options: FetchLiveOptions = {}): Promise<BrightDataRefreshResult> {
+  /**
+   * 새 수집 작업을 등록합니다.
+   *
+   * existingSnapshotId가 있으면 먼저 그 snapshot을 확인합니다. 수집이 1시간씩
+   * 걸리는데 버튼을 누를 때마다 새 작업을 만들면, 이미 끝난 결과를 회수하지
+   * 못한 채 계속 새 작업만 쌓이고 Bright Data 사용량도 그만큼 낭비됩니다.
+   */
+  async startRefresh(
+    filters: SourcingFilters,
+    options: FetchLiveOptions = {},
+    existingSnapshotId?: string,
+  ): Promise<BrightDataRefreshResult> {
     const seed = await this.getLiveSeed(filters);
+
+    if (existingSnapshotId) {
+      options.onProgress?.(20, '진행중인 snapshot을 먼저 확인합니다.');
+      const outcome = await this.resumeSnapshot(existingSnapshotId, filters);
+      if (outcome.status === 'ready') {
+        return { snapshotId: existingSnapshotId, products: outcome.products, diagnostics: outcome.diagnostics };
+      }
+      return { snapshotId: existingSnapshotId, pendingStatus: outcome.progressStatus, meta: outcome.meta };
+    }
+
     const keyword = filters.query.trim() || seed.name;
     options.onProgress?.(18, 'Bright Data 수집 작업 생성중');
     const result = await startLiveRefresh(keyword, seed.category, filters, options);
@@ -361,26 +424,31 @@ export class LiveSourcingProvider extends MockSourcingProvider {
     return result;
   }
 
-  async resumeSnapshot(snapshotId: string, filters: SourcingFilters): Promise<SourcingProduct[]> {
+  /**
+   * 완료된 snapshot을 읽어 상품으로 변환합니다.
+   * 아직 수집중이면 pending 상태를 그대로 돌려주고, 완료됐는데 결과가 비면
+   * 어느 단계에서 걸러졌는지 진단 문구와 함께 알립니다.
+   */
+  async resumeSnapshot(snapshotId: string, filters: SourcingFilters): Promise<ResumeOutcome> {
     const seed = await this.getLiveSeed(filters);
-    const apiProducts = await fetchSnapshotProducts(snapshotId, filters);
-    const products = buildLiveProducts(seed, apiProducts).sort(sortByOpportunity);
-    if (products.length === 0) throw new Error('완료된 snapshot에서 표시할 대박 상품을 찾지 못했습니다.');
-    return products;
+    const outcome = await fetchSnapshotProducts(snapshotId, filters);
+    if (outcome.status === 'pending') return outcome;
+
+    const products = buildLiveProducts(seed, outcome.apiProducts).sort(sortByOpportunity);
+    const diagnostics = { ...outcome.diagnostics, dedupedCount: products.length };
+    return { status: 'ready', products, diagnostics };
   }
 
   async searchProducts(filters: SourcingFilters, options: FetchLiveOptions = {}) {
-    const seed = await this.getLiveSeed(filters);
-    const liveProducts = await Promise.all([seed].map(async (seed, index) => {
-      const keyword = filters.query.trim() || seed.name;
-      options.onProgress?.(18, 'Bright Data 수집 작업 생성중');
-      const apiProducts = await fetchLiveProducts(keyword, seed.category, filters, options);
-      options.onProgress?.(98, '상품 URL과 리뷰 데이터 정리중');
-      return buildLiveProducts(seed, apiProducts);
-    }));
-    const usableProducts = liveProducts.flat().filter((product): product is SourcingProduct => Boolean(product));
-    if (usableProducts.length === 0) throw new Error('실제 상품 데이터를 아직 가져오지 못했습니다.');
-    return usableProducts.sort(sortByOpportunity);
+    // 수집이 1시간 가까이 걸리므로 요청 하나를 붙잡고 기다리지 않습니다.
+    // 작업만 등록하고 snapshot ID를 저장한 뒤, 완료 확인/자동 폴링으로 회수합니다.
+    const result = await this.startRefresh(filters, options);
+    if (result.products && result.products.length > 0) return result.products;
+    throw new Error(
+      result.snapshotId
+        ? `Bright Data 수집을 시작했습니다. 완료까지 1시간 정도 걸리며, 완료되면 자동으로 불러옵니다. (snapshot ${result.snapshotId})`
+        : '실제 상품 데이터를 아직 가져오지 못했습니다.',
+    );
   }
 }
 
