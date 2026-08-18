@@ -39,16 +39,28 @@ const sortByOpportunity = (a: SourcingProduct, b: SourcingProduct) => {
  * 카테고리별 쿠팡 카테고리 URL. 관리자 화면에서 추가/수정할 수 있고,
  * 저장된 값이 있으면 아래 기본값 대신 사용합니다.
  *
+ * 아래 ID는 쿠팡 카테고리 페이지의 제목으로 대조해 정리한 값입니다.
+ * 쿠팡이 카테고리를 개편하면 달라질 수 있으니, 수집 결과가 카테고리와
+ * 맞지 않으면 관리자 화면에서 해당 카테고리를 열어 주소를 바꿔주세요.
+ *
+ * 이전 기본값의 184060은 DIY로 등록돼 있었지만 실제로는 자동차용품이라,
+ * DIY로 수집해도 기어봉·기어노브 같은 차량용품이 나왔습니다.
+ *
  * 카테고리 ID는 쿠팡에서 해당 카테고리를 열었을 때 주소창의
  * https://www.coupang.com/np/categories/{숫자} 에서 그대로 복사하면 됩니다.
  */
 const defaultCoupangCategoryUrls: Record<string, string[]> = {
-  패션: ['https://www.coupang.com/np/categories/525715'],
+  생활: ['https://www.coupang.com/np/categories/450624'],
+  주방: ['https://www.coupang.com/np/categories/416452'],
+  패션: ['https://www.coupang.com/np/categories/564653'],
+  스포츠: ['https://www.coupang.com/np/categories/317778'],
+  자동차: ['https://www.coupang.com/np/categories/521977'],
+  반려동물: ['https://www.coupang.com/np/categories/452718'],
+  육아: ['https://www.coupang.com/np/categories/221934'],
+  문구: ['https://www.coupang.com/np/categories/177295'],
   DIY: [
-    'https://www.coupang.com/np/categories/520663',
-    'https://www.coupang.com/np/categories/184060',
-    'https://www.coupang.com/np/categories/401027',
-    'https://www.coupang.com/np/categories/497873',
+    'https://www.coupang.com/np/categories/510113',
+    'https://www.coupang.com/np/categories/184555',
   ],
 };
 
