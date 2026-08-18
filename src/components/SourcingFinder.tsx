@@ -169,7 +169,7 @@ export function SourcingFinder() {
     const totalRevenue = filteredProducts.reduce((sum, product) => sum + product.estimatedRevenue, 0);
     const totalPrice = filteredProducts.reduce((sum, product) => sum + product.price, 0);
     const avgPrice = filteredProducts.length ? Math.round((totalPrice / filteredProducts.length) / 100) * 100 : 0;
-    const lowCompetitionCount = filteredProducts.filter((product) => product.coupangProductCount <= 100).length;
+    const lowCompetitionCount = filteredProducts.filter((product) => product.competitionLevel <= 40).length;
 
     return {
       avgPrice,
@@ -389,7 +389,7 @@ export function SourcingFinder() {
   };
 
   const exportCsv = () => {
-    const rows = [['상품명', '등급', '기회점수', 'AI점수', '월판매량추정', '쿠팡상품수추정', '예상월매출', '평균리뷰', '예상마진'], ...filteredProducts.map((product) => [
+    const rows = [['상품명', '등급', '기회점수', 'AI점수', '누적판매추정', '수집표본', '누적매출추정', '리뷰수', '예상마진'], ...filteredProducts.map((product) => [
       product.name,
       product.grade,
       String(product.opportunityScore),
@@ -554,13 +554,13 @@ export function SourcingFinder() {
                     <MetricCard label="총리뷰수" value={fmt(resultSummary.totalReviews)} sub="상위권 리뷰 장벽 합산" />
                     <MetricCard label="상품수" value={`${fmt(resultSummary.productCount)}개`} sub={`저경쟁 ${fmt(resultSummary.lowCompetitionCount)}개`} />
                     <MetricCard label="평균가" value={won(resultSummary.avgPrice)} sub="추천 키워드 평균 판매가" />
-                    <MetricCard label="총 월매출" value={`${fmt(Math.round(resultSummary.totalRevenue / 10000))}만원`} sub={`Top ${fmt(filteredProducts[0]?.estimatedSales || 0)}개/월`} />
+                    <MetricCard label="누적 매출 추정" value={`${fmt(Math.round(resultSummary.totalRevenue / 10000))}만원`} sub="리뷰 기반 환산" />
                   </div>
 
                   <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3">
-                      <SectionTitle title="대박 상품 리스트" desc={`쿠팡 상품수 100개 이하에서 월판매와 월매출이 높은 순서 Top ${Math.min(7, filteredProducts.length)}입니다.`} />
-                      <span className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">상품수 100개 이하</span>
+                      <SectionTitle title="대박 상품 리스트" desc={`기회점수가 높은 순서 Top ${Math.min(7, filteredProducts.length)}입니다. 경쟁도는 수집된 표본 전체에서 계산합니다.`} />
+                      <span className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">표본 {fmt(filteredProducts[0]?.coupangProductCount || 0)}개 · 경쟁도 {filteredProducts[0]?.competitionLevel ?? 0}</span>
                     </div>
                     <div className="mt-4 overflow-x-auto">
                       <table className="w-full min-w-[860px] text-sm">
@@ -569,8 +569,8 @@ export function SourcingFinder() {
                             <th className="px-3 py-3 text-left">상품명</th>
                             <th className="px-3 py-3 text-right">가격</th>
                             <th className="px-3 py-3 text-right">리뷰</th>
-                            <th className="px-3 py-3 text-right">월판매</th>
-                            <th className="px-3 py-3 text-right">월매출</th>
+                            <th className="px-3 py-3 text-right">누적판매</th>
+                            <th className="px-3 py-3 text-right">누적매출</th>
                             <th className="px-3 py-3 text-center">AI</th>
                           </tr>
                         </thead>
@@ -590,7 +590,7 @@ export function SourcingFinder() {
                                         {product.name}
                                       </button>
                                     )}
-                                    <p className="mt-1 text-xs font-bold text-slate-500">쿠팡 상품수 {fmt(product.coupangProductCount)}개 · 기회점수 {product.opportunityScore}</p>
+                                    <p className="mt-1 text-xs font-bold text-slate-500">수집 표본 {fmt(product.coupangProductCount)}개 · 경쟁도 {product.competitionLevel} · 기회점수 {product.opportunityScore}</p>
                                   </div>
                                 </div>
                               </td>
@@ -645,11 +645,20 @@ export function SourcingFinder() {
                     <div><GradeBadge grade={selectedProduct.grade} /><h3 className="mt-3 text-2xl font-black">{selectedProduct.name}</h3><p className="mt-1 text-sm font-bold text-slate-500">{selectedProduct.difficulty} 추천 · {selectedProduct.recommendation}</p></div>
                     <span className="text-4xl font-black text-blue-600">{selectedProduct.score.total}</span>
                   </div>
-                  <div className="mt-5 grid grid-cols-4 gap-3"><MetricCard label="월 판매량 추정" value={`${fmt(selectedProduct.estimatedSales)}개`} /><MetricCard label="쿠팡 상품수 추정" value={`${fmt(selectedProduct.coupangProductCount)}개`} /><MetricCard label="기회점수" value={`${selectedProduct.opportunityScore}점`} /><MetricCard label="예상 월매출" value={won(selectedProduct.estimatedRevenue)} /></div>
+                  <div className="mt-5 grid grid-cols-4 gap-3"><MetricCard label="누적 판매 추정" value={`${fmt(selectedProduct.estimatedSales)}개`} sub="리뷰 기반 환산" /><MetricCard label="수집 표본" value={`${fmt(selectedProduct.coupangProductCount)}개`} sub="쿠팡 전체 등록수 아님" /><MetricCard label="기회점수" value={`${selectedProduct.opportunityScore}점`} sub={`경쟁도 ${selectedProduct.competitionLevel}/100`} /><MetricCard label="누적 매출 추정" value={won(selectedProduct.estimatedRevenue)} /></div>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <SectionTitle title="AI SCORE 세부 점수" desc="총점 100점, 계산 함수는 UI와 분리되어 있습니다." />
-                  <div className="mt-4 grid grid-cols-4 gap-3">{Object.entries({ 수요: selectedProduct.score.demand, 경쟁: selectedProduct.score.competition, 리뷰장벽: selectedProduct.score.review, 성장성: selectedProduct.score.growth, 예상마진: selectedProduct.score.margin, 가격안정성: selectedProduct.score.priceStability, 시즌성: selectedProduct.score.seasonality, 공급가능성: selectedProduct.score.supplier }).map(([label, value]) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-black text-slate-500">{label}</p><p className="mt-1 text-xl font-black text-slate-950">{value}</p></div>)}</div>
+                  <SectionTitle title="AI SCORE 세부 점수" desc="수집 데이터로 실측 가능한 축만 채점하고, 데이터 소스가 없는 축은 —로 표시합니다." />
+                  <div className="mt-4 grid grid-cols-4 gap-3">{[
+                    { label: '수요', value: selectedProduct.score.demand, max: 20 },
+                    { label: '경쟁', value: selectedProduct.score.competition, max: 20 },
+                    { label: '리뷰장벽', value: selectedProduct.score.review, max: 15 },
+                    { label: '예상마진', value: selectedProduct.score.margin, max: 15 },
+                    { label: '성장성', value: null, max: 15 },
+                    { label: '가격안정성', value: null, max: 5 },
+                    { label: '시즌성', value: null, max: 5 },
+                    { label: '공급가능성', value: null, max: 5 },
+                  ].map(({ label, value, max }) => <div key={label} className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-black text-slate-500">{label}</p><p className={`mt-1 text-xl font-black ${value === null ? 'text-slate-300' : 'text-slate-950'}`}>{value === null ? '—' : value}</p><p className="text-[10px] font-bold text-slate-400">{value === null ? '데이터 미연결' : `/ ${max}점`}</p></div>)}</div>
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                   <SectionTitle title="경쟁상품 TOP 10" desc="브랜드 상품은 제외하고, 가격·리뷰·판매량은 비브랜드 후보 기준 추정값으로 표시합니다." />

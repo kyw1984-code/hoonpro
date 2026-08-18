@@ -1,3 +1,10 @@
+import { getGrade, getRecommendation } from '../scoring/calculateProductScore';
+import {
+  computeMarketCohort,
+  computeMeasuredScore,
+  scoreProductInMarket,
+  type MarketProductInput,
+} from './marketScore';
 import { sourcingProducts } from './mockData';
 import type { SourcingFilters, SourcingProduct } from './types';
 
@@ -53,6 +60,7 @@ type CoupangApiProduct = {
   rank?: number;
   salesRank?: number;
   sellerName?: string;
+  brand?: string;
   source?: string;
   deliveryType?: 'rocket' | 'jet' | 'general' | string;
   calculated?: {
@@ -78,11 +86,19 @@ type BrightDataRawRefreshResult = {
   apiProducts?: CoupangApiProduct[];
 };
 
-const estimateSales = (product: CoupangApiProduct, rank: number) => {
+/**
+ * 리뷰 수에서 누적 판매량을 역산합니다. 리뷰 작성률을 4%로 가정한 값입니다.
+ *
+ * 이전 구현은 `max(1400 - 순위 * 95, ...)` 형태여서 수집 순위만으로 판매량이
+ * 정해졌습니다. 리뷰가 4개인 상품이 "월판매 1,305개"로 표시된 것이 그 결과입니다.
+ * 한 번의 수집에는 시간 정보가 없어 월 단위 판매량은 계산할 수 없으므로,
+ * 실제 신호인 리뷰 수에서 누적 판매량만 추정합니다.
+ */
+const REVIEW_TO_SALES_MULTIPLIER = 25;
+
+const estimateSales = (product: CoupangApiProduct) => {
   const reviewCount = Number(product.ratingCount ?? product.reviewCount ?? 0);
-  const saleIndex = Number(product.calculated?.saleIndex ?? 0);
-  const rankScore = Math.max(80, 1400 - rank * 95);
-  return Math.round(Math.max(rankScore, saleIndex * 18, reviewCount * 3.4));
+  return Math.round(Math.max(0, reviewCount) * REVIEW_TO_SALES_MULTIPLIER);
 };
 
 const getDeliveryLabel = (deliveryType: CoupangApiProduct['deliveryType']): '로켓' | '판매자로켓' | '일반' => {
@@ -119,84 +135,75 @@ const uniqueApiProducts = (apiProducts: CoupangApiProduct[]) => {
   });
 };
 
-const buildLiveProduct = (seed: SourcingProduct, apiProducts: CoupangApiProduct[], index: number): SourcingProduct => {
-  const competitors = apiProducts.slice(0, 10).map((product, rank) => {
-    const estimatedSales = estimateSales(product, rank + 1);
-    return {
-      rank: rank + 1,
-      name: product.productName,
-      productUrl: product.productUrl,
-      price: Number(product.productPrice) || seed.price,
-      reviews: Number(product.ratingCount ?? product.reviewCount ?? 0),
-      estimatedSales,
-      delivery: getDeliveryLabel(product.deliveryType),
-    };
-  });
-  const topProducts = competitors.length > 0 ? competitors : seed.competitors;
-  const avgPrice = Math.round(topProducts.reduce((sum, product) => sum + product.price, 0) / topProducts.length / 100) * 100;
-  const avgReview = Math.round(topProducts.reduce((sum, product) => sum + product.reviews, 0) / topProducts.length);
-  const totalSales = topProducts.reduce((sum, product) => sum + product.estimatedSales, 0);
-  const coupangProductCount = Math.max(1, apiProducts.length);
-  const opportunityScore = Math.max(
-    0,
-    Math.min(100, Math.round((totalSales / 180) + Math.max(0, 100 - coupangProductCount) * 0.45 - avgReview / 180)),
-  );
+/** 화면에 노출할 최대 상품 수 */
+const LIVE_PRODUCT_DISPLAY_LIMIT = 24;
 
-  return {
-    ...seed,
-    id: `live-${seed.id}-${index + 1}`,
-    price: avgPrice || seed.price,
-    avgReview,
-    estimatedSales: Math.round(totalSales / Math.max(1, topProducts.length)),
-    estimatedRevenue: avgPrice * Math.round(totalSales / Math.max(1, topProducts.length)),
-    coupangProductCount,
-    opportunityScore,
-    competitors: topProducts,
-    recommendation: 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터 기반 결과입니다.',
-  };
-};
+const toMarketInput = (product: CoupangApiProduct, fallbackPrice: number): MarketProductInput => ({
+  reviews: Number(product.ratingCount ?? product.reviewCount ?? 0),
+  price: Number(product.productPrice) || fallbackPrice,
+  delivery: getDeliveryLabel(product.deliveryType),
+  brand: product.brand,
+});
 
 const buildLiveProducts = (seed: SourcingProduct, apiProducts: CoupangApiProduct[]): SourcingProduct[] => {
-  const uniqueProducts = uniqueApiProducts(apiProducts);
-  const productsForDisplay = uniqueProducts;
+  const productsForDisplay = uniqueApiProducts(apiProducts);
+
+  // 경쟁도는 개별 상품이 아니라 수집된 집합 전체에서 계산합니다.
+  const cohort = computeMarketCohort(productsForDisplay.map((product) => toMarketInput(product, seed.price)));
+
   const competitors = productsForDisplay.slice(0, 10).map((product, rank) => ({
     rank: rank + 1,
     name: product.productName,
     productUrl: product.productUrl,
     price: Number(product.productPrice) || seed.price,
     reviews: Number(product.ratingCount ?? product.reviewCount ?? 0),
-    estimatedSales: estimateSales(product, rank + 1),
+    estimatedSales: estimateSales(product),
     delivery: getDeliveryLabel(product.deliveryType),
   }));
-  const avgReview = Math.round(competitors.reduce((sum, product) => sum + product.reviews, 0) / Math.max(1, competitors.length));
+  const avgReview = cohort.medianReviews;
 
-  return productsForDisplay.slice(0, 7).map((product, index) => {
-    const price = Number(product.productPrice) || seed.price;
-    const reviews = Number(product.ratingCount ?? product.reviewCount ?? 0);
-    const estimatedSales = estimateSales(product, index + 1);
-    const opportunityScore = Math.max(0, Math.min(100, Math.round(72 - reviews / 18 + Math.max(0, 10 - index) * 1.8)));
+  return productsForDisplay.slice(0, LIVE_PRODUCT_DISPLAY_LIMIT).map((product, index) => {
+    const marketInput = toMarketInput(product, seed.price);
+    const opportunity = scoreProductInMarket(marketInput, cohort);
+    const measured = computeMeasuredScore(marketInput, cohort);
+    const estimatedSales = estimateSales(product);
+    const grade = getGrade(measured.total);
+
     return {
       ...seed,
       id: `live-${String(product.productId || index + 1)}`,
       keyword: product.productName,
       name: product.productName,
       productUrl: product.productUrl,
-      price,
-      avgReview: reviews,
+      price: marketInput.price,
+      avgReview: marketInput.reviews,
+      rating: Number(product.rating ?? 0),
       estimatedSales,
-      estimatedRevenue: price * estimatedSales,
-      coupangProductCount: productsForDisplay.length,
-      opportunityScore,
+      estimatedRevenue: marketInput.price * estimatedSales,
+      coupangProductCount: cohort.sampleSize,
+      opportunityScore: opportunity.opportunityScore,
+      competitionLevel: cohort.competitionLevel,
+      rocketRatio: cohort.rocketRatio,
+      brandRatio: cohort.brandConcentration,
+      topConcentration: cohort.topConcentration,
       competitors,
-      recommendation: 'Bright Data Coupang Scraper 실제 수집 상품입니다.',
+      recommendation: `${cohort.confidenceLabel} · 수집 ${cohort.sampleSize}개 기준 · 경쟁도 ${cohort.competitionLevel}/100`,
       score: {
         ...seed.score,
-        demand: Math.max(10, Math.min(20, Math.round(estimatedSales / 90))),
-        competition: Math.max(8, Math.min(20, Math.round((100 - reviews / 2) / 5))),
-        review: Math.max(6, Math.min(15, Math.round((180 - reviews) / 12))),
-        total: Math.max(45, Math.min(95, opportunityScore + 8)),
+        demand: measured.demand,
+        competition: measured.competition,
+        review: measured.review,
+        margin: measured.margin,
+        // 성장성·가격안정성·시즌성·공급가능성은 연결된 데이터 소스가 없어 측정하지 않습니다.
+        growth: 0,
+        priceStability: 0,
+        seasonality: 0,
+        supplier: 0,
+        total: measured.total,
+        grade,
+        recommendation: getRecommendation(grade),
       },
-      grade: opportunityScore >= 80 ? 'S' : opportunityScore >= 65 ? 'A' : opportunityScore >= 52 ? 'B' : 'C',
+      grade,
     };
   });
 };

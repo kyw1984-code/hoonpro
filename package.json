@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test:scoring": "tsx src/lib/scoring/calculateProductScore.test.ts"
+    "test:scoring": "tsx --test src/lib/scoring/calculateProductScore.test.ts src/lib/sourcing/marketScore.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.3.0",
