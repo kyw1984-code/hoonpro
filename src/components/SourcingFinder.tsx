@@ -1064,6 +1064,28 @@ export function SourcingFinder() {
                       <MetricCard label="속도 측정 가능" value={`${fmt(history.measurableProducts)}개`} sub="2회 이상 관측" />
                     </div>
 
+                    {history.jobs.length > 0 && (
+                      <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                        <p className="text-xs font-black text-slate-500">자동 수집 최근 기록</p>
+                        <div className="mt-2 space-y-1">
+                          {history.jobs.slice(0, 5).map((job) => (
+                            <div key={`${job.category}-${job.started_at}`} className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                              <span className={`rounded px-2 py-0.5 font-black ${
+                                job.status === 'ready' ? 'bg-emerald-100 text-emerald-700'
+                                  : job.status === 'pending' ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-red-100 text-red-700'
+                              }`}>
+                                {job.status === 'ready' ? '완료' : job.status === 'pending' ? '수집중' : '실패'}
+                              </span>
+                              <span className="text-slate-700">{job.category}</span>
+                              <span className="text-slate-400">{new Date(job.started_at).toLocaleString('ko-KR')}</span>
+                              {job.error && <span className="text-red-600">{job.error}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {history.measurableProducts === 0 ? (
                       <p className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
                         아직 판매 속도를 낼 수 없습니다. 같은 카테고리를 며칠 간격으로 한 번 더 수집하면, 그때부터 리뷰 증가분으로 실제로 팔리는 상품을 가려낼 수 있습니다.

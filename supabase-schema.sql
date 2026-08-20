@@ -283,3 +283,31 @@ create table if not exists sourcing_category_config (
 create index if not exists idx_sourcing_category_enabled on sourcing_category_config(enabled);
 
 alter table sourcing_category_config disable row level security;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 소싱 자동 수집 작업 큐
+--
+-- 수집 한 번에 1시간 가까이 걸려서, 크론 한 번으로 시작과 회수를 모두
+-- 끝낼 수 없습니다. 진행중인 snapshot을 서버에 기록해두고, 다음 크론이
+-- 이어받아 완료분을 회수합니다. (이전에는 브라우저 localStorage에만 있어
+-- 브라우저를 닫으면 진행 상황이 사라졌습니다.)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists sourcing_jobs (
+  id uuid default gen_random_uuid() primary key,
+  category text not null,
+  snapshot_id text,
+  status text not null default 'pending',
+  attempts integer default 0,
+  error text,
+  started_at timestamptz default now(),
+  finished_at timestamptz
+);
+
+create index if not exists idx_sourcing_jobs_status on sourcing_jobs(status, started_at desc);
+
+-- 카테고리를 골고루 돌아가며 수집하기 위한 마지막 수집 시각
+alter table sourcing_category_config
+  add column if not exists last_collected_at timestamptz;
+
+alter table sourcing_jobs disable row level security;

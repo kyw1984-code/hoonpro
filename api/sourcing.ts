@@ -675,6 +675,221 @@ async function handleCategories(req: VercelRequest, res: VercelResponse) {
 
 const MAX_OBSERVATIONS_PER_RUN = 300;
 
+// ─── 자동 수집 (Vercel Cron) ─────────────────────────────────────────────────
+
+/** 수집 한 번에 Bright Data에서 받아올 상품 수 */
+const CRON_COLLECT_LIMIT = 250;
+
+/** snapshot이 이 시간을 넘도록 안 끝나면 실패로 보고 다음 카테고리로 넘어갑니다. */
+const JOB_STALE_HOURS = 6;
+
+/**
+ * Bright Data snapshot 응답을 관측치 행으로 바꿉니다.
+ *
+ * 점수는 저장하지 않습니다. 판매 속도에 필요한 건 시점별 리뷰 수·가격 같은
+ * 사실뿐이고, 점수 계산식은 앞으로도 바뀔 수 있어 읽는 시점에 계산하는 편이
+ * 낫습니다. 그래야 계산식을 고쳐도 과거 이력을 다시 해석할 수 있습니다.
+ */
+function snapshotToObservations(payload: unknown, runId: string, category: string) {
+  const records = extractRecords(payload);
+  const normalized = records
+    .map(normalizeBrightDataRecord)
+    .filter(product => product.productName && product.productUrl && product.productPrice > 0)
+    .filter(product => !product.outOfStock);
+
+  const seen = new Set<string>();
+  const rows = [];
+  for (const product of normalized) {
+    const productId = String(product.productId || "").trim();
+    if (!productId || seen.has(productId)) continue;
+    seen.add(productId);
+    rows.push({
+      run_id: runId,
+      coupang_product_id: productId,
+      product_name: product.productName,
+      product_url: product.productUrl || null,
+      image_url: product.productImage || null,
+      brand: product.brand || null,
+      seller: product.sellerName || null,
+      app_category: category,
+      source_category: product.sourceCategory || null,
+      price: Math.round(product.productPrice),
+      review_count: Math.round(product.ratingCount || 0),
+      rating: product.rating || 0,
+      delivery_type: product.deliveryType === "rocket" ? "로켓" : product.deliveryType === "jet" ? "판매자로켓" : "일반",
+    });
+    if (rows.length >= MAX_OBSERVATIONS_PER_RUN) break;
+  }
+  return rows;
+}
+
+/** 진행중인 작업을 확인해 완료됐으면 관측치로 저장합니다. */
+async function advancePendingJob() {
+  const { data: jobs } = await supabase
+    .from("sourcing_jobs")
+    .select("id, category, snapshot_id, attempts, started_at")
+    .eq("status", "pending")
+    .order("started_at", { ascending: true })
+    .limit(1);
+
+  const job = (jobs || [])[0];
+  if (!job) return { handled: false as const };
+
+  const ageHours = (Date.now() - new Date(job.started_at).getTime()) / 3600000;
+  if (ageHours > JOB_STALE_HOURS) {
+    await supabase.from("sourcing_jobs")
+      .update({ status: "failed", error: `${JOB_STALE_HOURS}시간 내에 완료되지 않았습니다.`, finished_at: new Date().toISOString() })
+      .eq("id", job.id);
+    return { handled: true as const, result: { job: job.id, category: job.category, outcome: "stale" } };
+  }
+
+  if (!job.snapshot_id) {
+    await supabase.from("sourcing_jobs")
+      .update({ status: "failed", error: "snapshot ID가 없습니다.", finished_at: new Date().toISOString() })
+      .eq("id", job.id);
+    return { handled: true as const, result: { job: job.id, category: job.category, outcome: "no-snapshot" } };
+  }
+
+  let payload: any;
+  try {
+    payload = await downloadBrightDataSnapshot(job.snapshot_id);
+  } catch (error) {
+    await supabase.from("sourcing_jobs")
+      .update({
+        status: "failed",
+        error: error instanceof Error ? error.message : "snapshot 다운로드 실패",
+        finished_at: new Date().toISOString(),
+      })
+      .eq("id", job.id);
+    return { handled: true as const, result: { job: job.id, category: job.category, outcome: "failed" } };
+  }
+
+  if (payload?.pending) {
+    await supabase.from("sourcing_jobs")
+      .update({ attempts: (job.attempts || 0) + 1 })
+      .eq("id", job.id);
+    return {
+      handled: true as const,
+      result: { job: job.id, category: job.category, outcome: "still-running", progressStatus: payload.progressStatus },
+    };
+  }
+
+  const { data: run, error: runError } = await supabase
+    .from("sourcing_runs")
+    .insert({
+      snapshot_id: job.snapshot_id,
+      categories: [job.category],
+      confidence_label: "자동 수집",
+    })
+    .select("id")
+    .single();
+
+  if (runError || !run) {
+    await supabase.from("sourcing_jobs")
+      .update({ status: "failed", error: runError?.message || "run 생성 실패", finished_at: new Date().toISOString() })
+      .eq("id", job.id);
+    return { handled: true as const, result: { job: job.id, category: job.category, outcome: "run-failed" } };
+  }
+
+  const rows = snapshotToObservations(payload, run.id, job.category);
+  if (rows.length > 0) {
+    const { error: obsError } = await supabase.from("sourcing_observations").insert(rows);
+    if (obsError) {
+      await supabase.from("sourcing_jobs")
+        .update({ status: "failed", error: obsError.message, finished_at: new Date().toISOString() })
+        .eq("id", job.id);
+      return { handled: true as const, result: { job: job.id, category: job.category, outcome: "insert-failed" } };
+    }
+  }
+
+  await supabase.from("sourcing_runs").update({ sample_size: rows.length }).eq("id", run.id);
+  await supabase.from("sourcing_jobs")
+    .update({ status: "ready", finished_at: new Date().toISOString() })
+    .eq("id", job.id);
+  await supabase.from("sourcing_category_config")
+    .update({ last_collected_at: new Date().toISOString() })
+    .eq("category", job.category);
+
+  return {
+    handled: true as const,
+    result: { job: job.id, category: job.category, outcome: "saved", observations: rows.length, runId: run.id },
+  };
+}
+
+/** 가장 오래 수집하지 않은 카테고리로 새 수집을 시작합니다. */
+async function startNextCollection() {
+  const { data: categories, error } = await supabase
+    .from("sourcing_category_config")
+    .select("category, urls, last_collected_at")
+    .eq("enabled", true);
+
+  if (error) return { started: false as const, reason: error.message };
+  const usable = (categories || []).filter(row => Array.isArray(row.urls) && row.urls.length > 0);
+  if (usable.length === 0) return { started: false as const, reason: "등록된 카테고리가 없습니다." };
+
+  // 한 번도 수집한 적 없는 카테고리를 먼저, 그다음 가장 오래된 순서.
+  usable.sort((a, b) => {
+    const at = a.last_collected_at ? new Date(a.last_collected_at).getTime() : 0;
+    const bt = b.last_collected_at ? new Date(b.last_collected_at).getTime() : 0;
+    return at - bt;
+  });
+
+  const target = usable[0];
+  const inputUrls = target.urls.map(normalizeCategoryUrlServer).filter(Boolean);
+  if (inputUrls.length === 0) return { started: false as const, reason: `${target.category}에 유효한 URL이 없습니다.` };
+
+  try {
+    const raw = await triggerBrightData(inputUrls, CRON_COLLECT_LIMIT);
+    const snapshotId = String(raw?.snapshot_id || "");
+    if (!snapshotId) return { started: false as const, reason: "snapshot ID를 받지 못했습니다." };
+
+    await supabase.from("sourcing_jobs").insert({
+      category: target.category,
+      snapshot_id: snapshotId,
+      status: "pending",
+    });
+
+    return { started: true as const, category: target.category, snapshotId };
+  } catch (error) {
+    return { started: false as const, reason: error instanceof Error ? error.message : "수집 시작 실패" };
+  }
+}
+
+/**
+ * 크론 진입점. 한 번 호출될 때마다 상태머신을 한 칸 굴립니다.
+ *
+ * 1) 진행중인 작업이 있으면 완료 여부를 확인하고, 끝났으면 관측치로 저장
+ * 2) 진행중인 작업이 없으면 가장 오래된 카테고리로 새 수집 시작
+ *
+ * 수집이 1시간쯤 걸리므로 한 번의 호출로 시작과 회수를 모두 끝낼 수 없고,
+ * 이렇게 나눠두면 크론 주기가 하루든 한 시간이든 그대로 동작합니다.
+ */
+async function handleCron(req: VercelRequest, res: VercelResponse) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) return res.status(500).json({ error: "CRON_SECRET이 설정되지 않았습니다." });
+  if (req.headers.authorization !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  if (!BRIGHTDATA_API_TOKEN) return res.status(500).json({ error: "BRIGHTDATA_API_TOKEN이 설정되지 않았습니다." });
+
+  const steps: unknown[] = [];
+
+  const advanced = await advancePendingJob();
+  if (advanced.handled) steps.push(advanced.result);
+
+  // 아직 돌고 있는 작업이 있으면 새로 시작하지 않습니다.
+  const stillRunning = advanced.handled
+    && typeof advanced.result === "object"
+    && (advanced.result as any).outcome === "still-running";
+
+  if (!stillRunning) {
+    const started = await startNextCollection();
+    steps.push(started);
+  }
+
+  return res.status(200).json({ ok: true, steps });
+}
+
 // ─── 카테고리 설정 (서버 공유) ───────────────────────────────────────────────
 
 function normalizeCategoryUrlServer(input: string): string {
@@ -895,12 +1110,20 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
 
     velocity.sort((a, b) => b.reviewsPerMonth - a.reviewsPerMonth);
 
+    // 자동 수집이 실제로 돌고 있는지 화면에서 확인할 수 있게 함께 내려줍니다.
+    const { data: jobs } = await supabase
+      .from("sourcing_jobs")
+      .select("category, status, snapshot_id, error, started_at, finished_at")
+      .order("started_at", { ascending: false })
+      .limit(10);
+
     return res.status(200).json({
       runs: runs || [],
       runCount: (runs || []).length,
       trackedProducts: byProduct.size,
       measurableProducts: velocity.length,
       velocity: velocity.slice(0, 100),
+      jobs: jobs || [],
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "수집 이력 조회에 실패했습니다.";
@@ -928,6 +1151,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
+  if (type === "cron") return handleCron(req, res);
   if (type === "category-config") return handleGetCategoryConfig(req, res);
   if (type === "history") return handleHistory(req, res);
   if (type === "products") return handleProducts(req, res);

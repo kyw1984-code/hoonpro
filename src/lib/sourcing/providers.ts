@@ -280,6 +280,14 @@ export type SourcingHistory = {
   trackedProducts: number;
   measurableProducts: number;
   velocity: ProductVelocity[];
+  jobs: Array<{
+    category: string;
+    status: string;
+    snapshot_id: string | null;
+    error: string | null;
+    started_at: string;
+    finished_at: string | null;
+  }>;
 };
 
 /** 저장된 관측치에서 리뷰 증가 속도를 조회합니다. */
