@@ -865,10 +865,16 @@ async function startNextCollection() {
  * 이렇게 나눠두면 크론 주기가 하루든 한 시간이든 그대로 동작합니다.
  */
 async function handleCron(req: VercelRequest, res: VercelResponse) {
+  // 크론(CRON_SECRET) 또는 관리자 토큰으로 호출할 수 있습니다.
+  // 관리자 실행을 허용하는 건 예약 시각을 기다리지 않고 동작을 확인하기 위해서입니다.
   const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return res.status(500).json({ error: "CRON_SECRET이 설정되지 않았습니다." });
-  if (req.headers.authorization !== `Bearer ${cronSecret}`) {
-    return res.status(401).json({ error: "Unauthorized" });
+  const isCronCall = Boolean(cronSecret) && req.headers.authorization === `Bearer ${cronSecret}`;
+  const isAdminCall = !isCronCall && verifyAuth(req)?.isAdmin === true;
+
+  if (!isCronCall && !isAdminCall) {
+    return res.status(401).json({
+      error: cronSecret ? "Unauthorized" : "CRON_SECRET이 설정되지 않았고 관리자 토큰도 아닙니다.",
+    });
   }
   if (!BRIGHTDATA_API_TOKEN) return res.status(500).json({ error: "BRIGHTDATA_API_TOKEN이 설정되지 않았습니다." });
 
@@ -887,7 +893,7 @@ async function handleCron(req: VercelRequest, res: VercelResponse) {
     steps.push(started);
   }
 
-  return res.status(200).json({ ok: true, steps });
+  return res.status(200).json({ ok: true, triggeredBy: isCronCall ? "cron" : "admin", steps });
 }
 
 // ─── 카테고리 설정 (서버 공유) ───────────────────────────────────────────────

@@ -290,6 +290,21 @@ export type SourcingHistory = {
   }>;
 };
 
+/**
+ * 자동 수집 상태머신을 한 단계 실행합니다. 관리자 전용.
+ * 예약 시각을 기다리지 않고 크론과 같은 동작을 확인할 때 씁니다.
+ */
+export const runCollectionStep = async (): Promise<{ steps: unknown[] }> => {
+  const token = getToken();
+  if (!token) throw new Error('로그인이 필요합니다.');
+  const response = await fetch('/api/sourcing?type=cron', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error || '자동 수집 실행에 실패했습니다.');
+  return data;
+};
+
 /** 저장된 관측치에서 리뷰 증가 속도를 조회합니다. */
 export const fetchSourcingHistory = async (days = 90): Promise<SourcingHistory> => {
   const token = getToken();

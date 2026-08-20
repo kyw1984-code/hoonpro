@@ -15,6 +15,7 @@ import {
   loadCategoryUrlConfig,
   resetCategoryUrlConfig,
   fetchSourcingHistory,
+  runCollectionStep,
   normalizeCategoryUrl,
   saveCategoryUrlConfig,
   saveSourcingRun,
@@ -198,6 +199,7 @@ export function SourcingFinder() {
   const [history, setHistory] = useState<SourcingHistory | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isSavingCategories, setIsSavingCategories] = useState(false);
+  const [isRunningStep, setIsRunningStep] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
   const [categoryUrlDraft, setCategoryUrlDraft] = useState<Record<string, string>>(() => {
     const config = readCategoryUrlConfig();
@@ -249,6 +251,21 @@ export function SourcingFinder() {
       ...current,
       categories: (current.categories || [])[0] === category ? [] : [category],
     }));
+  };
+
+  /** 예약 시각을 기다리지 않고 자동 수집 한 단계를 즉시 실행합니다. */
+  const runAutoCollectStep = async () => {
+    setIsRunningStep(true);
+    setSourcingMessage('자동 수집을 한 단계 실행합니다.');
+    try {
+      const result = await runCollectionStep();
+      setSourcingMessage(`자동 수집 실행 결과: ${JSON.stringify(result.steps)}`);
+      await loadSourcingHistory();
+    } catch (error) {
+      setSourcingMessage(error instanceof Error ? error.message : '자동 수집 실행에 실패했습니다.');
+    } finally {
+      setIsRunningStep(false);
+    }
   };
 
   const loadSourcingHistory = async () => {
@@ -1051,9 +1068,14 @@ export function SourcingFinder() {
                     title="판매 속도 추적"
                     desc="수집할 때마다 상품별 리뷰 수를 기록합니다. 같은 상품이 두 번 이상 쌓이면 리뷰 증가분으로 실제 판매 속도를 계산합니다."
                   />
-                  <button onClick={loadSourcingHistory} disabled={isLoadingHistory} className="shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white disabled:opacity-50">
-                    {isLoadingHistory ? '불러오는 중…' : '이력 불러오기'}
-                  </button>
+                  <div className="flex shrink-0 gap-2">
+                    <button onClick={runAutoCollectStep} disabled={isRunningStep || isLoadingHistory} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-black text-slate-700 disabled:opacity-50">
+                      {isRunningStep ? '실행 중…' : '자동 수집 한 단계 실행'}
+                    </button>
+                    <button onClick={loadSourcingHistory} disabled={isLoadingHistory} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white disabled:opacity-50">
+                      {isLoadingHistory ? '불러오는 중…' : '이력 불러오기'}
+                    </button>
+                  </div>
                 </div>
 
                 {history && (
