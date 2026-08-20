@@ -204,3 +204,62 @@ alter table sourcing_products disable row level security;
 alter table analysis disable row level security;
 alter table favorites disable row level security;
 alter table projects disable row level security;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 소싱 수집 이력 — 리뷰 증가분으로 판매 속도를 재기 위한 시계열 저장소
+--
+-- 한 번의 수집으로는 "지금 잘 팔리는지"를 알 수 없습니다. 같은 상품을
+-- 여러 번 수집해두면 리뷰 증가분이 곧 판매 속도의 대리지표가 됩니다.
+-- 그래서 실행(run)마다 상품 관측치(observation)를 그대로 쌓습니다.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 수집 실행 단위. 그때의 시장 지표를 함께 남깁니다.
+create table if not exists sourcing_runs (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references users(id) on delete set null,
+  snapshot_id text,
+  categories text[] default '{}',
+  sample_size integer default 0,
+  competition_level integer default 0,
+  median_reviews integer default 0,
+  rocket_ratio integer default 0,
+  brand_concentration integer default 0,
+  top_concentration integer default 0,
+  confidence_label text,
+  collected_at timestamptz default now()
+);
+
+create index if not exists idx_sourcing_runs_collected on sourcing_runs(collected_at desc);
+
+-- 실행별 상품 관측치. 같은 coupang_product_id가 여러 run에 반복 등장하며,
+-- 그 사이 review_count 차이가 해당 기간의 판매 속도 추정치가 됩니다.
+create table if not exists sourcing_observations (
+  id uuid default gen_random_uuid() primary key,
+  run_id uuid references sourcing_runs(id) on delete cascade,
+  coupang_product_id text not null,
+  product_name text not null,
+  product_url text,
+  image_url text,
+  brand text,
+  seller text,
+  app_category text,
+  source_category text,
+  price integer default 0,
+  review_count integer default 0,
+  rating numeric default 0,
+  delivery_type text,
+  opportunity_score integer default 0,
+  competition_level integer default 0,
+  ai_score integer default 0,
+  grade text,
+  difficulty text,
+  observed_at timestamptz default now()
+);
+
+-- 상품별 시계열 조회용 (리뷰 증가분 계산의 핵심 경로)
+create index if not exists idx_sourcing_obs_product on sourcing_observations(coupang_product_id, observed_at desc);
+create index if not exists idx_sourcing_obs_run on sourcing_observations(run_id);
+create index if not exists idx_sourcing_obs_observed on sourcing_observations(observed_at desc);
+
+alter table sourcing_runs disable row level security;
+alter table sourcing_observations disable row level security;

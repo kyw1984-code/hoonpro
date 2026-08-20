@@ -13,11 +13,14 @@ import {
   getDefaultCategoryUrls,
   readCategoryUrlConfig,
   resetCategoryUrlConfig,
+  fetchSourcingHistory,
   normalizeCategoryUrl,
   saveCategoryUrlConfig,
+  saveSourcingRun,
   sourcingProvider,
   type BrightDataRefreshResult,
   type CoupangCategoryOption,
+  type SourcingHistory,
 } from '../lib/sourcing/providers';
 import type { Difficulty, KeywordType, SourcingFilters, SourcingProduct, SourcingStatus } from '../lib/sourcing/types';
 
@@ -191,6 +194,8 @@ export function SourcingFinder() {
   const [isLoadingCategories, setIsLoadingCategories] = useState(false);
   const [categoryTarget, setCategoryTarget] = useState<string>('DIY');
   const [categoryConfigVersion, setCategoryConfigVersion] = useState(0);
+  const [history, setHistory] = useState<SourcingHistory | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
   const [categoryUrlDraft, setCategoryUrlDraft] = useState<Record<string, string>>(() => {
     const config = readCategoryUrlConfig();
@@ -235,6 +240,24 @@ export function SourcingFinder() {
       ...current,
       categories: (current.categories || [])[0] === category ? [] : [category],
     }));
+  };
+
+  const loadSourcingHistory = async () => {
+    setIsLoadingHistory(true);
+    try {
+      const result = await fetchSourcingHistory(90);
+      setHistory(result);
+      setSourcingMessage(
+        result.measurableProducts > 0
+          ? `수집 ${result.runCount}회 · 추적 상품 ${result.trackedProducts}개 · 판매 속도 측정 가능 ${result.measurableProducts}개`
+          : `수집 ${result.runCount}회 · 추적 상품 ${result.trackedProducts}개. 같은 상품이 두 번 이상 수집되어야 판매 속도를 낼 수 있습니다.`,
+      );
+    } catch (error) {
+      setHistory(null);
+      setSourcingMessage(error instanceof Error ? error.message : '수집 이력 조회에 실패했습니다.');
+    } finally {
+      setIsLoadingHistory(false);
+    }
   };
 
   const loadCoupangCategories = async () => {
@@ -325,6 +348,24 @@ export function SourcingFinder() {
     setView('results');
   };
 
+  /**
+   * 수집 결과를 이력으로 남깁니다. 실패해도 화면 흐름은 막지 않습니다.
+   * 같은 상품이 두 번 이상 쌓여야 리뷰 증가분(판매 속도)을 낼 수 있습니다.
+   */
+  const persistSourcingRun = async (nextProducts: SourcingProduct[], snapshotId?: string) => {
+    if (nextProducts.length === 0) return '';
+    try {
+      const result = await saveSourcingRun({
+        snapshotId,
+        categories: filters.categories || [],
+        products: nextProducts,
+      });
+      return ` 이력 ${result.saved}건 저장.`;
+    } catch (error) {
+      return ` (이력 저장 실패: ${error instanceof Error ? error.message : '알 수 없는 오류'})`;
+    }
+  };
+
   const saveSourcingCache = (nextProducts: SourcingProduct[]) => {
     if (!cacheEnabled || typeof window === 'undefined' || nextProducts.length === 0) return;
     const nextCache = { savedAt: Date.now(), products: nextProducts };
@@ -383,7 +424,8 @@ export function SourcingFinder() {
 
       saveSourcingCache(outcome.products);
       applyProducts(outcome.products, '전체');
-      setSourcingMessage(`Bright Data 결과 ${outcome.products.length}개를 캐시에 저장했습니다. ${describeDiagnostics(outcome.diagnostics)}`);
+      const persisted = await persistSourcingRun(outcome.products, snapshotId);
+      setSourcingMessage(`Bright Data 결과 ${outcome.products.length}개를 캐시에 저장했습니다.${persisted} ${describeDiagnostics(outcome.diagnostics)}`);
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Bright Data snapshot 확인에 실패했습니다.';
@@ -397,13 +439,14 @@ export function SourcingFinder() {
     }
   };
 
-  const handleRefreshResult = (result: BrightDataRefreshResult) => {
+  const handleRefreshResult = async (result: BrightDataRefreshResult) => {
     if (result.products && result.products.length > 0) {
       saveSourcingCache(result.products);
       clearPendingSourcing();
       applyProducts(result.products, '전체');
       const detail = result.diagnostics ? ` ${describeDiagnostics(result.diagnostics)}` : '';
-      setSourcingMessage(`Bright Data 결과 ${result.products.length}개를 캐시에 저장했습니다.${detail}`);
+      const persisted = await persistSourcingRun(result.products, result.snapshotId);
+      setSourcingMessage(`Bright Data 결과 ${result.products.length}개를 캐시에 저장했습니다.${persisted}${detail}`);
       return;
     }
     if (result.snapshotId) {
@@ -440,7 +483,7 @@ export function SourcingFinder() {
         pendingSourcing?.snapshotId,
       );
       setSourcingProgress(result.products?.length ? 100 : 32);
-      handleRefreshResult(result);
+      await handleRefreshResult(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Bright Data 수집 작업 등록에 실패했습니다.';
       setSourcingMessage(message);
@@ -479,7 +522,7 @@ export function SourcingFinder() {
         },
         onSnapshot: (snapshotId, meta) => savePendingSourcing(snapshotId, meta),
       });
-      handleRefreshResult(result);
+      await handleRefreshResult(result);
     } catch (error) {
       setSourcingMessage(error instanceof Error ? error.message : 'Bright Data 수집 작업 등록에 실패했습니다.');
     } finally {
@@ -553,7 +596,8 @@ export function SourcingFinder() {
       saveSourcingCache(liveProducts);
       clearPendingSourcing();
       applyProducts(liveProducts, '전체');
-      setSourcingMessage(liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.');
+      const persisted = await persistSourcingRun(liveProducts);
+      setSourcingMessage((liveProducts.some((product) => product.id.startsWith('live-')) ? 'Bright Data Coupang Scraper로 수집한 실제 쿠팡 상품 데이터입니다.' : '실제 API 연결 실패로 mock fallback을 표시합니다.') + persisted);
     } catch (error) {
       const message = error instanceof Error ? error.message : '실제 데이터 분석이 아직 완료되지 않았습니다.';
       setProducts([]);
@@ -972,6 +1016,66 @@ export function SourcingFinder() {
                 <button onClick={runLiveSourcingForDebug} disabled={isSourcingLoading} className="mt-3 rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-600 disabled:opacity-50">
                   장시간 직접 수집 테스트
                 </button>
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <SectionTitle
+                    title="판매 속도 추적"
+                    desc="수집할 때마다 상품별 리뷰 수를 기록합니다. 같은 상품이 두 번 이상 쌓이면 리뷰 증가분으로 실제 판매 속도를 계산합니다."
+                  />
+                  <button onClick={loadSourcingHistory} disabled={isLoadingHistory} className="shrink-0 rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white disabled:opacity-50">
+                    {isLoadingHistory ? '불러오는 중…' : '이력 불러오기'}
+                  </button>
+                </div>
+
+                {history && (
+                  <>
+                    <div className="mt-4 grid grid-cols-3 gap-3">
+                      <MetricCard label="수집 횟수" value={`${fmt(history.runCount)}회`} sub="최근 90일" />
+                      <MetricCard label="추적 상품" value={`${fmt(history.trackedProducts)}개`} sub="기록된 상품 수" />
+                      <MetricCard label="속도 측정 가능" value={`${fmt(history.measurableProducts)}개`} sub="2회 이상 관측" />
+                    </div>
+
+                    {history.measurableProducts === 0 ? (
+                      <p className="mt-4 rounded-lg bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+                        아직 판매 속도를 낼 수 없습니다. 같은 카테고리를 며칠 간격으로 한 번 더 수집하면, 그때부터 리뷰 증가분으로 실제로 팔리는 상품을 가려낼 수 있습니다.
+                      </p>
+                    ) : (
+                      <div className="mt-4 overflow-x-auto">
+                        <table className="w-full min-w-[720px] text-sm">
+                          <thead className="bg-slate-50 text-xs font-black text-slate-500">
+                            <tr>
+                              <th className="px-3 py-3 text-left">상품명</th>
+                              <th className="px-3 py-3 text-right">관측</th>
+                              <th className="px-3 py-3 text-right">기간</th>
+                              <th className="px-3 py-3 text-right">리뷰 증가</th>
+                              <th className="px-3 py-3 text-right">월 환산</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {history.velocity.slice(0, 20).map((item) => (
+                              <tr key={item.coupangProductId} className="border-b border-slate-100">
+                                <td className="px-3 py-3">
+                                  {item.productUrl ? (
+                                    <a href={item.productUrl} target="_blank" rel="noopener noreferrer" className="font-black text-blue-700 hover:underline">{item.name}</a>
+                                  ) : (
+                                    <span className="font-black text-slate-800">{item.name}</span>
+                                  )}
+                                  <p className="mt-0.5 text-xs font-bold text-slate-500">{won(item.price)} · 누적 리뷰 {fmt(item.latestReviews)}</p>
+                                </td>
+                                <td className="px-3 py-3 text-right font-bold text-slate-600">{item.observations}회</td>
+                                <td className="px-3 py-3 text-right font-bold text-slate-600">{item.elapsedDays}일</td>
+                                <td className="px-3 py-3 text-right font-black text-slate-950">+{fmt(item.reviewGain)}</td>
+                                <td className="px-3 py-3 text-right font-black text-emerald-600">+{fmt(item.reviewsPerMonth)}/월</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">

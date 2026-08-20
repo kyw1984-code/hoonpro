@@ -49,6 +49,8 @@ export type SourcingProduct = {
   delivery?: '로켓' | '판매자로켓' | '일반';
   /** 쿠팡이 제공한 실제 분류명 (표시용) */
   sourceCategoryName?: string;
+  /** 수집된 브랜드명 */
+  brand?: string;
   searchVolume: number;
   growth7d: number;
   growth30d: number;

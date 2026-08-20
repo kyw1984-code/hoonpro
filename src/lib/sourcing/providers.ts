@@ -1,3 +1,4 @@
+import { getToken } from '../auth';
 import { getGrade, getRecommendation } from '../scoring/calculateProductScore';
 import {
   computeMarketCohort,
@@ -121,6 +122,109 @@ export type CoupangCategoryOption = {
   id: string;
   name: string;
   url: string;
+};
+
+/**
+ * 수집 결과를 Supabase에 관측치로 남깁니다.
+ *
+ * 한 번의 수집에는 시간 정보가 없어 판매 속도를 알 수 없습니다.
+ * 매 수집을 쌓아두면 같은 상품의 리뷰 증가분으로 속도를 낼 수 있고,
+ * 그게 "지금 잘 팔리는 상품"을 찾는 유일한 근거가 됩니다.
+ */
+export const saveSourcingRun = async (input: {
+  snapshotId?: string;
+  categories: string[];
+  products: SourcingProduct[];
+}): Promise<{ runId: string; saved: number }> => {
+  const token = getToken();
+  if (!token) throw new Error('로그인이 필요합니다.');
+  if (input.products.length === 0) throw new Error('저장할 상품이 없습니다.');
+
+  const first = input.products[0];
+  const cohort = {
+    sampleSize: first.coupangProductCount,
+    competitionLevel: first.competitionLevel,
+    medianReviews: first.avgReview,
+    rocketRatio: first.rocketRatio,
+    brandConcentration: first.brandRatio,
+    topConcentration: first.topConcentration,
+    confidenceLabel: first.recommendation,
+  };
+
+  const response = await fetch('/api/sourcing?type=save-run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      snapshotId: input.snapshotId,
+      categories: input.categories,
+      cohort,
+      products: input.products.map((product) => ({
+        // live- 접두사를 떼어 쿠팡 상품 ID를 안정적인 키로 씁니다.
+        coupangProductId: product.id.replace(/^live-/, ''),
+        name: product.name,
+        productUrl: product.productUrl,
+        brand: product.brand,
+        appCategory: product.category,
+        sourceCategoryName: product.sourceCategoryName,
+        price: product.price,
+        reviews: product.avgReview,
+        rating: product.rating,
+        delivery: product.delivery,
+        opportunityScore: product.opportunityScore,
+        competitionLevel: product.competitionLevel,
+        aiScore: product.score.total,
+        grade: product.grade,
+        difficulty: product.difficulty,
+      })),
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error || '수집 이력 저장에 실패했습니다.');
+  return data;
+};
+
+export type ProductVelocity = {
+  coupangProductId: string;
+  name: string;
+  productUrl?: string;
+  price: number;
+  delivery?: string;
+  sourceCategory?: string;
+  observations: number;
+  elapsedDays: number;
+  reviewGain: number;
+  reviewsPerDay: number;
+  reviewsPerMonth: number;
+  latestReviews: number;
+};
+
+export type SourcingHistory = {
+  runs: Array<{
+    id: string;
+    snapshot_id: string | null;
+    categories: string[];
+    sample_size: number;
+    competition_level: number;
+    confidence_label: string | null;
+    collected_at: string;
+  }>;
+  runCount: number;
+  trackedProducts: number;
+  measurableProducts: number;
+  velocity: ProductVelocity[];
+};
+
+/** 저장된 관측치에서 리뷰 증가 속도를 조회합니다. */
+export const fetchSourcingHistory = async (days = 90): Promise<SourcingHistory> => {
+  const token = getToken();
+  if (!token) throw new Error('로그인이 필요합니다.');
+  const response = await fetch(`/api/sourcing?type=history&days=${days}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error || '수집 이력 조회에 실패했습니다.');
+  return data;
 };
 
 /** 쿠팡에서 카테고리 목록을 받아옵니다. 관리자가 번호를 직접 찾지 않아도 되게 합니다. */
@@ -270,6 +374,7 @@ const buildLiveProducts = (seed: SourcingProduct, apiProducts: CoupangApiProduct
       // 앱 카테고리 필터와 맞물려야 하므로 category는 seed 값을 유지하고,
       // 쿠팡이 준 실제 분류명은 표시용으로 따로 담습니다.
       sourceCategoryName: product.sourceCategory || '',
+      brand: product.brand || '',
       productUrl: product.productUrl,
       price: marketInput.price,
       avgReview: marketInput.reviews,

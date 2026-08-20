@@ -1,6 +1,25 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createClient } from "@supabase/supabase-js";
+import jwt from "jsonwebtoken";
 
 export const config = { maxDuration: 60 };
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!,
+);
+
+type AuthResult = { userId?: string; isAdmin?: boolean } | null;
+
+function verifyAuth(req: VercelRequest): AuthResult {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) return null;
+  try {
+    return jwt.verify(auth.slice(7), process.env.JWT_SECRET!) as AuthResult;
+  } catch {
+    return null;
+  }
+}
 
 // ─── 환경변수 ────────────────────────────────────────────────────────────────
 const NAVER_CLIENT_ID = (process.env.NAVER_CLIENT_ID || process.env.NAVER_API_CLIENT_ID || "").trim();
@@ -647,17 +666,178 @@ async function handleCategories(req: VercelRequest, res: VercelResponse) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// HISTORY — 수집 이력 적재와 리뷰 증가분 조회
+//
+// 한 번의 수집에는 시간 정보가 없어 "지금 잘 팔리는지"를 알 수 없습니다.
+// 매 수집을 관측치로 쌓아두면, 같은 상품의 리뷰 증가분이 그 기간의
+// 판매 속도 추정치가 됩니다.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const MAX_OBSERVATIONS_PER_RUN = 300;
+
+async function handleSaveRun(req: VercelRequest, res: VercelResponse) {
+  const auth = verifyAuth(req);
+  if (!auth) return res.status(401).json({ error: "인증이 필요합니다." });
+
+  const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+  const products = Array.isArray(body.products) ? body.products : [];
+  if (products.length === 0) return res.status(400).json({ error: "저장할 상품이 없습니다." });
+
+  const cohort = body.cohort || {};
+
+  try {
+    const { data: run, error: runError } = await supabase
+      .from("sourcing_runs")
+      .insert({
+        user_id: auth.userId || null,
+        snapshot_id: asString(body.snapshotId) || null,
+        categories: Array.isArray(body.categories) ? body.categories.map(asString).filter(Boolean) : [],
+        sample_size: asNumber(cohort.sampleSize),
+        competition_level: asNumber(cohort.competitionLevel),
+        median_reviews: asNumber(cohort.medianReviews),
+        rocket_ratio: asNumber(cohort.rocketRatio),
+        brand_concentration: asNumber(cohort.brandConcentration),
+        top_concentration: asNumber(cohort.topConcentration),
+        confidence_label: asString(cohort.confidenceLabel) || null,
+      })
+      .select("id")
+      .single();
+
+    if (runError || !run) {
+      return res.status(500).json({ error: runError?.message || "수집 이력 저장에 실패했습니다." });
+    }
+
+    const observations = products.slice(0, MAX_OBSERVATIONS_PER_RUN).map((product: any) => ({
+      run_id: run.id,
+      coupang_product_id: asString(product.coupangProductId) || asString(product.id),
+      product_name: asString(product.name),
+      product_url: asString(product.productUrl) || null,
+      image_url: asString(product.imageUrl) || null,
+      brand: asString(product.brand) || null,
+      seller: asString(product.seller) || null,
+      app_category: asString(product.appCategory) || null,
+      source_category: asString(product.sourceCategoryName) || null,
+      price: asNumber(product.price),
+      review_count: asNumber(product.reviews),
+      rating: asNumber(product.rating),
+      delivery_type: asString(product.delivery) || null,
+      opportunity_score: asNumber(product.opportunityScore),
+      competition_level: asNumber(product.competitionLevel),
+      ai_score: asNumber(product.aiScore),
+      grade: asString(product.grade) || null,
+      difficulty: asString(product.difficulty) || null,
+    })).filter((row: any) => row.coupang_product_id && row.product_name);
+
+    const { error: obsError } = await supabase.from("sourcing_observations").insert(observations);
+    if (obsError) {
+      return res.status(500).json({ error: obsError.message, runId: run.id });
+    }
+
+    return res.status(200).json({ runId: run.id, saved: observations.length });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "수집 이력 저장에 실패했습니다.";
+    return res.status(500).json({ error: message });
+  }
+}
+
+/**
+ * 저장된 관측치에서 상품별 리뷰 증가분을 계산합니다.
+ * 같은 상품이 두 번 이상 관측됐을 때만 속도를 낼 수 있습니다.
+ */
+async function handleHistory(req: VercelRequest, res: VercelResponse) {
+  const auth = verifyAuth(req);
+  if (!auth) return res.status(401).json({ error: "인증이 필요합니다." });
+
+  const days = Math.min(180, Math.max(1, Number(req.query.days) || 90));
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  try {
+    const { data: runs, error: runsError } = await supabase
+      .from("sourcing_runs")
+      .select("id, snapshot_id, categories, sample_size, competition_level, confidence_label, collected_at")
+      .gte("collected_at", since)
+      .order("collected_at", { ascending: false })
+      .limit(50);
+
+    if (runsError) return res.status(500).json({ error: runsError.message });
+
+    const { data: observations, error: obsError } = await supabase
+      .from("sourcing_observations")
+      .select("coupang_product_id, product_name, product_url, price, review_count, delivery_type, source_category, observed_at")
+      .gte("observed_at", since)
+      .order("observed_at", { ascending: true })
+      .limit(5000);
+
+    if (obsError) return res.status(500).json({ error: obsError.message });
+
+    // 상품별로 첫 관측과 마지막 관측을 비교해 리뷰 증가 속도를 냅니다.
+    const byProduct = new Map<string, any[]>();
+    for (const row of observations || []) {
+      const list = byProduct.get(row.coupang_product_id) || [];
+      list.push(row);
+      byProduct.set(row.coupang_product_id, list);
+    }
+
+    const velocity = [];
+    for (const [productId, rows] of byProduct) {
+      if (rows.length < 2) continue;
+      const first = rows[0];
+      const last = rows[rows.length - 1];
+      const elapsedDays = (new Date(last.observed_at).getTime() - new Date(first.observed_at).getTime()) / 86400000;
+      if (elapsedDays < 0.5) continue;
+      const reviewGain = Math.max(0, (last.review_count || 0) - (first.review_count || 0));
+
+      velocity.push({
+        coupangProductId: productId,
+        name: last.product_name,
+        productUrl: last.product_url,
+        price: last.price,
+        delivery: last.delivery_type,
+        sourceCategory: last.source_category,
+        observations: rows.length,
+        elapsedDays: Math.round(elapsedDays * 10) / 10,
+        reviewGain,
+        reviewsPerDay: Math.round((reviewGain / elapsedDays) * 100) / 100,
+        reviewsPerMonth: Math.round((reviewGain / elapsedDays) * 30),
+        latestReviews: last.review_count,
+      });
+    }
+
+    velocity.sort((a, b) => b.reviewsPerMonth - a.reviewsPerMonth);
+
+    return res.status(200).json({
+      runs: runs || [],
+      runCount: (runs || []).length,
+      trackedProducts: byProduct.size,
+      measurableProducts: velocity.length,
+      velocity: velocity.slice(0, 100),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "수집 이력 조회에 실패했습니다.";
+    return res.status(500).json({ error: message });
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // 메인 핸들러 — ?type=products | ?type=stats | ?type=shopping-data | ?type=categories
+//                ?type=save-run (POST) | ?type=history
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
   const type = typeof req.query.type === "string" ? req.query.type : "";
+
+  if (req.method === "POST") {
+    if (type === "save-run") return handleSaveRun(req, res);
+    return res.status(400).json({ error: "POST는 type=save-run 만 지원합니다." });
+  }
+  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+
+  if (type === "history") return handleHistory(req, res);
   if (type === "products") return handleProducts(req, res);
   if (type === "stats") return handleStats(req, res);
   if (type === "shopping-data") return handleShoppingData(req, res);
