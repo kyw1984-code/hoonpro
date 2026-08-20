@@ -263,3 +263,23 @@ create index if not exists idx_sourcing_obs_observed on sourcing_observations(ob
 
 alter table sourcing_runs disable row level security;
 alter table sourcing_observations disable row level security;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- 소싱 카테고리 설정 — 서버 공유 저장소
+--
+-- 이전에는 브라우저 localStorage에만 있어서 기기·브라우저마다 설정이
+-- 따로 놀았고, 서버가 값을 볼 수 없어 자동 수집도 붙일 수 없었습니다.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+create table if not exists sourcing_category_config (
+  id uuid default gen_random_uuid() primary key,
+  category text unique not null,
+  urls text[] not null default '{}',
+  enabled boolean default true,
+  updated_by uuid references users(id) on delete set null,
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_sourcing_category_enabled on sourcing_category_config(enabled);
+
+alter table sourcing_category_config disable row level security;

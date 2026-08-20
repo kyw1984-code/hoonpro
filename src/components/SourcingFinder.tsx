@@ -12,6 +12,7 @@ import {
   fetchCoupangCategories,
   getDefaultCategoryUrls,
   readCategoryUrlConfig,
+  loadCategoryUrlConfig,
   resetCategoryUrlConfig,
   fetchSourcingHistory,
   normalizeCategoryUrl,
@@ -196,13 +197,14 @@ export function SourcingFinder() {
   const [categoryConfigVersion, setCategoryConfigVersion] = useState(0);
   const [history, setHistory] = useState<SourcingHistory | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isSavingCategories, setIsSavingCategories] = useState(false);
   const [categorySearch, setCategorySearch] = useState('');
   const [categoryUrlDraft, setCategoryUrlDraft] = useState<Record<string, string>>(() => {
     const config = readCategoryUrlConfig();
     return Object.fromEntries(categories.map((category) => [category, (config[category] || []).join('\n')]));
   });
 
-  const saveCategoryUrls = () => {
+  const saveCategoryUrls = async () => {
     const next: Record<string, string[]> = {};
     const invalid: string[] = [];
     for (const [category, raw] of Object.entries(categoryUrlDraft)) {
@@ -220,11 +222,18 @@ export function SourcingFinder() {
       setSourcingMessage('등록할 카테고리가 없습니다. 최소 한 개는 입력해주세요.');
       return;
     }
-    saveCategoryUrlConfig(next);
-    setCategoryConfigVersion((v) => v + 1);
-    const saved = readCategoryUrlConfig();
-    setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (saved[category] || []).join('\n')])));
-    setSourcingMessage(`수집 카테고리를 저장했습니다. 등록된 카테고리 ${Object.keys(saved).length}개.`);
+    setIsSavingCategories(true);
+    try {
+      await saveCategoryUrlConfig(next);
+      setCategoryConfigVersion((v) => v + 1);
+      const saved = readCategoryUrlConfig();
+      setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (saved[category] || []).join('\n')])));
+      setSourcingMessage(`수집 카테고리를 서버에 저장했습니다. 등록된 카테고리 ${Object.keys(saved).length}개 · 모든 기기에 적용됩니다.`);
+    } catch (error) {
+      setSourcingMessage(error instanceof Error ? error.message : '카테고리 설정 저장에 실패했습니다.');
+    } finally {
+      setIsSavingCategories(false);
+    }
   };
 
   /** URL이 등록돼 실제로 수집 가능한 카테고리. 관리자 저장 시 갱신됩니다. */
@@ -286,12 +295,19 @@ export function SourcingFinder() {
     setSourcingMessage(`${categoryTarget}에 "${option.name}" 카테고리를 추가했습니다. 저장을 눌러야 반영됩니다.`);
   };
 
-  const restoreDefaultCategoryUrls = () => {
-    resetCategoryUrlConfig();
-    setCategoryConfigVersion((v) => v + 1);
-    const defaults = getDefaultCategoryUrls();
-    setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (defaults[category] || []).join('\n')])));
-    setSourcingMessage('수집 카테고리를 기본값으로 되돌렸습니다.');
+  const restoreDefaultCategoryUrls = async () => {
+    setIsSavingCategories(true);
+    try {
+      await resetCategoryUrlConfig();
+      setCategoryConfigVersion((v) => v + 1);
+      const defaults = getDefaultCategoryUrls();
+      setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (defaults[category] || []).join('\n')])));
+      setSourcingMessage('수집 카테고리를 기본값으로 되돌렸습니다.');
+    } catch (error) {
+      setSourcingMessage(error instanceof Error ? error.message : '기본값 복원에 실패했습니다.');
+    } finally {
+      setIsSavingCategories(false);
+    }
   };
 
   const filteredProducts = useMemo(() => {
@@ -492,6 +508,17 @@ export function SourcingFinder() {
       window.setTimeout(() => setSourcingProgress(0), 900);
     }
   };
+
+  /** 카테고리 설정의 원본은 Supabase입니다. 화면이 뜨면 서버 값으로 맞춥니다. */
+  React.useEffect(() => {
+    let cancelled = false;
+    loadCategoryUrlConfig().then((config) => {
+      if (cancelled) return;
+      setCategoryUrlDraft(Object.fromEntries(categories.map((category) => [category, (config[category] || []).join('\n')])));
+      setCategoryConfigVersion((v) => v + 1);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   /** 진행중인 snapshot을 1분마다 자동 확인해서 완료되면 바로 회수합니다. */
   React.useEffect(() => {
@@ -1146,13 +1173,13 @@ export function SourcingFinder() {
                   })}
                 </div>
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <button onClick={saveCategoryUrls} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white">
-                    카테고리 저장
+                  <button onClick={saveCategoryUrls} disabled={isSavingCategories} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white disabled:opacity-50">
+                    {isSavingCategories ? '저장 중…' : '카테고리 저장'}
                   </button>
-                  <button onClick={restoreDefaultCategoryUrls} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600">
+                  <button onClick={restoreDefaultCategoryUrls} disabled={isSavingCategories} className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-600 disabled:opacity-50">
                     기본값으로 되돌리기
                   </button>
-                  <p className="text-xs font-bold text-slate-500">저장 후 “새로 시작”으로 수집하면 해당 카테고리에서 상품을 가져옵니다.</p>
+                  <p className="text-xs font-bold text-slate-500">서버에 저장되어 모든 기기에서 같은 설정을 씁니다. 저장 후 “새로 시작”으로 수집하세요.</p>
                 </div>
               </div>
               <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"><SectionTitle title="관리자 지표" desc="회원, 분석 횟수, 인기 키워드, 검색 횟수, 저장상품, 사용자 활동을 확인합니다." /><div className="mt-4 grid grid-cols-3 gap-3">{['안경김서림 방지 냉감 귀걸이 마스크', '차박용 자석 암막 사이드 햇빛가리개', '목뒤 밀착형 PCM 아이스 넥쿨러', '종이호일 대체 사각 실리콘 에어프라이어 용기', '스노쿨링 터치가능 스마트폰 방수팩', '독서실용 무드등 겸 저소음 탁상 선풍기'].map((keyword, index) => <div key={keyword} className="rounded-lg bg-slate-50 p-3"><p className="text-xs font-bold text-slate-500">인기 키워드 {index + 1}</p><p className="mt-1 font-black">{keyword}</p></div>)}</div></div>

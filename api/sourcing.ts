@@ -675,6 +675,96 @@ async function handleCategories(req: VercelRequest, res: VercelResponse) {
 
 const MAX_OBSERVATIONS_PER_RUN = 300;
 
+// ─── 카테고리 설정 (서버 공유) ───────────────────────────────────────────────
+
+function normalizeCategoryUrlServer(input: string): string {
+  const trimmed = asString(input);
+  if (!trimmed) return "";
+  const idMatch = trimmed.match(/\/np\/categories\/(\d+)/);
+  if (idMatch) return `https://www.coupang.com/np/categories/${idMatch[1]}`;
+  if (/^\d{4,}$/.test(trimmed)) return `https://www.coupang.com/np/categories/${trimmed}`;
+  if (/^https:\/\/(www\.|m\.)?coupang\.com\//i.test(trimmed)) return trimmed;
+  return "";
+}
+
+async function handleGetCategoryConfig(req: VercelRequest, res: VercelResponse) {
+  if (!verifyAuth(req)) return res.status(401).json({ error: "인증이 필요합니다." });
+
+  const { data, error } = await supabase
+    .from("sourcing_category_config")
+    .select("category, urls, enabled, updated_at")
+    .eq("enabled", true);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  const config: Record<string, string[]> = {};
+  for (const row of data || []) {
+    const urls = (Array.isArray(row.urls) ? row.urls : []).map(normalizeCategoryUrlServer).filter(Boolean);
+    if (urls.length > 0) config[row.category] = urls;
+  }
+
+  return res.status(200).json({ config, count: Object.keys(config).length });
+}
+
+async function handleSaveCategoryConfig(req: VercelRequest, res: VercelResponse) {
+  const auth = verifyAuth(req);
+  if (!auth) return res.status(401).json({ error: "인증이 필요합니다." });
+  if (!auth.isAdmin) return res.status(403).json({ error: "관리자만 수집 카테고리를 변경할 수 있습니다." });
+
+  const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+  const incoming = body.config;
+  if (!incoming || typeof incoming !== "object") {
+    return res.status(400).json({ error: "config 객체가 필요합니다." });
+  }
+
+  const rows: { category: string; urls: string[]; enabled: boolean; updated_by: string | null; updated_at: string }[] = [];
+  for (const [category, urls] of Object.entries(incoming)) {
+    const valid = (Array.isArray(urls) ? urls : []).map(normalizeCategoryUrlServer).filter(Boolean);
+    if (valid.length === 0) continue;
+    rows.push({
+      category: asString(category),
+      urls: Array.from(new Set(valid)),
+      enabled: true,
+      updated_by: auth.userId || null,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  if (rows.length === 0) return res.status(400).json({ error: "등록할 카테고리가 없습니다." });
+
+  // 이번에 보내지 않은 카테고리는 비활성화해서, 화면에 보이는 목록과 실제
+  // 수집 대상이 항상 같도록 맞춥니다.
+  //
+  // 남길 목록을 문자열로 이어 붙여 not-in 필터를 만들면 이름에 따옴표나
+  // 쉼표가 섞였을 때 엉뚱한 행이 꺼질 수 있어, 지울 대상을 먼저 조회한 뒤
+  // 배열로 넘깁니다.
+  const keep = new Set(rows.map(row => row.category));
+  const { data: existing, error: listError } = await supabase
+    .from("sourcing_category_config")
+    .select("category")
+    .eq("enabled", true);
+  if (listError) return res.status(500).json({ error: listError.message });
+
+  const toDisable = (existing || [])
+    .map(row => row.category)
+    .filter(category => !keep.has(category));
+
+  if (toDisable.length > 0) {
+    const { error: disableError } = await supabase
+      .from("sourcing_category_config")
+      .update({ enabled: false, updated_at: new Date().toISOString() })
+      .in("category", toDisable);
+    if (disableError) return res.status(500).json({ error: disableError.message });
+  }
+
+  const { error: upsertError } = await supabase
+    .from("sourcing_category_config")
+    .upsert(rows, { onConflict: "category" });
+  if (upsertError) return res.status(500).json({ error: upsertError.message });
+
+  return res.status(200).json({ saved: rows.length, categories: Array.from(keep) });
+}
+
 async function handleSaveRun(req: VercelRequest, res: VercelResponse) {
   const auth = verifyAuth(req);
   if (!auth) return res.status(401).json({ error: "인증이 필요합니다." });
@@ -833,10 +923,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === "POST") {
     if (type === "save-run") return handleSaveRun(req, res);
-    return res.status(400).json({ error: "POST는 type=save-run 만 지원합니다." });
+    if (type === "category-config") return handleSaveCategoryConfig(req, res);
+    return res.status(400).json({ error: "POST는 type=save-run 또는 type=category-config 만 지원합니다." });
   }
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
+  if (type === "category-config") return handleGetCategoryConfig(req, res);
   if (type === "history") return handleHistory(req, res);
   if (type === "products") return handleProducts(req, res);
   if (type === "stats") return handleStats(req, res);

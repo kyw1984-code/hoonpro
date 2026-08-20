@@ -89,31 +89,98 @@ export const normalizeCategoryUrl = (input: string): string => {
  * 화면에 보이는 목록과 실제 수집 대상이 어긋나 보이기 쉬웠습니다.
  * 저장한 내용이 곧 등록 목록이 되도록 단순하게 바꿉니다.
  */
-export const readCategoryUrlConfig = (): Record<string, string[]> => {
-  if (typeof window === 'undefined') return { ...defaultCoupangCategoryUrls };
+const sanitizeConfig = (input: unknown): Record<string, string[]> => {
+  const config: Record<string, string[]> = {};
+  if (!input || typeof input !== 'object') return config;
+  for (const [category, urls] of Object.entries(input as Record<string, unknown>)) {
+    const valid = (Array.isArray(urls) ? urls : []).map((url) => normalizeCategoryUrl(String(url))).filter(Boolean);
+    if (valid.length > 0) config[category] = valid;
+  }
+  return config;
+};
+
+/**
+ * 서버에서 불러온 설정을 담아두는 캐시입니다.
+ *
+ * 설정의 원본은 Supabase지만, 수집 경로 곳곳에서 동기적으로 읽기 때문에
+ * 한 번 불러온 값을 여기에 두고 동기 접근을 유지합니다. localStorage는
+ * 첫 화면을 그리는 동안 쓰는 임시 사본입니다.
+ */
+let categoryConfigCache: Record<string, string[]> | null = null;
+
+const readLocalCategoryConfig = (): Record<string, string[]> | null => {
+  if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(CATEGORY_URL_STORAGE_KEY);
-    if (!raw) return { ...defaultCoupangCategoryUrls };
-    const parsed = JSON.parse(raw) as Record<string, string[]>;
-    const config: Record<string, string[]> = {};
-    for (const [category, urls] of Object.entries(parsed)) {
-      const valid = (Array.isArray(urls) ? urls : []).map(normalizeCategoryUrl).filter(Boolean);
-      if (valid.length > 0) config[category] = valid;
-    }
-    return Object.keys(config).length > 0 ? config : { ...defaultCoupangCategoryUrls };
+    if (!raw) return null;
+    const config = sanitizeConfig(JSON.parse(raw));
+    return Object.keys(config).length > 0 ? config : null;
   } catch {
-    return { ...defaultCoupangCategoryUrls };
+    return null;
   }
 };
 
-export const saveCategoryUrlConfig = (config: Record<string, string[]>) => {
+const writeLocalCategoryConfig = (config: Record<string, string[]>) => {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(CATEGORY_URL_STORAGE_KEY, JSON.stringify(config));
 };
 
-export const resetCategoryUrlConfig = () => {
-  if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(CATEGORY_URL_STORAGE_KEY);
+/** 동기 접근용. 서버에서 불러오기 전에는 로컬 사본이나 기본값을 씁니다. */
+export const readCategoryUrlConfig = (): Record<string, string[]> => {
+  if (categoryConfigCache && Object.keys(categoryConfigCache).length > 0) return categoryConfigCache;
+  return readLocalCategoryConfig() || { ...defaultCoupangCategoryUrls };
+};
+
+/** Supabase에서 카테고리 설정을 불러와 캐시에 채웁니다. */
+export const loadCategoryUrlConfig = async (): Promise<Record<string, string[]>> => {
+  const token = getToken();
+  if (!token) return readCategoryUrlConfig();
+  try {
+    const response = await fetch('/api/sourcing?type=category-config', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || '카테고리 설정을 불러오지 못했습니다.');
+
+    const config = sanitizeConfig(data?.config);
+    if (Object.keys(config).length === 0) {
+      // 서버에 아직 아무것도 없으면 기본값을 그대로 씁니다.
+      categoryConfigCache = { ...defaultCoupangCategoryUrls };
+      return categoryConfigCache;
+    }
+    categoryConfigCache = config;
+    writeLocalCategoryConfig(config);
+    return config;
+  } catch {
+    // 서버를 못 읽어도 화면은 로컬 사본으로 계속 동작하게 둡니다.
+    return readCategoryUrlConfig();
+  }
+};
+
+/** 관리자만 가능. 서버에 저장하고 캐시·로컬 사본을 갱신합니다. */
+export const saveCategoryUrlConfig = async (config: Record<string, string[]>): Promise<number> => {
+  const token = getToken();
+  if (!token) throw new Error('로그인이 필요합니다.');
+
+  const response = await fetch('/api/sourcing?type=category-config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ config }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error || '카테고리 설정 저장에 실패했습니다.');
+
+  const saved = sanitizeConfig(config);
+  categoryConfigCache = saved;
+  writeLocalCategoryConfig(saved);
+  return Number(data?.saved ?? Object.keys(saved).length);
+};
+
+/** 기본값으로 되돌리고 서버에도 반영합니다. */
+export const resetCategoryUrlConfig = async (): Promise<void> => {
+  if (typeof window !== 'undefined') window.localStorage.removeItem(CATEGORY_URL_STORAGE_KEY);
+  categoryConfigCache = { ...defaultCoupangCategoryUrls };
+  await saveCategoryUrlConfig(defaultCoupangCategoryUrls).catch(() => undefined);
 };
 
 export const getDefaultCategoryUrls = () => ({ ...defaultCoupangCategoryUrls });
