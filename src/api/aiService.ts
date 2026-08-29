@@ -235,7 +235,6 @@ export interface DetailPlanImage {
   shotType?: 'model' | 'product' | 'detail' | 'texture' | 'lifestyle' | 'package' | 'cta';
   mainCopy: string;      // 메인 카피 (한글, \n 줄바꿈)
   subCopy: string;       // 서브 카피
-  points: string[];      // 보조 포인트 3~5개
   trustElement: string;  // 신뢰 요소
   trigger: string;       // 전환 트리거
   textPosition: 'top' | 'middle' | 'bottom';
@@ -434,7 +433,6 @@ const createFallbackDetailPlan = (data: any, reason = 'GPT 기획안 생성 실�
       shotType: index === count - 1 ? 'cta' : base.shotType,
       mainCopy: base.mainCopy,
       subCopy: base.subCopy,
-      points: base.role === '상품 특장점' ? featurePoints : ['핵심 장점', '편한 사용', '꼼꼼한 마감'],
       trustElement: index >= count - 2 ? '품질과 사용성 중심의 신뢰 요소' : '제품 장점 기반 설득 요소',
       trigger: base.trigger,
       textPosition,
@@ -517,7 +515,6 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
       shotType: ['model', 'product', 'detail', 'texture', 'lifestyle', 'package', 'cta'].includes(img?.shotType) ? img.shotType : fallbackImage.shotType,
       mainCopy: normalizeMainCopy(img?.mainCopy || img?.copy || fallbackImage.mainCopy),
       subCopy: String(img?.subCopy || fallbackImage.subCopy).slice(0, 26),
-      points: Array.isArray(img?.points) && img.points.length > 0 ? img.points.slice(0, 3).map((p: any) => String(p).slice(0, 16)) : fallbackImage.points,
       trustElement: String(img?.trustElement || fallbackImage.trustElement),
       trigger: String(img?.trigger || fallbackImage.trigger),
       textPosition: validPositions.includes(img?.textPosition) ? img.textPosition : fallbackImage.textPosition,
@@ -533,9 +530,6 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
   });
   if (!hasFeatureSection && images.length >= 4) {
     const productBrief = data.productBrief ? normalizeProductBrief(data.productBrief, data) : null;
-    const featurePoints = productBrief?.coreFeatures?.length
-      ? productBrief.coreFeatures.slice(0, 3)
-      : fallback.images[3].points;
     images[3] = {
       ...images[3],
       role: '상품 특장점',
@@ -544,12 +538,11 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
       shotType: 'product',
       mainCopy: '한눈에보이는\n핵심특장점',
       subCopy: '이 상품의 장점을 명확하게 보여드립니다',
-      points: featurePoints,
       trigger: '비교우위',
       textPosition: 'top',
       visualPrompt: [
         images[3].visualPrompt || fallback.images[3].visualPrompt,
-        `This section must clearly visualize the product's key selling features and benefits: ${featurePoints.join(', ')}.`,
+        `This section must clearly visualize the product's key selling features and benefits: ${(productBrief?.coreFeatures || []).slice(0, 3).join(', ') || 'core product strengths'}.`,
         'Use product-focused composition with detail callouts, texture, function, premium props, and clear negative space for overlay copy. No text inside the generated image.',
       ].join(' '),
     };
@@ -636,7 +629,7 @@ ${productBriefGuide}
 ${bundleRules}
 - 문제 공감/문제 확대 섹션은 현재 판매 제품을 보여주지 말고, 고객이 기존에 겪던 불편한 상황이나 일반적인 기존/타사/낡은 대안 제품을 보여주세요. 이 섹션은 "기존에는 이랬지만, 이제 이 제품이 더 좋다"는 대비를 만들기 위한 before 컷입니다.
 - 전체 이미지 중 최소 1장은 반드시 role="상품 특장점" 또는 "핵심 특장점"으로 작성하세요. 이 장은 productBrief.coreFeatures 또는 추론한 핵심 장점을 한눈에 보여주는 benefit/feature 섹션이어야 합니다.
-- 상품 특장점 장은 제품의 장점, 기능, 소재, 사용성, 차별점을 시각적으로 비교/강조하는 구성으로 만들고, points에는 핵심 특장점 3개를 넣으세요.
+- 상품 특장점 장은 제품의 장점, 기능, 소재, 사용성, 차별점을 시각적으로 비교/강조하는 구성으로 만드세요.
 - 중간 이미지는 기능/감성/비교/사용 장면/디테일 등 서로 다른 각도로 구성하고 표현 중복을 피하세요.
 - shotType은 model, product, detail, texture, lifestyle, package, cta 중 하나를 반드시 지정하세요.
 - 기본 8장 기준 모델컷은 최대 2~3장만 사용하고, 나머지는 제품 단독컷/디테일 클로즈업/소재·프린팅 클로즈업/패키지·구성품/CTA 제품컷으로 섞으세요.
@@ -646,7 +639,6 @@ ${bundleRules}
 - 이미지 위 문구는 최소한으로. 비주얼이 설득하고 카피는 한 문장으로 정리합니다. 문구가 적을수록 고급스러운 상세페이지입니다.
 - mainCopy는 기본 1줄 12자 이내. 꼭 필요한 경우에만 2줄(\n 줄바꿈, 각 줄 12자 이내)
 - subCopy는 Hook과 CTA 섹션에만 1줄 18자 이내로 작성하고, 나머지 모든 섹션은 반드시 빈 문자열 ""
-- points는 '상품 특장점'(핵심 특장점)과 비교 섹션에만 최대 3개(각 8자 이내), 나머지 모든 섹션은 반드시 빈 배열 []
 - 광고 문구가 아니라 '고객의 머릿속 생각을 대신 말하는' 방식, 존댓말, 미사여구·어려운 한자어 금지
 - 각 이미지마다 전환 트리거(손실회피/사회적 증거/권위/희소성/편의성/감정적 보상/비교우위) 중 하나 이상 적용하되, 트리거는 비주얼과 mainCopy 한 줄로만 표현
 
@@ -659,7 +651,8 @@ ${bundleRules}
 - product only는 흰 배경 카탈로그컷이 아닙니다. 사람은 없되, 상세페이지 디자이너가 만든 것처럼 배경 질감/컬러, 플랫폼/받침, 조명 그림자, 카테고리 관련 소품, 깊이감, 프리미엄 연출을 포함하세요.
 - 모든 섹션은 “제품 사진 한 장”이 아니라 “상세페이지용 한 섹션 비주얼”처럼 보여야 합니다. 단순 흰 배경, 누끼컷, 마켓 상품 등록용 중앙 정렬 컷, 텅 빈 스튜디오 배경을 피하세요.
 - 의류 product/detail/texture/cta 컷은 제품을 행거/마네킹처럼 보이게 하지 말고, 접힘, 소재 질감, 프린팅 클로즈업, 프리미엄 받침대, 배경 패브릭/종이/스튜디오 세트 등으로 디자인된 장면을 만드세요.
-- photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, realistic shadows, Korean smartstore style를 녹일 것
+- 다음 상업 사진 키워드를 자연스럽게 녹일 것: photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, high-end advertising, clean layout, Korean ecommerce style, smartstore optimized, high conversion design, premium visual merchandising, realistic shadows, luxury branding
+- 실제 상업 스튜디오에서 촬영한 사진처럼 묘사할 것: 자연스러운 심도(depth of field), 단일 방향의 부드러운 주광과 보조광, 접지 그림자, 실제 소재의 질감과 미세한 결. AI 합성처럼 보이는 묘사(매끈한 플라스틱 피부, 떠 있는 제품, 콜라주)는 금지
 - 텍스트가 올라갈 영역(상/중/하)에는 깨끗한 여백이 생기도록 구도를 설계
 - 행거컷/마네킹/저품질 플랫레이는 피하되, product/detail/texture/package/cta 섹션에서는 사람 없이 제품만 고급스럽게 연출하세요.
 - 레퍼런스 인물이 있는 경우 모델컷에서만 새 가상 인물로 교체하고, 제품 단독 섹션에는 사람을 넣지 마세요.
@@ -680,7 +673,7 @@ ${bundleRules}
   "purchaseResistances": ["저항1", "저항2", "저항3", "저항4", "저항5"],
   "designSystem": { "tone": "프리미엄/미니멀/감성 등 1개", "colors": { "primary": "#hex", "secondary": "#hex", "accent": "#hex", "background": "#hex", "text": "#hex" } },
   "images": [
-    { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "shotType": "model", "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "points": ["보조1","보조2","보조3"], "trustElement": "신뢰 요소", "trigger": "감정적 보상", "textPosition": "bottom", "visualPrompt": "A premium Hook model cut with one fictional Korean model wearing or using the exact reference product, strong first impression, product large and clearly visible, designer-made detail-page hero scene ..." }
+    { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "shotType": "model", "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "trustElement": "신뢰 요소", "trigger": "감정적 보상", "textPosition": "bottom", "visualPrompt": "A premium Hook model cut with one fictional Korean model wearing or using the exact reference product, strong first impression, product large and clearly visible, designer-made detail-page hero scene ..." }
   ]
 }
 images 배열은 정확히 ${count}개여야 하며 1번은 Hook, 마지막은 CTA여야 합니다.

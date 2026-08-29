@@ -244,7 +244,10 @@ const TEXT_RENDER_MODE_LABEL: Record<TextRenderMode, string> = {
 
 const isIntegratedTextEligible = (copy: string): boolean => {
     const normalized = normalizeOverlayCopy(copy);
-    return !!normalized && !normalized.includes('\n') && Array.from(normalized).length <= 12;
+    if (!normalized) return false;
+    const lines = normalized.split('\n');
+    // 최신 이미지 모델은 2줄 한글 헤드라인까지 안정적 — 과도한 폴백으로 통합 모드가 무력화되지 않게 완화
+    return lines.length <= 2 && lines.every(line => Array.from(line).length <= 16) && Array.from(normalized.replace(/\n/g, '')).length <= 30;
 };
 
 const compactCopyLine = (value: string, maxLength: number): string => {
@@ -309,7 +312,6 @@ const formatMainCopy = (value: string): string => {
 const tidyImageCopy = (img: GenImage): Partial<GenImage> => ({
     mainCopy: formatMainCopy(img.mainCopy),
     subCopy: compactCopyLine(img.subCopy, 24),
-    points: (img.points || []).slice(0, 3).map(point => compactCopyLine(point, 12)).filter(Boolean),
 });
 
 const detectProductColorLock = (value: string): ProductColorLock => {
@@ -477,14 +479,13 @@ const inspectImageQuality = (
     const mainLines = normalizedMain.split('\n').filter(Boolean);
     if (!normalizedMain) warnings.push('메인 카피가 비어 있습니다.');
     FORBIDDEN_COPY_REPLACEMENTS.forEach(({ pattern, label }) => {
-        if (new RegExp(pattern.source).test(`${img.mainCopy} ${img.subCopy} ${(img.points || []).join(' ')}`)) {
+        if (new RegExp(pattern.source).test(`${img.mainCopy} ${img.subCopy}`)) {
             warnings.push(`${label}이 포함되어 있습니다.`);
         }
     });
     if (mainLines.length > 4) warnings.push('메인 카피가 길어 폰트가 작아질 수 있습니다.');
     if (mainLines.some(line => Array.from(line).length > 14)) warnings.push('메인 카피 한 줄이 14자를 넘습니다.');
     if (Array.from(normalizeOverlayCopy(img.subCopy)).length > 24) warnings.push('서브 카피가 24자를 넘습니다.');
-    if ((img.points || []).some(point => Array.from(normalizeOverlayCopy(point)).length > 12)) warnings.push('보조 포인트는 12자 이내가 안정적입니다.');
     if (!normalizeOverlayCopy(img.visualPrompt)) warnings.push('이미지 프롬프트가 비어 있습니다.');
     if (allMainCopies.filter(copy => copy === normalizedMain).length > 1) warnings.push('다른 이미지와 메인 카피가 중복됩니다.');
     if (index === 0 && img.layoutPreset !== 'hero') warnings.push('첫 이미지는 Hook/Hero 역할이 권장됩니다.');
@@ -508,14 +509,14 @@ const inspectImageQuality = (
         if (isIntegratedTextEligible(img.mainCopy)) {
             warnings.push('AI 통합 텍스트 모드: 이미지 속 한글 오타·뭉개짐을 직접 확인해주세요.');
         } else {
-            warnings.push('메인 카피가 길어 AI 통합 텍스트 대신 안전 합성으로 처리됩니다.');
+            warnings.push('메인 카피가 길어 AI 통합 텍스트 대신 안전 합성으로 처리됩니다. (2줄·줄당 16자 이내로 줄이면 통합 텍스트가 적용됩니다)');
         }
     }
     return warnings;
 };
 
-const isFeatureBenefitImage = (img: Pick<GenImage, 'role' | 'stage' | 'sectionType' | 'mainCopy' | 'subCopy' | 'points'>): boolean => {
-    const source = `${img.role} ${img.stage} ${img.sectionType} ${img.mainCopy} ${img.subCopy} ${(img.points || []).join(' ')}`.toLowerCase();
+const isFeatureBenefitImage = (img: Pick<GenImage, 'role' | 'stage' | 'sectionType' | 'mainCopy' | 'subCopy'>): boolean => {
+    const source = `${img.role} ${img.stage} ${img.sectionType} ${img.mainCopy} ${img.subCopy}`.toLowerCase();
     return /특장점|핵심\s*장점|셀링|benefit|feature|advantage|usp|차별점/.test(source);
 };
 
@@ -655,8 +656,9 @@ const buildImagePrompt = (
         ? `\nAPPROVED MASTER REFERENCE: Follow the ${masterReferenceType === 'hook-model' ? 'Hook model master' : 'product detail master'} for product continuity, but create a fresh section image matching this section role.`
         : '';
 
-    return `Create ONE polished Korean e-commerce detail-page background image (vertical 860x1000 / 4:5 layout) for the product "${productName}".
-This must look like a TOP 1% Korean smartstore/Coupang detail page section background: photorealistic real product photography with a clean composition and premium visual merchandising.
+    return `Create ONE polished Korean e-commerce detail-page image (vertical 860x1000 / 4:5 layout) for the product "${productName}".
+photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, high-end advertising, clean layout, professional typography area, Korean ecommerce style, smartstore optimized, 860px width composition, high conversion design, premium visual merchandising, realistic shadows, luxury branding.
+This must look like a TOP 1% Korean smartstore/Coupang detail page section: a real photo studio shoot art-directed by a professional commercial photographer — not an AI collage, not a stock photo, not a marketplace listing thumbnail.
 
 SECTION ROLE: ${img.role}${img.stage ? ` (구매 심리 단계: ${img.stage})` : ''}.
 ${masterGuide}
@@ -675,6 +677,9 @@ DESIGN DIRECTION:
 - Use a complete designer-made detail-page section: layered composition, background texture/color, product scale hierarchy, realistic shadow, premium lighting, and tasteful category-relevant styling.
 - Visual diversity rule: make this section clearly different from adjacent sections in camera angle, background depth, pose, crop, and product emphasis. Avoid repeating the same model pose, same room, same close-up type, or same centered product composition.
 - Minimal-clutter rule: at most 1-2 tasteful category-relevant props, one background concept, one dominant subject. The scene must feel calm, airy, and expensive — never busy, cramped, cluttered, or collage-like. When in doubt, remove elements instead of adding them.
+- PHOTOGRAPHIC REALISM (critical for quality): shoot-like depth of field with a natural focus falloff, soft directional key light with a gentle fill, true-to-life color grading, accurate contact shadows where objects meet surfaces, subtle surface imperfections and real material grain. Skin, fabric weave, metal, glass, and plastic must each read as their real material.
+- Composition craft: intentional framing using the rule of thirds or a clean centered hero, believable perspective and eye level, consistent single light direction across the whole frame, and a background that recedes naturally behind the subject.
+- FORBIDDEN (these make it look cheap/AI-made): plastic-looking oversmoothed skin, waxy or melted product edges, warped/duplicated hands or fingers, floating objects without shadows, mismatched light directions, over-saturated HDR glow, heavy vignettes, fake bokeh circles, visible collage seams, repeated pattern artifacts, or a subject pasted onto an unrelated background.
 
 ${problemContrast || img.bundleRequirement === 'before-no-current-product' ? problemContrastGuide : identityInstruction}
 ${bundle}
@@ -910,15 +915,11 @@ const overlayTextOnImage = async (
             // 미니멀 타이포그래피: 판·칩·필 없이 악센트 라인 + 텍스트만 (문구 최소화)
             const headline = buildHeadlineLayout(ctx, formatMainCopy(seg.mainCopy), seg.textPosition);
             const subCopy = normalizeOverlayCopy(seg.subCopy);
-            const points = (seg.points || []).map(normalizeOverlayCopy).filter(Boolean).slice(0, 3);
             const subFont = 25;
-            const pointFont = 20;
             const subHeight = subCopy ? 38 : 0;
-            const pointLine = points.join('   ·   ');
-            const pointHeight = pointLine ? 34 : 0;
             const accentHeight = 20;
             const headlineHeight = headline.lines.length * headline.lineHeight;
-            const blockHeight = accentHeight + headlineHeight + subHeight + pointHeight + 8;
+            const blockHeight = accentHeight + headlineHeight + subHeight + 8;
             const centerY = seg.textPosition === 'top'
                 ? Math.max(110, blockHeight / 2 + 48)
                 : seg.textPosition === 'middle'
@@ -927,17 +928,13 @@ const overlayTextOnImage = async (
             const textColor = getTextColor(design);
             const accentColor = getAccentColor(design);
 
-            drawBackdrop(ctx, seg.textPosition, centerY, blockHeight, textColor);
+            // 배경 그라데이션·그림자 등 뒤 효과 없이 깨끗한 타이포그래피만 렌더링
             drawAccentLine(ctx, centerY - blockHeight / 2, accentColor);
 
             let y = centerY - blockHeight / 2 + accentHeight + headline.lineHeight / 2;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.lineJoin = 'round';
-            ctx.miterLimit = 2;
-            ctx.shadowColor = getContrastStroke(textColor);
-            ctx.shadowBlur = Math.max(5, headline.fontSize * 0.1);
-            ctx.shadowOffsetY = 1;
+            ctx.shadowBlur = 0;
             ctx.font = `800 ${headline.fontSize}px ${DETAIL_FONT_FAMILY}`;
             headline.lines.forEach((line) => {
                 ctx.fillStyle = textColor;
@@ -948,24 +945,12 @@ const overlayTextOnImage = async (
             if (subCopy) {
                 y += 4;
                 ctx.font = `500 ${subFont}px ${DETAIL_FONT_FAMILY}`;
-                ctx.shadowBlur = 4;
-                ctx.globalAlpha = 0.9;
+                ctx.globalAlpha = 0.85;
                 ctx.fillStyle = textColor;
                 wrapText(ctx, subCopy, TARGET_WIDTH - 180, 1).forEach((line) => {
                     ctx.fillText(line, TARGET_WIDTH / 2, y);
                 });
                 ctx.globalAlpha = 1;
-                y += subHeight;
-            }
-
-            if (pointLine) {
-                y += 2;
-                ctx.font = `600 ${pointFont}px ${DETAIL_FONT_FAMILY}`;
-                ctx.shadowBlur = 3;
-                ctx.fillStyle = accentColor;
-                wrapText(ctx, pointLine, TARGET_WIDTH - 150, 1).forEach((line) => {
-                    ctx.fillText(line, TARGET_WIDTH / 2, y);
-                });
             }
 
             resolve(canvas.toDataURL('image/png'));
@@ -985,7 +970,6 @@ interface GenImage {
     shotType?: ShotType;
     mainCopy: string;
     subCopy: string;
-    points: string[];
     trustElement: string;
     trigger: string;
     textPosition: 'top' | 'middle' | 'bottom';
@@ -1011,8 +995,6 @@ interface GenImage {
     bundleRequirement?: BundleRequirement;
     regenerationHint?: string;
     previousImageUrl?: string;
-    candidateImageUrl?: string;
-    candidateRawImageUrl?: string;
     provider?: 'openai' | 'gemini';
     model?: string;
 }
@@ -1066,7 +1048,6 @@ const createGenImagesFromPlan = (result: DetailPlan, combinationType: Combinatio
         const shotType = resolveShotType(img.sectionType, img.role, layoutPreset, i, total, img.shotType);
         const main = sanitizeCopy(formatMainCopy(img.mainCopy));
         const sub = sanitizeCopy(img.subCopy);
-        const points = (img.points || []).slice(0, 3).map(point => sanitizeCopy(point));
         const textPosition = img.textPosition || getDefaultTextPosition(layoutPreset, i);
 
         return {
@@ -1078,7 +1059,6 @@ const createGenImagesFromPlan = (result: DetailPlan, combinationType: Combinatio
             shotType,
             mainCopy: formatMainCopy(main.text),
             subCopy: sub.text,
-            points: points.map(point => point.text),
             trustElement: img.trustElement,
             trigger: img.trigger,
             textPosition,
@@ -1091,7 +1071,7 @@ const createGenImagesFromPlan = (result: DetailPlan, combinationType: Combinatio
             layoutPreset,
             textRenderMode: 'canvas',
             qaTags: [],
-            qualityWarnings: [...main.warnings, ...sub.warnings, ...points.flatMap(point => point.warnings)],
+            qualityWarnings: [...main.warnings, ...sub.warnings],
             priority: 0,
             bundleRequirement: resolveBundleRequirement({ number: img.number, role: img.role, layoutPreset, sectionType: img.sectionType, shotType }, combinationType),
         };
@@ -1533,8 +1513,7 @@ export const DetailPlanner: React.FC = () => {
         retry = false,
         runtimeMasters = masterReferences,
         runtimeLock = getActiveVisualLock(),
-        bulkGenerate = false,
-        asCandidate = false
+        bulkGenerate = false
     ) => {
         const requestedTextMode = textRenderMode;
         updateImage(seg.id, {
@@ -1571,10 +1550,9 @@ export const DetailPlanner: React.FC = () => {
                 : latest;
             const prompt = buildImagePrompt(promptSource, info.combinationType, info.name, colorLock, genderLock, requestedTextMode, runtimeLock, masterReferenceType, plan?.designSystem, referenceImages.length);
             const { refs, roles } = buildReferencePayload(latest, runtimeMasters);
-            const wantsCandidatePair = !asCandidate && shouldRunVisionQa(latest) && (latest.number === 1 || latest.layoutPreset === 'cta' || isFeatureBenefitImage(latest));
             const result = await generateImage(prompt, refs, '9:16', bulkGenerate ? 'medium' : undefined, {
                 inputFidelity: 'high',
-                variantCount: wantsCandidatePair ? 2 : 1,
+                variantCount: 1, // 섹션당 이미지 1장만 생성
                 referenceRoles: roles,
                 pacingMode: 'auto',
                 priority: latest.priority ?? getImageGenerationPriority(latest),
@@ -1582,10 +1560,10 @@ export const DetailPlanner: React.FC = () => {
             const raw = result?.image;
             if (!raw) {
                 updateImage(seg.id, {
-                    imageUrl: asCandidate ? latest.imageUrl : '',
-                    rawImageUrl: asCandidate ? latest.rawImageUrl : '',
+                    imageUrl: '',
+                    rawImageUrl: '',
                     isGenerating: false,
-                    status: asCandidate && latest.imageUrl ? 'done' : 'failed',
+                    status: 'failed',
                     errorMessage: getImageFailureMessage('empty'),
                 });
                 return;
@@ -1593,23 +1571,6 @@ export const DetailPlanner: React.FC = () => {
             const imageUrl = canUseIntegratedText
                 ? raw
                 : await overlayTextOnImage(raw, { ...latest, textRenderMode: 'canvas' }, plan?.designSystem);
-            const secondRaw = result?.images?.find(candidate => candidate && candidate !== raw);
-            const secondImageUrl = secondRaw
-                ? (canUseIntegratedText ? secondRaw : await overlayTextOnImage(secondRaw, { ...latest, textRenderMode: 'canvas' }, plan?.designSystem))
-                : '';
-            if (asCandidate && latest.imageUrl) {
-                updateImage(seg.id, {
-                    candidateImageUrl: imageUrl,
-                    candidateRawImageUrl: raw,
-                    previousImageUrl: latest.imageUrl,
-                    isGenerating: false,
-                    status: 'done',
-                    errorMessage: '',
-                    provider: result?.provider,
-                    model: result?.model,
-                });
-                return;
-            }
             const nextPatch: Partial<GenImage> = {
                 imageUrl,
                 rawImageUrl: raw,
@@ -1619,9 +1580,7 @@ export const DetailPlanner: React.FC = () => {
                 textRenderMode: canUseIntegratedText ? 'integrated' : 'canvas',
                 provider: result?.provider,
                 model: result?.model,
-                variantUrls: result?.images || [],
-                candidateImageUrl: secondImageUrl,
-                candidateRawImageUrl: secondRaw || '',
+                variantUrls: [],
                 previousImageUrl: '',
                 regenerationHint: '',
                 visionWarnings: [],
@@ -1650,7 +1609,7 @@ export const DetailPlanner: React.FC = () => {
         updateImage(seg.id, { imageUrl, isGenerating: false, status: 'done', textRenderMode: 'canvas' });
     };
 
-    const applyTextPatch = async (seg: GenImage, patch: Partial<Pick<GenImage, 'mainCopy' | 'subCopy' | 'points'>>) => {
+    const applyTextPatch = async (seg: GenImage, patch: Partial<Pick<GenImage, 'mainCopy' | 'subCopy'>>) => {
         const latest = {
             ...(images.find(img => img.id === seg.id) || seg),
             ...patch,
@@ -1744,34 +1703,8 @@ export const DetailPlanner: React.FC = () => {
 
     const regenerateWithPreset = async (seg: GenImage, hint: string) => {
         const latest = { ...(images.find(img => img.id === seg.id) || seg), regenerationHint: hint };
-        updateImage(seg.id, {
-            previousImageUrl: latest.imageUrl,
-            candidateImageUrl: '',
-            candidateRawImageUrl: '',
-            regenerationHint: hint,
-        });
-        await generateOne(latest, seg.status === 'failed', masterReferences, getActiveVisualLock(), false, !!latest.imageUrl);
-    };
-
-    const acceptCandidateImage = (seg: GenImage) => {
-        if (!seg.candidateImageUrl) return;
-        updateImage(seg.id, {
-            imageUrl: seg.candidateImageUrl,
-            rawImageUrl: seg.candidateRawImageUrl || seg.candidateImageUrl,
-            candidateImageUrl: '',
-            candidateRawImageUrl: '',
-            previousImageUrl: '',
-            regenerationHint: '',
-        });
-    };
-
-    const keepPreviousImage = (seg: GenImage) => {
-        updateImage(seg.id, {
-            candidateImageUrl: '',
-            candidateRawImageUrl: '',
-            previousImageUrl: '',
-            regenerationHint: '',
-        });
+        updateImage(seg.id, { regenerationHint: hint });
+        await generateOne(latest, seg.status === 'failed', masterReferences, getActiveVisualLock(), false);
     };
 
     // ── STEP 2 → 전체 이미지 생성 ──
@@ -2076,7 +2009,7 @@ export const DetailPlanner: React.FC = () => {
                             </div>
                             {!aiIntegratedTextUnlocked && (
                                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
-                                    AI 통합 텍스트 실험은 관리자 설정에서 허용된 경우에만 사용할 수 있습니다.
+                                    AI 통합 텍스트 실험은 관리자 설정에서 허용된 경우에만 사용할 수 있습니다. (관리자 탭 → &apos;AI 통합 텍스트 실험 허용&apos; 켜기)
                                 </div>
                             )}
                             {textRenderMode === 'integrated' && (
@@ -2344,11 +2277,6 @@ export const DetailPlanner: React.FC = () => {
                                             </div>
                                         </div>
                                         <div className="text-sm text-slate-600 space-y-1">
-                                            {img.points?.length > 0 && (
-                                                <ul className="list-disc list-inside text-xs text-slate-500">
-                                                    {img.points.map((p, i) => <li key={i}>{p}</li>)}
-                                                </ul>
-                                            )}
                                             {img.trustElement && <p className="text-xs text-slate-500"><span className="text-slate-400">신뢰:</span> {img.trustElement}</p>}
                                             {img.qualityWarnings && img.qualityWarnings.length > 0 && (
                                                 <div className="rounded-lg border border-amber-100 bg-amber-50 p-2 text-[11px] text-amber-700">
@@ -2536,74 +2464,30 @@ export const DetailPlanner: React.FC = () => {
                                             className="w-full p-2 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none" placeholder="메인 카피" />
                                         <div className="rounded-lg border border-slate-100 p-2">
                                             <div className="mb-1.5 flex items-center justify-between gap-2">
-                                                <p className="text-[11px] font-black text-slate-600">서브/포인트 문구 편집</p>
+                                                <p className="text-[11px] font-black text-slate-600">서브 카피 편집</p>
                                                 <div className="flex gap-1">
                                                     <button
-                                                        onClick={() => applyTextPatch(seg, { subCopy: seg.subCopy, points: (seg.points || []).map(point => point.trim()).filter(Boolean) })}
+                                                        onClick={() => applyTextPatch(seg, { subCopy: seg.subCopy })}
                                                         disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
                                                         className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
                                                     >
                                                         적용
                                                     </button>
                                                     <button
-                                                        onClick={() => applyTextPatch(seg, { subCopy: '', points: [] })}
-                                                        disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || (!seg.subCopy && (!seg.points || seg.points.length === 0))}
+                                                        onClick={() => applyTextPatch(seg, { subCopy: '' })}
+                                                        disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || !seg.subCopy}
                                                         className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-100 disabled:opacity-40"
                                                     >
-                                                        서브/포인트 전체 제거
+                                                        서브 제거
                                                     </button>
                                                 </div>
                                             </div>
                                             <input
                                                 value={seg.subCopy}
                                                 onChange={e => updateImage(seg.id, { subCopy: e.target.value })}
-                                                className="mb-1.5 w-full rounded-lg border border-slate-200 p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                                                placeholder="서브 카피"
+                                                className="w-full rounded-lg border border-slate-200 p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                                                placeholder="서브 카피 (비워두면 메인 카피만 표시)"
                                             />
-                                            <div className="mb-1.5 space-y-1">
-                                                {(seg.points || []).map((point, index) => (
-                                                    <div key={index} className="flex gap-1">
-                                                        <input
-                                                            value={point}
-                                                            onChange={e => updateImage(seg.id, {
-                                                                points: (seg.points || []).map((item, pointIndex) => pointIndex === index ? e.target.value : item),
-                                                            })}
-                                                            className="min-w-0 flex-1 rounded-lg border border-slate-200 p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                                                            placeholder={`포인트 ${index + 1}`}
-                                                        />
-                                                        <button
-                                                            onClick={() => applyTextPatch(seg, { points: (seg.points || []).filter((_, pointIndex) => pointIndex !== index) })}
-                                                            disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
-                                                            className="rounded-lg bg-slate-100 px-2 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                                                        >
-                                                            삭제
-                                                        </button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <div className="flex flex-wrap gap-1.5">
-                                                <button
-                                                    onClick={() => updateImage(seg.id, { points: [...(seg.points || []), ''] })}
-                                                    disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || (seg.points || []).length >= 3}
-                                                    className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
-                                                >
-                                                    포인트 추가
-                                                </button>
-                                                <button
-                                                    onClick={() => applyTextPatch(seg, { subCopy: '' })}
-                                                    disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || !seg.subCopy}
-                                                    className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                                                >
-                                                    서브 제거
-                                                </button>
-                                                <button
-                                                    onClick={() => applyTextPatch(seg, { points: [] })}
-                                                    disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || !seg.points || seg.points.length === 0}
-                                                    className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                                                >
-                                                    포인트 제거
-                                                </button>
-                                            </div>
                                         </div>
                                         <div>
                                             <p className="mb-1 text-[11px] font-bold text-slate-500">텍스트 위치</p>
@@ -2671,25 +2555,6 @@ export const DetailPlanner: React.FC = () => {
                                                 ))}
                                             </div>
                                         </div>
-                                        {seg.candidateImageUrl && (
-                                            <div className="rounded-lg border border-blue-100 bg-blue-50 p-2">
-                                                <p className="mb-2 text-[11px] font-black text-blue-700">새 후보 이미지</p>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <div>
-                                                        <p className="mb-1 text-[10px] font-bold text-slate-500">현재</p>
-                                                        <img src={seg.previousImageUrl || seg.imageUrl} alt="현재 이미지" className="aspect-[860/1000] w-full rounded-md object-cover" />
-                                                    </div>
-                                                    <div>
-                                                        <p className="mb-1 text-[10px] font-bold text-blue-600">새 후보</p>
-                                                        <img src={seg.candidateImageUrl} alt="새 후보 이미지" className="aspect-[860/1000] w-full rounded-md object-cover" />
-                                                    </div>
-                                                </div>
-                                                <div className="mt-2 grid grid-cols-2 gap-1.5">
-                                                    <button onClick={() => keepPreviousImage(seg)} className="rounded-md bg-white px-2 py-1.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">현재 유지</button>
-                                                    <button onClick={() => acceptCandidateImage(seg)} className="rounded-md bg-blue-600 px-2 py-1.5 text-xs font-bold text-white hover:bg-blue-700">새 후보 적용</button>
-                                                </div>
-                                            </div>
-                                        )}
                                         {seg.textRenderMode === 'integrated' && (
                                             <button onClick={() => applyTextOnly(seg)} className="w-full text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 rounded py-1.5 flex items-center justify-center gap-1">
                                                 <RefreshCw className="w-3 h-3" /> 안전 모드로 다시 적용
