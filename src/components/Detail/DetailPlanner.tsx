@@ -1897,6 +1897,19 @@ export const DetailPlanner: React.FC = () => {
         });
     };
 
+    const handleDownloadOne = (seg: GenImage) => {
+        if (!seg.imageUrl) return;
+        const idx = images.findIndex(img => img.id === seg.id);
+        const order = idx >= 0 ? idx + 1 : seg.number;
+        const safeRole = (seg.role || '섹션').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '');
+        const a = document.createElement('a');
+        a.href = seg.imageUrl;
+        a.download = `detail_${String(order).padStart(2, '0')}_${safeRole}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
     const generatedCount = images.filter(i => i.status === 'done' && i.imageUrl).length;
     const generatingCount = images.filter(i => i.status === 'queued' || i.status === 'generating' || i.status === 'retrying').length;
     const failedCount = images.filter(i => i.status === 'failed').length;
@@ -2571,6 +2584,15 @@ export const DetailPlanner: React.FC = () => {
                                     )}
                                     <span className="absolute left-2 top-2 rounded-control bg-ink/80 px-2 py-0.5 text-[11px] font-medium text-paper backdrop-blur">{seg.number}. {seg.role}</span>
                                     <span className={`absolute right-2 top-2 rounded-control border px-2 py-0.5 text-[11px] font-semibold backdrop-blur ${STATUS_CLASS[seg.status]}`}>{STATUS_LABEL[seg.status]}</span>
+                                    {seg.imageUrl && seg.status === 'done' && (
+                                        <button
+                                            onClick={() => handleDownloadOne(seg)}
+                                            title="이 이미지만 다운로드"
+                                            className="absolute bottom-2 right-2 flex items-center gap-1 rounded-control bg-ink/80 px-2.5 py-1.5 text-[11px] font-semibold text-paper backdrop-blur transition-opacity hover:bg-ink"
+                                        >
+                                            <Download className="h-3.5 w-3.5" /> 저장
+                                        </button>
+                                    )}
                                 </div>
                                 {seg.imageUrl && (
                                     <div className="p-3 space-y-2">
@@ -2672,6 +2694,9 @@ export const DetailPlanner: React.FC = () => {
                                                 ))}
                                             </div>
                                         </div>
+                                        <button onClick={() => handleDownloadOne(seg)} className="w-full text-xs bg-ink hover:opacity-90 text-paper rounded py-1.5 flex items-center justify-center gap-1 font-semibold">
+                                            <Download className="w-3 h-3" /> 이 이미지 다운로드
+                                        </button>
                                         <button onClick={() => applyTextOnly(seg)} className="w-full text-xs bg-accent-soft hover:bg-accent-soft text-accent rounded py-1.5 flex items-center justify-center gap-1">
                                             <RefreshCw className="w-3 h-3" /> 문구만 다시 적용
                                         </button>
