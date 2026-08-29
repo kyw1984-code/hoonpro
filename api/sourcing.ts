@@ -172,24 +172,37 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 쿠팡 상품 분석 — Bright Data Web Unlocker (실시간)
 // ═══════════════════════════════════════════════════════════════════════════════
-async function fetchViaUnlocker(targetUrl: string): Promise<{ ok: boolean; html?: string; error?: string }> {
-  try {
-    const res = await fetch("https://api.brightdata.com/request", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ zone: BRIGHTDATA_UNLOCKER_ZONE, url: targetUrl, format: "raw" }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return { ok: false, error: `Bright Data Unlocker 오류 (HTTP ${res.status}) ${body.slice(0, 300)}` };
+async function fetchViaUnlocker(targetUrl: string, retries = 2): Promise<{ ok: boolean; html?: string; error?: string }> {
+  let lastError = "Bright Data 호출 실패";
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * attempt));
+    try {
+      const res = await fetch("https://api.brightdata.com/request", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ zone: BRIGHTDATA_UNLOCKER_ZONE, url: targetUrl, format: "raw" }),
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        lastError = `Bright Data Unlocker 오류 (HTTP ${res.status}) ${body.slice(0, 300)}`;
+        if (res.status >= 500 || res.status === 429) continue; // 일시 오류는 재시도
+        return { ok: false, error: lastError };
+      }
+      const html = await res.text();
+      // 빈/불완전 응답은 일시 오류로 간주하고 재시도 (정상 페이지는 수백 KB 이상)
+      if (!html || html.length < 20000) {
+        lastError = `Bright Data 응답이 비정상적으로 작습니다 (len=${html?.length ?? 0}). 잠시 후 다시 시도해주세요.`;
+        continue;
+      }
+      return { ok: true, html };
+    } catch (e: any) {
+      lastError = e?.message || "Bright Data 호출 실패";
     }
-    return { ok: true, html: await res.text() };
-  } catch (e: any) {
-    return { ok: false, error: e?.message || "Bright Data 호출 실패" };
   }
+  return { ok: false, error: lastError };
 }
 
 function pick(re: RegExp, s: string): string {
