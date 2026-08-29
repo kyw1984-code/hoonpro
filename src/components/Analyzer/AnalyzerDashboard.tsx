@@ -190,11 +190,15 @@ export function AnalyzerDashboard() {
       const campMap = new Map<string, any>();
       cleanedData.forEach((row) => {
         const c = row["캠페인명"] || "미확인";
-        if (!campMap.has(c)) campMap.set(c, { 캠페인: c, 광고유형: row["광고유형"] || "", 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0 });
+        if (!campMap.has(c)) campMap.set(c, { 캠페인: c, 광고유형: row["광고유형"] || "", 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0, 검색광고비: 0, 검색매출: 0, 검색클릭: 0, 비검색광고비: 0, 비검색매출: 0, 비검색클릭: 0 });
         const acc = campMap.get(c);
         acc.노출수 += row["노출수"] || 0; acc.클릭수 += row["클릭수"] || 0;
         acc.광고비 += row["광고비"] || 0; acc.판매수량 += row[colQty] || 0;
         acc.매출 += rowRevenue(row);
+        // 목표수익률 레버 판단용: 캠페인 내 검색/비검색 분해
+        const area = row["광고 노출 지면"] || "";
+        if (isSearchPlatform(area)) { acc.검색광고비 += row["광고비"] || 0; acc.검색매출 += rowRevenue(row); acc.검색클릭 += row["클릭수"] || 0; }
+        else if (isNonSearchPlatform(area)) { acc.비검색광고비 += row["광고비"] || 0; acc.비검색매출 += rowRevenue(row); acc.비검색클릭 += row["클릭수"] || 0; }
       });
       campaignSummary = Array.from(campMap.values()).map((c) => {
         const roasPct = c.광고비 > 0 ? (c.매출 / c.광고비) * 100 : 0;
@@ -202,6 +206,9 @@ export function AnalyzerDashboard() {
         const cvr = c.클릭수 > 0 ? c.판매수량 / c.클릭수 : 0;
         const cpc = c.클릭수 > 0 ? c.광고비 / c.클릭수 : 0;
         const 순이익 = revenueMode === "actual" ? c.매출 * netMarginRate - c.광고비 : c.판매수량 * netUnitMargin - c.광고비;
+        const 검색ROAS = c.검색광고비 > 0 ? (c.검색매출 / c.검색광고비) * 100 : 0;
+        const 비검색ROAS = c.비검색광고비 > 0 ? (c.비검색매출 / c.비검색광고비) * 100 : 0;
+        const 검색비중 = c.광고비 > 0 ? (c.검색광고비 / c.광고비) * 100 : 0;
         // 판정: 데이터가 부족한 캠페인을 성급하게 '중단'으로 몰지 않는다
         let verdict: "scale" | "keep" | "fix" | "stop" | "watch";
         if (roasPct >= effectiveBE * 1.3 && c.판매수량 >= 2) verdict = "scale";
@@ -209,7 +216,44 @@ export function AnalyzerDashboard() {
         else if (c.판매수량 === 0 && c.클릭수 >= 30) verdict = "stop";
         else if (c.클릭수 >= 20) verdict = "fix";
         else verdict = "watch";
-        return { ...c, roasPct, ctr, cvr, cpc, 순이익, verdict };
+        // 추천 세팅: 매출 최적화 캠페인의 실제 레버는 예산·목표수익률 둘뿐.
+        // 목표수익률↓ → 입찰 공격적 → 검색 순위·클릭↑(CPC↑) / 목표수익률↑ → 검색 순위↓ → 소진이 비검색으로 이동
+        const 검색표본 = c.검색클릭 >= 10;
+        const 비검색표본 = c.비검색클릭 >= 10;
+        // 목표수익률 % 코칭: 사이드바의 '현재 목표수익률' 입력값을 기준으로 구체적인 숫자를 제안한다.
+        // 쿠팡 세팅 단위에 맞춰 50%p 단위로 반올림하고, 손익분기 아래로는 내리지 않는다.
+        const cur = targetROAS > 0 ? targetROAS : 0;
+        const beFloor = Math.ceil((effectiveBE * 1.1) / 50) * 50;
+        const coachDown = (factor: number): string | null => {
+          if (cur > 0) {
+            const sug = Math.max(Math.floor((cur * factor) / 50) * 50, beFloor);
+            return sug < cur ? `${fmt(cur)}%→${fmt(sug)}%` : null; // 이미 손익분기 근처 → 더 내리면 위험
+          }
+          return `${fmt(beFloor)}%로`;
+        };
+        const coachUp = (factor: number): string => {
+          if (cur > 0) return `${fmt(cur)}%→${fmt(Math.max(Math.ceil((cur * factor) / 50) * 50, cur + 50))}%`;
+          return `${fmt(Math.ceil(Math.max(effectiveBE * 1.5, 400) / 50) * 50)}%로`;
+        };
+        let lever = "";
+        if (verdict === "watch") lever = "현 세팅 유지 · 데이터 축적";
+        else if (verdict === "stop") lever = "예산 축소/일시중지 → 가격·리뷰·상세 점검";
+        else {
+          const searchGood = 검색ROAS >= effectiveBE;
+          const nonSearchGood = 비검색ROAS >= effectiveBE;
+          if (searchGood && nonSearchGood) lever = verdict === "scale" ? "예산 ↑ · 목표수익률 유지" : "세팅 유지";
+          else if (searchGood && 비검색표본 && !nonSearchGood) {
+            const d = coachDown(0.85);
+            lever = d ? `목표수익률 ↓ ${d} → 소진을 검색으로 (검색이 팔림)` : "목표수익률 유지 (손익분기 여유 없음) · 검색이 팔리는 중";
+          } else if (!searchGood && 검색표본 && nonSearchGood) lever = `목표수익률 ↑ ${coachUp(1.2)} → 소진을 비검색으로 (비검색이 팔림)`;
+          else if (searchGood) {
+            const d = coachDown(0.9);
+            const move = d ? `목표수익률 ↓ ${d} (검색 확대)` : "목표수익률 유지 (손익분기 여유 없음)";
+            lever = verdict === "scale" ? `예산 ↑ · ${move}` : move;
+          } else if (nonSearchGood) lever = `목표수익률 ↑ ${coachUp(1.2)} (저단가 비검색 확대)`;
+          else lever = `목표수익률 ↑ ${coachUp(1.3)} (CPC 절감) + 제외키워드 정리`;
+        }
+        return { ...c, roasPct, ctr, cvr, cpc, 순이익, verdict, 검색ROAS, 비검색ROAS, 검색비중, lever };
       }).sort((a, b) => b.광고비 - a.광고비);
     }
 
@@ -408,13 +452,13 @@ export function AnalyzerDashboard() {
     // 8. 스타 키워드 확장
     if (keywordDiag && keywordDiag.star.length > 0) {
       const top = keywordDiag.star.slice(0, 3).map((k: any) => `'${k.키워드}'(ROAS ${fmt(k.roasPct)}%)`).join(", ");
-      recommendations.push(`🌟 [스타 키워드 확장] ${top} 등 ${keywordDiag.star.length}개 키워드가 손익분기를 크게 웃돕니다. 이 키워드들은 수동 캠페인으로 분리해 입찰가를 10~20% 올리고, 연관 세부 키워드(수식어 조합)를 추가해 노출을 확대하세요.`);
+      recommendations.push(`🌟 [스타 키워드 확장] ${top} 등 ${keywordDiag.star.length}개 키워드가 손익분기를 크게 웃돕니다. 매출 최적화(자동) 캠페인은 키워드별 입찰 조절이 불가하므로, ① 이 키워드들만 수동 캠페인으로 분리해 공격적으로 입찰하거나 ② 자동 캠페인의 목표수익률을 낮춰 검색 노출 자체를 키우는 방식으로 확대하세요.`);
     }
 
     // 9. 저효율 키워드 입찰 하향
     if (keywordDiag && keywordDiag.lowRoas.length > 0) {
       const top = keywordDiag.lowRoas.slice(0, 3).map((k: any) => `'${k.키워드}'(ROAS ${fmt(k.roasPct)}%, CPC ₩${fmt(k.cpc)})`).join(", ");
-      recommendations.push(`🟡 [입찰 하향 대상] ${top} — 판매는 있지만 손익분기(${fmt(breakEvenROASPct)}%) 미만입니다. 제외 대신 입찰가를 20~30% 낮춰 CPC를 줄이면 흑자 전환 여지가 있습니다.`);
+      recommendations.push(`🟡 [저효율 키워드] ${top} — 판매는 있지만 손익분기(${fmt(breakEvenROASPct)}%) 미만입니다. 수동 캠페인이라면 입찰가를 20~30% 낮추고, 매출 최적화(자동) 캠페인이라면 키워드별 입찰 조절이 불가하므로 목표수익률을 한 단계(+50%p) 올려 CPC를 줄이거나, 그래도 적자가 지속되면 제외 등록하세요.`);
     }
 
     // 10. 관찰 키워드 — 성급한 제외 방지
@@ -587,8 +631,8 @@ export function AnalyzerDashboard() {
                     <table className="w-full text-sm text-left">
                       <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line">
                         <tr>
-                          {["캠페인", "판정", "광고비", "매출", "ROAS", "CTR", "CVR", "CPC", "순이익"].map((h) => (
-                            <th key={h} className="px-4 py-3 text-right first:text-left [&:nth-child(2)]:text-center">{h}</th>
+                          {["캠페인", "판정", "광고비", "매출", "ROAS", "검색 ROAS", "비검색 ROAS", "순이익", "추천 세팅"].map((h) => (
+                            <th key={h} className="px-4 py-3 text-right first:text-left last:text-left [&:nth-child(2)]:text-center">{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -611,10 +655,13 @@ export function AnalyzerDashboard() {
                               <td className="px-4 py-3 text-right tabular-nums">{c.광고비.toLocaleString()}원</td>
                               <td className="px-4 py-3 text-right tabular-nums">{Math.round(c.매출).toLocaleString()}원</td>
                               <td className="px-4 py-3 text-right tabular-nums">{c.roasPct.toFixed(0)}%</td>
-                              <td className="px-4 py-3 text-right tabular-nums">{(c.ctr * 100).toFixed(2)}%</td>
-                              <td className="px-4 py-3 text-right tabular-nums">{(c.cvr * 100).toFixed(1)}%</td>
-                              <td className="px-4 py-3 text-right tabular-nums">{c.cpc.toFixed(0)}원</td>
+                              <td className="px-4 py-3 text-right tabular-nums">
+                                {c.검색광고비 > 0 ? `${c.검색ROAS.toFixed(0)}%` : "—"}
+                                {c.광고비 > 0 && <span className="ml-1 text-[11px] text-ink-3">({c.검색비중.toFixed(0)}%)</span>}
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums">{c.비검색광고비 > 0 ? `${c.비검색ROAS.toFixed(0)}%` : "—"}</td>
                               <td className={`px-4 py-3 text-right font-semibold tabular-nums ${!processedData.marginProvided ? "text-ink-3" : c.순이익 >= 0 ? "text-positive" : "text-critical"}`}>{processedData.marginProvided ? `${Math.round(c.순이익).toLocaleString()}원` : "—"}</td>
+                              <td className="px-4 py-3 text-left text-[12px] font-medium leading-snug text-ink whitespace-nowrap">{c.lever}</td>
                             </tr>
                           );
                         })}
@@ -623,6 +670,9 @@ export function AnalyzerDashboard() {
                   </div>
                   <p className="mt-2 text-[12px] text-ink-2">
                     판정 기준(손익분기 ROAS {Math.round(processedData.effectiveBE)}%{processedData.marginProvided ? '' : ' — 마진 미입력으로 기본값 적용'}): <b>확대</b> 손익분기×1.3↑ & 판매 2건↑ · <b>유지</b> 손익분기 이상 · <b>개선</b> 미달(클릭 20↑) · <b>중단 검토</b> 클릭 30↑ 판매 0 · <b>관찰</b> 데이터 부족
+                  </p>
+                  <p className="mt-1 text-[12px] text-ink-2">
+                    검색 ROAS 옆 괄호는 광고비 중 검색 지면 비중입니다. <b>추천 세팅</b>의 목표수익률 %는 왼쪽 사이드바의 '현재 목표수익률' 입력값을 기준으로 계산됩니다 — 매출 최적화 캠페인의 조작 레버는 <b>예산</b>과 <b>목표수익률</b> 두 가지뿐이며, 목표수익률을 내리면 검색 노출·클릭이 늘고(CPC↑), 올리면 CPC가 절감되며 소진이 비검색 위주로 이동합니다.
                   </p>
                 </div>
               )}
@@ -752,7 +802,7 @@ export function AnalyzerDashboard() {
                     {[
                       { label: "🌟 스타 (확장)", n: processedData.keywordDiag.star.length, sub: `매출 ₩${Math.round(processedData.keywordDiag.starRevenue).toLocaleString()}`, cls: "border-positive/35 bg-positive-soft text-positive" },
                       { label: "✅ 효율 (유지)", n: processedData.keywordDiag.ok.length, sub: "손익분기 이상", cls: "border-accent/35 bg-accent-soft text-accent" },
-                      { label: "🟡 저효율 (입찰↓)", n: processedData.keywordDiag.lowRoas.length, sub: "판매 有, 손익분기 미달", cls: "border-caution/35 bg-caution-soft text-caution" },
+                      { label: "🟡 저효율 (개선)", n: processedData.keywordDiag.lowRoas.length, sub: "판매 有, 손익분기 미달", cls: "border-caution/35 bg-caution-soft text-caution" },
                       { label: "🔴 제외 후보", n: processedData.keywordDiag.drain.length, sub: `낭비 ₩${processedData.keywordDiag.drainCost.toLocaleString()}`, cls: "border-critical/35 bg-critical-soft text-critical" },
                       { label: "👀 판단 보류", n: processedData.keywordDiag.watch.length, sub: `₩${processedData.keywordDiag.watchCost.toLocaleString()} · 데이터 부족`, cls: "border-line-strong bg-paper-2 text-ink-2" },
                     ].map(({ label, n, sub, cls }) => (
@@ -766,7 +816,7 @@ export function AnalyzerDashboard() {
 
                   {processedData.keywordDiag.star.length > 0 && (
                     <div className="mb-4">
-                      <h4 className="font-semibold text-ink mb-2">🌟 스타 키워드 — 입찰 상향·수동 캠페인 분리 추천</h4>
+                      <h4 className="font-semibold text-ink mb-2">🌟 스타 키워드 — 수동 캠페인 분리·확대 추천</h4>
                       <div className="overflow-x-auto border border-line rounded-card max-h-64">
                         <table className="w-full text-sm text-left">
                           <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line sticky top-0">
