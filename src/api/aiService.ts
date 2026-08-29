@@ -233,12 +233,21 @@ export interface DetailPlanImage {
   stage: string;         // 심리 단계: 인지/공감/문제 인식/해결책/신뢰/확신
   sectionType: string;   // offer/problem/proof/detail/lifestyle/trust/cta
   shotType?: 'model' | 'product' | 'detail' | 'texture' | 'lifestyle' | 'cta';
+  purpose: string;       // 이 이미지가 수행하는 설득 목적 (STEP 4)
   mainCopy: string;      // 메인 카피 (한글, \n 줄바꿈)
   subCopy: string;       // 서브 카피
   trustElement: string;  // 신뢰 요소
   trigger: string;       // 전환 트리거
+  designLayout: string;  // 디자인 레이아웃 설명 (STEP 4)
   textPosition: 'top' | 'middle' | 'bottom';
   visualPrompt: string;  // 이미지 생성 프롬프트 (영어, 텍스트 없는 비주얼)
+}
+
+// STEP 1 — 경쟁상품 대비 비교표 한 줄
+export interface CompetitorComparisonRow {
+  item: string;        // 비교 항목
+  competitor: string;  // 경쟁상품
+  ours: string;        // 본 제품
 }
 
 export interface ProductBrief {
@@ -254,16 +263,40 @@ export interface ProductBrief {
 export interface DetailPlan {
   isFallback?: boolean;
   fallbackReason?: string;
+  // STEP 1 — 제품 정의
   productDefinition: string;
-  customer: { target: string; surfaceNeed: string; realNeed: string };
+  productReason: string;   // 왜 존재하는가
+  productProblem: string;  // 어떤 문제를 해결하는가
+  // STEP 1 — 고객 분석
+  customer: {
+    target: string;
+    age: string;
+    gender: string;
+    job: string;
+    lifestyle: string;
+    purchaseSituation: string;
+    surfaceNeed: string;
+    realNeed: string;
+  };
   differentiators: string[];
+  competitorComparison: CompetitorComparisonRow[];
   purchaseResistances: string[];
+  // STEP 5 — 디자인 시스템
   designSystem: {
     tone: string;
     colors: { primary: string; secondary: string; accent: string; background: string; text: string };
+    fonts: { headline: string; body: string; emphasis: string; cta: string };
   };
   images: DetailPlanImage[];
 }
+
+// STEP 5 — 폰트 시스템은 문서에서 고정값으로 지정됨
+const V21_FONTS = {
+  headline: 'S-Core Dream ExtraBold',
+  body: 'Pretendard Regular',
+  emphasis: 'Pretendard SemiBold',
+  cta: 'Pretendard Bold',
+};
 
 // 상세페이지 마스터 프롬프트 V2.1의 이미지 구성 (12~15장 기준).
 // 장수가 적으면 우선순위가 낮은 섹션부터 자동으로 덜어낸다.
@@ -437,7 +470,7 @@ const createFallbackDetailPlan = (data: any, reason = 'GPT 기획안 생성 실�
   const productBrief = data.productBrief ? normalizeProductBrief(data.productBrief, data) : null;
   const featurePoints = productBrief?.coreFeatures?.length
     ? productBrief.coreFeatures.slice(0, 3)
-    : ['핵심 장점', '편한 사용', '꼼꼼한 마감'];
+    : [`${productName}의 핵심 기능`, '실사용 편의성', '마감 품질'];
   const featureVisualPrompt = [
     buildFallbackVisualPrompt(productName, '상품 특장점', 'product', 'top', 3),
     bundleVisualGuide,
@@ -469,8 +502,10 @@ const createFallbackDetailPlan = (data: any, reason = 'GPT 기획안 생성 실�
       shotType: index === count - 1 ? 'cta' : base.shotType,
       mainCopy: base.mainCopy,
       subCopy: base.subCopy,
+      purpose: `${role} 단계에서 ${stage} 심리를 만들어 다음 섹션으로 스크롤을 이어가게 합니다.`,
       trustElement: index >= count - 2 ? '품질과 사용성 중심의 신뢰 요소' : '제품 장점 기반 설득 요소',
       trigger: base.trigger,
+      designLayout: `${textPosition === 'top' ? '상단' : textPosition === 'middle' ? '중앙' : '하단'} 카피 영역 + 제품 중심 단일 포컬 구성`,
       textPosition,
       visualPrompt: [
         (base as any).visualPrompt || buildFallbackVisualPrompt(productName, role, index === count - 1 ? 'cta' : base.shotType, textPosition, index),
@@ -485,16 +520,29 @@ const createFallbackDetailPlan = (data: any, reason = 'GPT 기획안 생성 실�
     isFallback: true,
     fallbackReason: reason,
     productDefinition: `${productName}의 핵심 장점과 사용 장면을 중심으로 구성한 fallback 상세페이지 기획안입니다.`,
+    productReason: '고객이 반복해서 겪는 불편을 줄이기 위해 존재하는 제품입니다.',
+    productProblem: '기존 대안으로는 해결되지 않던 사용성과 품질의 아쉬움을 해결합니다.',
     customer: {
       target: String(data.target || '상품에 관심 있는 잠재 고객'),
+      age: '20대 후반 ~ 40대',
+      gender: '무관',
+      job: '직장인 및 1인 가구',
+      lifestyle: '실용성과 가성비를 함께 따지는 소비 성향',
+      purchaseSituation: '기존 제품이 불편해 대체품을 찾아보는 상황',
       surfaceNeed: '제품의 장점과 사용성을 빠르게 확인하고 싶음',
       realNeed: '실패 없는 선택이라는 확신을 얻고 싶음',
     },
     differentiators: ['제품 중심 비주얼 구성', '구매 흐름에 맞춘 카피', '디테일과 활용 장면 분리'],
+    competitorComparison: [
+      { item: '사용 편의성', competitor: '기본 기능 위주', ours: '실사용 흐름에 맞춘 구성' },
+      { item: '마감 품질', competitor: '평균 수준의 마감', ours: '디테일까지 확인 가능한 마감' },
+      { item: '정보 제공', competitor: '사진 위주의 단순 나열', ours: '구매 판단에 필요한 정보까지 제공' },
+    ],
     purchaseResistances: ['내게 맞을까', '품질이 괜찮을까', '오래 쓸 수 있을까', '사진과 다르지 않을까', '구매 후 후회하지 않을까'],
     designSystem: {
       tone,
       colors: { primary: '#111827', secondary: '#f8fafc', accent: '#2563eb', background: '#ffffff', text: '#111827' },
+      fonts: { ...V21_FONTS },
     },
     images,
   };
@@ -551,8 +599,10 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
       shotType: ['model', 'product', 'detail', 'texture', 'lifestyle', 'cta'].includes(img?.shotType) ? img.shotType : fallbackImage.shotType,
       mainCopy: normalizeMainCopy(img?.mainCopy || img?.copy || fallbackImage.mainCopy),
       subCopy: String(img?.subCopy || fallbackImage.subCopy).slice(0, 26),
+      purpose: String(img?.purpose || fallbackImage.purpose),
       trustElement: String(img?.trustElement || fallbackImage.trustElement),
       trigger: String(img?.trigger || fallbackImage.trigger),
+      designLayout: String(img?.designLayout || fallbackImage.designLayout),
       textPosition: validPositions.includes(img?.textPosition) ? img.textPosition : fallbackImage.textPosition,
       visualPrompt: String(img?.visualPrompt || fallbackImage.visualPrompt),
     };
@@ -584,14 +634,30 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
     };
   }
 
+  const comparison = Array.isArray(plan.competitorComparison) && plan.competitorComparison.length > 0
+    ? plan.competitorComparison.slice(0, 6).map((row: any) => ({
+        item: String(row?.item || row?.['항목'] || '비교 항목'),
+        competitor: String(row?.competitor || row?.['경쟁상품'] || '-'),
+        ours: String(row?.ours || row?.['본제품'] || row?.['본 제품'] || '-'),
+      }))
+    : fallback.competitorComparison;
+
   return {
     productDefinition: String(plan.productDefinition || fallback.productDefinition),
+    productReason: String(plan.productReason || fallback.productReason),
+    productProblem: String(plan.productProblem || fallback.productProblem),
     customer: {
       target: String(plan.customer?.target || fallback.customer.target),
+      age: String(plan.customer?.age || fallback.customer.age),
+      gender: String(plan.customer?.gender || fallback.customer.gender),
+      job: String(plan.customer?.job || fallback.customer.job),
+      lifestyle: String(plan.customer?.lifestyle || fallback.customer.lifestyle),
+      purchaseSituation: String(plan.customer?.purchaseSituation || fallback.customer.purchaseSituation),
       surfaceNeed: String(plan.customer?.surfaceNeed || fallback.customer.surfaceNeed),
       realNeed: String(plan.customer?.realNeed || fallback.customer.realNeed),
     },
     differentiators: Array.isArray(plan.differentiators) && plan.differentiators.length > 0 ? plan.differentiators.map(String) : fallback.differentiators,
+    competitorComparison: comparison,
     purchaseResistances: Array.isArray(plan.purchaseResistances) && plan.purchaseResistances.length > 0 ? plan.purchaseResistances.map(String) : fallback.purchaseResistances,
     designSystem: {
       tone: String(plan.designSystem?.tone || fallback.designSystem.tone),
@@ -602,6 +668,7 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
         background: String(plan.designSystem?.colors?.background || fallback.designSystem.colors.background),
         text: String(plan.designSystem?.colors?.text || fallback.designSystem.colors.text),
       },
+      fonts: { ...V21_FONTS },
     },
     images,
   };
@@ -657,9 +724,22 @@ ${combinationGuide}
 ${toneGuide}
 ${productBriefGuide}
 
-[작성 규칙]
-- 상품 분석: 제품 정의, 고객의 표면 니즈/숨은 니즈, 차별점 3개 이상, 구매 저항 5개 이상.
+[STEP 1 — 상품 자동 분석]
+- 제품 정의: 어떤 제품인가(productDefinition) / 왜 존재하는가(productReason) / 어떤 문제를 해결하는가(productProblem)
+- 고객 분석: 핵심 타겟을 연령(age)·성별(gender)·직업(job)·라이프스타일(lifestyle)·구매 상황(purchaseSituation)까지 구체적으로 특정하세요.
+- 숨겨진 니즈: 겉으로 말하는 니즈(surfaceNeed)와 실제 니즈(realNeed)를 반드시 구분하세요.
+  예) 운동기구 → 표면: 운동하고 싶음 / 실제: 자기관리 잘하는 사람으로 보이고 싶음
+- 차별점(differentiators) 3개 이상, 그리고 경쟁상품 대비 비교표(competitorComparison)를 3~5행으로 작성하세요.
+- 구매 저항 요소(purchaseResistances) 5개 이상을 도출하고, 각 이미지가 이 불안을 해소하도록 설계하세요.
+
+[STEP 2 — 전환 전략]
+- 심리 흐름: 인지 → 공감 → 문제 인식 → 해결책 발견 → 신뢰 형성 → 구매 확신 → 결제
+- 각 이미지가 이 흐름의 어느 단계인지 stage에 명시하고, 그 이미지의 설득 목적을 purpose에 한 문장으로 쓰세요.
+
+[STEP 4 — 이미지 기획]
 - 이미지 기획은 정확히 ${count}장. 1번은 Hook, 마지막은 CTA.
+- 각 이미지마다 목적(purpose), 메인 카피, 서브 카피, 신뢰 요소(trustElement), 전환 트리거(trigger),
+  디자인 레이아웃(designLayout: 구도와 카피 배치를 한 문장으로), 텍스트 배치(textPosition), 이미지 생성 프롬프트(visualPrompt)를 작성하세요.
 
 [섹션 구성 템플릿 — 아래 순서를 반드시 따르세요]
 ${buildSectionTemplate(imageCount)}
@@ -675,7 +755,15 @@ ${bundleRules}
 - 중간 이미지는 기능/감성/비교/사용 장면/디테일 등 서로 다른 각도로 구성하고 표현 중복을 피하세요.
 - shotType은 model, product, detail, texture, lifestyle, cta 중 하나를 반드시 지정하세요.
 - 모델컷은 전체의 1/3 이하로만 사용하고, 나머지는 제품 단독컷/디테일 클로즈업/소재·프린팅 클로즈업/CTA 제품컷으로 섞으세요.
-- 사실 확인 불가 문구 금지: "판매 1위", "만족도 99%", "누적 100만개", "효과 보장" 등. 안전한 표현으로 대체하세요.
+
+[STEP 6 — 신뢰성 검증 (필수)]
+- 사실 확인이 불가능한 문구는 절대 사용 금지: "국내 판매 1위", "만족도 99%", "누적 판매 100만개", "효과 보장", 검증되지 않은 할인율·판매량·리뷰 수·평점·인증 문구
+- 대체 표현 사용: "많은 고객이 선택한 이유", "재구매 후기가 이어지는 이유", "꾸준히 사랑받는 이유"
+
+[STEP 7 — 최종 출력 규칙]
+- 설명·해설 문장 금지. 아래 JSON만 반환하세요.
+- 카피 중복 금지. 모든 이미지는 서로 다른 설득 역할을 수행하고, 한 이미지 = 하나의 설득 완결.
+- 쿠팡·스마트스토어 상위 1% 상세페이지 수준의 설득력을 목표로 하되, 문구는 최소한으로 유지하세요.
 
 [카피 규칙 — 문구 최소화가 최우선]
 - 이미지 위 문구는 최소한으로. 비주얼이 설득하고 카피는 한 문장으로 정리합니다. 문구가 적을수록 고급스러운 상세페이지입니다.
@@ -709,13 +797,27 @@ ${bundleRules}
 
 [출력 형식] 반드시 아래처럼 최상위가 JSON 객체이고, images 키가 있는 객체 하나만 반환하세요. 배열만 반환하지 마세요. 다른 텍스트 금지:
 {
-  "productDefinition": "제품 정의 요약",
-  "customer": { "target": "핵심 타겟 묘사", "surfaceNeed": "표면 니즈", "realNeed": "실제 숨은 니즈" },
+  "productDefinition": "어떤 제품인가",
+  "productReason": "왜 존재하는가",
+  "productProblem": "어떤 문제를 해결하는가",
+  "customer": {
+    "target": "핵심 타겟 한 줄 묘사",
+    "age": "예: 30대 초중반",
+    "gender": "예: 남성 / 여성 / 무관",
+    "job": "예: 사무직 직장인",
+    "lifestyle": "예: 주중 야근이 잦고 주말엔 홈카페를 즐김",
+    "purchaseSituation": "예: 기존 제품이 고장 나 대체품을 급히 찾는 상황",
+    "surfaceNeed": "표면 니즈",
+    "realNeed": "실제 숨은 니즈"
+  },
   "differentiators": ["차별점1", "차별점2", "차별점3"],
+  "competitorComparison": [
+    { "item": "비교 항목", "competitor": "경쟁상품은 이렇다", "ours": "본 제품은 이렇다" }
+  ],
   "purchaseResistances": ["저항1", "저항2", "저항3", "저항4", "저항5"],
   "designSystem": { "tone": "프리미엄/미니멀/감성 등 1개", "colors": { "primary": "#hex", "secondary": "#hex", "accent": "#hex", "background": "#hex", "text": "#hex" } },
   "images": [
-    { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "shotType": "model", "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "trustElement": "신뢰 요소", "trigger": "감정적 보상", "textPosition": "bottom", "visualPrompt": "A premium Hook model cut with one fictional Korean model wearing or using the exact reference product, strong first impression, product large and clearly visible, designer-made detail-page hero scene ..." }
+    { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "shotType": "model", "purpose": "3초 안에 시선을 잡아 스크롤을 멈추게 한다", "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "trustElement": "신뢰 요소", "trigger": "감정적 보상", "designLayout": "하단 카피 영역 + 제품 중심 단일 포컬 구성", "textPosition": "bottom", "visualPrompt": "A premium Hook model cut with one fictional Korean model wearing or using the exact reference product, strong first impression, product large and clearly visible, designer-made detail-page hero scene ..." }
   ]
 }
 images 배열은 정확히 ${count}개여야 하며 1번은 Hook, 마지막은 CTA여야 합니다.

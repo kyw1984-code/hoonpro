@@ -1015,7 +1015,9 @@ interface GenImage {
     shotType?: ShotType;
     mainCopy: string;
     subCopy: string;
+    purpose?: string;
     trustElement: string;
+    designLayout?: string;
     trigger: string;
     textPosition: 'top' | 'middle' | 'bottom';
     visualPrompt: string;
@@ -1104,7 +1106,9 @@ const createGenImagesFromPlan = (result: DetailPlan, combinationType: Combinatio
             shotType,
             mainCopy: formatMainCopy(main.text),
             subCopy: sub.text,
+            purpose: img.purpose,
             trustElement: img.trustElement,
+            designLayout: img.designLayout,
             trigger: img.trigger,
             textPosition,
             visualPrompt: img.visualPrompt,
@@ -2057,12 +2061,35 @@ export const DetailPlanner: React.FC = () => {
                             <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
                                 <p className="font-bold text-slate-700 mb-1">제품 정의</p>
                                 <p className="text-slate-600 leading-relaxed">{plan.productDefinition}</p>
+                                {plan.productReason && (
+                                    <p className="mt-2 text-slate-600"><span className="text-slate-400">왜 존재하는가:</span> {plan.productReason}</p>
+                                )}
+                                {plan.productProblem && (
+                                    <p className="mt-1 text-slate-600"><span className="text-slate-400">해결하는 문제:</span> {plan.productProblem}</p>
+                                )}
                             </div>
                             <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
                                 <p className="font-bold text-slate-700 mb-1">고객 분석</p>
                                 <p className="text-slate-600"><span className="text-slate-400">타겟:</span> {plan.customer?.target}</p>
-                                <p className="text-slate-600"><span className="text-slate-400">표면 니즈:</span> {plan.customer?.surfaceNeed}</p>
-                                <p className="text-slate-600"><span className="text-slate-400">실제 니즈:</span> {plan.customer?.realNeed}</p>
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                    {([
+                                        ['연령', plan.customer?.age],
+                                        ['성별', plan.customer?.gender],
+                                        ['직업', plan.customer?.job],
+                                    ] as const).filter(([, v]) => !!v).map(([k, v]) => (
+                                        <span key={k} className="rounded-md bg-white px-2 py-0.5 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">
+                                            {k} {v}
+                                        </span>
+                                    ))}
+                                </div>
+                                {plan.customer?.lifestyle && (
+                                    <p className="mt-1.5 text-slate-600"><span className="text-slate-400">라이프스타일:</span> {plan.customer.lifestyle}</p>
+                                )}
+                                {plan.customer?.purchaseSituation && (
+                                    <p className="text-slate-600"><span className="text-slate-400">구매 상황:</span> {plan.customer.purchaseSituation}</p>
+                                )}
+                                <p className="mt-1.5 text-slate-600"><span className="text-slate-400">표면 니즈:</span> {plan.customer?.surfaceNeed}</p>
+                                <p className="text-slate-600"><span className="text-blue-500 font-bold">실제 니즈:</span> {plan.customer?.realNeed}</p>
                             </div>
                             <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
                                 <p className="font-bold text-slate-700 mb-1">경쟁 대비 차별점</p>
@@ -2077,6 +2104,28 @@ export const DetailPlanner: React.FC = () => {
                                 </ul>
                             </div>
                         </div>
+                        {plan.competitorComparison?.length > 0 && (
+                            <div className="mt-4 overflow-hidden rounded-xl border border-slate-200">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="bg-slate-100 text-[11px] font-black uppercase tracking-wider text-slate-500">
+                                            <th className="px-4 py-2 text-left">비교 항목</th>
+                                            <th className="px-4 py-2 text-left">경쟁상품</th>
+                                            <th className="px-4 py-2 text-left text-blue-600">본 제품</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {plan.competitorComparison.map((row, i) => (
+                                            <tr key={i} className="border-t border-slate-100">
+                                                <td className="px-4 py-2 font-bold text-slate-700">{row.item}</td>
+                                                <td className="px-4 py-2 text-slate-500">{row.competitor}</td>
+                                                <td className="px-4 py-2 font-medium text-blue-700">{row.ours}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                         {productBrief && (
                             <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm">
                                 <div className="mb-3 flex items-center gap-2">
@@ -2139,13 +2188,29 @@ export const DetailPlanner: React.FC = () => {
                             </div>
                         </div>
                         {plan.designSystem && (
-                            <div className="flex items-center gap-3 mt-4 flex-wrap">
-                                <span className="text-sm font-bold text-slate-700">디자인 톤: {plan.designSystem.tone}</span>
-                                {plan.designSystem.colors && Object.entries(plan.designSystem.colors).map(([k, v]) => (
-                                    <span key={k} className="flex items-center gap-1.5 text-xs text-slate-500">
-                                        <span className="w-5 h-5 rounded border border-slate-200" style={{ background: v as string }} />{k}
-                                    </span>
-                                ))}
+                            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-4">
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <span className="text-sm font-bold text-slate-700">디자인 톤: {plan.designSystem.tone}</span>
+                                    {plan.designSystem.colors && Object.entries(plan.designSystem.colors).map(([k, v]) => (
+                                        <span key={k} className="flex items-center gap-1.5 text-xs text-slate-500">
+                                            <span className="w-5 h-5 rounded border border-slate-200" style={{ background: v as string }} />{k}
+                                        </span>
+                                    ))}
+                                </div>
+                                {plan.designSystem.fonts && (
+                                    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-slate-200 pt-3">
+                                        {([
+                                            ['헤드라인', plan.designSystem.fonts.headline],
+                                            ['본문', plan.designSystem.fonts.body],
+                                            ['강조', plan.designSystem.fonts.emphasis],
+                                            ['CTA', plan.designSystem.fonts.cta],
+                                        ] as const).map(([k, v]) => (
+                                            <span key={k} className="rounded-md bg-white px-2 py-1 text-[11px] text-slate-600 ring-1 ring-slate-200">
+                                                <span className="font-bold text-slate-400">{k}</span> {v}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                         {plan.isFallback && (
@@ -2239,6 +2304,8 @@ export const DetailPlanner: React.FC = () => {
                                             </div>
                                         </div>
                                         <div className="text-sm text-slate-600 space-y-1">
+                                            {img.purpose && <p className="text-xs text-slate-500"><span className="text-slate-400">목적:</span> {img.purpose}</p>}
+                                            {img.designLayout && <p className="text-xs text-slate-500"><span className="text-slate-400">레이아웃:</span> {img.designLayout}</p>}
                                             {img.trustElement && <p className="text-xs text-slate-500"><span className="text-slate-400">신뢰:</span> {img.trustElement}</p>}
                                             {img.qualityWarnings && img.qualityWarnings.length > 0 && (
                                                 <div className="rounded-lg border border-amber-100 bg-amber-50 p-2 text-[11px] text-amber-700">
