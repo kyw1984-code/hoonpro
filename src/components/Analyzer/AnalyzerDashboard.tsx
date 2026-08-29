@@ -139,6 +139,10 @@ export function AnalyzerDashboard() {
     const rowRevenue = (row: any) => (revenueMode === "actual" ? row.실측매출 : (row[colQty] || 0) * unitPrice);
     // 순이익: 실측 모드에서는 마진율(개당마진 ÷ 판매가)을 실측 매출에 적용해 옵션별 단가 차이를 흡수
     const netMarginRate = unitPrice > 0 ? netUnitMargin / unitPrice : 0;
+    // 마진 미입력(판매가 0 등) 시: 순이익은 계산 불가로 표시하고,
+    // 판정은 쿠팡 셀러 통상 기준선(손익분기 ROAS 300%)으로 폴백해 어긋난 판정을 막는다
+    const marginProvided = breakEvenROAS > 0;
+    const effectiveBE = marginProvided ? breakEvenROAS : 300;
     const rowProfit = (row: any) =>
       revenueMode === "actual"
         ? rowRevenue(row) * netMarginRate - (row.광고비 || 0)
@@ -200,8 +204,8 @@ export function AnalyzerDashboard() {
         const 순이익 = revenueMode === "actual" ? c.매출 * netMarginRate - c.광고비 : c.판매수량 * netUnitMargin - c.광고비;
         // 판정: 데이터가 부족한 캠페인을 성급하게 '중단'으로 몰지 않는다
         let verdict: "scale" | "keep" | "fix" | "stop" | "watch";
-        if (breakEvenROAS > 0 && roasPct >= breakEvenROAS * 1.3 && c.판매수량 >= 2) verdict = "scale";
-        else if (breakEvenROAS > 0 && roasPct >= breakEvenROAS) verdict = "keep";
+        if (roasPct >= effectiveBE * 1.3 && c.판매수량 >= 2) verdict = "scale";
+        else if (roasPct >= effectiveBE) verdict = "keep";
         else if (c.판매수량 === 0 && c.클릭수 >= 30) verdict = "stop";
         else if (c.클릭수 >= 20) verdict = "fix";
         else verdict = "watch";
@@ -253,9 +257,9 @@ export function AnalyzerDashboard() {
       const expectClicks = totalCvr > 0 ? Math.min(15, Math.max(6, Math.ceil(1.5 / totalCvr))) : 10;
       // 광고비 기준: 한 개 팔았을 때의 마진만큼 쓰고도 0건이면, 팔렸어도 적자였던 키워드
       const drainCostFloor = netUnitMargin > 0 ? Math.max(2000, netUnitMargin) : Math.max(3000, avgCPC * expectClicks);
-      const star = allKw.filter((k) => k.매출 > 0 && breakEvenROAS > 0 && k.roasPct >= breakEvenROAS * 1.2).sort((a, b) => b.매출 - a.매출);
-      const ok = allKw.filter((k) => k.매출 > 0 && breakEvenROAS > 0 && k.roasPct >= breakEvenROAS && k.roasPct < breakEvenROAS * 1.2);
-      const lowRoas = allKw.filter((k) => k.매출 > 0 && breakEvenROAS > 0 && k.roasPct < breakEvenROAS).sort((a, b) => b.광고비 - a.광고비);
+      const star = allKw.filter((k) => k.매출 > 0 && k.roasPct >= effectiveBE * 1.2).sort((a, b) => b.매출 - a.매출);
+      const ok = allKw.filter((k) => k.매출 > 0 && k.roasPct >= effectiveBE && k.roasPct < effectiveBE * 1.2);
+      const lowRoas = allKw.filter((k) => k.매출 > 0 && k.roasPct < effectiveBE).sort((a, b) => b.광고비 - a.광고비);
       const drain = allKw.filter((k) => k.판매수량 === 0 && k.광고비 > 0 && (k.클릭수 >= expectClicks || k.광고비 >= drainCostFloor)).sort((a, b) => b.광고비 - a.광고비);
       const drainSet = new Set(drain.map((k) => k.키워드));
       const watch = allKw.filter((k) => k.판매수량 === 0 && k.광고비 > 0 && !drainSet.has(k.키워드)).sort((a, b) => b.광고비 - a.광고비);
@@ -458,6 +462,7 @@ export function AnalyzerDashboard() {
       placementSummary, tot, totalRevenue, totalRealRoas, totalProfit, totalCtr, totalCvr, avgCPC,
       productSummary, badKeywords, recommendations,
       revenueMode, campaignSummary, keywordDiag, indirectShare, attributionLag,
+      marginProvided, effectiveBE,
       precision: {
         ctrScore: ctrResult.score, ctrLevel: ctrResult.level,
         cvrScore: cvrResult.score, cvrLevel: cvrResult.level,
@@ -527,6 +532,14 @@ export function AnalyzerDashboard() {
 
           {processedData && !("error" in processedData) && (
             <div className="space-y-8">
+              {/* 마진 미입력 안내 */}
+              {!processedData.marginProvided && (
+                <div className="rounded-card border border-caution/35 bg-caution-soft p-4 text-sm text-caution">
+                  <b>왼쪽에 판매가·원가·수수료를 입력하면 순이익과 손익분기 판정이 정확해집니다.</b>{" "}
+                  현재는 순이익을 계산할 수 없어 '—'로 표시하고, 판정은 기본 기준(손익분기 ROAS 300%)으로 대신하고 있습니다.
+                </div>
+              )}
+
               {/* KPI Cards */}
               <div>
                 <div className="mb-4 flex items-center gap-2">
@@ -541,7 +554,7 @@ export function AnalyzerDashboard() {
                 </div>
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
                   {[
-                    { label: "최종 실질 순이익", value: `${Math.round(processedData.totalProfit).toLocaleString()}원`, color: processedData.totalProfit >= 0 ? "text-positive" : "text-critical" },
+                    { label: "최종 실질 순이익", value: processedData.marginProvided ? `${Math.round(processedData.totalProfit).toLocaleString()}원` : "—", color: !processedData.marginProvided ? "text-ink-3" : processedData.totalProfit >= 0 ? "text-positive" : "text-critical" },
                     { label: "총 전환매출", value: `${Math.round(processedData.totalRevenue).toLocaleString()}원`, color: "text-ink" },
                     { label: "총 광고비", value: `${processedData.tot.광고비.toLocaleString()}원`, color: "text-ink" },
                     { label: "실제 ROAS", value: `${(processedData.totalRealRoas * 100).toFixed(0)}%`, color: "text-ink" },
@@ -601,7 +614,7 @@ export function AnalyzerDashboard() {
                               <td className="px-4 py-3 text-right tabular-nums">{(c.ctr * 100).toFixed(2)}%</td>
                               <td className="px-4 py-3 text-right tabular-nums">{(c.cvr * 100).toFixed(1)}%</td>
                               <td className="px-4 py-3 text-right tabular-nums">{c.cpc.toFixed(0)}원</td>
-                              <td className={`px-4 py-3 text-right font-semibold tabular-nums ${c.순이익 >= 0 ? "text-positive" : "text-critical"}`}>{Math.round(c.순이익).toLocaleString()}원</td>
+                              <td className={`px-4 py-3 text-right font-semibold tabular-nums ${!processedData.marginProvided ? "text-ink-3" : c.순이익 >= 0 ? "text-positive" : "text-critical"}`}>{processedData.marginProvided ? `${Math.round(c.순이익).toLocaleString()}원` : "—"}</td>
                             </tr>
                           );
                         })}
@@ -609,7 +622,7 @@ export function AnalyzerDashboard() {
                     </table>
                   </div>
                   <p className="mt-2 text-[12px] text-ink-2">
-                    판정 기준: <b>확대</b> ROAS ≥ 손익분기×1.3 & 판매 2건↑ · <b>유지</b> 손익분기 이상 · <b>개선</b> 손익분기 미달(클릭 20↑) · <b>중단 검토</b> 클릭 30↑ 판매 0 · <b>관찰</b> 데이터 부족
+                    판정 기준(손익분기 ROAS {Math.round(processedData.effectiveBE)}%{processedData.marginProvided ? '' : ' — 마진 미입력으로 기본값 적용'}): <b>확대</b> 손익분기×1.3↑ & 판매 2건↑ · <b>유지</b> 손익분기 이상 · <b>개선</b> 미달(클릭 20↑) · <b>중단 검토</b> 클릭 30↑ 판매 0 · <b>관찰</b> 데이터 부족
                   </p>
                 </div>
               )}
@@ -672,7 +685,7 @@ export function AnalyzerDashboard() {
                           <td className="px-4 py-3 text-right">{(row.클릭률 * 100).toFixed(2)}%</td>
                           <td className="px-4 py-3 text-right">{(row.구매전환율 * 100).toFixed(2)}%</td>
                           <td className="px-4 py-3 text-right">{(row.실제ROAS * 100).toFixed(0)}%</td>
-                          <td className={`px-4 py-3 text-right font-semibold ${row.실질순이익 >= 0 ? "text-critical" : "text-accent"}`}>{row.실질순이익.toLocaleString()}원</td>
+                          <td className={`px-4 py-3 text-right font-semibold tabular-nums ${!processedData.marginProvided ? "text-ink-3" : row.실질순이익 >= 0 ? "text-positive" : "text-critical"}`}>{processedData.marginProvided ? `${Math.round(row.실질순이익).toLocaleString()}원` : "—"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -698,7 +711,7 @@ export function AnalyzerDashboard() {
                                 <td className="px-4 py-3 font-medium text-ink whitespace-normal break-words">{row.상품명}</td>
                                 <td className="px-4 py-3 text-right">{row.판매수량.toLocaleString()}개</td>
                                 <td className="px-4 py-3 text-right">{row.광고비.toLocaleString()}원</td>
-                                <td className={`px-4 py-3 text-right font-semibold ${row.실질순이익 >= 0 ? "text-critical" : "text-accent"}`}>{row.실질순이익.toLocaleString()}원</td>
+                                <td className={`px-4 py-3 text-right font-semibold tabular-nums ${!processedData.marginProvided ? "text-ink-3" : row.실질순이익 >= 0 ? "text-positive" : "text-critical"}`}>{processedData.marginProvided ? `${Math.round(row.실질순이익).toLocaleString()}원` : "—"}</td>
                               </tr>
                             ))}
                           </tbody>
