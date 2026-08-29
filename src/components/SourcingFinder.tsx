@@ -128,6 +128,7 @@ export function SourcingFinder() {
   const [products, setProducts] = useState<Product[]>([]);
   const [market, setMarket] = useState<Market | null>(null);
   const [servedFrom, setServedFrom] = useState<string>('fresh');
+  const [prodDebug, setProdDebug] = useState<string | null>(null);
   const [rocketFilter, setRocketFilter] = useState<'all' | 'general' | 'jet' | 'rocket'>('all');
   const [gradeFilter, setGradeFilter] = useState<'all' | 'Great' | 'Good' | 'Normal' | 'Bad'>('all');
   const [prodSort, setProdSort] = useState<'opportunityScore' | 'reviewCount' | 'rank' | 'priceAsc'>('opportunityScore');
@@ -207,6 +208,7 @@ export function SourcingFinder() {
       })));
       setMarket(data.market || null);
       setServedFrom(data.servedFrom || 'fresh');
+      setProdDebug(data.parseDebug || null);
     } catch (e: any) {
       setProdError(e.message);
       setProducts([]);
@@ -571,6 +573,12 @@ export function SourcingFinder() {
             <div className="flex flex-col gap-5">
               {prodError && (
                 <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-rose-700 text-sm font-bold whitespace-pre-wrap">{prodError}</div>
+              )}
+              {prodDebug && !prodLoading && (
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                  <p className="text-[10px] font-black text-slate-500 mb-1">파싱 진단 — 결과가 이상하면 이 내용을 공유해주세요</p>
+                  <pre className="text-[10px] text-slate-500 whitespace-pre-wrap break-all font-mono">{prodDebug}</pre>
+                </div>
               )}
 
               {prodLoading ? (

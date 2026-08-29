@@ -240,24 +240,41 @@ function cleanImageUrl(url: string): string {
   return url.startsWith("//") ? "https:" + url : url;
 }
 
-// ⓪ JSON-LD (schema.org) — 쿠팡 신형 페이지가 심어주는 표준 상품 구조화 데이터.
-//    상품명·이미지·URL·가격·평점·리뷰수가 표준 스키마라 마크업 변경에 가장 강함.
+// ⓪ schema.org Product JSON — 쿠팡 신형 페이지에 포함된 표준 상품 구조화 데이터.
+//    스크립트 태그 종류와 무관하게 HTML 전체에서 {"@type":"Product"...} 객체를
+//    중괄호 균형 스캔으로 직접 추출한다 (마크업 변경에 가장 강함).
+function extractBalancedJson(s: string, startIdx: number): string | null {
+  let depth = 0, inStr = false, esc = false;
+  const limit = Math.min(s.length, startIdx + 30000);
+  for (let i = startIdx; i < limit; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+    } else {
+      if (c === '"') inStr = true;
+      else if (c === "{") depth++;
+      else if (c === "}") { depth--; if (depth === 0) return s.slice(startIdx, i + 1); }
+    }
+  }
+  return null;
+}
+
+function isProductType(t: any): boolean {
+  return t === "Product" || (Array.isArray(t) && t.includes("Product"));
+}
+
 function parseJsonLd(html: string): ParsedProduct[] {
   const products: ParsedProduct[] = [];
   const seen = new Set<string>();
-  const collect = (node: any) => {
-    if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) { node.forEach(collect); return; }
-    if (node["@type"] === "ItemList" && Array.isArray(node.itemListElement)) {
-      node.itemListElement.forEach((e: any) => collect(e?.item ?? e));
-      return;
-    }
-    if (node["@graph"]) { collect(node["@graph"]); return; }
-    if (node["@type"] !== "Product") return;
+
+  const pushProduct = (node: any) => {
+    if (!node || typeof node !== "object" || !isProductType(node["@type"])) return;
     const url = String(node.url ?? "");
     const productId = pick(/\/vp\/products\/(\d+)/, url);
     const name = String(node.name ?? "").trim();
-    const price = numFrom(node.offers?.price, node.offers?.lowPrice);
+    const price = numFrom(node.offers?.price, node.offers?.lowPrice, node.offers?.highPrice);
     if (!productId || !name || price <= 0 || seen.has(productId)) return;
     seen.add(productId);
     const agg = node.aggregateRating || {};
@@ -274,13 +291,36 @@ function parseJsonLd(html: string): ParsedProduct[] {
       isAd: false,
     });
   };
+
+  const collect = (node: any) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { node.forEach(collect); return; }
+    if (node["@type"] === "ItemList" && Array.isArray(node.itemListElement)) {
+      node.itemListElement.forEach((e: any) => collect(e?.item ?? e));
+      return;
+    }
+    if (node["@graph"]) { collect(node["@graph"]); return; }
+    pushProduct(node);
+  };
+
+  // (a) 정식 ld+json 스크립트
   for (const m of html.matchAll(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)) {
     try { collect(JSON.parse(m[1])); } catch { /* 잘못된 JSON 블록은 무시 */ }
+  }
+
+  // (b) 스크립트 태그와 무관하게 HTML 전체에서 Product 객체 직접 스캔
+  if (products.length < 5) {
+    for (const m of html.matchAll(/\{\s*"@type"\s*:\s*"Product"/g)) {
+      if (products.length >= 200) break;
+      const objStr = extractBalancedJson(html, m.index!);
+      if (!objStr) continue;
+      try { pushProduct(JSON.parse(objStr)); } catch { /* 개별 객체 파싱 실패 무시 */ }
+    }
   }
   return products;
 }
 
-// JSON-LD에는 배송유형/광고 여부가 없으므로 상품 li 블록을 productId로 매칭해 보강
+// JSON에 없는 배송유형/광고 여부(+누락된 리뷰)를 상품 li 블록에서 productId 매칭으로 보강
 function enrichFromHtmlBlocks(products: ParsedProduct[], html: string): void {
   const blocks = html.split(/<li[^>]*class="[^"]*ProductUnit_productUnit__/).slice(1);
   const byId = new Map<string, string>();
@@ -293,6 +333,12 @@ function enrichFromHtmlBlocks(products: ParsedProduct[], html: string): void {
     if (!b) continue;
     p.deliveryType = detectDelivery(b);
     p.isAd = /AdMark_|ad-badge|sponsored/i.test(b);
+    if (p.reviewCount === 0 && /rating/i.test(b)) {
+      const rc = parseInt((pick(/ProductRating_ratingCount__[^"]*"[^>]*>[\s\S]{0,30}?([\d,]+)/, b) || pick(/\(\s*([\d,]+)\s*\)/, b)).replace(/,/g, ""), 10) || 0;
+      if (rc > 0) p.reviewCount = rc;
+      const starPct = parseFloat(pick(/width:\s*([\d.]+)%/, b)) || 0;
+      if (p.rating === 0 && starPct > 0 && starPct <= 100) p.rating = Math.round((starPct / 20) * 10) / 10;
+    }
   }
 }
 
@@ -439,25 +485,26 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
     html.match(/"searchResultCount"\s*:\s*(\d+)/);
   if (tc) totalCount = parseInt(tc[1].replace(/,/g, ""), 10) || 0;
 
-  // JSON-LD → 신형 마크업 → 구형 마크업 → 내장 JSON 순으로 시도
+  // schema.org JSON → 신형 마크업 → 구형 마크업 → 내장 JSON 순으로 시도
+  let strategy = "jsonld";
   let products = parseJsonLd(html);
   if (products.length > 0) enrichFromHtmlBlocks(products, html);
-  if (products.length === 0) products = parseProductUnits(html);
-  if (products.length === 0) products = parseLegacyMarkup(html);
-  if (products.length === 0) products = parseEmbeddedJson(html);
+  if (products.length === 0) { products = parseProductUnits(html); strategy = "productUnit"; }
+  if (products.length === 0) { products = parseLegacyMarkup(html); strategy = "legacy"; }
+  if (products.length === 0) { products = parseEmbeddedJson(html); strategy = "nextData"; }
 
+  const count = (re: RegExp) => (html.match(re) || []).length;
   let diagnostics = "";
-  if (products.length === 0) {
-    const count = (re: RegExp) => (html.match(re) || []).length;
-    const idx = html.indexOf("/vp/products/");
+  if (products.length < 5) {
+    const idx = html.search(/\{\s*"@type"\s*:\s*"Product"/);
     const excerpt = idx >= 0
-      ? html.slice(Math.max(0, idx - 250), idx + 250).replace(/\s+/g, " ")
-      : html.slice(0, 300).replace(/\s+/g, " ");
+      ? html.slice(idx, idx + 500).replace(/\s+/g, " ")
+      : (() => { const i2 = html.indexOf("/vp/products/"); return i2 >= 0 ? html.slice(Math.max(0, i2 - 250), i2 + 250).replace(/\s+/g, " ") : html.slice(0, 300); })();
     diagnostics =
-      `파싱 결과 0개 — htmlLen=${html.length}, ProductUnit=${count(/ProductUnit_productUnit__/g)}, ` +
-      `legacy=${count(/class="search-product[\s"]/g)}, nextData=${html.includes("__NEXT_DATA__")}, ` +
-      `vp링크=${count(/\/vp\/products\/\d+/g)}, 차단여부=${/access denied|보안 확인|captcha/i.test(html)}\n` +
-      `[구조 샘플] ${excerpt.slice(0, 450)}`;
+      `전략=${strategy}, 상품=${products.length}개 — htmlLen=${html.length}, ` +
+      `ldScript=${count(/type="application\/ld\+json"/g)}, ProductJSON=${count(/\{\s*"@type"\s*:\s*"Product"/g)}, ` +
+      `ProductUnit=${count(/ProductUnit_productUnit__/g)}, vp링크=${count(/\/vp\/products\/\d+/g)}, ` +
+      `차단여부=${/access denied|보안 확인|captcha/i.test(html)}\n[구조 샘플] ${excerpt.slice(0, 450)}`;
   }
   return { products, totalCount, diagnostics };
 }
@@ -590,10 +637,11 @@ async function handleProducts(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  const cacheKey = `cp:v4:${keyword.replace(/\s+/g, "")}`;
+  const cacheKey = `cp:v5:${keyword.replace(/\s+/g, "")}`;
   const cached = await cacheGet(cacheKey);
   let parsed: { products: ParsedProduct[]; totalCount: number } | null = null;
   let servedFrom: "fresh" | "cache" | "stale" = "fresh";
+  let parseDebug = "";
 
   if (cached && cached.ageMs < 24 * 3600 * 1000) {
     parsed = cached.payload;
@@ -603,9 +651,11 @@ async function handleProducts(req: VercelRequest, res: VercelResponse) {
     const result = await fetchViaUnlocker(url);
     if (result.ok) {
       const p = parseCoupangSearch(result.html!);
+      parseDebug = p.diagnostics;
       if (p.products.length > 0) {
         parsed = { products: p.products, totalCount: p.totalCount };
-        await cacheSet(cacheKey, parsed);
+        // 불완전 파싱(5개 미만)은 캐시하지 않아 재시도가 가능하도록 함
+        if (p.products.length >= 5) await cacheSet(cacheKey, parsed);
         await recordObservations(keyword, p.products); // 리뷰속도 히스토리 축적
       } else if (cached) {
         parsed = cached.payload;
@@ -632,7 +682,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse) {
     return { ...p, reviewGrowthPerDay: v ? v.perDay : null, obsDays: v ? v.days : null };
   });
 
-  return res.status(200).json({ keyword, products: withVelocity, market, servedFrom });
+  return res.status(200).json({ keyword, products: withVelocity, market, servedFrom, ...(parseDebug ? { parseDebug } : {}) });
 }
 
 // ─── 메인 핸들러 ──────────────────────────────────────────────────────────────
