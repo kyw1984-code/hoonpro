@@ -227,6 +227,62 @@ function cleanImageUrl(url: string): string {
   return url.startsWith("//") ? "https:" + url : url;
 }
 
+// ⓪ JSON-LD (schema.org) — 쿠팡 신형 페이지가 심어주는 표준 상품 구조화 데이터.
+//    상품명·이미지·URL·가격·평점·리뷰수가 표준 스키마라 마크업 변경에 가장 강함.
+function parseJsonLd(html: string): ParsedProduct[] {
+  const products: ParsedProduct[] = [];
+  const seen = new Set<string>();
+  const collect = (node: any) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { node.forEach(collect); return; }
+    if (node["@type"] === "ItemList" && Array.isArray(node.itemListElement)) {
+      node.itemListElement.forEach((e: any) => collect(e?.item ?? e));
+      return;
+    }
+    if (node["@graph"]) { collect(node["@graph"]); return; }
+    if (node["@type"] !== "Product") return;
+    const url = String(node.url ?? "");
+    const productId = pick(/\/vp\/products\/(\d+)/, url);
+    const name = String(node.name ?? "").trim();
+    const price = numFrom(node.offers?.price, node.offers?.lowPrice);
+    if (!productId || !name || price <= 0 || seen.has(productId)) return;
+    seen.add(productId);
+    const agg = node.aggregateRating || {};
+    products.push({
+      productId,
+      productName: name,
+      productPrice: price,
+      productUrl: url.startsWith("http") ? url : `https://www.coupang.com/vp/products/${productId}`,
+      productImage: cleanImageUrl(String(node.image ?? "")),
+      rating: Number(agg.ratingValue) || 0,
+      reviewCount: numFrom(agg.ratingCount, agg.reviewCount),
+      deliveryType: "general", // enrichFromHtmlBlocks에서 후보정
+      rank: products.length + 1,
+      isAd: false,
+    });
+  };
+  for (const m of html.matchAll(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)) {
+    try { collect(JSON.parse(m[1])); } catch { /* 잘못된 JSON 블록은 무시 */ }
+  }
+  return products;
+}
+
+// JSON-LD에는 배송유형/광고 여부가 없으므로 상품 li 블록을 productId로 매칭해 보강
+function enrichFromHtmlBlocks(products: ParsedProduct[], html: string): void {
+  const blocks = html.split(/<li[^>]*class="[^"]*ProductUnit_productUnit__/).slice(1);
+  const byId = new Map<string, string>();
+  for (const b of blocks) {
+    const pid = pick(/\/vp\/products\/(\d+)/, b);
+    if (pid && !byId.has(pid)) byId.set(pid, b);
+  }
+  for (const p of products) {
+    const b = byId.get(p.productId);
+    if (!b) continue;
+    p.deliveryType = detectDelivery(b);
+    p.isAd = /AdMark_|ad-badge|sponsored/i.test(b);
+  }
+}
+
 // ① 신형 마크업 (2024~ CSS 모듈: li.ProductUnit_productUnit__*)
 function parseProductUnits(html: string): ParsedProduct[] {
   const products: ParsedProduct[] = [];
@@ -236,8 +292,10 @@ function parseProductUnits(html: string): ParsedProduct[] {
     const href = pick(/href="(\/vp\/products\/[^"]+)"/, block);
     const productId = pick(/\/vp\/products\/(\d+)/, href || block) || pick(/data-id="(\d+)"/, block);
     if (!productId) continue;
-    const name = stripTags(pick(/ProductUnit_productName__[^"]*"[^>]*>([\s\S]*?)<\/div>/, block));
-    const price = parseInt(stripTags(pick(/Price_priceValue__[^"]*"[^>]*>([\s\S]*?)<\/strong>/, block)).replace(/[^0-9]/g, ""), 10) || 0;
+    const name = stripTags(pick(/ProductUnit_productName__[^"]*"[^>]*>([\s\S]*?)<\/div>/, block))
+      || stripTags(pick(/<img[^>]+alt="([^"]{4,200})"/, block));
+    const price = parseInt(stripTags(pick(/Price_priceValue__[^"]*"[^>]*>([\s\S]*?)<\/strong>/, block)).replace(/[^0-9]/g, ""), 10)
+      || parseInt(pick(/"price"\s*:\s*"?([\d,]+)/, block).replace(/,/g, ""), 10) || 0;
     if (!name || price <= 0) continue;
     const starPct = parseFloat(pick(/ProductRating_star__[^"]*"[^>]*width:\s*([\d.]+)%/, block)) || 0;
     const rating = starPct > 0 ? Math.round((starPct / 20) * 10) / 10 : 0;
@@ -368,8 +426,10 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
     html.match(/"searchResultCount"\s*:\s*(\d+)/);
   if (tc) totalCount = parseInt(tc[1].replace(/,/g, ""), 10) || 0;
 
-  // 신형 → 구형 → 내장 JSON 순으로 시도
-  let products = parseProductUnits(html);
+  // JSON-LD → 신형 마크업 → 구형 마크업 → 내장 JSON 순으로 시도
+  let products = parseJsonLd(html);
+  if (products.length > 0) enrichFromHtmlBlocks(products, html);
+  if (products.length === 0) products = parseProductUnits(html);
   if (products.length === 0) products = parseLegacyMarkup(html);
   if (products.length === 0) products = parseEmbeddedJson(html);
 
