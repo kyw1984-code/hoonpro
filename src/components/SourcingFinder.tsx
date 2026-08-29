@@ -412,7 +412,7 @@ export function SourcingFinder() {
             <span className="text-sm font-black text-indigo-700">니치 키워드 발굴 + 쿠팡 실데이터 분석</span>
           </div>
           <p className="text-[11px] text-slate-400 font-bold hidden md:block">
-            네이버 검색광고 · 쿠팡 실시간 수집 데이터 기반
+            쿠팡 실시간 수집 데이터 기반
           </p>
           <div className="flex items-center gap-2 ml-auto">
             <button onClick={() => { setShowFavorites(v => !v); setError(null); }}
