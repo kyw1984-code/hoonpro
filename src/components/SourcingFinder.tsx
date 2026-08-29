@@ -42,6 +42,7 @@ interface Product {
   deliveryType: 'rocket' | 'jet' | 'general';
   rank: number;
   isAd: boolean;
+  isBrand: boolean;
   reviewGrowthPerDay: number | null;
   obsDays: number | null;
   estimated1688Price?: number;
@@ -139,6 +140,7 @@ export function SourcingFinder() {
   const [rocketFilter, setRocketFilter] = useState<'all' | 'general' | 'jet' | 'rocket'>('all');
   const [gradeFilter, setGradeFilter] = useState<'all' | 'Great' | 'Good' | 'Normal' | 'Bad'>('all');
   const [prodSort, setProdSort] = useState<'opportunityScore' | 'reviewCount' | 'rank' | 'priceAsc'>('opportunityScore');
+  const [excludeBrands, setExcludeBrands] = useState(true);
   const productsRef = useRef<HTMLDivElement>(null);
 
   // 마진 계산기 (상품 컨텍스트 선택적)
@@ -317,6 +319,7 @@ export function SourcingFinder() {
     });
 
   const displayProducts = [...products]
+    .filter(p => !excludeBrands || !p.isBrand)
     .filter(p => rocketFilter === 'all' || p.deliveryType === rocketFilter)
     .filter(p => gradeFilter === 'all' || p.calculated.grade === gradeFilter)
     .sort((a, b) => {
@@ -725,6 +728,13 @@ export function SourcingFinder() {
                         </button>
                       ))}
                     </div>
+                    <button onClick={() => setExcludeBrands(v => !v)}
+                      title="브랜드 상품(나이키·네파 등)을 목록에서 숨기거나 표시"
+                      className={`px-3 py-2 rounded-xl text-xs font-bold border shadow-sm transition-all ${
+                        excludeBrands ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-500 border-slate-200'
+                      }`}>
+                      브랜드 제외 {excludeBrands ? 'ON' : 'OFF'}
+                    </button>
                     <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border border-slate-200 shadow-sm">
                       <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
                       <select value={prodSort} onChange={e => setProdSort(e.target.value as any)}
@@ -776,6 +786,9 @@ export function SourcingFinder() {
                                 <div className="px-2 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded uppercase shadow-sm flex items-center gap-1">
                                   <Store className="w-2.5 h-2.5" />일반배송
                                 </div>
+                              )}
+                              {product.isBrand && (
+                                <div className="px-2 py-0.5 bg-slate-700 text-white text-[8px] font-black rounded uppercase shadow-sm">브랜드</div>
                               )}
                             </div>
                             <div className="absolute top-3 left-3 px-2 py-1 bg-slate-900/70 text-white text-[10px] font-black rounded-lg backdrop-blur-sm">

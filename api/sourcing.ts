@@ -100,25 +100,54 @@ async function callKeywordTool(hintKeywords: string[]): Promise<{ ok: boolean; l
   }
 }
 
-// 브랜드/유통사 키워드 제외 목록 (소싱 불가 키워드) — 소문자·공백 제거 기준
+// 브랜드/유통사 키워드 제외 목록 (소싱 불가 키워드) — 소문자·공백 제거 기준 부분일치.
+// 일반 명사와 겹치는 토큰(예: 캐리어, 레이저, 보스, 대상)은 오탐 방지를 위해 제외했음.
 const BRAND_EXCLUDE = [
+  // 스포츠/글로벌 패션
   "나이키", "nike", "아디다스", "adidas", "뉴발란스", "newbalance", "푸마", "puma", "리복", "reebok",
   "아식스", "asics", "미즈노", "mizuno", "휠라", "fila", "챔피언", "언더아머", "underarmour",
   "카파", "kappa", "폴로", "polo", "라코스테", "lacoste", "타미힐피거", "tommyhilfiger",
   "캘빈클라인", "calvinklein", "게스", "guess", "리바이스", "levis", "버버리", "burberry",
-  "구찌", "gucci", "샤넬", "chanel", "루이비통", "louisvuitton", "프라다", "prada",
-  "유니클로", "uniqlo", "스파오", "spao", "탑텐", "topten", "지오다노", "giordano",
-  "노스페이스", "northface", "컬럼비아", "columbia", "디스커버리", "discovery",
-  "아이더", "eider", "블랙야크", "blackyak", "코오롱", "kolon", "밀레", "millet", "네파", "nepa",
-  "mlb", "nba", "코베아", "kovea", "헬리녹스", "helinox", "스노우피크", "snowpeak",
-  "삼성", "samsung", "lg전자", "엘지", "애플", "apple", "아이폰", "iphone", "갤럭시", "galaxy",
-  "샤오미", "xiaomi", "필립스", "philips", "소니", "sony", "파나소닉", "panasonic",
-  "레노버", "lenovo", "에이수스", "asus", "캐논", "canon", "니콘", "nikon", "다이슨", "dyson",
+  "구찌", "gucci", "샤넬", "chanel", "루이비통", "louisvuitton", "프라다", "prada", "디올", "dior",
+  "몽클레르", "moncler", "스톤아일랜드", "스케쳐스", "skechers", "크록스", "crocs", "반스", "vans",
+  "컨버스", "converse", "뉴에라", "newera", "스투시", "stussy", "커버낫", "covernat", "널디", "nerdy",
+  "mlb", "nba", "데상트", "descente", "르꼬끄", "험멜", "hummel", "프로스펙스", "prospecs",
+  // 국내 패션/SPA
+  "유니클로", "uniqlo", "스파오", "spao", "탑텐", "topten", "지오다노", "giordano", "폴햄", "polham",
+  "빈폴", "beanpole", "헤지스", "hazzys", "웨스트우드", "westwood", "프로젝트엠", "projectm",
+  "티비제이", "에잇세컨즈", "8seconds", "지프", "jeep", "내셔널지오그래픽", "nationalgeographic",
+  "코닥", "kodak", "말본", "malbon", "타이틀리스트", "titleist", "캘러웨이", "callaway",
+  "테일러메이드", "taylormade", "오클리", "oakley", "레이밴", "rayban", "젠틀몬스터",
+  // 아웃도어/캠핑
+  "노스페이스", "northface", "컬럼비아", "columbia", "디스커버리", "discovery", "아이더", "eider",
+  "블랙야크", "blackyak", "코오롱", "kolon", "밀레", "millet", "네파", "nepa", "케이투",
+  "몽벨", "montbell", "콜핑", "kolping", "트렉스타", "treksta", "레드페이스", "redface", "센터폴",
+  "아크테릭스", "arcteryx", "파타고니아", "patagonia", "살로몬", "salomon", "마무트", "mammut",
+  "호카", "hoka", "코베아", "kovea", "헬리녹스", "helinox", "스노우피크", "snowpeak",
+  "콜맨", "coleman", "노르디스크", "nordisk", "미니멀웍스", "카즈미", "kazmi", "네이처하이크", "naturehike",
+  // 뷰티
+  "설화수", "헤라", "라네즈", "이니스프리", "미샤", "에뛰드", "클리오", "아이오페", "닥터지",
+  "메디힐", "토리든", "라운드랩", "아누아", "닥터자르트", "바닐라코", "에스티로더", "랑콤", "lancome",
+  "키엘", "kiehl", "록시땅", "loccitane", "아벤느", "avene", "라로슈포제", "세타필", "cetaphil", "아모레",
+  // 식품
+  "오뚜기", "농심", "삼양", "풀무원", "비비고", "씨제이", "해태", "롯데", "오리온", "동원",
+  "청정원", "샘표", "정관장", "종근당", "광동제약", "코카콜라", "펩시", "델몬트", "서울우유",
+  "매일유업", "남양유업", "네스프레소", "nespresso", "스타벅스", "starbucks", "로얄캐닌", "royalcanin",
+  // 주방/생활
+  "락앤락", "locknlock", "쿠쿠", "cuckoo", "쿠첸", "테팔", "tefal", "해피콜", "키친아트",
+  "휘슬러", "fissler", "쿠진아트", "cuisinart", "스탠리", "stanley", "써모스", "thermos",
+  "조지루시", "도루코", "크리넥스", "유한킴벌리", "깨끗한나라",
+  // 가전/디지털
+  "삼성", "samsung", "엘지", "lg전자", "애플", "apple", "아이폰", "iphone", "갤럭시", "galaxy",
+  "샤오미", "xiaomi", "필립스", "philips", "소니", "sony", "파나소닉", "panasonic", "다이슨", "dyson",
+  "로지텍", "logitech", "razer", "벤큐", "benq", "마샬", "marshall", "브리츠", "britz",
+  "벨킨", "belkin", "앤커", "anker", "샌디스크", "sandisk", "캐논", "canon", "니콘", "nikon",
+  "레노버", "lenovo", "에이수스", "asus", "위니아", "딤채", "신일전자",
+  // 유통/플랫폼/행사
   "다이소", "daiso", "이케아", "ikea", "코스트코", "costco", "이마트", "emart", "홈플러스",
   "쿠팡", "coupang", "지마켓", "gmarket", "11번가", "옥션", "auction", "티몬", "위메프",
   "무신사", "musinsa", "올리브영", "oliveyoung", "알리익스프레스", "aliexpress", "테무", "temu",
-  "스타벅스", "starbucks", "락앤락", "locknlock", "쿠쿠", "cuckoo", "쿠첸", "테팔", "tefal",
-  "감사제", "빅세일", "브랜드위크",
+  "감사제", "빅세일", "브랜드위크", "브랜드데이",
 ];
 
 function isBrandKeyword(keyword: string): boolean {
@@ -618,8 +647,10 @@ async function loadReviewVelocity(productIds: string[]): Promise<Map<string, { p
 }
 
 // ─── 점수 산출 (실데이터) ─────────────────────────────────────────────────────
-function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCount: number) {
+function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCount: number, searchKeyword = "") {
   const organic = parsed.filter(p => !p.isAd);
+  // 검색 키워드 자체가 브랜드면 브랜드 표시를 하지 않는다 (의도적 브랜드 조사)
+  const searchTargetsBrand = isBrandKeyword(searchKeyword);
   const total = organic.length;
   const rocketCount = organic.filter(p => p.deliveryType === "rocket").length;
   const jetCount = organic.filter(p => p.deliveryType === "jet").length;
@@ -653,7 +684,8 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
       : opportunityScore >= 55 ? "Good"
       : opportunityScore >= 40 ? "Normal"
       : "Bad";
-    return { ...p, calculated: { demandScore, entryEase, priceFit, opportunityScore, grade } };
+    const isBrand = !searchTargetsBrand && isBrandKeyword(p.productName);
+    return { ...p, isBrand, calculated: { demandScore, entryEase, priceFit, opportunityScore, grade } };
   });
 
   scored.sort((a, b) => b.calculated.opportunityScore - a.calculated.opportunityScore || a.rank - b.rank);
@@ -734,7 +766,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ keyword, products: [], market: null, error: "검색 결과가 없습니다." });
   }
 
-  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount);
+  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount, keyword);
   const velocity = await loadReviewVelocity(products.map(p => p.productId));
   const withVelocity = products.map(p => {
     const v = velocity.get(p.productId);
