@@ -445,7 +445,7 @@ export function SourcingFinder() {
         {loading ? (
           <div className="bg-white rounded-[24px] border border-slate-200 p-12 flex flex-col items-center gap-4 text-slate-400">
             <Loader2 className="w-10 h-10 animate-spin text-indigo-400" />
-            <p className="text-sm font-bold">네이버 검색광고 API에서 연관 키워드를 수집하는 중...</p>
+            <p className="text-sm font-bold">훈프로AI 연관 키워드를 수집 중...</p>
           </div>
         ) : displayKeywords.length > 0 || (showFavorites && favCount === 0) ? (
           <div className="bg-white rounded-[24px] border border-slate-200 shadow-sm overflow-hidden">
@@ -542,6 +542,11 @@ export function SourcingFinder() {
                               className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg text-[11px] font-black transition-all flex items-center gap-1">
                               <TrendingUp className="w-3 h-3" />확장
                             </button>
+                            <a href={coupangSearchUrl(k.keyword)} target="_blank" rel="noopener noreferrer"
+                              title="쿠팡에서 이 키워드 검색 결과 직접 확인"
+                              className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded-lg text-[11px] font-black transition-all">
+                              쿠팡
+                            </a>
                             <a href={naverShopUrl(k.keyword)} target="_blank" rel="noopener noreferrer"
                               title="네이버쇼핑에서 직접 확인"
                               className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg text-[11px] font-black transition-all">
