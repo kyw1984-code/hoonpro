@@ -1786,7 +1786,6 @@ export const DetailPlanner: React.FC = () => {
     const maxRecommendedModelShots = images.length >= 8 ? 3 : Math.max(1, Math.ceil(images.length * 0.4));
     const qualityWarningCount = images.reduce((sum, img) => sum + (img.qualityWarnings?.length || 0), 0);
     const visionWarningCount = images.reduce((sum, img) => sum + (img.visionWarnings?.length || 0), 0);
-    const qaCheckedCount = images.filter(i => i.qaChecked).length;
     const warningImageCount = images.filter(i => (i.qualityWarnings?.length || 0) > 0 || (i.qaTags?.length || 0) > 0 || (i.visionWarnings?.length || 0) > 0).length;
     const missingCount = images.filter(i => !i.imageUrl).length;
     const filteredImages = images.filter(img => {
@@ -2386,46 +2385,6 @@ export const DetailPlanner: React.FC = () => {
                         </div>
                     </div>
                     )}
-
-                    <div className={`rounded-2xl border p-5 shadow-sm ${qaWarnings.length > 0 ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
-                        <div className="mb-3 flex items-center gap-2">
-                            {qaWarnings.length > 0 ? <AlertTriangle className="h-5 w-5 text-amber-600" /> : <CheckCircle2 className="h-5 w-5 text-emerald-600" />}
-                            <h3 className={`font-black ${qaWarnings.length > 0 ? 'text-amber-900' : 'text-emerald-800'}`}>최종 상세페이지 QA</h3>
-                        </div>
-                        {qaWarnings.length > 0 ? (
-                            <div className="space-y-1 text-sm text-amber-800">
-                                {qaWarnings.map((warning, idx) => <p key={idx}>• {warning}</p>)}
-                            </div>
-                        ) : (
-                            <p className="text-sm text-emerald-700">누락, 실패, 카피 경고 없이 모든 이미지가 준비됐습니다.</p>
-                        )}
-                        <div className="mt-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
-                            {[
-                                { label: '이미지 생성 완료', ok: generatedCount === images.length && images.length > 0 },
-                                { label: '실패 이미지 없음', ok: failedCount === 0 },
-                                { label: '카피/기획 경고 확인', ok: qualityWarningCount === 0 },
-                                { label: `비전 QA ${qaCheckedCount}장 검사`, ok: visionWarningCount === 0 },
-                                { label: `컷별 QA 태그 ${warningImageCount}장`, ok: images.length > 0 },
-                                { label: `모델컷 ${modelShotCount}/${maxRecommendedModelShots}장`, ok: modelShotCount <= maxRecommendedModelShots },
-                            ].map(item => (
-                                <div key={item.label} className={`rounded-xl border px-3 py-2 font-bold ${item.ok ? 'border-emerald-200 bg-white/70 text-emerald-700' : 'border-amber-200 bg-white/70 text-amber-800'}`}>
-                                    {item.ok ? '✓' : '!'} {item.label}
-                                </div>
-                            ))}
-                        </div>
-                        {images.some(img => (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0 || (img.visionWarnings?.length || 0) > 0) && (
-                            <div className="mt-4 flex flex-wrap gap-2">
-                                {images
-                                    .filter(img => (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0 || (img.visionWarnings?.length || 0) > 0)
-                                    .slice(0, 8)
-                                    .map(img => (
-                                        <button key={img.id} onClick={() => scrollToImage(img.id)} className="rounded-full bg-white/80 px-3 py-1 text-xs font-bold text-amber-800 ring-1 ring-amber-200 hover:bg-white">
-                                            {img.number}번 이미지 이동
-                                        </button>
-                                    ))}
-                            </div>
-                        )}
-                    </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                         <div>
