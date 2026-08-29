@@ -122,6 +122,7 @@ export function SourcingFinder() {
   const [cached, setCached] = useState(false);
   const [seedTrail, setSeedTrail] = useState<string[]>([]);
   const [activeKwCategory, setActiveKwCategory] = useState<string | null>(null);
+  const [activeMonth, setActiveMonth] = useState<number | null>(null);
 
   // 필터/정렬 (키워드)
   const [sortKey, setSortKey] = useState<'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('opportunityScore');
@@ -195,6 +196,7 @@ export function SourcingFinder() {
     const trimmed = kw.trim();
     if (!trimmed) return;
     setActiveKwCategory(null);
+    setActiveMonth(null);
     setLoading(true);
     setError(null);
     setShowFavorites(false);
@@ -223,6 +225,7 @@ export function SourcingFinder() {
   // ─── API: 카테고리 추천 키워드 (시드 없이) ──────────────────────────────────
   const fetchCategoryKeywords = async (cat: string) => {
     setActiveKwCategory(cat);
+    setActiveMonth(null);
     setLoading(true);
     setError(null);
     setShowFavorites(false);
@@ -235,6 +238,34 @@ export function SourcingFinder() {
       const data = await res.json();
       if (!res.ok || data.error) {
         setError(data.error || '추천 키워드 조회 실패');
+        setKeywords([]);
+        return;
+      }
+      setKeywords(Array.isArray(data.keywords) ? data.keywords : []);
+      setCached(!!data.cached);
+    } catch (e: any) {
+      setError(e.message);
+      setKeywords([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchMonthKeywords = async (m: number) => {
+    setActiveMonth(m);
+    setActiveKwCategory(null);
+    setLoading(true);
+    setError(null);
+    setShowFavorites(false);
+    setSeedStat(null);
+    setSeedTrail([]);
+    setSeedInput('');
+    setCurrentSeed(`${m}월 시즌`);
+    try {
+      const res = await fetch(`/api/sourcing?type=keywords&month=${m}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setError(data.error || '월별 시즌 키워드 조회 실패');
         setKeywords([]);
         return;
       }
@@ -431,6 +462,41 @@ export function SourcingFinder() {
           </div>
         </div>
 
+        {/* 월별 시즌 키워드 — 소싱은 판매 1~2개월 전에 시작해야 함 */}
+        {(() => {
+          const curMonth = new Date().getMonth() + 1;
+          const recMonth1 = (curMonth % 12) + 1;
+          const recMonth2 = (recMonth1 % 12) + 1;
+          return (
+            <div className="bg-paper rounded-panel p-5 border border-line">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-1 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-accent" />
+                월별 시즌 키워드 — 그 달에 잘 팔리는 시즌 상품
+              </p>
+              <p className="mb-3 text-[12px] text-ink-2">
+                소싱→입고→판매까지 1~2개월 걸립니다. 지금은 {curMonth}월이니 <b className="text-accent">{recMonth1}월·{recMonth2}월 판매 상품</b>을 준비할 때입니다.
+              </p>
+              <div className="flex gap-2 flex-wrap">
+                {Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
+                  const isRec = m === recMonth1 || m === recMonth2;
+                  return (
+                    <button key={m} onClick={() => fetchMonthKeywords(m)} disabled={loading}
+                      className={`relative rounded-control border px-3 py-1.5 text-[12px] font-medium transition-colors disabled:opacity-50 ${
+                        activeMonth === m
+                          ? 'border-ink bg-ink text-paper'
+                          : isRec
+                            ? 'border-accent-line bg-accent-soft text-accent hover:border-accent'
+                            : 'border-line text-ink-2 hover:border-line-strong hover:text-ink'
+                      }`}>
+                      {m}월{isRec && activeMonth !== m ? ' ✓' : ''}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* 쿠팡 대표 카테고리 (시드 없이 추천 키워드) */}
         <div className="bg-paper rounded-panel p-5 border border-line">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-3 flex items-center gap-1.5">
@@ -550,9 +616,11 @@ export function SourcingFinder() {
               <h3 className="text-sm font-semibold text-ink">
                 {showFavorites
                   ? <>관심 키워드 <span className="text-caution">{displayKeywords.length}개</span></>
-                  : activeKwCategory
-                    ? <>"{activeKwCategory}" 추천 키워드 <span className="text-accent">{displayKeywords.length}개</span></>
-                    : <>연관 니치 키워드 <span className="text-accent">{displayKeywords.length}개</span></>}
+                  : activeMonth
+                    ? <>{activeMonth}월 시즌 추천 키워드 <span className="text-accent">{displayKeywords.length}개</span></>
+                    : activeKwCategory
+                      ? <>"{activeKwCategory}" 추천 키워드 <span className="text-accent">{displayKeywords.length}개</span></>
+                      : <>연관 니치 키워드 <span className="text-accent">{displayKeywords.length}개</span></>}
               </h3>
               {!showFavorites && cached && (
                 <span className="text-[10px] font-semibold text-ink-3 flex items-center gap-1"><RefreshCw className="w-3 h-3" />캐시 데이터</span>

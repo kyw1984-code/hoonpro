@@ -209,10 +209,29 @@ const CATEGORY_SEEDS: Record<string, string[]> = {
   "반려동물": ["강아지장난감", "고양이용품", "펫방석", "강아지옷", "강아지급식기"],
 };
 
+// 월별 시즌 시드 — "그 달에 잘 팔리는" 키워드 기준.
+// 소싱→입고→판매까지 1~2개월 걸리므로 UI는 기본으로 다음 달을 선택해 보여준다.
+const MONTH_SEEDS: Record<number, string[]> = {
+  1: ["방한용품", "다이어리", "홈트용품", "가습기", "설선물세트"],
+  2: ["발렌타인초콜릿", "졸업선물", "신학기가방", "새학기문구", "환절기영양제"],
+  3: ["신학기용품", "화이트데이선물", "봄원피스", "미세먼지마스크", "봄맞이청소용품"],
+  4: ["피크닉용품", "캠핑용품", "등산의류", "선크림", "봄자켓"],
+  5: ["어버이날선물", "어린이날선물", "캠핑의자", "선풍기", "여름원피스"],
+  6: ["선풍기", "쿨매트", "제습기", "래쉬가드", "장마우산"],
+  7: ["물놀이용품", "수영복", "휴가용품", "모기퇴치기", "아이스박스"],
+  8: ["신학기가방", "쿨링용품", "책상정리용품", "가을가디건", "환절기이불"],
+  9: ["추석선물세트", "가을가디건", "트렌치코트", "등산복", "환절기영양제"],
+  10: ["할로윈의상", "가을캠핑용품", "전기장판", "가을부츠", "무릎담요"],
+  11: ["김장용품", "패딩", "전기히터", "수능선물", "방한용품"],
+  12: ["크리스마스선물", "트리장식", "연말파티용품", "목도리", "핫팩"],
+};
+
 async function handleKeywords(req: VercelRequest, res: VercelResponse) {
   const seed = typeof req.query.seed === "string" ? req.query.seed.trim() : "";
   const category = typeof req.query.category === "string" ? req.query.category.trim() : "";
-  if (!seed && !category) return res.status(400).json({ error: "seed 키워드 또는 category가 필요합니다." });
+  const monthRaw = typeof req.query.month === "string" ? parseInt(req.query.month, 10) : 0;
+  const month = monthRaw >= 1 && monthRaw <= 12 ? monthRaw : 0;
+  if (!seed && !category && !month) return res.status(400).json({ error: "seed 키워드, category 또는 month가 필요합니다." });
   if (category && !CATEGORY_SEEDS[category]) return res.status(400).json({ error: "지원하지 않는 카테고리입니다." });
   if (!NAVER_AD_API_KEY || !NAVER_AD_SECRET_KEY || !NAVER_AD_CUSTOMER_ID) {
     return res.status(500).json({
@@ -222,16 +241,16 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
   }
 
   // 시드 자체가 브랜드 검색이면 브랜드 필터를 끈다 (예: "나이키 운동화")
-  const seedIsBrand = !category && isBrandKeyword(seed);
+  const seedIsBrand = !category && !month && isBrandKeyword(seed);
   const applyBrandFilter = (payload: any) =>
     seedIsBrand ? payload : {
       ...payload,
       keywords: (payload.keywords || []).filter((k: any) => !isBrandKeyword(k.keyword)),
     };
 
-  const hints = category ? CATEGORY_SEEDS[category] : [seed];
-  const cacheKey = category ? `kwcat:${category}` : `kw:${seed.replace(/\s+/g, "")}`;
-  const ttlMs = (category ? 24 : 12) * 3600 * 1000;
+  const hints = month ? MONTH_SEEDS[month] : category ? CATEGORY_SEEDS[category] : [seed];
+  const cacheKey = month ? `kwmon:${month}` : category ? `kwcat:${category}` : `kw:${seed.replace(/\s+/g, "")}`;
+  const ttlMs = (category || month ? 24 : 12) * 3600 * 1000;
 
   const cached = await cacheGet(cacheKey);
   if (cached && cached.ageMs < ttlMs) {
@@ -246,13 +265,13 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
 
   const seedNorm = seed.replace(/\s+/g, "");
   const scoredAll = (result.list || []).map(scoreKeyword).filter(k => k.keyword);
-  const seedStat = category ? null : scoredAll.find(k => k.keyword.replace(/\s+/g, "") === seedNorm) || null;
+  const seedStat = category || month ? null : scoredAll.find(k => k.keyword.replace(/\s+/g, "") === seedNorm) || null;
   const related = scoredAll
-    .filter(k => category || k.keyword.replace(/\s+/g, "") !== seedNorm)
+    .filter(k => category || month || k.keyword.replace(/\s+/g, "") !== seedNorm)
     .sort((a, b) => b.opportunityScore - a.opportunityScore || b.monthlyVolume - a.monthlyVolume)
     .slice(0, 200);
 
-  const payload = { seed: category || seed, category: category || null, seedStat, keywords: related };
+  const payload = { seed: month ? `${month}월 시즌` : category || seed, category: category || null, month: month || null, seedStat, keywords: related };
   await cacheSet(cacheKey, payload); // 캐시에는 원본 저장, 필터는 응답 시 적용
   return res.status(200).json(applyBrandFilter(payload));
 }
