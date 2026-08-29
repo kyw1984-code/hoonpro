@@ -94,17 +94,20 @@ const KW_CATEGORIES = [
 const coupangSearchUrl = (kw: string) => `https://www.coupang.com/np/search?q=${encodeURIComponent(kw)}`;
 const naverShopUrl = (kw: string) => `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(kw)}`;
 
+// 뱃지는 채운 배경 대신 얇은 테두리 — 카드 위에 여러 개가 올라가도 시끄럽지 않다.
+const BADGE_BASE = 'inline-flex items-center rounded-control border px-2 py-0.5 text-[11px] font-semibold';
+
 const gradeStyle = (grade: string) => {
-  if (grade === 'Great') return 'text-positive bg-positive-soft ring-positive/20';
-  if (grade === 'Good') return 'text-accent bg-accent-soft ring-accent/20';
-  if (grade === 'Normal') return 'text-caution bg-caution-soft ring-caution/20';
-  return 'text-critical bg-critical-soft ring-critical/20';
+  if (grade === 'Great') return 'text-positive border-positive/35 bg-positive-soft';
+  if (grade === 'Good') return 'text-accent border-accent/35 bg-accent-soft';
+  if (grade === 'Normal') return 'text-caution border-caution/35 bg-caution-soft';
+  return 'text-ink-3 border-line-strong bg-paper-2';
 };
 
 const compStyle = (compIdx: string) => {
-  if (compIdx === '낮음') return 'text-positive bg-positive-soft ring-positive/20';
-  if (compIdx === '중간') return 'text-caution bg-caution-soft ring-caution/20';
-  return 'text-critical bg-critical-soft ring-critical/20';
+  if (compIdx === '낮음') return 'text-positive border-positive/35 bg-positive-soft';
+  if (compIdx === '중간') return 'text-caution border-caution/35 bg-caution-soft';
+  return 'text-critical border-critical/35 bg-critical-soft';
 };
 
 // ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
@@ -403,7 +406,7 @@ export function SourcingFinder() {
   // ─── 렌더 ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-paper text-ink">
-      <main className="max-w-[1500px] mx-auto px-4 sm:px-6 py-8 flex flex-col gap-6 bg-paper">
+      <main className="mx-auto max-w-[1240px] px-6 py-8 flex flex-col gap-6 bg-paper">
 
         {/* 헤더 라인 */}
         <div className="flex items-center gap-2 flex-wrap">
@@ -422,7 +425,7 @@ export function SourcingFinder() {
               <Star className={`w-3.5 h-3.5 ${showFavorites ? 'fill-white' : ''}`} />관심 키워드 {favCount > 0 && `(${favCount})`}
             </button>
             <button onClick={() => { setSelectedProduct(null); setIsCalcOpen(true); }}
-              className="flex items-center gap-1.5 px-4 py-2 bg-ink hover:bg-ink-2 text-white rounded-card text-xs font-semibold transition-all">
+              className="flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
               <Calculator className="w-3.5 h-3.5" />마진 계산기
             </button>
           </div>
@@ -449,9 +452,9 @@ export function SourcingFinder() {
         </div>
 
         {/* 검색바 */}
-        <div className="bg-paper rounded-panel p-4 border-2 border-accent-line shadow-overlay flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div className="flex flex-col items-stretch gap-2.5 rounded-card border border-line bg-paper p-3 sm:flex-row sm:items-center">
           <div className="flex-1 relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ink-3" />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" />
             <input
               type="text"
               value={seedInput}
@@ -464,13 +467,13 @@ export function SourcingFinder() {
           <button
             onClick={() => fetchKeywords(seedInput)}
             disabled={loading}
-            className="px-8 py-4 bg-accent hover:bg-accent-hover text-white font-semibold rounded-card flex items-center justify-center gap-2 transition-all shadow-raised active:scale-95"
+            className="flex items-center justify-center gap-2 rounded-control bg-ink px-6 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
             키워드 발굴
           </button>
           {displayKeywords.length > 0 && (
-            <button onClick={exportKeywordsCSV} className="p-4 bg-positive hover:bg-positive text-white rounded-card transition-all shadow-raised active:scale-95" title="CSV로 저장">
+            <button onClick={exportKeywordsCSV} className="flex items-center justify-center rounded-control border border-line px-3.5 py-2.5 text-ink-2 transition-colors hover:border-line-strong hover:text-ink" title="CSV로 저장">
               <Download className="w-5 h-5" />
             </button>
           )}
@@ -501,22 +504,22 @@ export function SourcingFinder() {
         {/* 시드 키워드 요약 */}
         {seedStat && !loading && !showFavorites && (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-paper rounded-card p-5 border border-line">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-1">"{seedStat.keyword}" 월간 검색량</p>
-              <p className="text-2xl font-semibold text-accent">{seedStat.monthlyVolume.toLocaleString()}</p>
-              <p className="text-[10px] text-ink-3 font-bold mt-1">PC {seedStat.monthlyPcVolume.toLocaleString()} · 모바일 {seedStat.monthlyMobileVolume.toLocaleString()}</p>
+            <div className="rounded-card border border-line bg-paper p-5">
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">"{seedStat.keyword}" 월간 검색량</p>
+              <p className="text-[26px] font-semibold tracking-tight tabular-nums text-ink">{seedStat.monthlyVolume.toLocaleString()}</p>
+              <p className="mt-1 text-[12px] text-ink-3">PC {seedStat.monthlyPcVolume.toLocaleString()} · 모바일 {seedStat.monthlyMobileVolume.toLocaleString()}</p>
             </div>
-            <div className="bg-paper rounded-card p-5 border border-line">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-1">월평균 클릭수</p>
-              <p className="text-2xl font-semibold text-caution">{seedStat.monthlyClicks.toLocaleString()}</p>
-              <p className="text-[10px] text-ink-3 font-bold mt-1">광고 클릭 기준 실측치</p>
+            <div className="rounded-card border border-line bg-paper p-5">
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">월평균 클릭수</p>
+              <p className="text-[26px] font-semibold tracking-tight tabular-nums text-ink">{seedStat.monthlyClicks.toLocaleString()}</p>
+              <p className="mt-1 text-[12px] text-ink-3">광고 클릭 기준 실측치</p>
             </div>
-            <div className="bg-paper rounded-card p-5 border border-line">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-1">광고 경쟁도</p>
-              <span className={`inline-block mt-1 px-3 py-1 rounded-full text-sm font-semibold ring-1 ${compStyle(seedStat.compIdx)}`}>{seedStat.compIdx}</span>
-              <p className="text-[10px] text-ink-3 font-bold mt-2">평균 노출 광고 {seedStat.adDepth}개</p>
+            <div className="rounded-card border border-line bg-paper p-5">
+              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">광고 경쟁도</p>
+              <span className={`${BADGE_BASE} mt-1 ${compStyle(seedStat.compIdx)}`}>{seedStat.compIdx}</span>
+              <p className="mt-2 text-[12px] text-ink-3">평균 노출 광고 {seedStat.adDepth}개</p>
             </div>
-            <div className="bg-paper rounded-card p-5 border border-line">
+            <div className="rounded-card border border-line bg-paper p-5">
               <div className="flex items-center justify-between mb-1">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2">기회점수</p>
                 <button onClick={() => toggleFavorite(seedStat)} title="관심 키워드">
@@ -524,8 +527,8 @@ export function SourcingFinder() {
                 </button>
               </div>
               <div className="flex items-center gap-3">
-                <p className="text-2xl font-semibold text-ink">{seedStat.opportunityScore}</p>
-                <span className={`px-3 py-1 rounded-full text-xs font-semibold ring-1 ${gradeStyle(seedStat.grade)}`}>{seedStat.grade}</span>
+                <p className="text-[26px] font-semibold tracking-tight tabular-nums text-ink">{seedStat.opportunityScore}</p>
+                <span className={`${BADGE_BASE} ${gradeStyle(seedStat.grade)}`}>{seedStat.grade}</span>
               </div>
               <button onClick={() => fetchProducts(seedStat.keyword, seedStat.monthlyVolume)}
                 className="mt-2 text-[11px] font-semibold text-accent hover:text-accent-hover flex items-center gap-1">
@@ -562,14 +565,14 @@ export function SourcingFinder() {
                   </button>
                 ))}
                 <div className="flex items-center gap-1 bg-paper-2 rounded-control px-2 py-1">
-                  <span className="text-[10px] font-bold text-ink-2">검색량 ≥</span>
+                  <span className="text-[11px] text-ink-3">검색량 ≥</span>
                   <input type="number" value={minVolume} onChange={e => setMinVolume(e.target.value)}
-                    className="w-16 bg-transparent text-xs font-bold text-ink outline-none" />
+                    className="w-16 bg-transparent text-[12px] font-medium tabular-nums text-ink outline-none" />
                 </div>
                 <div className="flex items-center gap-1 bg-paper-2 rounded-control px-2 py-1.5">
                   <ArrowUpDown className="w-3 h-3 text-ink-3" />
                   <select value={sortKey} onChange={e => setSortKey(e.target.value as any)}
-                    className="text-xs font-bold text-ink bg-transparent outline-none cursor-pointer">
+                    className="cursor-pointer bg-transparent text-[12px] font-medium text-ink outline-none">
                     <option value="opportunityScore">기회점수순</option>
                     <option value="monthlyVolume">검색량순</option>
                     <option value="monthlyClicks">클릭수순</option>
@@ -587,65 +590,71 @@ export function SourcingFinder() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-[10px] font-semibold uppercase tracking-widest text-ink-3 border-b border-line">
-                      <th className="px-3 py-3 w-10" />
-                      <th className="text-left px-3 py-3">키워드</th>
-                      <th className="text-right px-4 py-3">월간 검색량</th>
-                      <th className="text-right px-4 py-3 hidden md:table-cell">월평균 클릭</th>
-                      <th className="text-center px-4 py-3">광고경쟁</th>
-                      <th className="text-left px-4 py-3 w-36">기회점수</th>
-                      <th className="text-center px-4 py-3">등급</th>
-                      <th className="px-4 py-3 text-right">분석</th>
+                    <tr className="border-b border-line text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">
+                      <th className="w-10 px-3 py-2.5" />
+                      <th className="px-3 py-2.5 text-left">키워드</th>
+                      <th className="px-4 py-2.5 text-right">월간 검색량</th>
+                      <th className="hidden px-4 py-2.5 text-right md:table-cell">월평균 클릭</th>
+                      <th className="px-4 py-2.5 text-center">광고경쟁</th>
+                      <th className="w-36 px-4 py-2.5 text-left">기회점수</th>
+                      <th className="px-4 py-2.5 text-center">등급</th>
+                      <th className="px-4 py-2.5 text-right">분석</th>
                     </tr>
                   </thead>
                   <tbody>
                     {displayKeywords.slice(0, 100).map(k => (
-                      <tr key={k.keyword} className={`border-b border-line hover:bg-accent-soft/40 transition-colors ${activeKeyword === k.keyword ? 'bg-accent-soft/60' : ''}`}>
-                        <td className="px-3 py-3 text-center">
-                          <button onClick={() => toggleFavorite(k)} title="관심 키워드">
-                            <Star className={`w-4 h-4 transition-all ${favorites[k.keyword] ? 'fill-amber-400 text-caution' : 'text-ink-3 hover:text-caution'}`} />
+                      <tr
+                        key={k.keyword}
+                        className={`group border-b border-line transition-colors last:border-b-0 ${
+                          activeKeyword === k.keyword ? 'bg-accent-soft' : 'hover:bg-paper-2'
+                        }`}
+                      >
+                        <td className="px-3 py-2.5 text-center">
+                          <button onClick={() => toggleFavorite(k)} title="관심 키워드" className="rounded-control p-1">
+                            <Star className={`h-4 w-4 transition-colors ${favorites[k.keyword] ? 'fill-caution text-caution' : 'text-ink-3/50 hover:text-caution'}`} />
                           </button>
                         </td>
-                        <td className="px-3 py-3 font-bold text-ink">{k.keyword}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-ink tabular-nums">
-                          {k.monthlyVolume.toLocaleString()}
-                          <span className="block text-[9px] text-ink-3 font-bold">PC {k.monthlyPcVolume.toLocaleString()} · MO {k.monthlyMobileVolume.toLocaleString()}</span>
+                        <td className="px-3 py-2.5 text-[13px] font-medium text-ink">{k.keyword}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums">
+                          <span className="text-[13px] font-semibold text-ink">{k.monthlyVolume.toLocaleString()}</span>
+                          <span className="mt-0.5 block text-[11px] text-ink-3">PC {k.monthlyPcVolume.toLocaleString()} · MO {k.monthlyMobileVolume.toLocaleString()}</span>
                         </td>
-                        <td className="px-4 py-3 text-right font-bold text-ink-2 tabular-nums hidden md:table-cell">{k.monthlyClicks.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold ring-1 ${compStyle(k.compIdx)}`}>{k.compIdx}</span>
+                        <td className="hidden px-4 py-2.5 text-right text-[13px] tabular-nums text-ink-2 md:table-cell">{k.monthlyClicks.toLocaleString()}</td>
+                        <td className="px-4 py-2.5 text-center">
+                          <span className={`${BADGE_BASE} ${compStyle(k.compIdx)}`}>{k.compIdx}</span>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-1.5 bg-paper-2 rounded-full overflow-hidden">
-                              <div className="h-full bg-accent rounded-full" style={{ width: `${k.opportunityScore}%` }} />
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-1 flex-1 overflow-hidden rounded-full bg-line">
+                              <div className="h-full rounded-full bg-ink" style={{ width: `${k.opportunityScore}%` }} />
                             </div>
-                            <span className="text-xs font-semibold text-ink tabular-nums w-7 text-right">{k.opportunityScore}</span>
+                            <span className="w-6 text-right text-[13px] font-semibold tabular-nums text-ink">{k.opportunityScore}</span>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold ring-1 ${gradeStyle(k.grade)}`}>{k.grade}</span>
+                        <td className="px-4 py-2.5 text-center">
+                          <span className={`${BADGE_BASE} ${gradeStyle(k.grade)}`}>{k.grade}</span>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                        <td className="px-4 py-2.5">
+                          {/* 주 동작만 채우고 나머지는 조용하게 — 행 위에 올렸을 때 또렷해진다 */}
+                          <div className="flex items-center justify-end gap-1 whitespace-nowrap">
                             <button onClick={() => fetchProducts(k.keyword, k.monthlyVolume)}
                               title="쿠팡 상품·리뷰 실데이터 분석"
-                              className="px-2.5 py-1.5 bg-ink hover:bg-ink-2 text-white rounded-control text-[11px] font-semibold transition-all flex items-center gap-1">
-                              <LayoutDashboard className="w-3 h-3" />쿠팡 분석
+                              className="flex items-center gap-1 rounded-control bg-ink px-2.5 py-1.5 text-[11px] font-semibold text-paper transition-opacity hover:opacity-90">
+                              <LayoutDashboard className="h-3 w-3" />쿠팡 분석
                             </button>
                             <button onClick={() => fetchKeywords(k.keyword, 'drill')}
                               title="이 키워드를 시드로 다시 확장"
-                              className="px-2.5 py-1.5 bg-accent-soft hover:bg-accent-soft text-accent rounded-control text-[11px] font-semibold transition-all flex items-center gap-1">
-                              <TrendingUp className="w-3 h-3" />확장
+                              className="flex items-center gap-1 rounded-control border border-line px-2.5 py-1.5 text-[11px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
+                              <TrendingUp className="h-3 w-3" />확장
                             </button>
                             <a href={coupangSearchUrl(k.keyword)} target="_blank" rel="noopener noreferrer"
                               title="쿠팡에서 이 키워드 검색 결과 직접 확인"
-                              className="px-2.5 py-1.5 bg-critical-soft hover:bg-critical-soft text-critical rounded-control text-[11px] font-semibold transition-all">
+                              className="rounded-control border border-line px-2.5 py-1.5 text-[11px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
                               쿠팡
                             </a>
                             <a href={naverShopUrl(k.keyword)} target="_blank" rel="noopener noreferrer"
                               title="네이버쇼핑에서 직접 확인"
-                              className="px-2.5 py-1.5 bg-positive-soft hover:bg-positive-soft text-positive rounded-control text-[11px] font-semibold transition-all">
+                              className="rounded-control border border-line px-2.5 py-1.5 text-[11px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
                               N쇼핑
                             </a>
                           </div>
@@ -718,24 +727,24 @@ export function SourcingFinder() {
                         </div>
                       </div>
                       <div className="bg-paper-2 rounded-card p-4 border border-line">
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-1">경쟁 강도 (상품수 ÷ 검색량)</p>
+                        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">경쟁 강도 (상품수 ÷ 검색량)</p>
                         <p className={`text-xl font-semibold ${market.competitionRate === null ? 'text-ink-3' : market.competitionRate < 2 ? 'text-positive' : market.competitionRate < 8 ? 'text-accent' : 'text-critical'}`}>
                           {market.competitionRate === null ? '—' : market.competitionRate}
                         </p>
-                        <p className="text-[10px] text-ink-3 font-bold mt-1">
+                        <p className="mt-1 text-[12px] text-ink-3">
                           총 {market.totalProducts > 0 ? market.totalProducts.toLocaleString() : '?'}개 상품
                           {market.keywordVolume > 0 && ` / 검색 ${market.keywordVolume.toLocaleString()}회`}
                         </p>
                       </div>
                       <div className="bg-paper-2 rounded-card p-4 border border-line">
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-1">리뷰 진입장벽</p>
+                        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">리뷰 진입장벽</p>
                         <p className="text-xl font-semibold text-accent">중앙값 {market.medianReviews.toLocaleString()}</p>
-                        <p className="text-[10px] text-ink-3 font-bold mt-1">1위 상품 리뷰 {market.maxReviews.toLocaleString()}개</p>
+                        <p className="mt-1 text-[12px] text-ink-3">1위 상품 리뷰 {market.maxReviews.toLocaleString()}개</p>
                       </div>
                       <div className="bg-paper-2 rounded-card p-4 border border-line">
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-1">평균 판매가</p>
+                        <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">평균 판매가</p>
                         <p className="text-xl font-semibold text-caution">{market.avgPrice.toLocaleString()}원</p>
-                        <p className="text-[10px] text-ink-3 font-bold mt-1">{market.minPrice.toLocaleString()} ~ {market.maxPrice.toLocaleString()}원</p>
+                        <p className="mt-1 text-[12px] text-ink-3">{market.minPrice.toLocaleString()} ~ {market.maxPrice.toLocaleString()}원</p>
                       </div>
                     </div>
                   </div>
@@ -771,12 +780,12 @@ export function SourcingFinder() {
                       ))}
                     </div>
                     <div className="flex items-center gap-1.5 bg-paper rounded-card px-3 py-1.5 border border-line">
-                      <span className="text-[10px] font-bold text-ink-2">가격</span>
+                      <span className="text-[11px] text-ink-3">가격</span>
                       <input type="number" value={prodMinPrice} onChange={e => setProdMinPrice(e.target.value)} placeholder="최소"
-                        className="w-16 bg-transparent text-xs font-bold text-ink outline-none" />
+                        className="w-16 bg-transparent text-[12px] font-medium tabular-nums text-ink outline-none" />
                       <span className="text-ink-3">~</span>
                       <input type="number" value={prodMaxPrice} onChange={e => setProdMaxPrice(e.target.value)} placeholder="최대"
-                        className="w-16 bg-transparent text-xs font-bold text-ink outline-none" />
+                        className="w-16 bg-transparent text-[12px] font-medium tabular-nums text-ink outline-none" />
                     </div>
                     <button onClick={() => setExcludeBrands(v => !v)}
                       title="브랜드 상품(나이키·네파 등)을 목록에서 숨기거나 표시"
@@ -788,7 +797,7 @@ export function SourcingFinder() {
                     <div className="flex items-center gap-2 bg-paper rounded-card px-3 py-1.5 border border-line">
                       <ArrowUpDown className="w-3.5 h-3.5 text-ink-3" />
                       <select value={prodSort} onChange={e => setProdSort(e.target.value as any)}
-                        className="text-xs font-bold text-ink bg-transparent outline-none cursor-pointer">
+                        className="cursor-pointer bg-transparent text-[12px] font-medium text-ink outline-none">
                         <option value="opportunityScore">기회점수순</option>
                         <option value="reviewCount">리뷰 많은순</option>
                         <option value="rank">쿠팡 노출순</option>
@@ -819,7 +828,7 @@ export function SourcingFinder() {
                                   className="w-full h-full object-cover transition-transform group-hover:scale-110" />
                               : <div className="w-full h-full flex items-center justify-center text-ink-3"><Search className="w-10 h-10" /></div>}
                             <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
-                              <div className={`px-3 py-1 rounded-full text-[10px] font-bold ring-1 ${gradeStyle(product.calculated.grade)}`}>
+                              <div className={`${BADGE_BASE} bg-paper/90 backdrop-blur ${gradeStyle(product.calculated.grade)}`}>
                                 {product.calculated.grade}
                               </div>
                               {product.deliveryType === 'rocket' && (
@@ -864,7 +873,7 @@ export function SourcingFinder() {
                               )}
                             </div>
                             <div className="flex items-center gap-1.5 mb-3">
-                              <span className={`px-2 py-0.5 rounded-control text-[10px] font-semibold ring-1 ${gradeStyle(product.calculated.grade)}`}
+                              <span className={`${BADGE_BASE} ${gradeStyle(product.calculated.grade)}`}
                                 title="수요검증(리뷰)·진입용이성(배송유형)·가격적합도 종합 (0~100)">
                                 기회지수 {product.calculated.opportunityScore}
                               </span>
