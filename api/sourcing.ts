@@ -215,18 +215,55 @@ interface ParsedProduct {
   isAd: boolean;
 }
 
-function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCount: number; diagnostics: string } {
+function detectDelivery(s: string): ParsedProduct["deliveryType"] {
+  const lower = s.toLowerCase();
+  if (/logorocketmerchant|merchant_?rocket|seller_?rocket|판매자로켓|rocket_?growth|로켓그로스/.test(lower)) return "jet";
+  if (/logo_rocket|rocket_logo|rocketbadge|badge\.rocket|로켓배송|rocket-fresh|logorocketfresh|rocket_wow|로켓와우|"rocket"|rocketdelivery/.test(lower)) return "rocket";
+  return "general";
+}
+
+function cleanImageUrl(url: string): string {
+  if (!url) return "";
+  return url.startsWith("//") ? "https:" + url : url;
+}
+
+// ① 신형 마크업 (2024~ CSS 모듈: li.ProductUnit_productUnit__*)
+function parseProductUnits(html: string): ParsedProduct[] {
   const products: ParsedProduct[] = [];
+  const blocks = html.split(/<li[^>]*class="[^"]*ProductUnit_productUnit__/).slice(1);
+  let rank = 0;
+  for (const block of blocks) {
+    const href = pick(/href="(\/vp\/products\/[^"]+)"/, block);
+    const productId = pick(/\/vp\/products\/(\d+)/, href || block) || pick(/data-id="(\d+)"/, block);
+    if (!productId) continue;
+    const name = stripTags(pick(/ProductUnit_productName__[^"]*"[^>]*>([\s\S]*?)<\/div>/, block));
+    const price = parseInt(stripTags(pick(/Price_priceValue__[^"]*"[^>]*>([\s\S]*?)<\/strong>/, block)).replace(/[^0-9]/g, ""), 10) || 0;
+    if (!name || price <= 0) continue;
+    const starPct = parseFloat(pick(/ProductRating_star__[^"]*"[^>]*width:\s*([\d.]+)%/, block)) || 0;
+    const rating = starPct > 0 ? Math.round((starPct / 20) * 10) / 10 : 0;
+    const reviewCount = parseInt(pick(/ProductRating_ratingCount__[^"]*"[^>]*>[\s\S]{0,30}?([\d,]+)/, block).replace(/,/g, ""), 10) || 0;
+    const image = cleanImageUrl(pick(/<img[^>]+src="([^"]*coupangcdn[^"]+)"/, block) || pick(/<img[^>]+src="([^"]+)"/, block));
+    const isAd = /AdMark_|ad-badge|sponsored/i.test(block);
+    rank += 1;
+    products.push({
+      productId,
+      productName: name,
+      productPrice: price,
+      productUrl: href ? `https://www.coupang.com${href.replace(/&amp;/g, "&")}` : `https://www.coupang.com/vp/products/${productId}`,
+      productImage: image,
+      rating,
+      reviewCount,
+      deliveryType: detectDelivery(block),
+      rank,
+      isAd,
+    });
+  }
+  return products;
+}
 
-  // 총 검색결과 건수 (베스트에포트)
-  let totalCount = 0;
-  const tc =
-    html.match(/검색결과[\s\S]{0,120}?([\d,]{2,12})\s*건/) ||
-    html.match(/총\s*<[^>]+>([\d,]+)<[^>]+>\s*건/) ||
-    html.match(/"totalCount"\s*:\s*(\d+)/);
-  if (tc) totalCount = parseInt(tc[1].replace(/,/g, ""), 10) || 0;
-
-  // 상품 리스트: <li class="search-product ..."> 블록 단위로 분리
+// ② 구형 마크업 (li.search-product)
+function parseLegacyMarkup(html: string): ParsedProduct[] {
+  const products: ParsedProduct[] = [];
   const blocks = html.split(/<li[^>]*class="search-product[\s"]/).slice(1);
   let rank = 0;
   for (const block of blocks) {
@@ -238,14 +275,8 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
     if (!name || price <= 0) continue;
     const rating = parseFloat(pick(/class="rating"[^>]*>([\d.]+)/, block)) || 0;
     const reviewCount = parseInt(pick(/class="rating-total-count"[^>]*>\s*\(?\s*([\d,]+)/, block).replace(/,/g, ""), 10) || 0;
-    let image = pick(/<img[^>]+(?:data-img-src|src)="([^"]+thumbnail[^"]+)"/, block) || pick(/<img[^>]+src="([^"]+)"/, block);
-    if (image.startsWith("//")) image = "https:" + image;
+    const image = cleanImageUrl(pick(/<img[^>]+(?:data-img-src|src)="([^"]+thumbnail[^"]+)"/, block) || pick(/<img[^>]+src="([^"]+)"/, block));
     const isAd = /search-product__ad-badge|AdMark|class="ad-badge/i.test(block);
-    const lower = block.toLowerCase();
-    const deliveryType: ParsedProduct["deliveryType"] =
-      /logorocketmerchant|merchant_?rocket|판매자로켓/.test(lower) ? "jet"
-      : /logo_rocket|rocket_logo|rocketbadge|badge\.rocket|로켓배송|rocket-fresh|logorocketfresh/.test(lower) ? "rocket"
-      : "general";
     rank += 1;
     products.push({
       productId,
@@ -255,15 +286,106 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
       productImage: image,
       rating,
       reviewCount,
-      deliveryType,
+      deliveryType: detectDelivery(block),
       rank,
       isAd,
     });
   }
+  return products;
+}
 
-  const diagnostics = products.length === 0
-    ? `파싱 결과 0개 — htmlLen=${html.length}, productList마커=${html.includes("productList")}, 차단여부=${/access denied|보안 확인|captcha/i.test(html)}`
-    : "";
+// ③ 내장 JSON (__NEXT_DATA__ 등) — 상품 배열을 재귀 탐색으로 발굴
+function numFrom(...vals: any[]): number {
+  for (const v of vals) {
+    if (typeof v === "number" && v > 0) return v;
+    if (typeof v === "string") {
+      const n = parseInt(v.replace(/[^0-9]/g, ""), 10);
+      if (n > 0) return n;
+    }
+  }
+  return 0;
+}
+
+function parseEmbeddedJson(html: string): ParsedProduct[] {
+  const scripts: string[] = [];
+  const nextData = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (nextData) scripts.push(nextData[1]);
+  for (const s of scripts) {
+    let root: any;
+    try { root = JSON.parse(s); } catch { continue; }
+    const candidates: any[][] = [];
+    const walk = (node: any, depth: number) => {
+      if (depth > 25 || node === null || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        const good = node.filter(x => x && typeof x === "object" && (x.productId ?? x.id) && (x.productName ?? x.title ?? x.name));
+        if (good.length >= 3) candidates.push(good);
+        for (const v of node) walk(v, depth + 1);
+      } else {
+        for (const k of Object.keys(node)) walk(node[k], depth + 1);
+      }
+    };
+    walk(root, 0);
+    if (candidates.length === 0) continue;
+    candidates.sort((a, b) => b.length - a.length);
+    const items = candidates[0];
+    const products: ParsedProduct[] = [];
+    let rank = 0;
+    for (const it of items) {
+      const productId = String(it.productId ?? it.id ?? "");
+      const name = String(it.productName ?? it.title ?? it.name ?? "").trim();
+      const price = numFrom(it.salePrice, it.salesPrice, it.price, it.discountedPrice, it.finalPrice,
+        it.priceInfo?.salePrice, it.price?.salePrice, it.price?.value, it.unitPrice);
+      if (!productId || !name || price <= 0) continue;
+      const itStr = JSON.stringify(it);
+      rank += 1;
+      products.push({
+        productId,
+        productName: name,
+        productPrice: price,
+        productUrl: typeof it.productUrl === "string" && it.productUrl.startsWith("http")
+          ? it.productUrl
+          : `https://www.coupang.com/vp/products/${productId}`,
+        productImage: cleanImageUrl(String(it.imageUrl ?? it.image ?? it.thumbnailUrl ?? it.imagePath ?? "")),
+        rating: Number(it.ratingAverage ?? it.rating ?? it.ratingScore ?? 0) || 0,
+        reviewCount: numFrom(it.ratingCount, it.reviewCount, it.ratingTotalCount),
+        deliveryType: detectDelivery(itStr),
+        rank,
+        isAd: Boolean(it.isAd || it.adId || it.adProduct),
+      });
+    }
+    if (products.length > 0) return products;
+  }
+  return [];
+}
+
+function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCount: number; diagnostics: string } {
+  // 총 검색결과 건수 (베스트에포트)
+  let totalCount = 0;
+  const tc =
+    html.match(/검색결과[\s\S]{0,120}?([\d,]{2,12})\s*[건개]/) ||
+    html.match(/총\s*<[^>]+>([\d,]+)<[^>]+>\s*[건개]/) ||
+    html.match(/"totalCount"\s*:\s*(\d+)/) ||
+    html.match(/"searchResultCount"\s*:\s*(\d+)/);
+  if (tc) totalCount = parseInt(tc[1].replace(/,/g, ""), 10) || 0;
+
+  // 신형 → 구형 → 내장 JSON 순으로 시도
+  let products = parseProductUnits(html);
+  if (products.length === 0) products = parseLegacyMarkup(html);
+  if (products.length === 0) products = parseEmbeddedJson(html);
+
+  let diagnostics = "";
+  if (products.length === 0) {
+    const count = (re: RegExp) => (html.match(re) || []).length;
+    const idx = html.indexOf("/vp/products/");
+    const excerpt = idx >= 0
+      ? html.slice(Math.max(0, idx - 250), idx + 250).replace(/\s+/g, " ")
+      : html.slice(0, 300).replace(/\s+/g, " ");
+    diagnostics =
+      `파싱 결과 0개 — htmlLen=${html.length}, ProductUnit=${count(/ProductUnit_productUnit__/g)}, ` +
+      `legacy=${count(/class="search-product[\s"]/g)}, nextData=${html.includes("__NEXT_DATA__")}, ` +
+      `vp링크=${count(/\/vp\/products\/\d+/g)}, 차단여부=${/access denied|보안 확인|captcha/i.test(html)}\n` +
+      `[구조 샘플] ${excerpt.slice(0, 450)}`;
+  }
   return { products, totalCount, diagnostics };
 }
 
