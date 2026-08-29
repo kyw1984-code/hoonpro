@@ -95,3 +95,17 @@ create table if not exists sourcing_cache (
 );
 
 alter table sourcing_cache disable row level security;
+
+-- 8. 소싱 파인더 리뷰 관측 기록 (수집 시마다 리뷰 수를 기록해 리뷰 증가속도(≒판매속도) 산출)
+create table if not exists sourcing_product_obs (
+  id bigserial primary key,
+  product_id text not null,
+  keyword text,
+  review_count int,
+  price int,
+  captured_at timestamptz default now()
+);
+
+create index if not exists idx_spo_pid on sourcing_product_obs(product_id, captured_at);
+
+alter table sourcing_product_obs disable row level security;
