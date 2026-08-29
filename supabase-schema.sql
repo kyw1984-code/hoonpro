@@ -86,3 +86,37 @@ insert into app_config (key, value) values
   ('image_quality', 'medium'),
   ('ai_integrated_text_enabled', 'false')
 on conflict (key) do nothing;
+
+-- 7. 소싱 파인더 외부 API 응답 캐시 (쿠팡 파트너스 검색 API 시간당 10회 제한 대응)
+create table if not exists sourcing_cache (
+  cache_key text primary key,
+  payload jsonb not null,
+  created_at timestamptz default now()
+);
+
+alter table sourcing_cache disable row level security;
+
+-- 8. 소싱 파인더 리뷰 관측 기록 (수집 시마다 리뷰 수를 기록해 리뷰 증가속도(≒판매속도) 산출)
+create table if not exists sourcing_product_obs (
+  id bigserial primary key,
+  product_id text not null,
+  keyword text,
+  review_count int,
+  price int,
+  captured_at timestamptz default now()
+);
+
+create index if not exists idx_spo_pid on sourcing_product_obs(product_id, captured_at);
+
+alter table sourcing_product_obs disable row level security;
+
+-- 9. 소싱 파인더 관심 키워드 (크론 자동 추적 대상)
+create table if not exists sourcing_favorites (
+  user_id uuid not null,
+  keyword text not null,
+  stat jsonb,
+  created_at timestamptz default now(),
+  primary key (user_id, keyword)
+);
+
+alter table sourcing_favorites disable row level security;
