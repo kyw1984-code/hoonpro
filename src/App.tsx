@@ -12,10 +12,11 @@ import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdminPanel } from './components/Admin/AdminPanel';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp } from 'lucide-react';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp, MessageCircleQuestion } from 'lucide-react';
+import { AskHoonpro } from './components/QA/AskHoonpro';
 import { getUser, removeToken, type AuthUser } from './lib/auth';
 
-type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'analyzer' | 'productname' | 'admin';
+type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'analyzer' | 'productname' | 'qa' | 'admin';
 
 const getTabButtonClass = (active: boolean): string => (
   `flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold transition-all lg:text-sm ${
@@ -60,7 +61,7 @@ export default function App() {
 
             <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center">
               {/* 탭 네비게이션 */}
-              <div className="grid w-full grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 sm:grid-cols-3 lg:grid-cols-6 xl:w-auto">
+              <div className="grid w-full grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 sm:grid-cols-3 lg:grid-cols-7 xl:w-auto">
                 <button
                   onClick={() => setActiveTab('thumbnail')}
                   className={getTabButtonClass(activeTab === 'thumbnail')}
@@ -90,6 +91,12 @@ export default function App() {
                   className={getTabButtonClass(activeTab === 'productname')}
                 >
                   <Tag className="w-4 h-4 shrink-0" />상품명 제조기
+                </button>
+                <button
+                  onClick={() => setActiveTab('qa')}
+                  className={getTabButtonClass(activeTab === 'qa')}
+                >
+                  <MessageCircleQuestion className="w-4 h-4 shrink-0" />훈프로에게 질문
                 </button>
                 {user.isAdmin && (
                   <button
@@ -127,6 +134,7 @@ export default function App() {
           {activeTab === 'sourcing' && <SourcingFinder />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
           {activeTab === 'productname' && <ProductNameGenerator />}
+          {activeTab === 'qa' && <AskHoonpro />}
           {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
         </main>
 

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, BookOpen } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
+import { QAManager } from './QAManager';
 
 interface UserRow {
   id: string;
@@ -29,7 +30,7 @@ const STATUS_COLOR: Record<string, string> = {
 const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'stats' | 'config'>('users');
+  const [tab, setTab] = useState<'users' | 'stats' | 'config' | 'qa'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -146,9 +147,17 @@ export function AdminPanel() {
         >
           <ImageIcon className="w-4 h-4" /> 이미지 설정
         </button>
+        <button
+          onClick={() => setTab('qa')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'qa' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+        >
+          <BookOpen className="w-4 h-4" /> 지식 관리
+        </button>
       </div>
 
-      {tab === 'stats' ? <UsageStats /> : tab === 'config' ? <ImageConfigTab showToast={showToast} /> : <UsersTab
+      {tab === 'stats' ? <UsageStats /> : tab === 'config' ? <ImageConfigTab showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : <UsersTab
         users={users}
         loading={loading}
         filter={filter}

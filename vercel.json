@@ -1,5 +1,8 @@
 {
   "crons": [
     { "path": "/api/sourcing?type=cron", "schedule": "0 18 * * *" }
-  ]
+  ],
+  "functions": {
+    "api/qa.ts": { "maxDuration": 60 }
+  }
 }

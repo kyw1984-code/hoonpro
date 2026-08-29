@@ -120,3 +120,90 @@ create table if not exists sourcing_favorites (
 );
 
 alter table sourcing_favorites disable row level security;
+
+-- ─────────────────────────────────────────────────────────────
+-- "훈프로에게 질문" RAG 챗봇 (지식 문서 + 청크 임베딩 + 질문 로그)
+-- ─────────────────────────────────────────────────────────────
+
+-- 10. pgvector 확장 (Supabase 대시보드 Extensions에서도 활성화 가능)
+create extension if not exists vector;
+
+-- 11. 지식 문서 (강의 정리본 / 카톡 Q&A)
+create table if not exists knowledge_docs (
+  id uuid default gen_random_uuid() primary key,
+  title text not null,
+  source_type text not null default 'lecture' check (source_type in ('lecture', 'kakao')),
+  chunk_count integer default 0,
+  char_count integer default 0,
+  created_by uuid,
+  created_at timestamptz default now()
+);
+
+alter table knowledge_docs disable row level security;
+
+-- 12. 지식 청크 (text-embedding-3-small = 1536차원)
+create table if not exists knowledge_chunks (
+  id uuid default gen_random_uuid() primary key,
+  doc_id uuid references knowledge_docs(id) on delete cascade,
+  chunk_index integer not null,
+  content text not null,
+  embedding vector(1536),
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_knowledge_chunks_doc_id on knowledge_chunks(doc_id);
+-- 코사인 유사도 검색 인덱스 (데이터가 수천 건 이상일 때 효과. 소량이면 없어도 정확 검색됨)
+create index if not exists idx_knowledge_chunks_embedding on knowledge_chunks
+  using ivfflat (embedding vector_cosine_ops) with (lists = 100);
+
+alter table knowledge_chunks disable row level security;
+
+-- 13. 유사도 검색 RPC (코사인 유사도 상위 N개 청크 + 문서 정보)
+create or replace function match_knowledge_chunks(
+  query_embedding vector(1536),
+  match_count int default 5,
+  min_similarity float default 0.25
+)
+returns table (
+  chunk_id uuid,
+  doc_id uuid,
+  doc_title text,
+  source_type text,
+  content text,
+  similarity float
+)
+language sql
+stable
+as $$
+  select
+    c.id as chunk_id,
+    c.doc_id,
+    d.title as doc_title,
+    d.source_type,
+    c.content,
+    1 - (c.embedding <=> query_embedding) as similarity
+  from knowledge_chunks c
+  join knowledge_docs d on d.id = c.doc_id
+  where c.embedding is not null
+    and 1 - (c.embedding <=> query_embedding) >= min_similarity
+  order by c.embedding <=> query_embedding
+  limit match_count;
+$$;
+
+-- 14. 질문/답변 로그 (피드백 포함)
+create table if not exists qa_logs (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references users(id) on delete set null,
+  question text not null,
+  answer text,
+  sources jsonb,
+  matched boolean default true,
+  feedback smallint check (feedback in (1, -1)),
+  model text,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_qa_logs_created_at on qa_logs(created_at);
+create index if not exists idx_qa_logs_user_id on qa_logs(user_id);
+
+alter table qa_logs disable row level security;
