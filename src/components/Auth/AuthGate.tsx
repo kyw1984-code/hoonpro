@@ -63,25 +63,25 @@ export function AuthGate({ onSuccess }: Props) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-      <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-10 w-full max-w-sm flex flex-col items-center">
-        <div className="w-14 h-14 bg-blue-600 rounded-2xl flex items-center justify-center mb-4">
+    <div className="min-h-screen bg-paper-2 flex items-center justify-center">
+      <div className="bg-paper rounded-card shadow-raised border border-line p-10 w-full max-w-sm flex flex-col items-center">
+        <div className="w-14 h-14 bg-accent rounded-card flex items-center justify-center mb-4">
           <Lock className="w-7 h-7 text-white" />
         </div>
-        <h1 className="text-xl font-bold text-slate-900 mb-1">쇼크트리 훈프로</h1>
-        <p className="text-sm text-slate-500 mb-6">AI 자동화 프로그램</p>
+        <h1 className="text-xl font-bold text-ink mb-1">쇼크트리 훈프로</h1>
+        <p className="text-sm text-ink-2 mb-6">AI 자동화 프로그램</p>
 
         {/* 탭 */}
-        <div className="flex w-full bg-slate-100 p-1 rounded-xl mb-6">
+        <div className="flex w-full bg-paper-2 p-1 rounded-card mb-6">
           <button
             onClick={() => { setMode('login'); setMessage(null); }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'login' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-control text-sm font-medium transition-all ${mode === 'login' ? 'bg-paper text-accent ' : 'text-ink-2'}`}
           >
             <LogIn className="w-4 h-4" /> 로그인
           </button>
           <button
             onClick={() => { setMode('signup'); setMessage(null); }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-all ${mode === 'signup' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500'}`}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-control text-sm font-medium transition-all ${mode === 'signup' ? 'bg-paper text-accent ' : 'text-ink-2'}`}
           >
             <UserPlus className="w-4 h-4" /> 가입 신청
           </button>
@@ -95,13 +95,13 @@ export function AuthGate({ onSuccess }: Props) {
               onChange={e => setLoginEmail(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleLogin()}
               placeholder="이메일 주소"
-              className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full p-3 border border-line-strong rounded-card outline-none focus:ring-2 focus:ring-accent text-sm"
               autoFocus
             />
             <button
               onClick={handleLogin}
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-colors text-sm"
+              className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-3 rounded-card transition-colors text-sm"
             >
               {loading ? '확인 중...' : '입장하기'}
             </button>
@@ -113,7 +113,7 @@ export function AuthGate({ onSuccess }: Props) {
               value={signupName}
               onChange={e => setSignupName(e.target.value)}
               placeholder="성함"
-              className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full p-3 border border-line-strong rounded-card outline-none focus:ring-2 focus:ring-accent text-sm"
               autoFocus
             />
             <input
@@ -121,7 +121,7 @@ export function AuthGate({ onSuccess }: Props) {
               value={signupPhone}
               onChange={e => setSignupPhone(e.target.value)}
               placeholder="연락처 (예: 010-1234-5678)"
-              className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full p-3 border border-line-strong rounded-card outline-none focus:ring-2 focus:ring-accent text-sm"
             />
             <input
               type="email"
@@ -129,12 +129,12 @@ export function AuthGate({ onSuccess }: Props) {
               onChange={e => setSignupEmail(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSignup()}
               placeholder="이메일 주소"
-              className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full p-3 border border-line-strong rounded-card outline-none focus:ring-2 focus:ring-accent text-sm"
             />
             <button
               onClick={handleSignup}
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-3 rounded-xl transition-colors text-sm"
+              className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-3 rounded-card transition-colors text-sm"
             >
               {loading ? '신청 중...' : '가입 신청하기'}
             </button>
@@ -142,7 +142,7 @@ export function AuthGate({ onSuccess }: Props) {
         )}
 
         {message && (
-          <p className={`mt-4 text-sm text-center ${message.type === 'error' ? 'text-red-500' : 'text-green-600'}`}>
+          <p className={`mt-4 text-sm text-center ${message.type === 'error' ? 'text-critical' : 'text-positive'}`}>
             {message.text}
           </p>
         )}

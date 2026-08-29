@@ -43,20 +43,20 @@ export const ApiKeyCheck: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (!hasKey) {
         return (
-            <div className="flex flex-col items-center justify-center h-screen bg-slate-50 p-4">
-                <div className="bg-white p-8 rounded-2xl shadow-md max-w-md w-full text-center">
-                    <h2 className="text-2xl font-bold text-slate-800 mb-4">API Key Required</h2>
-                    <p className="text-slate-600 mb-6">
+            <div className="flex flex-col items-center justify-center h-screen bg-paper-2 p-4">
+                <div className="bg-paper p-8 rounded-card shadow-raised max-w-md w-full text-center">
+                    <h2 className="text-2xl font-bold text-ink mb-4">API Key Required</h2>
+                    <p className="text-ink-2 mb-6">
                         To use the high-quality image generation features (Gemini 3.1 Flash Image Preview), 
                         you need to select a paid Google Cloud API key.
                     </p>
                     <button 
                         onClick={handleSelectKey}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-xl transition-colors"
+                        className="bg-accent hover:bg-accent-hover text-white font-medium py-2 px-6 rounded-card transition-colors"
                     >
                         Select API Key
                     </button>
-                    <p className="mt-4 text-sm text-slate-500">
+                    <p className="mt-4 text-sm text-ink-2">
                         <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="underline">
                             Learn more about billing
                         </a>

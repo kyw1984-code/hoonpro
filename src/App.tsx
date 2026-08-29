@@ -18,8 +18,8 @@ import { getUser, removeToken, type AuthUser } from './lib/auth';
 type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'analyzer' | 'productname' | 'admin';
 
 const getTabButtonClass = (active: boolean): string => (
-  `flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold transition-all lg:text-sm ${
-    active ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
+  `flex min-w-0 items-center justify-center gap-1.5 rounded-control px-3 py-2 text-xs font-bold transition-all lg:text-sm ${
+    active ? 'bg-paper text-accent ' : 'text-ink-2 hover:bg-paper/70 hover:text-ink'
   }`
 );
 
@@ -48,19 +48,19 @@ export default function App() {
 
   return (
     <ApiKeyCheck>
-      <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+      <div className="min-h-screen bg-paper-2 flex flex-col font-sans">
+        <header className="bg-paper border-b border-line sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-6 py-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex shrink-0 items-center gap-2">
-              <div className="w-8 h-8 shrink-0 bg-blue-600 rounded-lg flex items-center justify-center">
+              <div className="w-8 h-8 shrink-0 bg-accent rounded-control flex items-center justify-center">
                 <LayoutTemplate className="w-5 h-5 text-white" />
               </div>
-              <h1 className="text-lg font-bold text-slate-900 tracking-tight lg:text-xl">쇼크트리 훈프로 AI 자동화 프로그램</h1>
+              <h1 className="text-lg font-bold text-ink tracking-tight lg:text-xl">쇼크트리 훈프로 AI 자동화 프로그램</h1>
             </div>
 
             <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center">
               {/* 탭 네비게이션 */}
-              <div className="grid w-full grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 sm:grid-cols-3 lg:grid-cols-6 xl:w-auto">
+              <div className="grid w-full grid-cols-2 gap-1 rounded-card bg-paper-2 p-1 sm:grid-cols-3 lg:grid-cols-6 xl:w-auto">
                 <button
                   onClick={() => setActiveTab('thumbnail')}
                   className={getTabButtonClass(activeTab === 'thumbnail')}
@@ -102,17 +102,17 @@ export default function App() {
               </div>
 
               {/* 사용자 정보 */}
-              <div className="flex shrink-0 items-center justify-end gap-3 xl:border-l xl:border-slate-200 xl:pl-3">
+              <div className="flex shrink-0 items-center justify-end gap-3 xl:border-l xl:border-line xl:pl-3">
                 {!user.isAdmin && remainingCalls !== null && (
-                  <div className="flex items-center gap-1 whitespace-nowrap text-xs text-slate-500">
-                    <Zap className="w-3.5 h-3.5 text-amber-500" />
+                  <div className="flex items-center gap-1 whitespace-nowrap text-xs text-ink-2">
+                    <Zap className="w-3.5 h-3.5 text-caution" />
                     <span>오늘 {remainingCalls}회 남음</span>
                   </div>
                 )}
-                <span className="whitespace-nowrap text-sm text-slate-700 font-medium">{user.name}</span>
+                <span className="whitespace-nowrap text-sm text-ink font-medium">{user.name}</span>
                 <button
                   onClick={handleLogout}
-                  className="flex items-center gap-1 whitespace-nowrap text-xs text-slate-400 hover:text-red-500 transition-colors"
+                  className="flex items-center gap-1 whitespace-nowrap text-xs text-ink-3 hover:text-critical transition-colors"
                 >
                   <LogOut className="w-3.5 h-3.5" />로그아웃
                 </button>

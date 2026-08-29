@@ -73,28 +73,28 @@ export function UsageStats() {
               key={p}
               onClick={() => setPeriod(p)}
               className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                period === p ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                period === p ? 'bg-accent text-white' : 'bg-paper-2 text-ink-2 hover:bg-line'
               }`}
             >
               {PERIOD_LABEL[p]}
             </button>
           ))}
         </div>
-        <button onClick={fetchStats} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors">
+        <button onClick={fetchStats} className="flex items-center gap-1.5 text-sm text-ink-2 hover:text-ink transition-colors">
           <RefreshCw className="w-4 h-4" /> 새로고침
         </button>
       </div>
 
       {loading ? (
-        <div className="text-center py-16 text-slate-400">불러오는 중...</div>
+        <div className="text-center py-16 text-ink-3">불러오는 중...</div>
       ) : error ? (
-        <div className="text-center py-16 text-red-500">{error}</div>
+        <div className="text-center py-16 text-critical">{error}</div>
       ) : !stats ? null : (
         <div className="space-y-6">
           {/* 합계 카드 */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <SummaryCard
-              icon={<Hash className="w-4 h-4 text-blue-600" />}
+              icon={<Hash className="w-4 h-4 text-accent" />}
               label="총 호출 수"
               value={stats.totals.calls.toLocaleString()}
             />
@@ -109,7 +109,7 @@ export function UsageStats() {
               value={fmtTokens(stats.totals.outputTokens)}
             />
             <SummaryCard
-              icon={<DollarSign className="w-4 h-4 text-green-600" />}
+              icon={<DollarSign className="w-4 h-4 text-positive" />}
               label="총 비용"
               value={formatUsd(stats.totals.costUsd)}
               sub={formatKrw(stats.totals.costUsd)}
@@ -118,16 +118,16 @@ export function UsageStats() {
 
           {/* 일자별 차트 */}
           {stats.timeline.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5">
-              <h3 className="text-sm font-bold text-slate-700 mb-3">일자별 비용 추이</h3>
+            <div className="bg-paper border border-line rounded-card p-5">
+              <h3 className="text-sm font-bold text-ink mb-3">일자별 비용 추이</h3>
               <div className="flex items-end gap-1 h-32">
                 {stats.timeline.map(d => (
                   <div key={d.date} className="flex-1 flex flex-col items-center gap-1" title={`${d.date}\n호출: ${d.calls}\n비용: ${formatUsd(d.costUsd)}`}>
                     <div
-                      className="w-full bg-blue-500 hover:bg-blue-600 rounded-t transition-colors"
+                      className="w-full bg-accent hover:bg-accent rounded-t transition-colors"
                       style={{ height: `${Math.max(2, (d.costUsd / maxDayCost) * 100)}%` }}
                     />
-                    <div className="text-[10px] text-slate-400 truncate w-full text-center">{d.date.slice(5)}</div>
+                    <div className="text-[10px] text-ink-3 truncate w-full text-center">{d.date.slice(5)}</div>
                   </div>
                 ))}
               </div>
@@ -184,39 +184,39 @@ export function UsageStats() {
 
 function SummaryCard({ icon, label, value, sub }: { icon: React.ReactNode; label: string; value: string; sub?: string }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-4">
-      <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
+    <div className="bg-paper border border-line rounded-card p-4">
+      <div className="flex items-center gap-1.5 text-xs text-ink-2 mb-1">
         {icon} {label}
       </div>
-      <div className="text-xl font-bold text-slate-900">{value}</div>
-      {sub && <div className="text-xs text-slate-500 mt-0.5">{sub}</div>}
+      <div className="text-xl font-bold text-ink">{value}</div>
+      {sub && <div className="text-xs text-ink-2 mt-0.5">{sub}</div>}
     </div>
   );
 }
 
 function BreakdownTable({ title, columns, rows }: { title: string; columns: string[]; rows: (string | number)[][] }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-200 flex items-center gap-2">
-        <BarChart3 className="w-4 h-4 text-slate-500" />
-        <h3 className="text-sm font-bold text-slate-700">{title}</h3>
+    <div className="bg-paper border border-line rounded-card overflow-hidden">
+      <div className="px-5 py-3 border-b border-line flex items-center gap-2">
+        <BarChart3 className="w-4 h-4 text-ink-2" />
+        <h3 className="text-sm font-bold text-ink">{title}</h3>
       </div>
       {rows.length === 0 ? (
-        <div className="text-center py-8 text-slate-400 text-sm">데이터가 없습니다.</div>
+        <div className="text-center py-8 text-ink-3 text-sm">데이터가 없습니다.</div>
       ) : (
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200">
+          <thead className="bg-paper-2 border-b border-line">
             <tr>
               {columns.map(c => (
-                <th key={c} className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">{c}</th>
+                <th key={c} className="text-left px-4 py-2 text-xs font-semibold text-ink-2 uppercase tracking-wide">{c}</th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-line">
             {rows.map((row, i) => (
-              <tr key={i} className="hover:bg-slate-50 transition-colors">
+              <tr key={i} className="hover:bg-paper-2 transition-colors">
                 {row.map((cell, j) => (
-                  <td key={j} className="px-4 py-2 text-slate-700">{cell}</td>
+                  <td key={j} className="px-4 py-2 text-ink">{cell}</td>
                 ))}
               </tr>
             ))}

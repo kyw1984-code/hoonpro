@@ -324,15 +324,15 @@ export function AnalyzerDashboard() {
     };
   }, [rawData, unitPrice, unitCost, deliveryFee, coupangFeeRate, netUnitMargin, targetROAS, breakEvenROAS]);
 
-  const gradeColor = (g: string) => ({ S: "text-purple-600", A: "text-blue-600", B: "text-green-600", C: "text-yellow-600", D: "text-red-600" }[g] || "text-slate-600");
-  const gradeBg = (g: string) => ({ S: "bg-purple-50 border-purple-200", A: "bg-blue-50 border-blue-200", B: "bg-green-50 border-green-200", C: "bg-yellow-50 border-yellow-200", D: "bg-red-50 border-red-200" }[g] || "bg-slate-50 border-slate-200");
+  const gradeColor = (g: string) => ({ S: "text-purple-600", A: "text-accent", B: "text-positive", C: "text-caution", D: "text-critical" }[g] || "text-ink-2");
+  const gradeBg = (g: string) => ({ S: "bg-purple-50 border-purple-200", A: "bg-accent-soft border-accent-line", B: "bg-positive-soft border-positive/30", C: "bg-caution-soft border-caution/30", D: "bg-critical-soft border-critical/30" }[g] || "bg-paper-2 border-line");
   const gradeEmoji = (g: string) => ({ S: "🏆", A: "🌟", B: "👍", C: "⚠️", D: "🚨" }[g] || "");
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-slate-50 overflow-hidden">
+    <div className="flex h-[calc(100vh-4rem)] bg-paper-2 overflow-hidden">
       {/* Sidebar */}
-      <div className="w-80 bg-white border-r border-slate-200 p-6 flex flex-col h-full overflow-y-auto shrink-0">
-        <h2 className="text-lg font-bold text-slate-900 mb-6">💰 마진 계산 설정</h2>
+      <div className="w-80 bg-paper border-r border-line p-6 flex flex-col h-full overflow-y-auto shrink-0">
+        <h2 className="text-lg font-bold text-ink mb-6">💰 마진 계산 설정</h2>
         <div className="space-y-4">
           {[
             { label: "상품 판매가 (원)", val: unitPrice, set: setUnitPrice, step: "1" },
@@ -342,20 +342,20 @@ export function AnalyzerDashboard() {
             { label: "현재 목표수익률 (%)", val: targetROAS, set: setTargetROAS, step: "50" },
           ].map(({ label, val, set, step }) => (
             <div key={label}>
-              <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
+              <label className="block text-sm font-medium text-ink mb-1">{label}</label>
               <input
                 type="number" step={step} value={val || ""}
                 onChange={(e) => set(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                className="w-full px-3 py-2 border border-line rounded-control focus:ring-2 focus:ring-accent focus:border-accent outline-none transition-all"
               />
             </div>
           ))}
         </div>
-        <div className="mt-6 pt-6 border-t border-slate-200 space-y-3">
-          <div className="flex justify-between text-sm"><span className="text-slate-600">📦 입출고비 합계:</span><span>{deliveryFee.toLocaleString()}원</span></div>
-          <div className="flex justify-between text-sm"><span className="text-slate-600">📊 예상 수수료 ({coupangFeeRate}%):</span><span>{totalFeeAmount.toLocaleString()}원</span></div>
-          <div className="flex justify-between text-base font-bold"><span className="text-slate-900">💡 개당 예상 마진:</span><span className="text-emerald-600">{netUnitMargin.toLocaleString()}원</span></div>
-          {unitPrice > 0 && <div className="flex justify-between text-sm font-bold"><span>📈 예상 마진율:</span><span className="text-blue-600">{marginRate.toFixed(1)}%</span></div>}
+        <div className="mt-6 pt-6 border-t border-line space-y-3">
+          <div className="flex justify-between text-sm"><span className="text-ink-2">📦 입출고비 합계:</span><span>{deliveryFee.toLocaleString()}원</span></div>
+          <div className="flex justify-between text-sm"><span className="text-ink-2">📊 예상 수수료 ({coupangFeeRate}%):</span><span>{totalFeeAmount.toLocaleString()}원</span></div>
+          <div className="flex justify-between text-base font-bold"><span className="text-ink">💡 개당 예상 마진:</span><span className="text-positive">{netUnitMargin.toLocaleString()}원</span></div>
+          {unitPrice > 0 && <div className="flex justify-between text-sm font-bold"><span>📈 예상 마진율:</span><span className="text-accent">{marginRate.toFixed(1)}%</span></div>}
           {breakEvenROAS > 0 && <div className="flex justify-between text-sm font-bold"><span>🎯 손익분기 ROAS:</span><span className="text-orange-600">{breakEvenROAS.toFixed(0)}%</span></div>}
         </div>
       </div>
@@ -364,39 +364,39 @@ export function AnalyzerDashboard() {
       <div className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-6xl mx-auto">
           <div className="mb-8">
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">📊 쇼크트리 훈프로 쿠팡 광고 성과 분석기</h1>
-            <p className="text-slate-600">쿠팡 보고서(CSV 또는 XLSX)를 업로드하면 훈프로의 정밀 운영 전략이 자동으로 생성됩니다.</p>
+            <h1 className="text-2xl font-bold text-ink mb-2">📊 쇼크트리 훈프로 쿠팡 광고 성과 분석기</h1>
+            <p className="text-ink-2">쿠팡 보고서(CSV 또는 XLSX)를 업로드하면 훈프로의 정밀 운영 전략이 자동으로 생성됩니다.</p>
           </div>
 
           {/* File Upload */}
           <div className="mb-8">
-            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 border-dashed rounded-xl cursor-pointer bg-white hover:bg-slate-50 transition-colors">
+            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-line-strong border-dashed rounded-card cursor-pointer bg-paper hover:bg-paper-2 transition-colors">
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                <Upload className="w-8 h-8 text-slate-400 mb-2" />
-                <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">클릭하여 파일 업로드</span> 또는 드래그 앤 드롭</p>
-                <p className="text-xs text-slate-500">CSV, XLSX 파일 지원</p>
+                <Upload className="w-8 h-8 text-ink-3 mb-2" />
+                <p className="mb-2 text-sm text-ink-2"><span className="font-semibold">클릭하여 파일 업로드</span> 또는 드래그 앤 드롭</p>
+                <p className="text-xs text-ink-2">CSV, XLSX 파일 지원</p>
               </div>
               <input type="file" className="hidden" accept=".csv, .xlsx" onChange={handleFileUpload} />
             </label>
-            {fileName && <p className="mt-2 text-sm text-emerald-600 font-medium">선택된 파일: {fileName}</p>}
-            {error && <p className="mt-2 text-sm text-red-500 font-medium">{error}</p>}
+            {fileName && <p className="mt-2 text-sm text-positive font-medium">선택된 파일: {fileName}</p>}
+            {error && <p className="mt-2 text-sm text-critical font-medium">{error}</p>}
           </div>
 
           {processedData && !("error" in processedData) && (
             <div className="space-y-8">
               {/* KPI Cards */}
               <div>
-                <h3 className="text-lg font-bold text-slate-900 mb-4">📌 핵심 성과 지표</h3>
+                <h3 className="text-lg font-bold text-ink mb-4">📌 핵심 성과 지표</h3>
                 <div className="grid grid-cols-5 gap-3">
                   {[
-                    { label: "최종 실질 순이익", value: `${processedData.totalProfit.toLocaleString()}원`, color: processedData.totalProfit >= 0 ? "text-red-500" : "text-blue-500" },
-                    { label: "총 광고비", value: `${processedData.tot.광고비.toLocaleString()}원`, color: "text-slate-900" },
-                    { label: "실제 ROAS", value: `${(processedData.totalRealRoas * 100).toFixed(0)}%`, color: "text-slate-900" },
-                    { label: "총 판매수량", value: `${processedData.tot.판매수량.toLocaleString()}개`, color: "text-slate-900" },
-                    { label: "구매전환율(CVR)", value: `${(processedData.totalCvr * 100).toFixed(2)}%`, color: "text-slate-900" },
+                    { label: "최종 실질 순이익", value: `${processedData.totalProfit.toLocaleString()}원`, color: processedData.totalProfit >= 0 ? "text-critical" : "text-accent" },
+                    { label: "총 광고비", value: `${processedData.tot.광고비.toLocaleString()}원`, color: "text-ink" },
+                    { label: "실제 ROAS", value: `${(processedData.totalRealRoas * 100).toFixed(0)}%`, color: "text-ink" },
+                    { label: "총 판매수량", value: `${processedData.tot.판매수량.toLocaleString()}개`, color: "text-ink" },
+                    { label: "구매전환율(CVR)", value: `${(processedData.totalCvr * 100).toFixed(2)}%`, color: "text-ink" },
                   ].map(({ label, value, color }) => (
-                    <div key={label} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center">
-                      <p className="text-xs text-slate-500 font-medium mb-1">{label}</p>
+                    <div key={label} className="bg-paper p-4 rounded-card border border-line text-center">
+                      <p className="text-xs text-ink-2 font-medium mb-1">{label}</p>
                       <p className={`text-xl font-bold ${color}`}>{value}</p>
                     </div>
                   ))}
@@ -406,14 +406,14 @@ export function AnalyzerDashboard() {
               {/* 종합 등급 */}
               {processedData.precision && (
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">🎯 종합 진단 등급</h3>
-                  <div className={`border rounded-xl p-6 ${gradeBg(processedData.precision.grade)}`}>
+                  <h3 className="text-lg font-bold text-ink mb-4">🎯 종합 진단 등급</h3>
+                  <div className={`border rounded-card p-6 ${gradeBg(processedData.precision.grade)}`}>
                     <div className="flex items-center gap-6 mb-6">
                       <div className="text-center">
-                        <div className={`text-6xl font-black ${gradeColor(processedData.precision.grade)}`}>
+                        <div className={`text-6xl font-semibold ${gradeColor(processedData.precision.grade)}`}>
                           {gradeEmoji(processedData.precision.grade)} {processedData.precision.grade}
                         </div>
-                        <p className="text-sm text-slate-600 mt-1">종합 점수 {processedData.precision.totalScore.toFixed(1)}점</p>
+                        <p className="text-sm text-ink-2 mt-1">종합 점수 {processedData.precision.totalScore.toFixed(1)}점</p>
                       </div>
                       <div className="flex-1 grid grid-cols-4 gap-4">
                         {[
@@ -423,10 +423,10 @@ export function AnalyzerDashboard() {
                           { label: "효율 점수", score: processedData.precision.efficiencyScore },
                         ].map(({ label, score }) => (
                           <div key={label} className="text-center">
-                            <p className="text-xs text-slate-600 mb-1">{label}</p>
-                            <p className="text-lg font-bold text-slate-900">{score.toFixed(0)}</p>
-                            <div className="w-full bg-slate-200 rounded-full h-2 mt-1">
-                              <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${Math.min(score, 100)}%` }} />
+                            <p className="text-xs text-ink-2 mb-1">{label}</p>
+                            <p className="text-lg font-bold text-ink">{score.toFixed(0)}</p>
+                            <div className="w-full bg-line rounded-full h-2 mt-1">
+                              <div className="bg-accent h-2 rounded-full" style={{ width: `${Math.min(score, 100)}%` }} />
                             </div>
                           </div>
                         ))}
@@ -438,10 +438,10 @@ export function AnalyzerDashboard() {
 
               {/* Placement Table */}
               <div>
-                <h3 className="text-lg font-bold text-slate-900 mb-4">📍 지면별 상세 분석</h3>
-                <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-sm">
+                <h3 className="text-lg font-bold text-ink mb-4">📍 지면별 상세 분석</h3>
+                <div className="overflow-x-auto border border-line rounded-card">
                   <table className="w-full text-sm text-left">
-                    <thead className="text-xs text-slate-700 uppercase bg-slate-50 border-b border-slate-200">
+                    <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line">
                       <tr>
                         {["지면","노출수","클릭수","광고비","판매수량","실제매출액","CPC","클릭률(CTR)","구매전환율(CVR)","실제ROAS","실질순이익"].map((h) => (
                           <th key={h} className="px-4 py-3 text-right first:text-left">{h}</th>
@@ -450,8 +450,8 @@ export function AnalyzerDashboard() {
                     </thead>
                     <tbody>
                       {processedData.placementSummary.map((row: any, idx: number) => (
-                        <tr key={idx} className="bg-white border-b border-slate-100 hover:bg-slate-50">
-                          <td className="px-4 py-3 font-medium text-slate-900">{row.지면}</td>
+                        <tr key={idx} className="bg-paper border-b border-line hover:bg-paper-2">
+                          <td className="px-4 py-3 font-medium text-ink">{row.지면}</td>
                           <td className="px-4 py-3 text-right">{row.노출수.toLocaleString()}</td>
                           <td className="px-4 py-3 text-right">{row.클릭수.toLocaleString()}</td>
                           <td className="px-4 py-3 text-right">{row.광고비.toLocaleString()}원</td>
@@ -461,7 +461,7 @@ export function AnalyzerDashboard() {
                           <td className="px-4 py-3 text-right">{(row.클릭률 * 100).toFixed(2)}%</td>
                           <td className="px-4 py-3 text-right">{(row.구매전환율 * 100).toFixed(2)}%</td>
                           <td className="px-4 py-3 text-right">{(row.실제ROAS * 100).toFixed(0)}%</td>
-                          <td className={`px-4 py-3 text-right font-bold ${row.실질순이익 >= 0 ? "text-red-500" : "text-blue-500"}`}>{row.실질순이익.toLocaleString()}원</td>
+                          <td className={`px-4 py-3 text-right font-bold ${row.실질순이익 >= 0 ? "text-critical" : "text-accent"}`}>{row.실질순이익.toLocaleString()}원</td>
                         </tr>
                       ))}
                     </tbody>
@@ -472,22 +472,22 @@ export function AnalyzerDashboard() {
               {/* Products */}
               {processedData.productSummary && (
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">🛍️ 옵션별 성과 분석</h3>
+                  <h3 className="text-lg font-bold text-ink mb-4">🛍️ 옵션별 성과 분석</h3>
                   <div className="flex flex-col gap-6">
                     <div>
-                      <h4 className="font-semibold text-slate-800 mb-3">🏆 효자 옵션 (판매순)</h4>
-                      <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-sm max-h-80">
+                      <h4 className="font-semibold text-ink mb-3">🏆 효자 옵션 (판매순)</h4>
+                      <div className="overflow-x-auto border border-line rounded-card max-h-80">
                         <table className="w-full text-sm text-left">
-                          <thead className="text-xs text-slate-700 uppercase bg-slate-50 border-b border-slate-200 sticky top-0">
+                          <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line sticky top-0">
                             <tr><th className="px-4 py-3">상품명</th><th className="px-4 py-3 text-right">판매수량</th><th className="px-4 py-3 text-right">광고비</th><th className="px-4 py-3 text-right">실질순이익</th></tr>
                           </thead>
                           <tbody>
                             {processedData.productSummary.filter((p: any) => p.판매수량 > 0).sort((a: any, b: any) => b.판매수량 - a.판매수량).map((row: any, idx: number) => (
-                              <tr key={idx} className="bg-white border-b border-slate-100 hover:bg-slate-50">
-                                <td className="px-4 py-3 font-medium text-slate-900 whitespace-normal break-words">{row.상품명}</td>
+                              <tr key={idx} className="bg-paper border-b border-line hover:bg-paper-2">
+                                <td className="px-4 py-3 font-medium text-ink whitespace-normal break-words">{row.상품명}</td>
                                 <td className="px-4 py-3 text-right">{row.판매수량.toLocaleString()}개</td>
                                 <td className="px-4 py-3 text-right">{row.광고비.toLocaleString()}원</td>
-                                <td className={`px-4 py-3 text-right font-bold ${row.실질순이익 >= 0 ? "text-red-500" : "text-blue-500"}`}>{row.실질순이익.toLocaleString()}원</td>
+                                <td className={`px-4 py-3 text-right font-bold ${row.실질순이익 >= 0 ? "text-critical" : "text-accent"}`}>{row.실질순이익.toLocaleString()}원</td>
                               </tr>
                             ))}
                           </tbody>
@@ -495,17 +495,17 @@ export function AnalyzerDashboard() {
                       </div>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-slate-800 mb-3">💸 돈만 쓰는 옵션 (판매0)</h4>
-                      <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-sm max-h-80">
+                      <h4 className="font-semibold text-ink mb-3">💸 돈만 쓰는 옵션 (판매0)</h4>
+                      <div className="overflow-x-auto border border-line rounded-card max-h-80">
                         <table className="w-full text-sm text-left">
-                          <thead className="text-xs text-slate-700 uppercase bg-slate-50 border-b border-slate-200 sticky top-0">
+                          <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line sticky top-0">
                             <tr><th className="px-4 py-3">상품명</th><th className="px-4 py-3 text-right">광고비</th><th className="px-4 py-3 text-right">클릭수</th></tr>
                           </thead>
                           <tbody>
                             {processedData.productSummary.filter((p: any) => p.판매수량 === 0 && p.광고비 > 0).sort((a: any, b: any) => b.광고비 - a.광고비).map((row: any, idx: number) => (
-                              <tr key={idx} className="bg-white border-b border-slate-100 hover:bg-slate-50">
-                                <td className="px-4 py-3 font-medium text-slate-900 whitespace-normal break-words">{row.상품명}</td>
-                                <td className="px-4 py-3 text-right text-red-500 font-medium">{row.광고비.toLocaleString()}원</td>
+                              <tr key={idx} className="bg-paper border-b border-line hover:bg-paper-2">
+                                <td className="px-4 py-3 font-medium text-ink whitespace-normal break-words">{row.상품명}</td>
+                                <td className="px-4 py-3 text-right text-critical font-medium">{row.광고비.toLocaleString()}원</td>
                                 <td className="px-4 py-3 text-right">{row.클릭수.toLocaleString()}</td>
                               </tr>
                             ))}
@@ -520,16 +520,16 @@ export function AnalyzerDashboard() {
               {/* Bad Keywords */}
               {processedData.badKeywords && processedData.badKeywords.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">✂️ 제외 키워드 제안</h3>
-                  <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                    <p className="text-sm text-slate-600 mb-1">
-                      광고비만 소진하고 판매가 없는 키워드 <span className="font-bold text-red-500">{processedData.badKeywords.length}개</span> —
-                      낭비 광고비: <span className="font-bold text-red-500">₩{processedData.badKeywords.reduce((s: number, k: any) => s + k.광고비, 0).toLocaleString()}</span>
+                  <h3 className="text-lg font-bold text-ink mb-4">✂️ 제외 키워드 제안</h3>
+                  <div className="bg-paper border border-line rounded-card p-4">
+                    <p className="text-sm text-ink-2 mb-1">
+                      광고비만 소진하고 판매가 없는 키워드 <span className="font-bold text-critical">{processedData.badKeywords.length}개</span> —
+                      낭비 광고비: <span className="font-bold text-critical">₩{processedData.badKeywords.reduce((s: number, k: any) => s + k.광고비, 0).toLocaleString()}</span>
                     </p>
-                    <p className="text-sm text-slate-600 mb-2">복사해서 제외 등록하세요:</p>
+                    <p className="text-sm text-ink-2 mb-2">복사해서 제외 등록하세요:</p>
                     <textarea
                       readOnly
-                      className="w-full h-24 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none"
+                      className="w-full h-24 p-3 bg-paper-2 border border-line rounded-control text-sm text-ink focus:outline-none"
                       value={processedData.badKeywords.map((k: any) => k.키워드).join(", ")}
                     />
                   </div>
@@ -539,11 +539,11 @@ export function AnalyzerDashboard() {
               {/* Recommendations */}
               {processedData.recommendations.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">💡 훈프로의 정밀 운영 제안</h3>
+                  <h3 className="text-lg font-bold text-ink mb-4">💡 훈프로의 정밀 운영 제안</h3>
                   <div className="space-y-3">
                     {processedData.recommendations.map((rec: string, idx: number) => (
-                      <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                        <p className="text-sm text-slate-800 leading-relaxed">{rec}</p>
+                      <div key={idx} className="bg-paper border border-line rounded-card p-4">
+                        <p className="text-sm text-ink leading-relaxed">{rec}</p>
                       </div>
                     ))}
                   </div>
@@ -553,7 +553,7 @@ export function AnalyzerDashboard() {
           )}
 
           {"error" in (processedData ?? {}) && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">
+            <div className="p-4 bg-critical-soft border border-critical/30 rounded-card text-critical">
               {(processedData as any).error}
             </div>
           )}
