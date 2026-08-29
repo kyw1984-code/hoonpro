@@ -717,7 +717,9 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
   return { products: scored, market };
 }
 
-async function handleProducts(req: VercelRequest, res: VercelResponse) {
+const DAILY_LIMIT = 40; // api/usage.ts와 동일한 일일 한도
+
+async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: any) {
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
   const keywordVolume = Number(req.query.volume) || 0;
   if (!keyword) return res.status(400).json({ error: "keyword가 필요합니다." });
@@ -734,10 +736,26 @@ async function handleProducts(req: VercelRequest, res: VercelResponse) {
   let servedFrom: "fresh" | "cache" | "stale" = "fresh";
   let parseDebug = "";
 
+  let remaining: number | null = null;
   if (cached && cached.ageMs < 24 * 3600 * 1000) {
     parsed = cached.payload;
     servedFrom = "cache";
   } else {
+    // 신규 수집(외부 비용 발생)만 일일 사용 한도에 포함 — 캐시 조회는 무료
+    if (!decoded?.isAdmin && supabase) {
+      try {
+        const today = new Date().toISOString().split("T")[0];
+        const { data, error } = await supabase.rpc("increment_usage", {
+          p_user_id: decoded.userId,
+          p_date: today,
+          p_limit: DAILY_LIMIT,
+        });
+        if (!error && data?.exceeded) {
+          return res.status(429).json({ error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다. 내일 다시 이용해주세요. (이미 분석했던 키워드는 캐시로 계속 조회됩니다)` });
+        }
+        if (!error && typeof data?.remaining === "number") remaining = data.remaining;
+      } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
+    }
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
     const result = await fetchViaUnlocker(url);
     if (result.ok) {
@@ -773,7 +791,89 @@ async function handleProducts(req: VercelRequest, res: VercelResponse) {
     return { ...p, reviewGrowthPerDay: v ? v.perDay : null, obsDays: v ? v.days : null };
   });
 
-  return res.status(200).json({ keyword, products: withVelocity, market, servedFrom, ...(parseDebug ? { parseDebug } : {}) });
+  return res.status(200).json({
+    keyword, products: withVelocity, market, servedFrom,
+    ...(remaining !== null ? { remaining } : {}),
+    ...(parseDebug ? { parseDebug } : {}),
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 관심 키워드 (서버 저장 — 크론 자동 추적의 대상)
+// ═══════════════════════════════════════════════════════════════════════════════
+async function handleFavorites(req: VercelRequest, res: VercelResponse, decoded: any) {
+  if (!supabase) return res.status(500).json({ error: "서버 저장소가 설정되지 않았습니다." });
+  const action = typeof req.query.action === "string" ? req.query.action : "list";
+  const userId = decoded.userId;
+
+  if (action === "list") {
+    const { data, error } = await supabase
+      .from("sourcing_favorites")
+      .select("keyword, stat")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(300);
+    if (error) return res.status(500).json({ error: "관심 키워드 조회 실패" });
+    return res.status(200).json({ favorites: data || [] });
+  }
+
+  const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
+  if (!keyword) return res.status(400).json({ error: "keyword가 필요합니다." });
+
+  if (action === "add") {
+    let stat: any = null;
+    try { stat = JSON.parse(String(req.query.stat || "null")); } catch { /* stat 없이도 저장 */ }
+    const { error } = await supabase
+      .from("sourcing_favorites")
+      .upsert({ user_id: userId, keyword, stat });
+    if (error) return res.status(500).json({ error: "관심 키워드 저장 실패" });
+    return res.status(200).json({ ok: true });
+  }
+  if (action === "remove") {
+    await supabase.from("sourcing_favorites").delete().eq("user_id", userId).eq("keyword", keyword);
+    return res.status(200).json({ ok: true });
+  }
+  return res.status(400).json({ error: "action=list | add | remove 가 필요합니다." });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 크론: 관심 키워드 자동 재수집 → 리뷰 증가속도(판매속도) 자동 축적
+// Vercel Cron이 매일 호출 (vercel.json). 실행당 최대 6개 키워드,
+// 20시간 이내 수집된 키워드는 건너뛰므로 비용이 자연히 상한된다.
+// ═══════════════════════════════════════════════════════════════════════════════
+async function handleCron(req: VercelRequest, res: VercelResponse) {
+  const cronSecret = (process.env.CRON_SECRET || "").trim();
+  if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
+    return res.status(401).json({ error: "unauthorized" });
+  }
+  if (!supabase || !BRIGHTDATA_API_TOKEN) {
+    return res.status(200).json({ ok: false, reason: "supabase 또는 Bright Data 미설정" });
+  }
+
+  const { data: favs } = await supabase.from("sourcing_favorites").select("keyword").limit(1000);
+  const keywords = [...new Set((favs || []).map(f => String(f.keyword)))];
+
+  let crawled = 0;
+  const results: string[] = [];
+  for (const kw of keywords) {
+    if (crawled >= 6) break; // maxDuration(60s) 내에서 안전한 상한
+    const cacheKey = `cp:v5:${kw.replace(/\s+/g, "")}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached && cached.ageMs < 20 * 3600 * 1000) continue; // 오늘 이미 수집됨
+    const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(kw)}&channel=user&sorter=scoreDesc&listSize=60`;
+    const result = await fetchViaUnlocker(url, 1);
+    if (!result.ok) { results.push(`${kw}: 실패`); continue; }
+    const p = parseCoupangSearch(result.html!);
+    if (p.products.length >= 5) {
+      await cacheSet(cacheKey, { products: p.products, totalCount: p.totalCount });
+      await recordObservations(kw, p.products);
+      crawled++;
+      results.push(`${kw}: ${p.products.length}개`);
+    } else {
+      results.push(`${kw}: 파싱 ${p.products.length}개`);
+    }
+  }
+  return res.status(200).json({ ok: true, totalFavorites: keywords.length, crawled, results });
 }
 
 // ─── 메인 핸들러 ──────────────────────────────────────────────────────────────
@@ -784,19 +884,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
+  const type = typeof req.query.type === "string" ? req.query.type : "";
+
+  // 크론은 CRON_SECRET으로 자체 인증
+  if (type === "cron") return handleCron(req, res);
+
   // JWT 인증 (외부 남용 시 네이버/Bright Data 비용이 발생하므로 필수)
   const auth = req.headers.authorization;
   if (!auth?.startsWith("Bearer ")) {
     return res.status(401).json({ error: "인증이 필요합니다." });
   }
+  let decoded: any;
   try {
-    jwt.verify(auth.slice(7), process.env.JWT_SECRET!);
+    decoded = jwt.verify(auth.slice(7), process.env.JWT_SECRET!);
   } catch {
     return res.status(401).json({ error: "유효하지 않은 토큰입니다. 다시 로그인해주세요." });
   }
 
-  const type = typeof req.query.type === "string" ? req.query.type : "";
   if (type === "keywords") return handleKeywords(req, res);
-  if (type === "products") return handleProducts(req, res);
-  return res.status(400).json({ error: "type=keywords | products 가 필요합니다." });
+  if (type === "products") return handleProducts(req, res, decoded);
+  if (type === "favorites") return handleFavorites(req, res, decoded);
+  return res.status(400).json({ error: "type=keywords | products | favorites 가 필요합니다." });
 }

@@ -141,6 +141,9 @@ export function SourcingFinder() {
   const [gradeFilter, setGradeFilter] = useState<'all' | 'Great' | 'Good' | 'Normal' | 'Bad'>('all');
   const [prodSort, setProdSort] = useState<'opportunityScore' | 'reviewCount' | 'rank' | 'priceAsc'>('opportunityScore');
   const [excludeBrands, setExcludeBrands] = useState(true);
+  const [gemMode, setGemMode] = useState(false);
+  const [prodMinPrice, setProdMinPrice] = useState('');
+  const [prodMaxPrice, setProdMaxPrice] = useState('');
   const productsRef = useRef<HTMLDivElement>(null);
 
   // 마진 계산기 (상품 컨텍스트 선택적)
@@ -157,6 +160,26 @@ export function SourcingFinder() {
   useEffect(() => {
     const saved = localStorage.getItem('sourcingMultiplier');
     if (saved) setSourcingMultiplier(Number(saved));
+    // 관심 키워드 서버 동기화 (크론 자동 추적의 대상이 되도록 서버에 저장)
+    (async () => {
+      try {
+        const res = await fetch('/api/sourcing?type=favorites&action=list', { headers: authHeaders() });
+        const data = await res.json();
+        if (res.ok && Array.isArray(data.favorites)) {
+          const map: Record<string, KeywordStat> = {};
+          for (const f of data.favorites) {
+            if (f.stat && f.stat.keyword) map[f.keyword] = f.stat;
+            else map[f.keyword] = {
+              keyword: f.keyword, monthlyPcVolume: 0, monthlyMobileVolume: 0, monthlyVolume: 0,
+              monthlyClicks: 0, compIdx: '중간', adDepth: 0, volumeScore: 0, competition: 50,
+              opportunityScore: 0, grade: 'Normal',
+            };
+          }
+          setFavorites(map);
+          localStorage.setItem(FAV_KEY, JSON.stringify(map));
+        }
+      } catch { /* 서버 동기화 실패 시 localStorage 값 유지 */ }
+    })();
   }, []);
 
   const handleMultiplierChange = (val: number) => {
@@ -247,6 +270,9 @@ export function SourcingFinder() {
       setMarket(data.market || null);
       setServedFrom(data.servedFrom || 'fresh');
       setProdDebug(data.parseDebug || null);
+      if (typeof data.remaining === 'number') {
+        window.dispatchEvent(new CustomEvent('usage-updated', { detail: { remaining: data.remaining } }));
+      }
     } catch (e: any) {
       setProdError(e.message);
       setProducts([]);
@@ -258,6 +284,7 @@ export function SourcingFinder() {
 
   // ─── 관심 키워드 ────────────────────────────────────────────────────────────
   const toggleFavorite = (k: KeywordStat) => {
+    const adding = !favorites[k.keyword];
     setFavorites(prev => {
       const next = { ...prev };
       if (next[k.keyword]) delete next[k.keyword];
@@ -265,6 +292,10 @@ export function SourcingFinder() {
       localStorage.setItem(FAV_KEY, JSON.stringify(next));
       return next;
     });
+    // 서버에도 저장 — 관심 키워드는 매일 새벽 크론이 자동 재수집해 판매속도를 축적
+    const params = new URLSearchParams({ type: 'favorites', action: adding ? 'add' : 'remove', keyword: k.keyword });
+    if (adding) params.set('stat', JSON.stringify(k));
+    fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() }).catch(() => {});
   };
 
   // ─── 마진 계산 ──────────────────────────────────────────────────────────────
@@ -322,6 +353,10 @@ export function SourcingFinder() {
     .filter(p => !excludeBrands || !p.isBrand)
     .filter(p => rocketFilter === 'all' || p.deliveryType === rocketFilter)
     .filter(p => gradeFilter === 'all' || p.calculated.grade === gradeFilter)
+    .filter(p => !prodMinPrice || p.productPrice >= Number(prodMinPrice))
+    .filter(p => !prodMaxPrice || p.productPrice <= Number(prodMaxPrice))
+    // 숨은 보석: 수요는 검증됐지만(리뷰 30~1000) 로켓·브랜드가 장악하지 않은 자리
+    .filter(p => !gemMode || (p.reviewCount >= 30 && p.reviewCount <= 1000 && p.deliveryType !== 'rocket' && !p.isBrand))
     .sort((a, b) => {
       if (prodSort === 'rank') return a.rank - b.rank;
       if (prodSort === 'priceAsc') return a.productPrice - b.productPrice;
@@ -707,6 +742,13 @@ export function SourcingFinder() {
 
                   {/* 필터 */}
                   <div className="flex items-center gap-3 flex-wrap">
+                    <button onClick={() => setGemMode(v => !v)}
+                      title="리뷰 30~1000개(수요 검증)이면서 로켓·브랜드가 아닌 상품만 — 진입 가능한 검증 시장"
+                      className={`px-3 py-2 rounded-xl text-xs font-black border shadow-sm transition-all ${
+                        gemMode ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white text-indigo-600 border-indigo-200'
+                      }`}>
+                      💎 숨은 보석
+                    </button>
                     <div className="flex items-center gap-1.5 bg-white rounded-xl p-1 border border-slate-200 shadow-sm">
                       {([
                         { v: 'all', label: '전체' },
@@ -727,6 +769,14 @@ export function SourcingFinder() {
                           {g === 'all' ? '등급 전체' : g}
                         </button>
                       ))}
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-white rounded-xl px-3 py-1.5 border border-slate-200 shadow-sm">
+                      <span className="text-[10px] font-bold text-slate-500">가격</span>
+                      <input type="number" value={prodMinPrice} onChange={e => setProdMinPrice(e.target.value)} placeholder="최소"
+                        className="w-16 bg-transparent text-xs font-bold text-slate-700 outline-none" />
+                      <span className="text-slate-300">~</span>
+                      <input type="number" value={prodMaxPrice} onChange={e => setProdMaxPrice(e.target.value)} placeholder="최대"
+                        className="w-16 bg-transparent text-xs font-bold text-slate-700 outline-none" />
                     </div>
                     <button onClick={() => setExcludeBrands(v => !v)}
                       title="브랜드 상품(나이키·네파 등)을 목록에서 숨기거나 표시"
@@ -840,6 +890,21 @@ export function SourcingFinder() {
                                   placeholder="0"
                                 />
                                 <span className="text-[10px] text-amber-600 font-black">¥</span>
+                                {(() => {
+                                  if (!product.estimated1688Price || product.estimated1688Price <= 0) return null;
+                                  const s = product.productPrice;
+                                  const pf = s - Math.round(product.estimated1688Price * sourcingMultiplier) - 3000 - Math.round(s * 0.12);
+                                  const mg = s > 0 ? (pf / s) * 100 : 0;
+                                  return (
+                                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ring-1 ${
+                                      mg >= 20 ? 'bg-emerald-50 text-emerald-700 ring-emerald-500/20'
+                                      : mg > 0 ? 'bg-amber-50 text-amber-700 ring-amber-500/20'
+                                      : 'bg-rose-50 text-rose-600 ring-rose-500/20'
+                                    }`} title="판매가 - (위안×배수) - 배송비 3,000원 - 수수료 12% 기준">
+                                      마진 {mg.toFixed(0)}%
+                                    </span>
+                                  );
+                                })()}
                               </div>
                             </div>
                             <div className="flex flex-col gap-2 mt-auto">

@@ -109,3 +109,14 @@ create table if not exists sourcing_product_obs (
 create index if not exists idx_spo_pid on sourcing_product_obs(product_id, captured_at);
 
 alter table sourcing_product_obs disable row level security;
+
+-- 9. 소싱 파인더 관심 키워드 (크론 자동 추적 대상)
+create table if not exists sourcing_favorites (
+  user_id uuid not null,
+  keyword text not null,
+  stat jsonb,
+  created_at timestamptz default now(),
+  primary key (user_id, keyword)
+);
+
+alter table sourcing_favorites disable row level security;
