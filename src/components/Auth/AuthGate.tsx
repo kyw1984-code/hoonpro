@@ -63,29 +63,37 @@ export function AuthGate({ onSuccess }: Props) {
   };
 
   return (
-    <div className="min-h-screen bg-paper-2 flex items-center justify-center">
-      <div className="bg-paper rounded-card shadow-raised border border-line p-10 w-full max-w-sm flex flex-col items-center">
-        <div className="w-14 h-14 bg-accent rounded-card flex items-center justify-center mb-4">
-          <Lock className="w-7 h-7 text-white" />
+    <div className="flex min-h-screen items-center justify-center bg-ground px-5 py-12">
+      <div className="w-full max-w-[380px]">
+        {/* 브랜드 — 카드 밖에 두어 화면 전체가 하나의 표지처럼 읽히게 */}
+        <div className="mb-7 flex flex-col items-center text-center">
+          <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-card bg-ink">
+            <Lock className="h-5 w-5 text-paper" />
+          </div>
+          <h1 className="text-[22px] font-semibold tracking-tight text-ink">쇼크트리 훈프로</h1>
+          <p className="mt-1 text-[13px] text-ink-3">셀러를 위한 AI 자동화 도구</p>
         </div>
-        <h1 className="text-xl font-bold text-ink mb-1">쇼크트리 훈프로</h1>
-        <p className="text-sm text-ink-2 mb-6">AI 자동화 프로그램</p>
 
-        {/* 탭 */}
-        <div className="flex w-full bg-paper-2 p-1 rounded-card mb-6">
-          <button
-            onClick={() => { setMode('login'); setMessage(null); }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-control text-sm font-medium transition-all ${mode === 'login' ? 'bg-paper text-accent ' : 'text-ink-2'}`}
-          >
-            <LogIn className="w-4 h-4" /> 로그인
-          </button>
-          <button
-            onClick={() => { setMode('signup'); setMessage(null); }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-control text-sm font-medium transition-all ${mode === 'signup' ? 'bg-paper text-accent ' : 'text-ink-2'}`}
-          >
-            <UserPlus className="w-4 h-4" /> 가입 신청
-          </button>
-        </div>
+        <div className="rounded-panel border border-line bg-paper p-7">
+          {/* 탭 */}
+          <div className="mb-6 flex gap-1 border-b border-line">
+            <button
+              onClick={() => { setMode('login'); setMessage(null); }}
+              className={`-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 py-2.5 text-[13px] transition-colors ${
+                mode === 'login' ? 'border-ink font-semibold text-ink' : 'border-transparent font-medium text-ink-3 hover:text-ink'
+              }`}
+            >
+              <LogIn className="h-4 w-4" /> 로그인
+            </button>
+            <button
+              onClick={() => { setMode('signup'); setMessage(null); }}
+              className={`-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 py-2.5 text-[13px] transition-colors ${
+                mode === 'signup' ? 'border-ink font-semibold text-ink' : 'border-transparent font-medium text-ink-3 hover:text-ink'
+              }`}
+            >
+              <UserPlus className="h-4 w-4" /> 가입 신청
+            </button>
+          </div>
 
         {mode === 'login' ? (
           <div className="w-full space-y-3">
@@ -95,13 +103,13 @@ export function AuthGate({ onSuccess }: Props) {
               onChange={e => setLoginEmail(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleLogin()}
               placeholder="이메일 주소"
-              className="w-full p-3 border border-line-strong rounded-card outline-none focus:ring-2 focus:ring-accent text-sm"
+              className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
               autoFocus
             />
             <button
               onClick={handleLogin}
               disabled={loading}
-              className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-3 rounded-card transition-colors text-sm"
+              className="w-full rounded-control bg-ink py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               {loading ? '확인 중...' : '입장하기'}
             </button>
@@ -113,7 +121,7 @@ export function AuthGate({ onSuccess }: Props) {
               value={signupName}
               onChange={e => setSignupName(e.target.value)}
               placeholder="성함"
-              className="w-full p-3 border border-line-strong rounded-card outline-none focus:ring-2 focus:ring-accent text-sm"
+              className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
               autoFocus
             />
             <input
@@ -121,7 +129,7 @@ export function AuthGate({ onSuccess }: Props) {
               value={signupPhone}
               onChange={e => setSignupPhone(e.target.value)}
               placeholder="연락처 (예: 010-1234-5678)"
-              className="w-full p-3 border border-line-strong rounded-card outline-none focus:ring-2 focus:ring-accent text-sm"
+              className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
             />
             <input
               type="email"
@@ -129,23 +137,30 @@ export function AuthGate({ onSuccess }: Props) {
               onChange={e => setSignupEmail(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleSignup()}
               placeholder="이메일 주소"
-              className="w-full p-3 border border-line-strong rounded-card outline-none focus:ring-2 focus:ring-accent text-sm"
+              className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
             />
             <button
               onClick={handleSignup}
               disabled={loading}
-              className="w-full bg-accent hover:bg-accent-hover disabled:opacity-50 text-white font-medium py-3 rounded-card transition-colors text-sm"
+              className="w-full rounded-control bg-ink py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
             >
               {loading ? '신청 중...' : '가입 신청하기'}
             </button>
           </div>
         )}
 
-        {message && (
-          <p className={`mt-4 text-sm text-center ${message.type === 'error' ? 'text-critical' : 'text-positive'}`}>
-            {message.text}
-          </p>
-        )}
+          {message && (
+            <p className={`mt-4 rounded-control px-3 py-2.5 text-center text-[13px] ${
+              message.type === 'error' ? 'bg-critical-soft text-critical' : 'bg-positive-soft text-positive'
+            }`}>
+              {message.text}
+            </p>
+          )}
+        </div>
+
+        <p className="mt-6 text-center text-xs text-ink-3">
+          가입 신청 후 관리자 승인이 완료되면 이용하실 수 있습니다.
+        </p>
       </div>
     </div>
   );
