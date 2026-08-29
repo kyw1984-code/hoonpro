@@ -86,3 +86,12 @@ insert into app_config (key, value) values
   ('image_quality', 'medium'),
   ('ai_integrated_text_enabled', 'false')
 on conflict (key) do nothing;
+
+-- 7. 소싱 파인더 외부 API 응답 캐시 (쿠팡 파트너스 검색 API 시간당 10회 제한 대응)
+create table if not exists sourcing_cache (
+  cache_key text primary key,
+  payload jsonb not null,
+  created_at timestamptz default now()
+);
+
+alter table sourcing_cache disable row level security;

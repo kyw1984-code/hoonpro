@@ -1,217 +1,299 @@
 /**
- * 소싱 파인더 컴포넌트
- * soucing 리포(src/app/page.tsx)에서 이식 — 인증/헤더/푸터 제거 후 탭 패널로 적용
+ * 소싱 파인더 v2
+ *
+ * 네이버 쇼핑검색 API 종료(2026-07)에 따라 전면 재구축:
+ *  1) 니치 키워드 발굴 — 네이버 검색광고 API: 실제 월간검색량 + 광고경쟁도로
+ *     "검색량은 많은데 경쟁은 적은" 키워드를 찾는다
+ *  2) 쿠팡 상품 분석 — 쿠팡 파트너스 API: 실제 로켓배송 여부(isRocket)로
+ *     로켓 비중이 낮은(= 일반 셀러가 진입하기 쉬운) 시장을 판별
+ *  3) 카테고리 베스트 — 쿠팡 공식 베스트셀러 중 로켓이 아닌 상품 = 소싱 기회
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Search, TrendingUp, DollarSign, ChevronRight, Target, BarChart3,
-  Loader2, LayoutDashboard, ExternalLink, Star, MessageSquare,
-  Sparkles, Dumbbell, Tent, Baby, PawPrint, Sofa, Shirt, Cpu,
-  Download, X, SlidersHorizontal, ArrowUpDown, Heart, ShoppingCart,
-  Utensils, UtensilsCrossed, Palette, Car, Book,
+  Search, TrendingUp, DollarSign, ChevronRight, Loader2, LayoutDashboard,
+  ExternalLink, Sparkles, Tent, PawPrint, Sofa, Shirt, Cpu, Download, X,
+  ArrowUpDown, Heart, UtensilsCrossed, Car, Book, Baby, Rocket, Store,
+  KeyRound, Crown, Gamepad2, Pencil, Apple, Dumbbell, RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProductSkeleton } from './Skeleton';
-
-// ─── Sparkline ────────────────────────────────────────────────────────────────
-const Sparkline = ({ data }: { data: number[] }) => {
-  const [hoveredIndex, setHoveredIndex] = React.useState<number | null>(null);
-  const safeData = React.useMemo(() => {
-    if (!data || !Array.isArray(data) || data.length === 0) return Array.from({ length: 12 }, () => 0);
-    return data.map(v => (typeof v === 'number' && !isNaN(v)) ? v : 0);
-  }, [data]);
-  const max = Math.max(...safeData, 1);
-  const min = Math.min(...safeData);
-  const range = max - min || 1;
-  const months = ['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
-
-  return (
-    <div className="w-full flex flex-col gap-4">
-      <div className="flex items-stretch gap-2 h-40 relative px-1">
-        {safeData.map((val, i) => {
-          const isFlat = max === min;
-          const heightPercent = isFlat ? 50 : 15 + ((val - min) / range) * 85;
-          return (
-            <div key={i} className="flex-1 flex flex-col justify-end relative group"
-              onMouseEnter={() => setHoveredIndex(i)} onMouseLeave={() => setHoveredIndex(null)}>
-              <div
-                className={`w-full rounded-t-[8px] transition-all duration-500 relative shadow-sm ${
-                  hoveredIndex === i
-                    ? 'bg-gradient-to-t from-orange-600 to-amber-400 shadow-amber-200/50 scale-x-105 z-10'
-                    : 'bg-gradient-to-t from-amber-400 to-amber-300 opacity-80 group-hover:opacity-100'
-                }`}
-                style={{ height: `${heightPercent}%` }}
-              >
-                {hoveredIndex === i && (
-                  <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-700 text-white px-3 py-2.5 rounded-2xl text-xs font-black whitespace-nowrap shadow-2xl z-[100]">
-                    <div className="text-center">
-                      <div className="text-[10px] text-amber-400 font-black mb-0.5 uppercase tracking-tighter">{months[i]} 검색 트렌드</div>
-                      <div className="text-sm font-black tabular-nums">{val.toLocaleString()}건</div>
-                    </div>
-                    <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-900 border-r border-b border-slate-700 rotate-45" />
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex justify-between px-1 pt-3 border-t border-slate-100">
-        {months.map((m, i) => (
-          <span key={i} className={`text-[9px] font-black tabular-nums transition-colors duration-300 ${hoveredIndex === i ? 'text-amber-600' : 'text-slate-400'}`}>
-            {i + 1}
-          </span>
-        ))}
-      </div>
-      <div className="bg-amber-50 rounded-xl py-2 px-3 flex items-center justify-center gap-2 mt-2 border border-amber-100">
-        <TrendingUp className="w-3 h-3 text-amber-500" />
-        <p className="text-[10px] font-black text-amber-600 uppercase tracking-[0.1em]">월간 검색량 추이 분석 (1월 - 12월)</p>
-      </div>
-    </div>
-  );
-};
+import { getToken } from '../lib/auth';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+interface KeywordStat {
+  keyword: string;
+  monthlyPcVolume: number;
+  monthlyMobileVolume: number;
+  monthlyVolume: number;
+  monthlyClicks: number;
+  compIdx: string;
+  adDepth: number;
+  volumeScore: number;
+  competition: number;
+  opportunityScore: number;
+  grade: 'Great' | 'Good' | 'Normal' | 'Bad';
+}
+
 interface Product {
   productId: string;
   productName: string;
   productPrice: number;
   productImage: string;
   productUrl: string;
-  rating?: number;
-  ratingCount?: number;
-  isRocket?: boolean;
-  deliveryType?: 'rocket' | 'jet' | 'general' | 'rocket_fallback';
-  reviewEnriched?: boolean;
+  categoryName: string;
+  isRocket: boolean;
+  isFreeShipping: boolean;
+  rank: number;
   estimated1688Price?: number;
   calculated: {
-    saleIndex: number;
-    competitionStrength: number;
-    sourcingScore: number;
+    exposureScore: number;
+    entryEase: number;
+    priceFit: number;
     opportunityScore: number;
-    grade: 'Great' | 'Excellent' | 'Good' | 'Bad';
-    estimated?: boolean;
+    grade: 'Great' | 'Good' | 'Normal' | 'Bad';
   };
 }
 
-// ─── SellerLandscape ─────────────────────────────────────────────────────────
-const SellerLandscape = ({ products }: { products: Product[] }) => {
-  if (!products || products.length === 0) return null;
-  const total = Math.min(products.length, 20);
-  const topProducts = products.slice(0, total);
-  const rocketCount = topProducts.filter(p => p.deliveryType === 'rocket' || p.deliveryType === 'rocket_fallback' || (p.isRocket && !p.deliveryType)).length;
-  const jetCount = topProducts.filter(p => p.deliveryType === 'jet').length;
-  const rocketCombined = rocketCount + jetCount;
-  const general = topProducts.filter(p => p.deliveryType === 'general' || (!p.isRocket && !p.deliveryType)).length;
-  const rocketCombinedPct = (rocketCombined / total) * 100;
-  const generalPct = (general / total) * 100;
+interface Market {
+  totalCollected: number;
+  inPriceRange: number;
+  rocketCount: number;
+  generalCount: number;
+  rocketRatio: number;
+  avgPrice: number;
+  minPrice: number;
+  maxPrice: number;
+  keywordVolume: number;
+  entryVerdict: 'Excellent' | 'Good' | 'Fair' | 'Bad';
+}
+
+// ─── 카테고리 (쿠팡 파트너스 베스트 카테고리 ID) ─────────────────────────────
+const BEST_CATEGORIES = [
+  { id: '1001', label: '여성패션', icon: Shirt },
+  { id: '1002', label: '남성패션', icon: Shirt },
+  { id: '1030', label: '유아동패션', icon: Baby },
+  { id: '1010', label: '뷰티', icon: Heart },
+  { id: '1011', label: '출산/유아동', icon: Baby },
+  { id: '1012', label: '식품', icon: Apple },
+  { id: '1013', label: '주방용품', icon: UtensilsCrossed },
+  { id: '1014', label: '생활용품', icon: Sparkles },
+  { id: '1015', label: '홈인테리어', icon: Sofa },
+  { id: '1016', label: '가전디지털', icon: Cpu },
+  { id: '1017', label: '스포츠/레저', icon: Tent },
+  { id: '1018', label: '자동차용품', icon: Car },
+  { id: '1019', label: '도서/음반', icon: Book },
+  { id: '1020', label: '완구/취미', icon: Gamepad2 },
+  { id: '1021', label: '문구/오피스', icon: Pencil },
+  { id: '1024', label: '헬스/건강식품', icon: Dumbbell },
+  { id: '1029', label: '반려동물', icon: PawPrint },
+];
+
+// ─── 공통 헬퍼 ────────────────────────────────────────────────────────────────
+const authHeaders = (): Record<string, string> => {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+const gradeStyle = (grade: string) => {
+  if (grade === 'Great') return 'text-emerald-600 bg-emerald-50 ring-emerald-500/20';
+  if (grade === 'Good') return 'text-indigo-600 bg-indigo-50 ring-indigo-500/20';
+  if (grade === 'Normal') return 'text-amber-600 bg-amber-50 ring-amber-500/20';
+  return 'text-rose-600 bg-rose-50 ring-rose-500/20';
+};
+
+const compStyle = (compIdx: string) => {
+  if (compIdx === '낮음') return 'text-emerald-600 bg-emerald-50 ring-emerald-500/20';
+  if (compIdx === '중간') return 'text-amber-600 bg-amber-50 ring-amber-500/20';
+  return 'text-rose-600 bg-rose-50 ring-rose-500/20';
+};
+
+// ─── 시장 요약 카드 ───────────────────────────────────────────────────────────
+const MarketSummary = ({ market, title }: { market: Market; title: string }) => {
+  const verdictText: Record<Market['entryVerdict'], { label: string; desc: string; color: string }> = {
+    Excellent: { label: '진입 기회 높음', desc: '로켓 비중이 낮아 일반 셀러가 노려볼 만한 시장입니다', color: 'text-emerald-600' },
+    Good: { label: '진입 가능', desc: '로켓과 일반 셀러가 공존하는 시장입니다', color: 'text-indigo-600' },
+    Fair: { label: '진입 주의', desc: '로켓 비중이 높은 편이라 차별화가 필요합니다', color: 'text-amber-600' },
+    Bad: { label: '진입 비추천', desc: '쿠팡 직매입(로켓)이 장악한 시장입니다', color: 'text-rose-600' },
+  };
+  const v = verdictText[market.entryVerdict];
 
   return (
-    <div className="bg-slate-50 p-5 rounded-[24px] border border-slate-200 flex flex-col gap-4">
-      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">판매자 경쟁 분포 (TOP {total})</p>
-      <div className="flex h-3 w-full rounded-full overflow-hidden bg-slate-200">
-        <div style={{ width: `${rocketCombinedPct}%` }} className="h-full bg-rose-500 transition-all duration-500" />
-        <div style={{ width: `${generalPct}%` }} className="h-full bg-emerald-500 transition-all duration-500" />
+    <div className="bg-white rounded-[24px] p-6 border border-slate-200 shadow-sm">
+      <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
+        <h3 className="text-base font-black text-slate-800">{title} <span className="text-slate-400 font-bold">시장 분석</span></h3>
+        <span className={`text-xs font-black ${v.color}`}>{v.label} · {v.desc}</span>
       </div>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="flex flex-col">
-          <span className="text-[9px] font-black text-rose-400 uppercase">로켓 / 판매자로켓</span>
-          <span className="text-xl font-black text-slate-800">{Math.round(rocketCombinedPct)}%</span>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">로켓 vs 일반 (상위 {market.totalCollected}개)</p>
+          <div className="flex h-2.5 w-full rounded-full overflow-hidden bg-slate-200 mb-2">
+            <div style={{ width: `${market.rocketRatio}%` }} className="h-full bg-rose-500 transition-all duration-500" />
+            <div style={{ width: `${100 - market.rocketRatio}%` }} className="h-full bg-emerald-500 transition-all duration-500" />
+          </div>
+          <div className="flex justify-between text-[11px] font-black">
+            <span className="text-rose-500">로켓 {market.rocketRatio}%</span>
+            <span className="text-emerald-600">일반 {100 - market.rocketRatio}%</span>
+          </div>
         </div>
-        <div className="flex flex-col border-l border-slate-300 pl-4">
-          <span className="text-[9px] font-black text-emerald-400 uppercase">일반배송</span>
-          <span className="text-xl font-black text-slate-800">{Math.round(generalPct)}%</span>
+        <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">평균 판매가</p>
+          <p className="text-xl font-black text-amber-600">{market.avgPrice.toLocaleString()}원</p>
+          <p className="text-[10px] text-slate-400 font-bold mt-1">{market.minPrice.toLocaleString()} ~ {market.maxPrice.toLocaleString()}원</p>
+        </div>
+        <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">일반배송 상품</p>
+          <p className="text-xl font-black text-emerald-600">{market.generalCount}개</p>
+          <p className="text-[10px] text-slate-400 font-bold mt-1">로켓 경쟁 없이 노출 가능한 자리</p>
+        </div>
+        <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">{market.keywordVolume > 0 ? '월간 검색량' : '수집 상품'}</p>
+          <p className="text-xl font-black text-indigo-600">
+            {market.keywordVolume > 0 ? market.keywordVolume.toLocaleString() : market.totalCollected}
+            <span className="text-xs text-slate-400 font-bold ml-1">{market.keywordVolume > 0 ? '회/월' : '개'}</span>
+          </p>
+          <p className="text-[10px] text-slate-400 font-bold mt-1">{market.keywordVolume > 0 ? '네이버 검색광고 실데이터' : '쿠팡 파트너스 API 실데이터'}</p>
         </div>
       </div>
     </div>
   );
 };
 
-// ─── CATEGORIES ───────────────────────────────────────────────────────────────
-const CATEGORIES = [
-  { label: '여성패션', icon: Shirt, subs: [
-    { label: '상의', items: [{ label: '티셔츠', keyword: '여성 티셔츠' },{ label: '블라우스', keyword: '여성 블라우스' },{ label: '후드티', keyword: '여성 후드티' },{ label: '맨투맨', keyword: '여성 맨투맨' }] },
-    { label: '하의', items: [{ label: '바지', keyword: '여성 바지' },{ label: '청바지', keyword: '여성 청바지' },{ label: '스커트', keyword: '여성 스커트' },{ label: '레깅스', keyword: '여성 레깅스' }] },
-    { label: '아우터/원피스', items: [{ label: '원피스', keyword: '여성 원피스' },{ label: '자켓', keyword: '여성 자켓' },{ label: '코트', keyword: '여성 코트' },{ label: '패딩', keyword: '여성 패딩' }] },
-  ]},
-  { label: '남성패션', icon: Shirt, subs: [
-    { label: '상의', items: [{ label: '티셔츠', keyword: '남성 티셔츠' },{ label: '셔츠', keyword: '남성 셔츠' },{ label: '후드티', keyword: '남성 후드티' },{ label: '맨투맨', keyword: '남성 맨투맨' }] },
-    { label: '하의', items: [{ label: '바지', keyword: '남성 바지' },{ label: '청바지', keyword: '남성 청바지' },{ label: '반바지', keyword: '남성 반바지' }] },
-    { label: '아우터', items: [{ label: '자켓', keyword: '남성 자켓' },{ label: '코트', keyword: '남성 코트' },{ label: '패딩', keyword: '남성 패딩' }] },
-  ]},
-  { label: '뷰티', icon: Heart, subs: [
-    { label: '기초케어', items: [{ label: '스킨', keyword: '스킨' },{ label: '에센스', keyword: '에센스' },{ label: '크림', keyword: '수분크림' },{ label: '마스크팩', keyword: '마스크팩' }] },
-    { label: '메이크업', items: [{ label: '쿠션', keyword: '쿠션 팩트' },{ label: '립스틱', keyword: '립스틱' },{ label: '틴트', keyword: '틴트' }] },
-  ]},
-  { label: '주방', icon: UtensilsCrossed, subs: [
-    { label: '조리도구', items: [{ label: '냄비', keyword: '인덕션 냄비' },{ label: '프라이팬', keyword: '코팅 프라이팬' },{ label: '실리콘 조리도구', keyword: '실리콘 조리도구' }] },
-    { label: '식기', items: [{ label: '그릇', keyword: '식기 그릇 세트' },{ label: '텀블러', keyword: '텀블러' }] },
-  ]},
-  { label: '생활용품', icon: UtensilsCrossed, subs: [
-    { label: '욕실용품', items: [{ label: '샤워기', keyword: '필터 샤워기' },{ label: '욕실매트', keyword: '규조토 매트' }] },
-    { label: '청소/세탁', items: [{ label: '세제', keyword: '세탁 세제' },{ label: '청소도구', keyword: '청소도구 세트' },{ label: '옷걸이', keyword: '논슬립 옷걸이' }] },
-  ]},
-  { label: '가전', icon: Cpu, subs: [
-    { label: '생활가전', items: [{ label: '가습기', keyword: '복합식 가습기' },{ label: '공기청정기', keyword: '공기청정기' },{ label: '선풍기', keyword: '선풍기' }] },
-    { label: '주방가전', items: [{ label: '에어프라이어', keyword: '에어프라이어' },{ label: '커피머신', keyword: '커피 머신' }] },
-  ]},
-  { label: '디지털', icon: Cpu, subs: [
-    { label: '컴퓨터 주변기기', items: [{ label: '마우스', keyword: '무선 마우스' },{ label: '키보드', keyword: '기계식 키보드' },{ label: '보조배터리', keyword: '보조배터리' }] },
-    { label: '모바일', items: [{ label: '휴대폰케이스', keyword: '아이폰 갤럭시 케이스' },{ label: '거치대', keyword: '휴대폰 거치대' }] },
-  ]},
-  { label: '가구/침구', icon: Sofa, subs: [
-    { label: '침구', items: [{ label: '베개', keyword: '경추 베개' },{ label: '이불', keyword: '기능성 이불' },{ label: '커튼', keyword: '암막 커튼' }] },
-    { label: '수납/가구', items: [{ label: '의자', keyword: '컴퓨터 의자' },{ label: '선반', keyword: '수납 선반' },{ label: '조명', keyword: '무드등' }] },
-  ]},
-  { label: '스포츠/캠핑', icon: Tent, subs: [
-    { label: '홈트레이닝', items: [{ label: '요가매트', keyword: '요가매트' },{ label: '아령', keyword: '덤벨 아령' },{ label: '레깅스', keyword: '레깅스' }] },
-    { label: '캠핑', items: [{ label: '텐트', keyword: '캠핑 텐트' },{ label: '캠핑의자', keyword: '캠핑 의자' },{ label: '랜턴', keyword: '캠핑 랜턴' }] },
-  ]},
-  { label: '반려동물', icon: PawPrint, subs: [
-    { label: '펫 용품', items: [{ label: '강아지 사료', keyword: '강아지 사료' },{ label: '강아지 간식', keyword: '강아지 간식' },{ label: '배변패드', keyword: '배변패드' },{ label: '고양이모래', keyword: '고양이모래' }] },
-  ]},
-  { label: '자동차', icon: Car, subs: [
-    { label: '관리용품', items: [{ label: '방향제', keyword: '차량용 방향제' },{ label: '거치대', keyword: '차량용 거치대' },{ label: '충전기', keyword: '차량용 무선 충전기' }] },
-  ]},
-];
-
-// ─── Main Component ────────────────────────────────────────────────────────────
+// ─── 메인 컴포넌트 ────────────────────────────────────────────────────────────
 export function SourcingFinder() {
-  const [keyword, setKeyword] = useState('');
-  const [minPrice, setMinPrice] = useState('15000');
-  const [maxPrice, setMaxPrice] = useState('1000000');
-  const [loading, setLoading] = useState(false);
+  // 서브탭
+  const [subTab, setSubTab] = useState<'finder' | 'best'>('finder');
+
+  // 1) 키워드 발굴
+  const [seed, setSeed] = useState('');
+  const [kwLoading, setKwLoading] = useState(false);
+  const [kwError, setKwError] = useState<string | null>(null);
+  const [seedStat, setSeedStat] = useState<KeywordStat | null>(null);
+  const [keywords, setKeywords] = useState<KeywordStat[]>([]);
+  const [kwCached, setKwCached] = useState(false);
+  const [kwSortKey, setKwSortKey] = useState<'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('opportunityScore');
+  const [compFilter, setCompFilter] = useState<'all' | '낮음' | '중간' | '높음'>('all');
+  const [minVolume, setMinVolume] = useState('100');
+
+  // 2) 쿠팡 상품 분석
+  const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
+  const [prodLoading, setProdLoading] = useState(false);
+  const [prodError, setProdError] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
-  const [keywordStats, setKeywordStats] = useState<any | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [sortBy, setSortBy] = useState<'saleIndex' | 'ratingCount' | 'sourcingScore' | 'competitionStrength' | 'productPrice'>('saleIndex');
-  const [gradeFilter, setGradeFilter] = useState<'all' | 'Great' | 'Excellent' | 'Good' | 'Bad'>('all');
+  const [market, setMarket] = useState<Market | null>(null);
+  const [servedFrom, setServedFrom] = useState<string>('fresh');
+  const [rocketFilter, setRocketFilter] = useState<'all' | 'general' | 'rocket'>('all');
+  const [gradeFilter, setGradeFilter] = useState<'all' | 'Great' | 'Good' | 'Normal' | 'Bad'>('all');
+  const [prodSort, setProdSort] = useState<'opportunityScore' | 'rank' | 'priceAsc'>('opportunityScore');
+  const productsRef = useRef<HTMLDivElement>(null);
+
+  // 3) 카테고리 베스트
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+
+  // 수익 시뮬레이션 드로어
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [wholesalePrice, setWholesalePrice] = useState<number>(0);
   const [shippingFee] = useState(3000);
   const [sourcingMultiplier, setSourcingMultiplier] = useState<number>(300);
   const [purchasePopupProduct, setPurchasePopupProduct] = useState<Product | null>(null);
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('sourcingMultiplier');
     if (saved) setSourcingMultiplier(Number(saved));
   }, []);
 
-  useEffect(() => {
-    if (!expandedCategory) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setExpandedCategory(null); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [expandedCategory]);
-
   const handleMultiplierChange = (val: number) => {
     setSourcingMultiplier(val);
     localStorage.setItem('sourcingMultiplier', String(val));
   };
 
+  // ─── API 호출 ───────────────────────────────────────────────────────────────
+  const fetchKeywords = async (kw: string) => {
+    setKwLoading(true);
+    setKwError(null);
+    try {
+      const res = await fetch(`/api/sourcing?type=keywords&seed=${encodeURIComponent(kw)}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setKwError(data.error || '키워드 조회 실패');
+        setSeedStat(null);
+        setKeywords([]);
+        return;
+      }
+      setSeedStat(data.seedStat || null);
+      setKeywords(Array.isArray(data.keywords) ? data.keywords : []);
+      setKwCached(!!data.cached);
+    } catch (e: any) {
+      setKwError(e.message);
+      setKeywords([]);
+    } finally {
+      setKwLoading(false);
+    }
+  };
+
+  const fetchProducts = async (kw: string, volume = 0) => {
+    setActiveKeyword(kw);
+    setActiveCategory(null);
+    setProdLoading(true);
+    setProdError(null);
+    setTimeout(() => productsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+    try {
+      const params = new URLSearchParams({ type: 'products', keyword: kw });
+      if (volume > 0) params.set('volume', String(volume));
+      const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || (data.error && !data.products?.length)) {
+        setProdError(data.error || '상품 조회 실패');
+        setProducts([]);
+        setMarket(null);
+        return;
+      }
+      applyProductPayload(data);
+    } catch (e: any) {
+      setProdError(e.message);
+      setProducts([]);
+      setMarket(null);
+    } finally {
+      setProdLoading(false);
+    }
+  };
+
+  const fetchBest = async (categoryId: string) => {
+    setActiveCategory(categoryId);
+    setActiveKeyword(null);
+    setProdLoading(true);
+    setProdError(null);
+    try {
+      const res = await fetch(`/api/sourcing?type=best&categoryId=${categoryId}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || (data.error && !data.products?.length)) {
+        setProdError(data.error || '베스트 상품 조회 실패');
+        setProducts([]);
+        setMarket(null);
+        return;
+      }
+      applyProductPayload(data);
+    } catch (e: any) {
+      setProdError(e.message);
+      setProducts([]);
+      setMarket(null);
+    } finally {
+      setProdLoading(false);
+    }
+  };
+
+  const applyProductPayload = (data: any) => {
+    const savedPrices = JSON.parse(localStorage.getItem('1688prices') || '{}');
+    const enriched = (data.products || []).map((p: Product) => ({
+      ...p,
+      estimated1688Price: savedPrices[p.productId] || undefined,
+    }));
+    setProducts(enriched);
+    setMarket(data.market || null);
+    setServedFrom(data.servedFrom || 'fresh');
+  };
+
+  // ─── 수익 계산 ──────────────────────────────────────────────────────────────
   const calculateProfitData = (salePrice: number, cost: number, shipping: number) => {
     const fee = Math.round(salePrice * 0.12);
     const profit = salePrice - cost - shipping - fee;
@@ -219,10 +301,11 @@ export function SourcingFinder() {
     return { fee, profit, margin };
   };
 
-  const { fee, profit, margin } = selectedProduct
+  const { profit, margin } = selectedProduct
     ? calculateProfitData(selectedProduct.productPrice, wholesalePrice, shippingFee)
-    : { fee: 0, profit: 0, margin: 0 };
+    : { profit: 0, margin: 0 };
 
+  // ─── 1688 이미지 검색 ───────────────────────────────────────────────────────
   const PURCHASE_POPUP_HIDE_KEY = 'purchase_popup_hide_date';
 
   const submit1688Search = (imageUrl: string) => {
@@ -246,398 +329,411 @@ export function SourcingFinder() {
     else setPurchasePopupProduct(product);
   };
 
-  const handleSearchWithKeyword = async (kw: string) => {
-    setLoading(true);
-    setSearchError(null);
-    try {
-      const query = new URLSearchParams({ type: 'products', keyword: kw, minPrice, maxPrice });
-      const response = await fetch(`/api/sourcing?${query.toString()}`);
-      const data = await response.json();
-
-      if (!response.ok || data.error) {
-        setSearchError(data.error || '검색 실패');
-        setProducts([]); setKeywordStats(null);
-        return;
-      }
-
-      const savedPrices = JSON.parse(localStorage.getItem('1688prices') || '{}');
-      const enrichedData = data.map((product: Product) => ({
-        ...product,
-        estimated1688Price: savedPrices[product.productId] || undefined,
-      }));
-      setProducts(enrichedData);
-
-      const total = Math.min(data.length, 20);
-      const topProducts = data.slice(0, total);
-      const rocket = topProducts.filter((p: Product) => p.deliveryType === 'rocket' || (p.isRocket && !p.deliveryType)).length;
-      const jet = topProducts.filter((p: Product) => p.deliveryType === 'jet').length;
-      const general = topProducts.filter((p: Product) => p.deliveryType === 'general' || (!p.isRocket && !p.deliveryType)).length;
-      const sellerDist = JSON.stringify({ rocketPct: (rocket / total) * 100, jetPct: (jet / total) * 100, generalPct: (general / total) * 100 });
-
-      const statsRes = await fetch(`/api/sourcing?type=stats&keyword=${encodeURIComponent(kw)}&sellerDistribution=${encodeURIComponent(sellerDist)}`);
-      const statsData = await statsRes.json();
-      setKeywordStats(statsData);
-    } catch (error: any) {
-      setSearchError(error.message);
-      setProducts([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!keyword.trim()) return;
-    setActiveCategory(null);
-    await handleSearchWithKeyword(keyword.trim());
-  };
-
-  const handleCategorySearch = (subLabel: string, kw: string) => {
-    setActiveCategory(subLabel);
-    setKeyword(kw);
-    handleSearchWithKeyword(kw);
-  };
-
-  const getGradeStyle = (grade: 'Great' | 'Excellent' | 'Good' | 'Bad') => {
-    if (grade === 'Great') return 'text-emerald-400 bg-emerald-50 ring-emerald-500/20';
-    if (grade === 'Excellent') return 'text-indigo-400 bg-indigo-50 ring-indigo-500/20';
-    if (grade === 'Good') return 'text-amber-400 bg-amber-50 ring-amber-500/20';
-    return 'text-rose-400 bg-rose-50 ring-rose-500/20';
-  };
-
-  const displayProducts = [...products]
-    .filter(p => gradeFilter === 'all' || p.calculated.grade === gradeFilter)
+  // ─── 파생 목록 ──────────────────────────────────────────────────────────────
+  const displayKeywords = keywords
+    .filter(k => compFilter === 'all' || k.compIdx === compFilter)
+    .filter(k => k.monthlyVolume >= (Number(minVolume) || 0))
     .sort((a, b) => {
-      let primary = 0;
-      if (sortBy === 'productPrice') primary = a.productPrice - b.productPrice;
-      else if (sortBy === 'competitionStrength') primary = a.calculated.competitionStrength - b.calculated.competitionStrength;
-      else if (sortBy === 'ratingCount') primary = (b.ratingCount || 0) - (a.ratingCount || 0);
-      else primary = (b.calculated as any)[sortBy] - (a.calculated as any)[sortBy];
-      if (primary !== 0) return primary;
-      return (b.ratingCount || 0) - (a.ratingCount || 0);
+      if (kwSortKey === 'competition') return a.competition - b.competition;
+      return (b[kwSortKey] as number) - (a[kwSortKey] as number);
     });
 
-  const handleExportCSV = () => {
-    const headers = ['상품명', '가격', '소싱지수', '등급', '쿠팡링크'];
-    const rows = displayProducts.map(p => [
-      `"${p.productName.replace(/"/g, '""')}"`, p.productPrice, p.calculated.sourcingScore, p.calculated.grade, p.productUrl,
-    ]);
-    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+  const displayProducts = [...products]
+    .filter(p => rocketFilter === 'all' || (rocketFilter === 'rocket' ? p.isRocket : !p.isRocket))
+    .filter(p => gradeFilter === 'all' || p.calculated.grade === gradeFilter)
+    .sort((a, b) => {
+      if (prodSort === 'rank') return a.rank - b.rank;
+      if (prodSort === 'priceAsc') return a.productPrice - b.productPrice;
+      return b.calculated.opportunityScore - a.calculated.opportunityScore;
+    });
+
+  // ─── CSV 내보내기 ───────────────────────────────────────────────────────────
+  const downloadCSV = (name: string, headers: string[], rows: (string | number)[][]) => {
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\n');
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `소싱분석_${keyword}.csv`; a.click();
+    a.href = url; a.download = name; a.click();
     URL.revokeObjectURL(url);
   };
 
+  const exportKeywordsCSV = () => downloadCSV(
+    `키워드발굴_${seed}.csv`,
+    ['키워드', '월간검색량', 'PC검색량', '모바일검색량', '월평균클릭', '광고경쟁도', '기회점수', '등급'],
+    displayKeywords.map(k => [k.keyword, k.monthlyVolume, k.monthlyPcVolume, k.monthlyMobileVolume, k.monthlyClicks, k.compIdx, k.opportunityScore, k.grade]),
+  );
+
+  const exportProductsCSV = () => downloadCSV(
+    `소싱분석_${activeKeyword || activeCategory || 'products'}.csv`,
+    ['순위', '상품명', '가격', '배송유형', '기회점수', '등급', '쿠팡링크'],
+    displayProducts.map(p => [p.rank, p.productName, p.productPrice, p.isRocket ? '로켓' : '일반', p.calculated.opportunityScore, p.calculated.grade, p.productUrl]),
+  );
+
+  // ─── 렌더 ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-white text-slate-900">
-      <main className="max-w-[1600px] mx-auto px-6 py-8 flex flex-col gap-8 bg-white">
+      <main className="max-w-[1600px] mx-auto px-4 sm:px-6 py-8 flex flex-col gap-6 bg-white">
 
-        {/* 카테고리 + 검색바 */}
-        <div className="sticky top-[64px] z-30 flex flex-col gap-4 bg-white/80 backdrop-blur-md pb-4 pt-2">
-          {/* 카테고리 */}
-          <div className="bg-white rounded-[32px] p-5 border border-slate-200 shadow-sm flex items-start gap-6">
-            <div className="flex items-center gap-2 px-3 border-r border-slate-200 pr-6 shrink-0 mt-2.5">
-              <Sparkles className="w-4 h-4 text-emerald-500" />
-              <span className="text-[11px] font-black uppercase tracking-widest text-slate-500">카테고리</span>
-            </div>
-            <div className="flex-1 py-1">
-              <div className="flex gap-2.5 flex-wrap items-center">
-                {CATEGORIES.map(cat => (
-                  <div key={cat.label} className="relative">
-                    <button
-                      onClick={() => setExpandedCategory(expandedCategory === cat.label ? null : cat.label)}
-                      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
-                        expandedCategory === cat.label ? 'bg-indigo-600 text-white shadow-indigo-200' : 'bg-slate-50 hover:bg-indigo-50/80 text-slate-600 border border-slate-100'
-                      }`}
-                    >
-                      <cat.icon className="w-3.5 h-3.5" />
-                      <span>{cat.label}</span>
-                    </button>
-                    <AnimatePresence>
-                      {expandedCategory === cat.label && (
-                        <>
-                          <motion.div
-                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setExpandedCategory(null); }}
-                            className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-sm cursor-pointer"
-                          />
-                          <motion.div
-                            initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            className="fixed inset-0 m-auto z-[70] w-[95%] max-w-[1200px] h-fit max-h-[85vh] bg-white rounded-[48px] p-12 shadow-[0_32px_128px_-16px_rgba(0,0,0,0.3)] border border-slate-200 overflow-y-auto"
-                          >
-                            <div className="flex items-center justify-between mb-10 pb-8 border-b border-slate-100">
-                              <div className="flex items-center gap-4">
-                                <div className="p-4 bg-indigo-600 rounded-2xl shadow-xl shadow-indigo-100">
-                                  <cat.icon className="w-8 h-8 text-white" />
-                                </div>
-                                <div>
-                                  <h3 className="text-2xl font-black text-slate-800">{cat.label} <span className="text-indigo-600">마켓 분류</span></h3>
-                                  <p className="text-xs text-slate-400 font-bold uppercase tracking-[0.2em] mt-1">High-Potential Sourcing Sectors</p>
-                                </div>
-                              </div>
-                              <button onClick={() => setExpandedCategory(null)} className="p-4 hover:bg-slate-100 rounded-full transition-all">
-                                <X className="w-8 h-8 text-slate-300 hover:text-slate-600" />
-                              </button>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-x-16 gap-y-12">
-                              {cat.subs.map(sub => (
-                                <div key={sub.label} className="space-y-6">
-                                  <div className="flex items-center gap-2 pb-3 border-b-2 border-indigo-500/10">
-                                    <span className="w-2 h-2 rounded-full bg-indigo-500" />
-                                    <h4 className="text-sm font-black text-slate-800 uppercase tracking-tight">{sub.label}</h4>
-                                  </div>
-                                  <div className="grid grid-cols-1 gap-1">
-                                    {sub.items.map(item => (
-                                      <button
-                                        key={item.label}
-                                        onClick={() => { handleCategorySearch(item.label, item.keyword); setExpandedCategory(null); }}
-                                        className={`group flex items-center justify-between py-3 px-4 rounded-xl text-[13px] font-bold transition-all ${
-                                          activeCategory === item.label ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-slate-500 hover:bg-indigo-50 hover:text-indigo-600'
-                                        }`}
-                                      >
-                                        <span>{item.label}</span>
-                                        <ChevronRight className={`w-4 h-4 transition-all ${activeCategory === item.label ? 'translate-x-0 opacity-100' : '-translate-x-2 opacity-0 group-hover:translate-x-0 group-hover:opacity-100'}`} />
-                                      </button>
-                                    ))}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </motion.div>
-                        </>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* 검색바 */}
-          <div className="bg-white rounded-[32px] p-4 border-2 border-indigo-100 shadow-xl flex items-center gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-              <input
-                type="text"
-                value={keyword}
-                onChange={e => setKeyword(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                placeholder="공략할 상품 키워드를 입력하세요..."
-                className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-slate-300 rounded-2xl outline-none text-sm font-bold shadow-inner focus:ring-2 ring-indigo-500/20 transition-all text-slate-900"
-              />
-            </div>
-            <button
-              onClick={() => handleSearch()}
-              disabled={loading}
-              className="px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl flex items-center gap-2 transition-all shadow-lg active:scale-95"
-            >
-              {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <Search className="w-5 h-5" />}
-              소싱 제품 찾기
-            </button>
-            {!loading && products.length > 0 && (
-              <button onClick={handleExportCSV} className="p-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl transition-all shadow-lg active:scale-95" title="엑셀로 저장">
-                <Download className="w-5 h-5" />
-              </button>
-            )}
-          </div>
+        {/* 서브탭 */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setSubTab('finder')}
+            className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-black transition-all ${
+              subTab === 'finder' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            }`}
+          >
+            <KeyRound className="w-4 h-4" />니치 키워드 발굴
+          </button>
+          <button
+            onClick={() => setSubTab('best')}
+            className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-black transition-all ${
+              subTab === 'best' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            }`}
+          >
+            <Crown className="w-4 h-4" />카테고리 베스트
+          </button>
+          <p className="text-[11px] text-slate-400 font-bold ml-auto hidden md:block">
+            네이버 검색광고 · 쿠팡 파트너스 공식 API 실데이터 기반
+          </p>
         </div>
 
-        {/* 에러 */}
-        {searchError && (
-          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-rose-700 text-sm font-bold">
-            {searchError}
-          </div>
+        {/* ══════════ 1) 니치 키워드 발굴 ══════════ */}
+        {subTab === 'finder' && (
+          <>
+            <div className="bg-white rounded-[28px] p-4 border-2 border-indigo-100 shadow-xl flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <div className="flex-1 relative">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                <input
+                  type="text"
+                  value={seed}
+                  onChange={e => setSeed(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && seed.trim() && fetchKeywords(seed.trim())}
+                  placeholder="시드 키워드 입력 (예: 캠핑의자) — 연관 니치 키워드를 발굴합니다"
+                  className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-slate-300 rounded-2xl outline-none text-sm font-bold shadow-inner focus:ring-2 ring-indigo-500/20 transition-all text-slate-900"
+                />
+              </div>
+              <button
+                onClick={() => seed.trim() && fetchKeywords(seed.trim())}
+                disabled={kwLoading}
+                className="px-8 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95"
+              >
+                {kwLoading ? <Loader2 className="animate-spin w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
+                키워드 발굴
+              </button>
+              {!kwLoading && keywords.length > 0 && (
+                <button onClick={exportKeywordsCSV} className="p-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl transition-all shadow-lg active:scale-95" title="CSV로 저장">
+                  <Download className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            {kwError && (
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-rose-700 text-sm font-bold whitespace-pre-wrap">{kwError}</div>
+            )}
+
+            {/* 시드 키워드 요약 */}
+            {seedStat && !kwLoading && (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">"{seedStat.keyword}" 월간 검색량</p>
+                  <p className="text-2xl font-black text-indigo-600">{seedStat.monthlyVolume.toLocaleString()}</p>
+                  <p className="text-[10px] text-slate-400 font-bold mt-1">PC {seedStat.monthlyPcVolume.toLocaleString()} · 모바일 {seedStat.monthlyMobileVolume.toLocaleString()}</p>
+                </div>
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">월평균 클릭수</p>
+                  <p className="text-2xl font-black text-amber-600">{seedStat.monthlyClicks.toLocaleString()}</p>
+                  <p className="text-[10px] text-slate-400 font-bold mt-1">광고 클릭 기준 실측치</p>
+                </div>
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">광고 경쟁도</p>
+                  <span className={`inline-block mt-1 px-3 py-1 rounded-full text-sm font-black ring-1 ${compStyle(seedStat.compIdx)}`}>{seedStat.compIdx}</span>
+                  <p className="text-[10px] text-slate-400 font-bold mt-2">평균 노출 광고 {seedStat.adDepth}개</p>
+                </div>
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">기회점수</p>
+                  <div className="flex items-center gap-3">
+                    <p className="text-2xl font-black text-slate-800">{seedStat.opportunityScore}</p>
+                    <span className={`px-3 py-1 rounded-full text-xs font-black ring-1 ${gradeStyle(seedStat.grade)}`}>{seedStat.grade}</span>
+                  </div>
+                  <button onClick={() => fetchProducts(seedStat.keyword, seedStat.monthlyVolume)}
+                    className="mt-2 text-[11px] font-black text-indigo-600 hover:text-indigo-800 flex items-center gap-1">
+                    쿠팡 상품 분석 <ChevronRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 연관 키워드 테이블 */}
+            {kwLoading ? (
+              <div className="bg-white rounded-[24px] border border-slate-200 p-12 flex flex-col items-center gap-4 text-slate-400">
+                <Loader2 className="w-10 h-10 animate-spin text-indigo-400" />
+                <p className="text-sm font-bold">네이버 검색광고 API에서 연관 키워드를 수집하는 중...</p>
+              </div>
+            ) : keywords.length > 0 ? (
+              <div className="bg-white rounded-[24px] border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-5 border-b border-slate-100 flex items-center gap-3 flex-wrap">
+                  <h3 className="text-sm font-black text-slate-800">연관 니치 키워드 <span className="text-indigo-600">{displayKeywords.length}개</span></h3>
+                  {kwCached && <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><RefreshCw className="w-3 h-3" />캐시 데이터</span>}
+                  <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+                    {(['all', '낮음', '중간', '높음'] as const).map(c => (
+                      <button key={c} onClick={() => setCompFilter(c)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${compFilter === c ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                        {c === 'all' ? '경쟁 전체' : `경쟁 ${c}`}
+                      </button>
+                    ))}
+                    <div className="flex items-center gap-1 bg-slate-100 rounded-lg px-2 py-1">
+                      <span className="text-[10px] font-bold text-slate-500">검색량 ≥</span>
+                      <input type="number" value={minVolume} onChange={e => setMinVolume(e.target.value)}
+                        className="w-16 bg-transparent text-xs font-bold text-slate-700 outline-none" />
+                    </div>
+                    <div className="flex items-center gap-1 bg-slate-100 rounded-lg px-2 py-1.5">
+                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                      <select value={kwSortKey} onChange={e => setKwSortKey(e.target.value as any)}
+                        className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer">
+                        <option value="opportunityScore">기회점수순</option>
+                        <option value="monthlyVolume">검색량순</option>
+                        <option value="monthlyClicks">클릭수순</option>
+                        <option value="competition">경쟁 낮은순</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
+                        <th className="text-left px-5 py-3">키워드</th>
+                        <th className="text-right px-4 py-3">월간 검색량</th>
+                        <th className="text-right px-4 py-3 hidden md:table-cell">월평균 클릭</th>
+                        <th className="text-center px-4 py-3">광고경쟁</th>
+                        <th className="text-left px-4 py-3 w-40">기회점수</th>
+                        <th className="text-center px-4 py-3">등급</th>
+                        <th className="px-4 py-3" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayKeywords.slice(0, 60).map(k => (
+                        <tr key={k.keyword} className="border-b border-slate-50 hover:bg-indigo-50/40 transition-colors">
+                          <td className="px-5 py-3 font-bold text-slate-800">{k.keyword}</td>
+                          <td className="px-4 py-3 text-right font-black text-slate-700 tabular-nums">
+                            {k.monthlyVolume.toLocaleString()}
+                            <span className="block text-[9px] text-slate-400 font-bold">PC {k.monthlyPcVolume.toLocaleString()} · MO {k.monthlyMobileVolume.toLocaleString()}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right font-bold text-slate-500 tabular-nums hidden md:table-cell">{k.monthlyClicks.toLocaleString()}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-black ring-1 ${compStyle(k.compIdx)}`}>{k.compIdx}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${k.opportunityScore}%` }} />
+                              </div>
+                              <span className="text-xs font-black text-slate-700 tabular-nums w-7 text-right">{k.opportunityScore}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`px-2.5 py-1 rounded-full text-[11px] font-black ring-1 ${gradeStyle(k.grade)}`}>{k.grade}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button onClick={() => fetchProducts(k.keyword, k.monthlyVolume)}
+                              className="px-3 py-1.5 bg-slate-900 hover:bg-slate-700 text-white rounded-lg text-[11px] font-black whitespace-nowrap transition-all">
+                              쿠팡 분석
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : !seedStat && !kwError && (
+              <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+                <KeyRound className="w-16 h-16 mb-6 opacity-20" />
+                <h2 className="text-xl font-bold">시드 키워드로 니치 시장을 발굴하세요</h2>
+                <p className="text-sm mt-2 font-medium">검색량은 많고 경쟁은 적은 키워드를 찾은 뒤, 쿠팡 로켓 비중까지 확인합니다</p>
+              </div>
+            )}
+          </>
         )}
 
-        {/* 키워드 통계 */}
-        <AnimatePresence>
-          {!loading && keywordStats && products.length > 0 && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-              className="bg-white rounded-[32px] p-8 border border-slate-200 shadow-xl overflow-hidden">
-              <div className="flex items-center gap-3 mb-8">
-                <div className="p-3 bg-indigo-50 rounded-2xl">
-                  <TrendingUp className="w-6 h-6 text-indigo-400" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-black text-slate-800">
-                    {keywordStats.keyword} <span className="text-slate-500 font-bold ml-2">시장성 분석</span>
-                  </h2>
-                  <div className="flex items-center gap-2 mt-1">
-                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">Market Insight Analytics</p>
-                    <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 text-[9px] font-black rounded-md border border-indigo-500/20">{keywordStats.marketTrend}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-8">
-                {keywordStats.trendData && (
-                  <div className="bg-slate-50 p-6 rounded-[24px] border border-slate-200">
-                    <p className="text-[10px] font-black uppercase tracking-widest mb-4 text-amber-400">월간 검색량 추이</p>
-                    <Sparkline data={keywordStats.trendData} />
-                  </div>
-                )}
-                <div className="grid grid-cols-4 gap-6">
-                  <div className="bg-slate-50 p-5 rounded-[24px] border border-slate-200">
-                    <p className="text-[10px] font-black uppercase tracking-widest mb-2 text-slate-500">총 등록 상품</p>
-                    <p className="text-2xl font-black text-blue-400">{keywordStats.totalProducts.toLocaleString()}</p>
-                    <p className="text-[10px] text-slate-500 font-bold mt-1">▸ 수집된 실시간 데이터</p>
-                  </div>
-                  <div className="bg-slate-50 p-5 rounded-[24px] border border-slate-200">
-                    <p className="text-[10px] font-black uppercase tracking-widest mb-2 text-slate-500">경쟁 강도</p>
-                    <p className={`text-2xl font-black ${keywordStats.competitionRate < 5.0 ? 'text-emerald-400' : keywordStats.competitionRate < 15.0 ? 'text-indigo-400' : 'text-rose-400'}`}>
-                      {keywordStats.competitionRate}
-                    </p>
-                    <p className="text-[10px] text-slate-500 font-bold mt-1">
-                      ▸ {keywordStats.competitionRate < 5.0 ? '블루오션 (강력추천)' : keywordStats.competitionRate < 15.0 ? '양호한 시장 (추천)' : '레드오션 (진입주의)'}
-                    </p>
-                  </div>
-                  <div className="bg-slate-50 p-5 rounded-[24px] border border-slate-200">
-                    <p className="text-[10px] font-black uppercase tracking-widest mb-2 text-slate-500">평균 객단가</p>
-                    <p className="text-2xl font-black text-amber-400">{keywordStats.averagePrice.toLocaleString()}원</p>
-                    <p className="text-[10px] text-slate-500 font-bold mt-1">▸ {keywordStats.minPrice.toLocaleString()} ~ {keywordStats.maxPrice.toLocaleString()} (범위)</p>
-                  </div>
-                  <div className="bg-slate-50 p-5 rounded-[24px] border border-slate-200">
-                    <SellerLandscape products={products} />
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* 필터/정렬 */}
-        {!loading && products.length > 0 && (
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="flex items-center gap-1.5 bg-white rounded-xl p-1 border border-slate-200 shadow-sm">
-              {(['all', 'Great', 'Excellent', 'Good', 'Bad'] as const).map(g => (
-                <button key={g} onClick={() => setGradeFilter(g)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold ${gradeFilter === g ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>
-                  {g}
+        {/* ══════════ 2) 카테고리 베스트 ══════════ */}
+        {subTab === 'best' && (
+          <div className="bg-white rounded-[28px] p-5 border border-slate-200 shadow-sm">
+            <p className="text-[11px] font-black uppercase tracking-widest text-slate-500 mb-4 flex items-center gap-2">
+              <Crown className="w-4 h-4 text-amber-500" />쿠팡 카테고리 베스트셀러 — 잘 팔리는데 로켓이 아닌 상품이 소싱 기회입니다
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              {BEST_CATEGORIES.map(cat => (
+                <button key={cat.id} onClick={() => fetchBest(cat.id)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
+                    activeCategory === cat.id ? 'bg-indigo-600 text-white shadow-indigo-200' : 'bg-slate-50 hover:bg-indigo-50/80 text-slate-600 border border-slate-100'
+                  }`}>
+                  <cat.icon className="w-3.5 h-3.5" />{cat.label}
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border border-slate-200 shadow-sm">
-              <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
-              <select value={sortBy} onChange={e => setSortBy(e.target.value as any)}
-                className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer">
-                <option value="saleIndex">판매지수순 (리뷰·인기)</option>
-                <option value="ratingCount">리뷰수 많은순</option>
-                <option value="sourcingScore">소싱점수순</option>
-                <option value="competitionStrength">경쟁 낮은순</option>
-                <option value="productPrice">가격 낮은순</option>
-              </select>
-            </div>
           </div>
         )}
 
-        {/* 상품 목록 */}
-        <div className="flex-1 overflow-y-auto pb-10">
-          {loading ? (
-            <div className="grid grid-cols-4 gap-6">
-              {Array.from({ length: 9 }).map((_, i) => <ProductSkeleton key={i} />)}
-            </div>
-          ) : products.length > 0 ? (
-            <div className="grid grid-cols-4 gap-6">
-              <AnimatePresence>
-                {displayProducts.map((product, index) => (
-                  <motion.div key={product.productId} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="group bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-                    <a href={product.productUrl} target="_blank" rel="noopener noreferrer"
-                      className="relative aspect-square overflow-hidden bg-slate-100 cursor-pointer block">
-                      <img src={product.productImage} alt={product.productName}
-                        className="w-full h-full object-cover transition-transform group-hover:scale-110" />
-                      <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
-                        <div className={`px-3 py-1 rounded-full text-[10px] font-bold ring-1 ${getGradeStyle(product.calculated.grade)}`}>
-                          {product.calculated.grade}
-                        </div>
-                        {product.deliveryType === 'rocket' && <div className="px-2 py-0.5 bg-rose-500 text-white text-[8px] font-black rounded uppercase shadow-sm">로켓</div>}
-                        {product.deliveryType === 'rocket_fallback' && <div className="px-2 py-0.5 bg-indigo-500 text-white text-[8px] font-black rounded uppercase shadow-sm">로켓/판매자</div>}
-                        {product.deliveryType === 'jet' && <div className="px-2 py-0.5 bg-amber-500 text-white text-[8px] font-black rounded uppercase shadow-sm">판매자로켓</div>}
-                        {(product.deliveryType === 'general' || !product.deliveryType) && <div className="px-2 py-0.5 bg-slate-400 text-white text-[8px] font-black rounded uppercase shadow-sm">일반배송</div>}
-                      </div>
-                    </a>
-                    <div className="p-5 flex-1 flex flex-col">
-                      <h3 className="font-bold text-[14px] text-slate-900 line-clamp-2 mb-2 h-10 leading-snug">{product.productName}</h3>
-                      <div className="flex items-center gap-2 mb-3">
-                        {product.reviewEnriched ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-black ring-1 ring-emerald-500/20">
-                            <Star className="w-3 h-3 fill-emerald-500 text-emerald-500" />
-                            {(product.rating || 0).toFixed(1)} · 리뷰 {(product.ratingCount || 0).toLocaleString()}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-50 text-slate-400 text-[10px] font-bold ring-1 ring-slate-200">
-                            <MessageSquare className="w-3 h-3" />리뷰 미확인
-                          </span>
-                        )}
-                        <span className="text-[10px] text-slate-400 font-bold">판매지수 {product.calculated.saleIndex}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 mb-3">
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ring-1 ${getGradeStyle(product.calculated.grade)}`}
-                          title="시장수요·소싱적합성·진입용이성을 종합한 소싱 기회 지수 (0~100)">
-                          기회지수 {product.calculated.opportunityScore}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ring-1 ${
-                          product.calculated.competitionStrength < 25 ? 'bg-emerald-50 text-emerald-700 ring-emerald-500/20' :
-                          product.calculated.competitionStrength < 45 ? 'bg-amber-50 text-amber-700 ring-amber-500/20' : 'bg-rose-50 text-rose-700 ring-rose-500/20'
-                        }`}>
-                          경쟁 {product.calculated.competitionStrength < 25 ? '낮음' : product.calculated.competitionStrength < 45 ? '보통' : '높음'}
-                        </span>
-                      </div>
-                      <div className="flex flex-col gap-1.5 mb-4">
-                        <span className="text-lg font-black text-indigo-600">{product.productPrice.toLocaleString()}원</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-slate-400 font-bold">예상 1688원가:</span>
-                          <input type="number" value={product.estimated1688Price || ''}
-                            onChange={e => {
-                              const newPrice = Number(e.target.value);
-                              setProducts(prev => prev.map(p => p.productId === product.productId ? { ...p, estimated1688Price: newPrice } : p));
-                              const saved = JSON.parse(localStorage.getItem('1688prices') || '{}');
-                              saved[product.productId] = newPrice;
-                              localStorage.setItem('1688prices', JSON.stringify(saved));
-                            }}
-                            className="w-16 px-2 py-0.5 text-[11px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-md outline-none focus:ring-1 ring-amber-400"
-                            placeholder="0"
-                          />
-                          <span className="text-[10px] text-amber-600 font-black">¥</span>
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-2 mt-auto">
+        {/* ══════════ 상품 분석 결과 (공용) ══════════ */}
+        <div ref={productsRef}>
+          {(activeKeyword || activeCategory || prodLoading || prodError) && (
+            <div className="flex flex-col gap-5">
+              {prodError && (
+                <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-rose-700 text-sm font-bold whitespace-pre-wrap">{prodError}</div>
+              )}
+
+              {!prodLoading && market && (
+                <MarketSummary
+                  market={market}
+                  title={activeKeyword ? `"${activeKeyword}"` : BEST_CATEGORIES.find(c => c.id === activeCategory)?.label || ''}
+                />
+              )}
+
+              {!prodLoading && products.length > 0 && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-1.5 bg-white rounded-xl p-1 border border-slate-200 shadow-sm">
+                    {([
+                      { v: 'all', label: '전체' },
+                      { v: 'general', label: '일반배송만' },
+                      { v: 'rocket', label: '로켓만' },
+                    ] as const).map(f => (
+                      <button key={f.v} onClick={() => setRocketFilter(f.v)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold ${rocketFilter === f.v ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-white rounded-xl p-1 border border-slate-200 shadow-sm">
+                    {(['all', 'Great', 'Good', 'Normal', 'Bad'] as const).map(g => (
+                      <button key={g} onClick={() => setGradeFilter(g)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold ${gradeFilter === g ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>
+                        {g === 'all' ? '등급 전체' : g}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 bg-white rounded-xl px-3 py-1.5 border border-slate-200 shadow-sm">
+                    <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
+                    <select value={prodSort} onChange={e => setProdSort(e.target.value as any)}
+                      className="text-xs font-bold text-slate-700 bg-transparent outline-none cursor-pointer">
+                      <option value="opportunityScore">기회점수순</option>
+                      <option value="rank">쿠팡 순위순</option>
+                      <option value="priceAsc">가격 낮은순</option>
+                    </select>
+                  </div>
+                  <button onClick={exportProductsCSV}
+                    className="ml-auto flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-black transition-all shadow-sm">
+                    <Download className="w-3.5 h-3.5" />CSV 저장
+                  </button>
+                  {servedFrom !== 'fresh' && (
+                    <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                      <RefreshCw className="w-3 h-3" />{servedFrom === 'stale' ? 'API 한도로 캐시 데이터 표시 중' : '캐시 데이터'}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {prodLoading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {Array.from({ length: 8 }).map((_, i) => <ProductSkeleton key={i} />)}
+                </div>
+              ) : displayProducts.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  <AnimatePresence>
+                    {displayProducts.map((product, index) => (
+                      <motion.div key={product.productId} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: Math.min(index * 0.04, 0.6) }}
+                        className="group bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
                         <a href={product.productUrl} target="_blank" rel="noopener noreferrer"
-                          className="w-full py-3 bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-2 transition-all shadow-sm">
-                          <ExternalLink className="w-3 h-3" />쿠팡 바로가기
+                          className="relative aspect-square overflow-hidden bg-slate-100 cursor-pointer block">
+                          <img src={product.productImage} alt={product.productName} loading="lazy"
+                            className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                          <div className="absolute top-3 right-3 flex flex-col gap-2 items-end">
+                            <div className={`px-3 py-1 rounded-full text-[10px] font-bold ring-1 ${gradeStyle(product.calculated.grade)}`}>
+                              {product.calculated.grade}
+                            </div>
+                            {product.isRocket ? (
+                              <div className="px-2 py-0.5 bg-rose-500 text-white text-[8px] font-black rounded uppercase shadow-sm flex items-center gap-1">
+                                <Rocket className="w-2.5 h-2.5" />로켓
+                              </div>
+                            ) : (
+                              <div className="px-2 py-0.5 bg-emerald-500 text-white text-[8px] font-black rounded uppercase shadow-sm flex items-center gap-1">
+                                <Store className="w-2.5 h-2.5" />일반배송
+                              </div>
+                            )}
+                          </div>
+                          <div className="absolute top-3 left-3 px-2 py-1 bg-slate-900/70 text-white text-[10px] font-black rounded-lg backdrop-blur-sm">
+                            {activeCategory ? '베스트' : '검색'} {product.rank}위
+                          </div>
                         </a>
-                        <div className="flex gap-2">
-                          <button onClick={() => handlePurchaseClick(product)}
-                            className="flex-1 py-3 bg-blue-50 rounded-xl text-[11px] font-bold text-blue-600 flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors">
-                            구매하기
-                          </button>
-                          <button onClick={() => {
-                              setSelectedProduct(product);
-                              setIsDrawerOpen(true);
-                              setWholesalePrice(Math.round((product.estimated1688Price || 0) * sourcingMultiplier));
-                            }}
-                            className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors">
-                            <LayoutDashboard className="w-3 h-3" />소싱 분석
-                          </button>
+                        <div className="p-5 flex-1 flex flex-col">
+                          <h3 className="font-bold text-[14px] text-slate-900 line-clamp-2 mb-2 h-10 leading-snug">{product.productName}</h3>
+                          <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ring-1 ${gradeStyle(product.calculated.grade)}`}
+                              title="진입용이성·노출순위·가격적합도를 종합한 소싱 기회 지수 (0~100)">
+                              기회지수 {product.calculated.opportunityScore}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ring-1 ${
+                              product.isRocket ? 'bg-rose-50 text-rose-700 ring-rose-500/20' : 'bg-emerald-50 text-emerald-700 ring-emerald-500/20'
+                            }`}>
+                              {product.isRocket ? '로켓 직접경쟁' : '일반셀러 시장'}
+                            </span>
+                          </div>
+                          <div className="flex flex-col gap-1.5 mb-4">
+                            <span className="text-lg font-black text-indigo-600">{product.productPrice.toLocaleString()}원</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] text-slate-400 font-bold">예상 1688원가:</span>
+                              <input type="number" value={product.estimated1688Price || ''}
+                                onChange={e => {
+                                  const newPrice = Number(e.target.value);
+                                  setProducts(prev => prev.map(p => p.productId === product.productId ? { ...p, estimated1688Price: newPrice } : p));
+                                  const saved = JSON.parse(localStorage.getItem('1688prices') || '{}');
+                                  saved[product.productId] = newPrice;
+                                  localStorage.setItem('1688prices', JSON.stringify(saved));
+                                }}
+                                className="w-16 px-2 py-0.5 text-[11px] font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-md outline-none focus:ring-1 ring-amber-400"
+                                placeholder="0"
+                              />
+                              <span className="text-[10px] text-amber-600 font-black">¥</span>
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-2 mt-auto">
+                            <a href={product.productUrl} target="_blank" rel="noopener noreferrer"
+                              className="w-full py-3 bg-gradient-to-r from-rose-500 to-orange-500 hover:from-rose-600 hover:to-orange-600 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-2 transition-all shadow-sm">
+                              <ExternalLink className="w-3 h-3" />쿠팡 바로가기
+                            </a>
+                            <div className="flex gap-2">
+                              <button onClick={() => handlePurchaseClick(product)}
+                                className="flex-1 py-3 bg-blue-50 rounded-xl text-[11px] font-bold text-blue-600 flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors">
+                                1688 소싱처 찾기
+                              </button>
+                              <button onClick={() => {
+                                  setSelectedProduct(product);
+                                  setIsDrawerOpen(true);
+                                  setWholesalePrice(Math.round((product.estimated1688Price || 0) * sourcingMultiplier));
+                                }}
+                                className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-[11px] font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors">
+                                <LayoutDashboard className="w-3 h-3" />마진 분석
+                              </button>
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center py-20 text-slate-400">
-              <Search className="w-16 h-16 mb-6 opacity-20" />
-              <h2 className="text-xl font-bold">분석을 시작해보세요</h2>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              ) : !prodError && (activeKeyword || activeCategory) && (
+                <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                  <Search className="w-12 h-12 mb-4 opacity-20" />
+                  <p className="text-sm font-bold">필터 조건에 맞는 상품이 없습니다</p>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* 소싱 분석 드로어 */}
+        {/* ══════════ 마진 분석 드로어 ══════════ */}
         <AnimatePresence>
           {isDrawerOpen && selectedProduct && (
             <>
@@ -645,34 +741,40 @@ export function SourcingFinder() {
                 onClick={() => setIsDrawerOpen(false)}
                 className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm cursor-pointer" />
               <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-                className="fixed top-0 right-0 h-full w-[450px] bg-white z-[60] shadow-2xl flex flex-col">
-                <div className="p-8 border-b border-slate-200 flex items-center justify-between">
+                className="fixed top-0 right-0 h-full w-full sm:w-[450px] bg-white z-[60] shadow-2xl flex flex-col">
+                <div className="p-6 sm:p-8 border-b border-slate-200 flex items-center justify-between">
                   <h2 className="text-xl font-bold text-slate-800">소싱 수익성 분석</h2>
                   <button onClick={() => setIsDrawerOpen(false)}>
                     <ChevronRight className="w-6 h-6 text-slate-600" />
                   </button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-8 space-y-10">
-                  <div className="flex gap-6 items-start border-t border-slate-200 pt-10">
+                <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-8">
+                  <div className="flex gap-6 items-start">
                     <img src={selectedProduct.productImage} className="w-20 h-20 rounded-2xl object-cover border shadow-sm" alt="" />
                     <div>
                       <h3 className="font-bold text-base line-clamp-2 mb-2 leading-tight text-slate-800">{selectedProduct.productName}</h3>
                       <p className="text-sm font-bold text-slate-600">현재 쿠팡가: {selectedProduct.productPrice.toLocaleString()}원</p>
+                      <span className={`inline-flex items-center gap-1 mt-2 px-2 py-0.5 rounded-md text-[10px] font-black ${
+                        selectedProduct.isRocket ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
+                      }`}>
+                        {selectedProduct.isRocket ? <Rocket className="w-3 h-3" /> : <Store className="w-3 h-3" />}
+                        {selectedProduct.isRocket ? '로켓배송 (직접경쟁 주의)' : '일반배송 (진입 용이)'}
+                      </span>
                     </div>
                   </div>
                   <div className="space-y-4 pt-6 border-t border-dashed border-slate-200">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest">소싱 지표</h4>
-                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold ring-1 ${getGradeStyle(selectedProduct.calculated.grade)}`}>
+                      <span className={`px-3 py-1 rounded-full text-[10px] font-bold ring-1 ${gradeStyle(selectedProduct.calculated.grade)}`}>
                         {selectedProduct.calculated.grade}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       {[
-                        { label: '기회지수', value: selectedProduct.calculated.opportunityScore, desc: '수요·적합성·진입용이성 종합' },
-                        { label: '판매지수', value: selectedProduct.calculated.saleIndex, desc: '네이버 인기순위·리뷰 기반 수요' },
-                        { label: '경쟁강도', value: selectedProduct.calculated.competitionStrength, desc: '낮을수록 진입 쉬움' },
-                        { label: '소싱적합', value: selectedProduct.calculated.sourcingScore, desc: '가격대·배송유형 적합도' },
+                        { label: '기회지수', value: selectedProduct.calculated.opportunityScore, desc: '진입용이성·노출·가격 종합' },
+                        { label: '노출순위', value: selectedProduct.calculated.exposureScore, desc: `쿠팡 ${activeCategory ? '베스트' : '검색'} ${selectedProduct.rank}위 기반` },
+                        { label: '진입용이성', value: selectedProduct.calculated.entryEase, desc: '로켓 직매입과의 경쟁 여부' },
+                        { label: '가격적합도', value: selectedProduct.calculated.priceFit, desc: '소싱 마진 확보 가능 가격대' },
                       ].map(m => (
                         <div key={m.label} className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
                           <div className="flex items-baseline justify-between mb-1">
@@ -680,8 +782,7 @@ export function SourcingFinder() {
                             <span className="text-lg font-black text-slate-800">{m.value}</span>
                           </div>
                           <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden mb-1.5">
-                            <div className={`h-full rounded-full ${m.label === '경쟁강도' ? 'bg-rose-400' : 'bg-indigo-500'}`}
-                              style={{ width: `${Math.min(100, m.value)}%` }} />
+                            <div className="h-full rounded-full bg-indigo-500" style={{ width: `${Math.min(100, m.value)}%` }} />
                           </div>
                           <p className="text-[9px] text-slate-400 font-medium leading-tight">{m.desc}</p>
                         </div>
@@ -695,7 +796,7 @@ export function SourcingFinder() {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 mb-2 block uppercase text-center">판매 매입가 (위안)</label>
+                        <label className="text-[10px] font-bold text-slate-500 mb-2 block uppercase text-center">1688 매입가 (위안)</label>
                         <input type="number" placeholder="예: 25.5"
                           defaultValue={selectedProduct.estimated1688Price || ''}
                           onChange={e => setWholesalePrice(Math.round(Number(e.target.value) * sourcingMultiplier))}
@@ -726,7 +827,7 @@ export function SourcingFinder() {
                     </div>
                   </div>
                 </div>
-                <div className="p-8 bg-slate-50 border-t border-slate-200">
+                <div className="p-6 sm:p-8 bg-slate-50 border-t border-slate-200">
                   <button onClick={() => setIsDrawerOpen(false)} className="w-full py-5 bg-slate-900 text-white font-black rounded-2xl">분석 완료</button>
                 </div>
               </motion.div>
@@ -734,7 +835,7 @@ export function SourcingFinder() {
           )}
         </AnimatePresence>
 
-        {/* 구매하기 이벤트 팝업 */}
+        {/* ══════════ 구매하기 이벤트 팝업 ══════════ */}
         <AnimatePresence>
           {purchasePopupProduct && (
             <>
