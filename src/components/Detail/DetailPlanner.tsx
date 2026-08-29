@@ -11,10 +11,10 @@ type LayoutPreset = 'hero' | 'problem' | 'solution' | 'proof' | 'detail' | 'life
 type ProductColorLock = 'black' | 'white' | 'none';
 type ModelGenderLock = 'male' | 'female' | 'none';
 type ProductVisualGenderLock = 'male' | 'female' | 'unisex' | 'none';
-type TextRenderMode = 'canvas' | 'integrated';
+type TextRenderMode = 'canvas';
 type ImageFilter = 'all' | 'warning' | 'failed' | 'done';
 type ProductSurfaceLock = 'printed' | 'plain' | 'unknown';
-type ShotType = 'model' | 'product' | 'detail' | 'texture' | 'lifestyle' | 'package' | 'cta';
+type ShotType = 'model' | 'product' | 'detail' | 'texture' | 'lifestyle' | 'cta';
 type BundleRequirement = 'both-items' | 'single-focus' | 'before-no-current-product';
 
 interface ProductVisualLock {
@@ -141,8 +141,6 @@ const getDesignerSetGuide = (shotType: ShotType): string => {
             return 'Designer set direction: macro product detail on textured surface, angled commercial lighting, shallow depth of field, background layers, premium material mood, not a flat isolated product photo.';
         case 'texture':
             return 'Designer set direction: macro print/material story with fabric folds, tactile texture, directional side light, premium shadow, close crop, and designed negative space, not a blank white product cutout.';
-        case 'package':
-            return 'Designer set direction: trust-building package/components scene with arranged composition, pedestal, soft reflections, background depth, premium studio styling, not a plain catalog layout.';
         case 'cta':
             return 'Designer set direction: final purchase hero with premium pedestal, atmospheric depth, confident product scale, refined props, decisive lighting, not a plain white background.';
         case 'lifestyle':
@@ -159,7 +157,6 @@ const SHOT_TYPE_LABEL: Record<ShotType, string> = {
     detail: '디테일',
     texture: '소재/프린팅',
     lifestyle: '사용장면',
-    package: '패키지/구성',
     cta: 'CTA 제품컷',
 };
 
@@ -199,7 +196,6 @@ const resolveShotType = (sectionType: string, role: string, layoutPreset: Layout
     const source = `${sectionType} ${role}`.toLowerCase();
     if (index === total - 1 || layoutPreset === 'cta' || source.includes('cta')) return 'cta';
     if (source.includes('texture') || source.includes('소재') || source.includes('프린팅') || source.includes('로고') || source.includes('패턴')) return 'texture';
-    if (source.includes('package') || source.includes('구성') || source.includes('패키지')) return 'package';
     if (layoutPreset === 'problem' || layoutPreset === 'lifestyle') return 'lifestyle';
     if (layoutPreset === 'proof' || layoutPreset === 'detail') return index % 2 === 0 ? 'detail' : 'texture';
     if (layoutPreset === 'solution') return 'product';
@@ -227,8 +223,6 @@ const getShotTypeGuide = (shotType: ShotType, genderLock: ProductVisualGenderLoc
             return 'SHOT TYPE: PRODUCT DETAIL CLOSE-UP. No model, no person, product only. Show seams, cut, fit detail, finish, hardware, logo/print placement, and functional parts in an extreme close-up. Product-only does not mean plain white catalog; use designed set styling.';
         case 'texture':
             return 'SHOT TYPE: TEXTURE / PRINT CLOSE-UP. No model, no person, product only. Show fabric/material texture, print/graphic/logo/pattern/embroidery placement, scale, and colors clearly. Use premium macro styling, not a white background cutout.';
-        case 'package':
-            return 'SHOT TYPE: PACKAGE / COMPONENTS / TRUST. No model, no person, product only. Show package, components, finishing, material evidence, construction, or trust-building product details in a designed commercial arrangement.';
         case 'cta':
             return 'SHOT TYPE: CTA PRODUCT HERO. No model, no person, product only. Use a purchase-confidence closing composition focused on the exact product with premium set design and depth.';
         case 'product':
@@ -239,15 +233,6 @@ const getShotTypeGuide = (shotType: ShotType, genderLock: ProductVisualGenderLoc
 
 const TEXT_RENDER_MODE_LABEL: Record<TextRenderMode, string> = {
     canvas: '안전 모드',
-    integrated: 'AI 통합 텍스트',
-};
-
-const isIntegratedTextEligible = (copy: string): boolean => {
-    const normalized = normalizeOverlayCopy(copy);
-    if (!normalized) return false;
-    const lines = normalized.split('\n');
-    // 최신 이미지 모델은 2줄 한글 헤드라인까지 안정적 — 과도한 폴백으로 통합 모드가 무력화되지 않게 완화
-    return lines.length <= 2 && lines.every(line => Array.from(line).length <= 16) && Array.from(normalized.replace(/\n/g, '')).length <= 30;
 };
 
 const compactCopyLine = (value: string, maxLength: number): string => {
@@ -505,13 +490,6 @@ const inspectImageQuality = (
     if (total >= 8 && expected && index !== 4 && img.layoutPreset !== expected.preset) {
         warnings.push(`${index + 1}번은 ${expected.label} 흐름이 더 자연스럽습니다.`);
     }
-    if (img.textRenderMode === 'integrated') {
-        if (isIntegratedTextEligible(img.mainCopy)) {
-            warnings.push('AI 통합 텍스트 모드: 이미지 속 한글 오타·뭉개짐을 직접 확인해주세요.');
-        } else {
-            warnings.push('메인 카피가 길어 AI 통합 텍스트 대신 안전 합성으로 처리됩니다. (2줄·줄당 16자 이내로 줄이면 통합 텍스트가 적용됩니다)');
-        }
-    }
     return warnings;
 };
 
@@ -523,7 +501,6 @@ const isFeatureBenefitImage = (img: Pick<GenImage, 'role' | 'stage' | 'sectionTy
 const getImageQaTags = (img: Omit<GenImage, 'qaTags'>): string[] => {
     const tags: string[] = [];
     if (img.status === 'failed') tags.push('실패 이미지');
-    if (img.textRenderMode === 'integrated') tags.push('텍스트 확인 필요');
     if (img.bundleRequirement === 'both-items') {
         tags.push('조합 제품 모두 보임');
         tags.push('색상/구성 유지');
@@ -567,23 +544,15 @@ const buildImagePrompt = (
         ? `Brand colors — primary ${colors.primary}, accent ${colors.accent || colors.primary}, text ${colors.text || '#1a1a1a'}, background ${colors.background || '#ffffff'}.`
         : '';
     const posKo = img.textPosition === 'top' ? '상단' : img.textPosition === 'middle' ? '중앙' : '하단';
-    const integratedTextEnabled = textRenderMode === 'integrated' && isIntegratedTextEligible(img.mainCopy);
     const exactMainCopy = normalizeOverlayCopy(img.mainCopy);
     const problemContrast = isProblemContrastSection(img);
-    const textInstruction = integratedTextEnabled
-        ? [
-            `- Render exactly this Korean headline text in the ${posKo} region: "${exactMainCopy}".`,
-            '- The headline must be crisp, readable, correctly spelled, and not distorted. Do not add any other text, numbers, captions, labels, badges, watermarks, or extra letters.',
-            '- Use premium Korean commercial typography that follows the image perspective naturally while keeping the text flat enough to read clearly.',
-            '- Leave enough contrast and empty space around the headline. The product/model must not overlap the letters.',
-        ].join('\n')
-        : [
+    const textInstruction = [
             '- SAFE CANVAS TEXT MODE: the app will overlay all Korean copy later in browser canvas.',
             '- Generate a clean visual background only. DO NOT render any new text inside the image.',
             '- NO Korean text, NO English text, NO letters, NO numbers, NO captions, NO headline, NO slogan, NO price, NO sale badge, NO labels, NO stickers, NO watermark, NO UI text, NO poster text, NO signage, NO book/newspaper/magazine text, NO package label text added by the model.',
             '- Leave the copy-safe area blank and clean for later canvas typography.',
             '- Exception: preserve only the exact logo/print/lettering that already exists on the uploaded reference product itself. Do not invent, rewrite, translate, simplify, or add new product lettering.',
-        ].join('\n');
+    ].join('\n');
     const combinationCount = getCombinationCount(combinationType);
     const isBundle = combinationCount >= 2;
     const isBundleTogetherSection = isBundle
@@ -665,7 +634,7 @@ ${masterGuide}
 
 DESIGN DIRECTION:
 - 톤: ${tone}. 잡지 화보처럼 정돈된 미니멀 프리미엄 레이아웃. ONE clear focal subject, generous calm negative space (roughly 30-40% of the frame), no visual clutter, high conversion design, premium visual hierarchy. ${colorHint}
-- IMPORTANT: leave a clean copy-safe negative-space area in the ${posKo} region. ${buildCopySafeInstruction(img.textPosition)} ${integratedTextEnabled ? 'Use this area for the exact headline only.' : 'The app will overlay Korean typography later.'}
+- IMPORTANT: leave a clean copy-safe negative-space area in the ${posKo} region. ${buildCopySafeInstruction(img.textPosition)} The app will overlay Korean typography later.
 - Keep all important product details, model faces, hands, logos, prints, and functional parts OUTSIDE the copy-safe text zone.
 - Do NOT create a separate white header/footer band, frame, box, panel, or split-screen. Keep one continuous premium background.
 - Do NOT use props or backgrounds that naturally introduce readable text, such as posters, signs, price tags, books, magazines, newspapers, labels, menus, UI screens, or packages with new readable writing.
@@ -866,6 +835,62 @@ const drawBackdrop = (
     ctx.fillRect(0, top, TARGET_WIDTH, bottom - top);
 };
 
+// 텍스트가 놓일 영역의 실제 픽셀 밝기와 편차를 측정 (글자색 자동 선택용)
+const sampleRegionBrightness = (
+    ctx: CanvasRenderingContext2D,
+    top: number,
+    height: number
+): { luminance: number; variance: number } => {
+    const y0 = Math.max(0, Math.floor(top - 10));
+    const y1 = Math.min(TARGET_HEIGHT, Math.ceil(top + height + 10));
+    const h = Math.max(1, y1 - y0);
+    try {
+        const data = ctx.getImageData(0, y0, TARGET_WIDTH, h).data;
+        let sum = 0;
+        let sumSq = 0;
+        let count = 0;
+        // 4px 간격 샘플링 (전 픽셀 순회는 불필요하게 느림)
+        for (let i = 0; i < data.length; i += 4 * 4) {
+            const l = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+            sum += l;
+            sumSq += l * l;
+            count += 1;
+        }
+        if (count === 0) return { luminance: 1, variance: 0 };
+        const mean = sum / count;
+        return { luminance: mean, variance: Math.max(0, sumSq / count - mean * mean) };
+    } catch {
+        // 캔버스 오염(cross-origin) 등으로 읽기 실패 시 밝은 배경으로 간주
+        return { luminance: 1, variance: 0 };
+    }
+};
+
+// 디자인 시스템 텍스트 컬러가 너무 밝으면 가독성을 위해 진한 색으로 대체
+const resolveDarkTextColor = (design?: { colors?: Record<string, string> }): string => {
+    const color = getTextColor(design);
+    return getColorLuminance(color) > 0.5 ? '#111827' : color;
+};
+
+// 배경이 복잡할 때만 사용하는 아주 옅은 스크림 (판때기처럼 보이지 않게)
+const drawSoftScrim = (
+    ctx: CanvasRenderingContext2D,
+    top: number,
+    height: number,
+    lightText: boolean
+) => {
+    const pad = 46;
+    const y0 = Math.max(0, top - pad);
+    const y1 = Math.min(TARGET_HEIGHT, top + height + pad);
+    const gradient = ctx.createLinearGradient(0, y0, 0, y1);
+    const solid = lightText ? 'rgba(10, 12, 16, 0.34)' : 'rgba(255, 255, 255, 0.38)';
+    const clear = lightText ? 'rgba(10, 12, 16, 0)' : 'rgba(255, 255, 255, 0)';
+    gradient.addColorStop(0, clear);
+    gradient.addColorStop(0.5, solid);
+    gradient.addColorStop(1, clear);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, y0, TARGET_WIDTH, y1 - y0);
+};
+
 // 판/칩 없는 미니멀 타이포그래피: 헤드라인 위 얇은 악센트 라인만 사용
 const drawAccentLine = (
     ctx: CanvasRenderingContext2D,
@@ -920,21 +945,40 @@ const overlayTextOnImage = async (
             const accentHeight = 20;
             const headlineHeight = headline.lines.length * headline.lineHeight;
             const blockHeight = accentHeight + headlineHeight + subHeight + 8;
-            const centerY = seg.textPosition === 'top'
-                ? Math.max(110, blockHeight / 2 + 48)
+
+            // 안전 여백 안에서만 배치되도록 클램프 (글자 잘림 방지)
+            const SAFE_MARGIN = 56;
+            const minCenter = SAFE_MARGIN + blockHeight / 2;
+            const maxCenter = TARGET_HEIGHT - SAFE_MARGIN - blockHeight / 2;
+            const desiredCenter = seg.textPosition === 'top'
+                ? blockHeight / 2 + 64
                 : seg.textPosition === 'middle'
                     ? TARGET_HEIGHT / 2
-                    : Math.min(TARGET_HEIGHT - 110, TARGET_HEIGHT - blockHeight / 2 - 58);
-            const textColor = getTextColor(design);
-            const accentColor = getAccentColor(design);
+                    : TARGET_HEIGHT - blockHeight / 2 - 72;
+            const centerY = maxCenter < minCenter
+                ? TARGET_HEIGHT / 2
+                : Math.min(maxCenter, Math.max(minCenter, desiredCenter));
 
-            // 배경 그라데이션·그림자 등 뒤 효과 없이 깨끗한 타이포그래피만 렌더링
-            drawAccentLine(ctx, centerY - blockHeight / 2, accentColor);
+            // 배경 밝기를 실제로 측정해 글자색을 자동 선택 (어두운 배경엔 흰 글씨)
+            const blockTop = centerY - blockHeight / 2;
+            const bg = sampleRegionBrightness(ctx, blockTop, blockHeight);
+            const useLightText = bg.luminance < 0.55;
+            const textColor = useLightText ? '#ffffff' : resolveDarkTextColor(design);
+            const accentColor = useLightText ? '#ffffff' : getAccentColor(design);
 
-            let y = centerY - blockHeight / 2 + accentHeight + headline.lineHeight / 2;
+            // 배경이 밝기 편차가 큰(복잡한) 구간이면 아주 옅은 스크림만 깔아 가독성 확보
+            if (bg.variance > 0.055) {
+                drawSoftScrim(ctx, blockTop, blockHeight, useLightText);
+            }
+
+            drawAccentLine(ctx, blockTop, accentColor);
+
+            let y = blockTop + accentHeight + headline.lineHeight / 2;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.shadowBlur = 0;
+            ctx.shadowColor = useLightText ? 'rgba(0, 0, 0, 0.35)' : 'rgba(255, 255, 255, 0.45)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetY = 0;
             ctx.font = `800 ${headline.fontSize}px ${DETAIL_FONT_FAMILY}`;
             headline.lines.forEach((line) => {
                 ctx.fillStyle = textColor;
@@ -945,13 +989,14 @@ const overlayTextOnImage = async (
             if (subCopy) {
                 y += 4;
                 ctx.font = `500 ${subFont}px ${DETAIL_FONT_FAMILY}`;
-                ctx.globalAlpha = 0.85;
+                ctx.globalAlpha = 0.92;
                 ctx.fillStyle = textColor;
                 wrapText(ctx, subCopy, TARGET_WIDTH - 180, 1).forEach((line) => {
                     ctx.fillText(line, TARGET_WIDTH / 2, y);
                 });
                 ctx.globalAlpha = 1;
             }
+            ctx.shadowBlur = 0;
 
             resolve(canvas.toDataURL('image/png'));
         };
@@ -1112,7 +1157,7 @@ const getImageGenerationPriority = (img: GenImage): number => {
     if (role.includes('특장점') || role.includes('proof') || role.includes('solution')) return 9;
     if (img.layoutPreset === 'cta' || role.includes('cta')) return 8;
     if (img.shotType === 'detail' || img.shotType === 'texture') return 7;
-    if (img.shotType === 'product' || img.shotType === 'package') return 6;
+    if (img.shotType === 'product') return 6;
     if (img.shotType === 'lifestyle') return 4;
     return 5;
 };
@@ -1152,8 +1197,7 @@ export const DetailPlanner: React.FC = () => {
     const [plan, setPlan] = useState<DetailPlan | null>(null);
     const [images, setImages] = useState<GenImage[]>([]);
     const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null);
-    const [textRenderMode, setTextRenderMode] = useState<TextRenderMode>('canvas');
-    const [aiIntegratedTextUnlocked, setAiIntegratedTextUnlocked] = useState(false);
+    const textRenderMode: TextRenderMode = 'canvas';
     const [imageFilter, setImageFilter] = useState<ImageFilter>('all');
     const [productBrief, setProductBrief] = useState<ProductBrief | null>(null);
     const [briefText, setBriefText] = useState('');
@@ -1273,47 +1317,7 @@ export const DetailPlanner: React.FC = () => {
         });
     };
 
-    useEffect(() => {
-        let alive = true;
-        (async () => {
-            try {
-                const res = await fetch('/api/usage?action=config', {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${getToken()}` },
-                });
-                const data = await res.json();
-                if (!alive) return;
-                const unlocked = data?.aiIntegratedTextEnabled === true;
-                setAiIntegratedTextUnlocked(unlocked);
-                if (!unlocked) {
-                    setTextRenderMode('canvas');
-                    setImages(prev => prev.map(img => ({ ...img, textRenderMode: 'canvas' })));
-                }
-            } catch {
-                if (!alive) return;
-                setAiIntegratedTextUnlocked(false);
-                setTextRenderMode('canvas');
-                setImages(prev => prev.map(img => ({ ...img, textRenderMode: 'canvas' })));
-            }
-        })();
-        return () => { alive = false; };
-    }, []);
 
-    const handleTextRenderModeChange = (mode: TextRenderMode) => {
-        const nextMode = mode === 'integrated' && !aiIntegratedTextUnlocked ? 'canvas' : mode;
-        setTextRenderMode(nextMode);
-        setImages(prev => {
-            const patched = prev.map(img => ({ ...img, textRenderMode: nextMode }));
-            const mainCopies = patched.map(img => normalizeOverlayCopy(img.mainCopy));
-            return patched.map((img, index) => {
-                const next = {
-                    ...img,
-                    qualityWarnings: inspectImageQuality(img, mainCopies, index, patched.length),
-                };
-                return { ...next, qaTags: getImageQaTags(next) };
-            });
-        });
-    };
 
     const handleTidyCopy = (id?: string) => {
         setImages(prev => {
@@ -1539,7 +1543,6 @@ export const DetailPlanner: React.FC = () => {
             ].join(' ');
             const colorLock = runtimeLock.colorLock || detectProductColorLock(productLockSource);
             const genderLock = runtimeLock.genderLock || detectModelGenderLock(productLockSource);
-            const canUseIntegratedText = requestedTextMode === 'integrated' && isIntegratedTextEligible(latest.mainCopy);
             const problemContrast = latest.bundleRequirement === 'before-no-current-product' || isProblemContrastSection(latest);
             const hasMatchingMaster = problemContrast ? false : (latest.shotType === 'model' ? !!runtimeMasters.hookModel : !!runtimeMasters.productDetail);
             const masterReferenceType = hasMatchingMaster
@@ -1568,16 +1571,14 @@ export const DetailPlanner: React.FC = () => {
                 });
                 return;
             }
-            const imageUrl = canUseIntegratedText
-                ? raw
-                : await overlayTextOnImage(raw, { ...latest, textRenderMode: 'canvas' }, plan?.designSystem);
+            const imageUrl = await overlayTextOnImage(raw, { ...latest, textRenderMode: 'canvas' }, plan?.designSystem);
             const nextPatch: Partial<GenImage> = {
                 imageUrl,
                 rawImageUrl: raw,
                 isGenerating: false,
                 status: 'done',
                 errorMessage: '',
-                textRenderMode: canUseIntegratedText ? 'integrated' : 'canvas',
+                textRenderMode: 'canvas',
                 provider: result?.provider,
                 model: result?.model,
                 variantUrls: [],
@@ -1630,7 +1631,7 @@ export const DetailPlanner: React.FC = () => {
         seg.bundleRequirement === 'both-items' ||
         seg.bundleRequirement === 'before-no-current-product' ||
         isFeatureBenefitImage(seg) ||
-        ['product', 'detail', 'texture', 'cta', 'package'].includes(seg.shotType || '')
+        ['product', 'detail', 'texture', 'cta'].includes(seg.shotType || '')
     );
 
     const runVisionQaForImage = async (seg: GenImage, imageUrl: string, rawImageUrl?: string) => {
@@ -1644,7 +1645,7 @@ export const DetailPlanner: React.FC = () => {
             shotType: seg.shotType,
             combinationCount: getCombinationCount(info.combinationType),
             genderLock: getVisualLockWithReferenceProfiles(getActiveVisualLock()).genderLock,
-            expectedNoText: seg.textRenderMode !== 'integrated',
+            expectedNoText: true,
             expectedProductOnly: !!seg.shotType && !isModelShot(seg.shotType),
             expectedProblemScene: seg.bundleRequirement === 'before-no-current-product' || isProblemContrastSection(seg),
         });
@@ -1777,7 +1778,6 @@ export const DetailPlanner: React.FC = () => {
     const generatedCount = images.filter(i => i.status === 'done' && i.imageUrl).length;
     const generatingCount = images.filter(i => i.status === 'queued' || i.status === 'generating' || i.status === 'retrying').length;
     const failedCount = images.filter(i => i.status === 'failed').length;
-    const integratedTextCount = images.filter(i => i.textRenderMode === 'integrated' && i.status === 'done').length;
     const modelShotCount = images.filter(i => isModelShot(i.shotType)).length;
     const maxRecommendedModelShots = images.length >= 8 ? 3 : Math.max(1, Math.ceil(images.length * 0.4));
     const qualityWarningCount = images.reduce((sum, img) => sum + (img.qualityWarnings?.length || 0), 0);
@@ -1797,7 +1797,6 @@ export const DetailPlanner: React.FC = () => {
         ...(qualityWarningCount > 0 ? [`카피/기획 QA 경고 ${qualityWarningCount}건이 있습니다.`] : []),
         ...(visionWarningCount > 0 ? [`비전 QA 경고 ${visionWarningCount}건이 있습니다.`] : []),
         ...(!images.some(isFeatureBenefitImage) ? ['상품 특장점 전용 이미지가 없습니다. 기획안을 다시 생성하거나 한 장을 특장점 섹션으로 수정하세요.'] : []),
-        ...(integratedTextCount > 0 ? [`AI 통합 텍스트 이미지 ${integratedTextCount}장은 한글 오타·뭉개짐을 눈으로 확인해주세요.`] : []),
         ...(modelShotCount > maxRecommendedModelShots ? [`모델컷이 ${modelShotCount}장입니다. 권장 최대 ${maxRecommendedModelShots}장보다 많습니다.`] : []),
     ];
     const visualLockSummary = productVisualLock || buildProductVisualLock(info, productBrief, briefText, productVisualLock);
@@ -1982,41 +1981,6 @@ export const DetailPlanner: React.FC = () => {
                                 ))}
                             </div>
 
-                            <label className="mb-2 mt-5 block text-sm font-medium text-slate-700">텍스트 렌더링</label>
-                            <div className="grid grid-cols-1 gap-2">
-                                {([
-                                    { value: 'canvas' as const, label: '안전 모드', desc: '한글 카피를 선명하게 별도 합성합니다' },
-                                    { value: 'integrated' as const, label: 'AI 통합 텍스트 실험', desc: '짧은 메인 카피만 이미지 생성에 함께 넣습니다' },
-                                ]).map(opt => {
-                                    const selected = textRenderMode === opt.value;
-                                    const locked = opt.value === 'integrated' && !aiIntegratedTextUnlocked;
-                                    return (
-                                        <button
-                                            key={opt.value}
-                                            type="button"
-                                            disabled={locked}
-                                            onClick={() => handleTextRenderModeChange(opt.value)}
-                                            className={`p-3 rounded-xl border text-left transition-all ${locked ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-70' : selected ? 'border-slate-950 bg-slate-950 text-white shadow-sm' : 'border-slate-200 hover:border-slate-400 hover:bg-slate-50'}`}
-                                        >
-                                            <div className={`mb-1 flex items-center gap-1.5 font-bold ${locked ? 'text-slate-400' : selected ? 'text-white' : 'text-slate-800'}`}>
-                                                {locked && <Lock className="h-3.5 w-3.5" />}
-                                                {opt.label}
-                                            </div>
-                                            <div className={`text-xs ${selected ? 'text-slate-300' : 'text-slate-500'}`}>{opt.desc}</div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            {!aiIntegratedTextUnlocked && (
-                                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
-                                    AI 통합 텍스트 실험은 관리자 설정에서 허용된 경우에만 사용할 수 있습니다. (관리자 탭 → &apos;AI 통합 텍스트 실험 허용&apos; 켜기)
-                                </div>
-                            )}
-                            {textRenderMode === 'integrated' && (
-                                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
-                                    AI 통합 텍스트는 오타나 글자 뭉개짐이 생길 수 있어 결과 확인이 필요합니다. 긴 문구는 자동으로 안전 모드로 처리됩니다.
-                                </div>
-                            )}
                         </div>
 
                         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -2203,9 +2167,7 @@ export const DetailPlanner: React.FC = () => {
                             <div>
                                 <h2 className="text-xl font-black text-slate-900">이미지별 기획안 <span className="text-slate-400">({images.length}장)</span></h2>
                                 <p className="mt-1 text-sm text-slate-500">
-                                    {textRenderMode === 'integrated'
-                                        ? '짧은 메인 카피는 이미지 생성에 함께 넣고, 실패 시 안전 합성으로 복구할 수 있습니다.'
-                                        : '카피는 생성된 배경 이미지 위에 선명하게 합성됩니다.'}
+                                    카피는 생성된 배경 이미지 위에 선명하게 합성됩니다.
                                 </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
@@ -2378,7 +2340,6 @@ export const DetailPlanner: React.FC = () => {
                                 { label: `비전 QA ${qaCheckedCount}장 검사`, ok: visionWarningCount === 0 },
                                 { label: `컷별 QA 태그 ${warningImageCount}장`, ok: images.length > 0 },
                                 { label: `모델컷 ${modelShotCount}/${maxRecommendedModelShots}장`, ok: modelShotCount <= maxRecommendedModelShots },
-                                { label: 'AI 통합 텍스트 확인', ok: integratedTextCount === 0 },
                             ].map(item => (
                                 <div key={item.label} className={`rounded-xl border px-3 py-2 font-bold ${item.ok ? 'border-emerald-200 bg-white/70 text-emerald-700' : 'border-amber-200 bg-white/70 text-amber-800'}`}>
                                     {item.ok ? '✓' : '!'} {item.label}
@@ -2445,20 +2406,11 @@ export const DetailPlanner: React.FC = () => {
                                     )}
                                     <span className="absolute top-2 left-2 bg-black/70 text-white text-xs font-bold rounded-full px-2 py-0.5 backdrop-blur">{seg.number}. {seg.role}</span>
                                     <span className={`absolute top-2 right-2 rounded-full px-2 py-0.5 text-xs font-bold ${STATUS_CLASS[seg.status]}`}>{STATUS_LABEL[seg.status]}</span>
-                                    {seg.textRenderMode === 'integrated' && seg.status === 'done' && (
-                                        <span className="absolute bottom-2 left-2 rounded-full bg-amber-500/90 px-2 py-0.5 text-xs font-bold text-white backdrop-blur">텍스트 확인 필요</span>
-                                    )}
                                 </div>
                                 {seg.imageUrl && (
                                     <div className="p-3 space-y-2">
-                                        <div className={`rounded-lg border p-2 text-[11px] ${
-                                            seg.textRenderMode === 'integrated'
-                                                ? 'border-amber-200 bg-amber-50 text-amber-800'
-                                                : 'border-emerald-100 bg-emerald-50 text-emerald-700'
-                                        }`}>
-                                            {seg.textRenderMode === 'integrated'
-                                                ? 'AI가 이미지 안에 메인 카피를 직접 넣었습니다. 오타, 뭉개짐, 잘림이 보이면 안전 모드로 다시 적용하세요.'
-                                                : '한글 카피를 별도 합성해 선명도와 오타 위험을 줄인 안전 모드입니다.'}
+                                        <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-2 text-[11px] text-emerald-700">
+                                            한글 카피를 별도 합성해 선명도와 오타 위험을 줄인 안전 모드입니다.
                                         </div>
                                         <textarea value={seg.mainCopy} onChange={e => updateImage(seg.id, { mainCopy: e.target.value })} rows={4}
                                             className="w-full p-2 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none" placeholder="메인 카피" />
@@ -2555,16 +2507,9 @@ export const DetailPlanner: React.FC = () => {
                                                 ))}
                                             </div>
                                         </div>
-                                        {seg.textRenderMode === 'integrated' && (
-                                            <button onClick={() => applyTextOnly(seg)} className="w-full text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 rounded py-1.5 flex items-center justify-center gap-1">
-                                                <RefreshCw className="w-3 h-3" /> 안전 모드로 다시 적용
-                                            </button>
-                                        )}
-                                        {seg.textRenderMode !== 'integrated' && (
-                                            <button onClick={() => applyTextOnly(seg)} className="w-full text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded py-1.5 flex items-center justify-center gap-1">
-                                                <RefreshCw className="w-3 h-3" /> 문구만 다시 적용
-                                            </button>
-                                        )}
+                                        <button onClick={() => applyTextOnly(seg)} className="w-full text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded py-1.5 flex items-center justify-center gap-1">
+                                            <RefreshCw className="w-3 h-3" /> 문구만 다시 적용
+                                        </button>
                                         <button onClick={() => regenerateWithPreset(seg, 'Regenerate this section with a fresh premium ecommerce detail-page composition while preserving the section role and product requirements.')} className="w-full text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 rounded py-1.5 flex items-center justify-center gap-1">
                                             <RefreshCw className="w-3 h-3" /> 배경까지 재생성
                                         </button>

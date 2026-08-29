@@ -232,7 +232,7 @@ export interface DetailPlanImage {
   role: string;          // Hook / 문제 공감 / 핵심 셀링포인트 ...
   stage: string;         // 심리 단계: 인지/공감/문제 인식/해결책/신뢰/확신
   sectionType: string;   // offer/problem/proof/detail/lifestyle/trust/cta
-  shotType?: 'model' | 'product' | 'detail' | 'texture' | 'lifestyle' | 'package' | 'cta';
+  shotType?: 'model' | 'product' | 'detail' | 'texture' | 'lifestyle' | 'cta';
   mainCopy: string;      // 메인 카피 (한글, \n 줄바꿈)
   subCopy: string;       // 서브 카피
   trustElement: string;  // 신뢰 요소
@@ -264,6 +264,43 @@ export interface DetailPlan {
   };
   images: DetailPlanImage[];
 }
+
+// 상세페이지 마스터 프롬프트 V2.1의 이미지 구성 (12~15장 기준).
+// 장수가 적으면 우선순위가 낮은 섹션부터 자동으로 덜어낸다.
+type SectionSpec = { role: string; stage: string; sectionType: string; shotType: string; desc: string; priority: number };
+
+const V21_SECTIONS: SectionSpec[] = [
+  { role: 'Hook', stage: '인지', sectionType: 'offer', shotType: 'model', priority: 1, desc: '3초 안에 시선 확보. 제품 메인/모델컷 + 핵심 USP로 스크롤을 멈추게 함' },
+  { role: '문제 공감', stage: '공감', sectionType: 'problem', shotType: 'lifestyle', priority: 3, desc: '고객이 실제 겪는 불편한 상황과 감정에 공감 (판매 제품 노출 금지)' },
+  { role: '문제 확대', stage: '문제 인식', sectionType: 'problem', shotType: 'lifestyle', priority: 6, desc: '방치 시 생기는 손실을 자극 (손실 회피 심리, 판매 제품 노출 금지)' },
+  { role: '해결책 제시', stage: '해결책 발견', sectionType: 'offer', shotType: 'product', priority: 2, desc: '왜 이 제품인가, 왜 지금인가를 보여주는 전환점' },
+  { role: '핵심 특장점', stage: '근거', sectionType: 'proof', shotType: 'product', priority: 2, desc: '셀링포인트 1 — 기능 중심. 핵심 기능과 성능을 시각적으로 강조' },
+  { role: '감성 가치', stage: '근거', sectionType: 'lifestyle', shotType: 'model', priority: 5, desc: '셀링포인트 2 — 감성 중심. 사용 시 느끼는 만족감과 분위기' },
+  { role: '비교 우위', stage: '근거', sectionType: 'proof', shotType: 'detail', priority: 4, desc: '셀링포인트 3 — 비교 중심. 일반 제품 대비 나은 점을 시각적으로 대비' },
+  { role: '소재 디테일', stage: '근거', sectionType: 'detail', shotType: 'texture', priority: 3, desc: '셀링포인트 4 — 수치·근거 중심. 소재/마감/디테일 극단 클로즈업' },
+  { role: '사용 장면', stage: '신뢰 형성', sectionType: 'lifestyle', shotType: 'lifestyle', priority: 4, desc: '셀링포인트 5 — 사용 장면 중심. 일상 속 자연스러운 활용 컷' },
+  { role: '경쟁 대비', stage: '신뢰 형성', sectionType: 'proof', shotType: 'product', priority: 7, desc: '일반 제품과의 차이를 한 장면 안에서 시각적으로 대비 (표가 아닌 사진 연출로)' },
+  { role: '실사용 후기', stage: '신뢰 형성', sectionType: 'proof', shotType: 'lifestyle', priority: 8, desc: '상황 기반의 사용 전/후 변화를 보여주는 장면 (허위 후기 문구 금지)' },
+  { role: '신뢰 강화', stage: '신뢰 형성', sectionType: 'trust', shotType: 'detail', priority: 5, desc: '원재료/제조공정/품질관리/생산환경으로 신뢰를 높이는 장면' },
+  { role: '구성품 안내', stage: '구매 확신', sectionType: 'detail', shotType: 'product', priority: 9, desc: '무엇을 받게 되는지 한눈에 보여주는 구성 안내 장면' },
+  { role: '상세 정보', stage: '구매 확신', sectionType: 'detail', shotType: 'product', priority: 6, desc: '구성/사양/사용법 등 카테고리별 핵심 정보를 보여주는 정돈된 장면' },
+  { role: 'CTA', stage: '결제', sectionType: 'trust', shotType: 'cta', priority: 1, desc: '지금 구매해야 하는 이유와 행동 유도로 마무리하는 제품 중심 컷' },
+];
+
+const buildSectionTemplate = (count: number): string => {
+  const first = V21_SECTIONS[0];
+  const last = V21_SECTIONS[V21_SECTIONS.length - 1];
+  const middle = V21_SECTIONS.slice(1, -1);
+  const keepMiddle = Math.max(0, count - 2);
+  const selected = [...middle]
+    .sort((a, b) => a.priority - b.priority)
+    .slice(0, keepMiddle)
+    .sort((a, b) => middle.indexOf(a) - middle.indexOf(b));
+  const ordered = count <= 1 ? [first] : [first, ...selected, last];
+  return ordered
+    .map((sec, i) => `${i + 1}번 (${sec.role}) — 단계: ${sec.stage} / sectionType: ${sec.sectionType} / 권장 shotType: ${sec.shotType}\n   → ${sec.desc}`)
+    .join('\n');
+};
 
 const getDetailPlanCount = (value: any): number => {
   if (value === 'auto') return 8;
@@ -373,7 +410,6 @@ const buildFallbackVisualPrompt = (
     detail: 'extreme close-up product detail scene with no person, textured surface, angled light, shallow depth of field, showing seams, cut, finish, logo, print, hardware, and construction',
     texture: 'macro texture and print/graphic story with no person, fabric folds, tactile material grain, directional side light, premium shadow, close crop, and designed negative space',
     lifestyle: 'natural lifestyle usage scene with the product in context, styled props, realistic environment depth; a hand or partial body may appear only if needed, no full fashion model pose',
-    package: 'product package, components, material, finishing, or trust-building detail scene with no person, arranged composition, pedestal, soft reflections, background depth',
     cta: 'product-only closing scene with no person, premium pedestal, atmospheric depth, confident product scale, refined props, decisive purchase-confidence lighting',
   };
 
@@ -415,7 +451,7 @@ const createFallbackDetailPlan = (data: any, reason = 'GPT 기획안 생성 실�
     { role: '상품 특장점', stage: '근거', sectionType: 'proof', shotType: 'product' as const, mainCopy: '한눈에보이는\n핵심특장점', subCopy: '이 상품의 장점을 명확하게 보여드립니다', trigger: '비교우위', textPosition: 'top' as const, visualPrompt: featureVisualPrompt },
     { role: '소재/프린팅', stage: '상세 정보', sectionType: 'detail', shotType: 'texture' as const, mainCopy: '작은 차이가\n만족을 만듭니다', subCopy: '매일 쓰는 제품일수록 디테일이 중요합니다', trigger: '권위', textPosition: 'bottom' as const },
     { role: '활용 장면', stage: '신뢰', sectionType: 'lifestyle', shotType: 'model' as const, mainCopy: '일상에 자연스럽게\n스며듭니다', subCopy: '사용하는 순간을 더 편하게 만듭니다', trigger: '감정적 보상', textPosition: 'middle' as const },
-    { role: '신뢰 강화', stage: '확신', sectionType: 'trust', shotType: 'package' as const, mainCopy: '구매 전 마지막\n확인까지', subCopy: '품질과 활용성을 차분히 보여드립니다', trigger: '사회적 증거', textPosition: 'top' as const },
+    { role: '신뢰 강화', stage: '확신', sectionType: 'trust', shotType: 'detail' as const, mainCopy: '구매 전 마지막\n확인까지', subCopy: '품질과 활용성을 차분히 보여드립니다', trigger: '사회적 증거', textPosition: 'top' as const },
     { role: 'CTA', stage: '구매 확신', sectionType: 'cta', shotType: 'cta' as const, mainCopy: '오늘부터 바로\n경험해보세요', subCopy: '망설임 없이 선택할 수 있도록 준비했습니다', trigger: '희소성', textPosition: 'bottom' as const },
   ];
 
@@ -512,7 +548,7 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
       role: String(img?.role || (idx === 0 ? 'Hook' : idx === targetCount - 1 ? 'CTA' : fallbackImage.role)),
       stage: String(img?.stage || fallbackImage.stage),
       sectionType: String(img?.sectionType || fallbackImage.sectionType),
-      shotType: ['model', 'product', 'detail', 'texture', 'lifestyle', 'package', 'cta'].includes(img?.shotType) ? img.shotType : fallbackImage.shotType,
+      shotType: ['model', 'product', 'detail', 'texture', 'lifestyle', 'cta'].includes(img?.shotType) ? img.shotType : fallbackImage.shotType,
       mainCopy: normalizeMainCopy(img?.mainCopy || img?.copy || fallbackImage.mainCopy),
       subCopy: String(img?.subCopy || fallbackImage.subCopy).slice(0, 26),
       trustElement: String(img?.trustElement || fallbackImage.trustElement),
@@ -574,7 +610,8 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
 export const generateDetailPlan = async (data: any): Promise<DetailPlan | null> => {
   try {
     await trackUsage();
-    const count = String(getDetailPlanCount(data.length));
+    const imageCount = getDetailPlanCount(data.length);
+    const count = String(imageCount);
     const combinationType = data.combinationType && data.combinationType !== 'single'
       ? String(data.combinationType)
       : '';
@@ -622,8 +659,13 @@ ${productBriefGuide}
 
 [작성 규칙]
 - 상품 분석: 제품 정의, 고객의 표면 니즈/숨은 니즈, 차별점 3개 이상, 구매 저항 5개 이상.
-- 전환 흐름: Hook → 문제 공감/확대 → 해결책 → 셀링포인트 → 신뢰 → 상세 정보 → CTA.
 - 이미지 기획은 정확히 ${count}장. 1번은 Hook, 마지막은 CTA.
+
+[섹션 구성 템플릿 — 아래 순서를 반드시 따르세요]
+${buildSectionTemplate(imageCount)}
+- 각 섹션의 role은 위 템플릿의 역할명을 그대로 사용하세요.
+- 셀링포인트 구간은 표현 방식이 절대 중복되면 안 됩니다(기능 → 감성 → 비교 → 수치·근거 → 사용 장면 순서로 서로 다른 각도).
+- 한 이미지 = 하나의 설득 완결. 각 이미지는 단독으로 보더라도 구매 설득이 가능해야 합니다.
 - 1번 Hook은 반드시 shotType=model 입니다. 제품을 착용/사용한 강한 모델컷으로, 제품이 크게 보이고 첫인상이 강해야 합니다.
 - 1번 Hook의 visualPrompt에는 productBrief.heroDirection과 핵심특징 중 가장 강한 USP를 반영하세요.
 ${bundleRules}
@@ -631,8 +673,8 @@ ${bundleRules}
 - 전체 이미지 중 최소 1장은 반드시 role="상품 특장점" 또는 "핵심 특장점"으로 작성하세요. 이 장은 productBrief.coreFeatures 또는 추론한 핵심 장점을 한눈에 보여주는 benefit/feature 섹션이어야 합니다.
 - 상품 특장점 장은 제품의 장점, 기능, 소재, 사용성, 차별점을 시각적으로 비교/강조하는 구성으로 만드세요.
 - 중간 이미지는 기능/감성/비교/사용 장면/디테일 등 서로 다른 각도로 구성하고 표현 중복을 피하세요.
-- shotType은 model, product, detail, texture, lifestyle, package, cta 중 하나를 반드시 지정하세요.
-- 기본 8장 기준 모델컷은 최대 2~3장만 사용하고, 나머지는 제품 단독컷/디테일 클로즈업/소재·프린팅 클로즈업/패키지·구성품/CTA 제품컷으로 섞으세요.
+- shotType은 model, product, detail, texture, lifestyle, cta 중 하나를 반드시 지정하세요.
+- 모델컷은 전체의 1/3 이하로만 사용하고, 나머지는 제품 단독컷/디테일 클로즈업/소재·프린팅 클로즈업/CTA 제품컷으로 섞으세요.
 - 사실 확인 불가 문구 금지: "판매 1위", "만족도 99%", "누적 100만개", "효과 보장" 등. 안전한 표현으로 대체하세요.
 
 [카피 규칙 — 문구 최소화가 최우선]
@@ -645,8 +687,8 @@ ${bundleRules}
 [visualPrompt 규칙(영어)]
 - 제품이 돋보이는 사실적 촬영 장면을 shotType에 맞게 구체적으로 묘사하세요.
 - 모든 visualPrompt를 모델컷으로 시작하지 마세요. 모델컷은 shotType=model 또는 일부 lifestyle에만 허용합니다.
-- shotType=product/detail/texture/package/cta인 경우 반드시 "no model, no person, product only"를 포함하세요.
-- shotType=detail은 제품 디테일 클로즈업, shotType=texture는 소재/프린팅/로고/패턴 클로즈업, shotType=package는 패키지/구성품/마감 신뢰 컷, shotType=cta는 제품 중심 마무리 컷입니다.
+- shotType=product/detail/texture/cta인 경우 반드시 "no model, no person, product only"를 포함하세요.
+- shotType=detail은 제품 디테일 클로즈업, shotType=texture는 소재/프린팅/로고/패턴 클로즈업, shotType=cta는 제품 중심 마무리 컷입니다.
 - shotType=model인 경우에만 fictional Korean model wearing/using the product를 사용하세요.
 - product only는 흰 배경 카탈로그컷이 아닙니다. 사람은 없되, 상세페이지 디자이너가 만든 것처럼 배경 질감/컬러, 플랫폼/받침, 조명 그림자, 카테고리 관련 소품, 깊이감, 프리미엄 연출을 포함하세요.
 - 모든 섹션은 “제품 사진 한 장”이 아니라 “상세페이지용 한 섹션 비주얼”처럼 보여야 합니다. 단순 흰 배경, 누끼컷, 마켓 상품 등록용 중앙 정렬 컷, 텅 빈 스튜디오 배경을 피하세요.
@@ -654,7 +696,7 @@ ${bundleRules}
 - 다음 상업 사진 키워드를 자연스럽게 녹일 것: photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, high-end advertising, clean layout, Korean ecommerce style, smartstore optimized, high conversion design, premium visual merchandising, realistic shadows, luxury branding
 - 실제 상업 스튜디오에서 촬영한 사진처럼 묘사할 것: 자연스러운 심도(depth of field), 단일 방향의 부드러운 주광과 보조광, 접지 그림자, 실제 소재의 질감과 미세한 결. AI 합성처럼 보이는 묘사(매끈한 플라스틱 피부, 떠 있는 제품, 콜라주)는 금지
 - 텍스트가 올라갈 영역(상/중/하)에는 깨끗한 여백이 생기도록 구도를 설계
-- 행거컷/마네킹/저품질 플랫레이는 피하되, product/detail/texture/package/cta 섹션에서는 사람 없이 제품만 고급스럽게 연출하세요.
+- 행거컷/마네킹/저품질 플랫레이는 피하되, product/detail/texture/cta 섹션에서는 사람 없이 제품만 고급스럽게 연출하세요.
 - 레퍼런스 인물이 있는 경우 모델컷에서만 새 가상 인물로 교체하고, 제품 단독 섹션에는 사람을 넣지 마세요.
 - 업로드된 레퍼런스 제품을 원본으로 유지하세요. 제품 종류, 실루엣, 핏, 소재, 색상, 프린팅, 그래픽, 로고, 패턴, 자수, 절개선, 부자재를 바꾸지 마세요.
 - 프린팅/그래픽/로고/패턴 제품은 visualPrompt에 반드시 "preserve exact print/graphic/logo/pattern placement, scale, and colors from the reference product; do not remove, simplify, recolor, or replace it"를 포함하세요.

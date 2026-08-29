@@ -432,21 +432,6 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
           <p className="text-xs text-slate-400 mt-1">12~15장 1페이지 기준 약 ${(costUsd * 13).toFixed(2)} 내외. GPT 모델은 OpenAI로, Gemini 모델은 Gemini API로 카피/기획/이미지가 모두 처리됩니다.</p>
         </div>
 
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3">
-          <div>
-            <div className="text-sm font-bold text-slate-900">AI 통합 텍스트 실험 허용</div>
-            <p className="mt-1 text-xs text-slate-500">OFF이면 제작 화면에서 실험 모드가 잠기고 안전 모드만 사용할 수 있습니다.</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setAiIntegratedTextEnabled(v => !v)}
-            className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${aiIntegratedTextEnabled ? 'bg-blue-600' : 'bg-slate-300'}`}
-            aria-pressed={aiIntegratedTextEnabled}
-          >
-            <span className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${aiIntegratedTextEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-          </button>
-        </div>
-
         <button
           onClick={handleSave}
           disabled={saving}
