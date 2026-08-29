@@ -662,18 +662,19 @@ SECTION ROLE: ${img.role}${img.stage ? ` (구매 심리 단계: ${img.stage})` :
 ${masterGuide}
 
 DESIGN DIRECTION:
-- 톤: ${tone}. 깔끔하고 현대적인 프리미엄 레이아웃, 넉넉한 여백, high conversion design, premium visual hierarchy. ${colorHint}
+- 톤: ${tone}. 잡지 화보처럼 정돈된 미니멀 프리미엄 레이아웃. ONE clear focal subject, generous calm negative space (roughly 30-40% of the frame), no visual clutter, high conversion design, premium visual hierarchy. ${colorHint}
 - IMPORTANT: leave a clean copy-safe negative-space area in the ${posKo} region. ${buildCopySafeInstruction(img.textPosition)} ${integratedTextEnabled ? 'Use this area for the exact headline only.' : 'The app will overlay Korean typography later.'}
 - Keep all important product details, model faces, hands, logos, prints, and functional parts OUTSIDE the copy-safe text zone.
 - Do NOT create a separate white header/footer band, frame, box, panel, or split-screen. Keep one continuous premium background.
 - Do NOT use props or backgrounds that naturally introduce readable text, such as posters, signs, price tags, books, magazines, newspapers, labels, menus, UI screens, or packages with new readable writing.
-- Korean smartstore optimized, photorealistic commercial product photography, natural lighting, ultra realistic texture, realistic shadows, premium visual merchandising, information-rich layout.
+- Korean smartstore optimized, photorealistic commercial product photography, high-end advertising, natural lighting, ultra realistic texture, realistic shadows, premium visual merchandising, luxury branding, magazine-grade editorial quality.
 - Layout preset: ${img.layoutPreset || 'detail'}. ${getLayoutVisualGuide(img.layoutPreset)}
 - ${shotGuide}
 - ${designerSetGuide}
 - Avoid plain white background, isolated catalog cutout, blank studio sweep, centered product-only listing photo, or ecommerce marketplace basic product image unless the user explicitly asks for that.
 - Use a complete designer-made detail-page section: layered composition, background texture/color, product scale hierarchy, realistic shadow, premium lighting, and tasteful category-relevant styling.
 - Visual diversity rule: make this section clearly different from adjacent sections in camera angle, background depth, pose, crop, and product emphasis. Avoid repeating the same model pose, same room, same close-up type, or same centered product composition.
+- Minimal-clutter rule: at most 1-2 tasteful category-relevant props, one background concept, one dominant subject. The scene must feel calm, airy, and expensive — never busy, cramped, cluttered, or collage-like. When in doubt, remove elements instead of adding them.
 
 ${problemContrast || img.bundleRequirement === 'before-no-current-product' ? problemContrastGuide : identityInstruction}
 ${bundle}
@@ -809,20 +810,20 @@ const buildHeadlineLayout = (
     copy: string,
     position: 'top' | 'middle' | 'bottom'
 ) => {
-    const maxWidth = TARGET_WIDTH - 112;
-    const maxLines = 8;
-    let fontSize = position === 'middle' ? 54 : 58;
-    const minFontSize = 20;
+    const maxWidth = TARGET_WIDTH - 130;
+    const maxLines = 3; // 문구 최소화 — 헤드라인은 최대 3줄까지만
+    let fontSize = position === 'middle' ? 46 : 50;
+    const minFontSize = 22;
     let lines: string[] = [];
     let lineHeight = 0;
 
     while (fontSize >= minFontSize) {
-        ctx.font = `900 ${fontSize}px ${DETAIL_FONT_FAMILY}`;
+        ctx.font = `800 ${fontSize}px ${DETAIL_FONT_FAMILY}`;
         lines = wrapText(ctx, copy, maxWidth, maxLines);
-        lineHeight = Math.round(fontSize * 1.24);
+        lineHeight = Math.round(fontSize * 1.3);
         const widest = Math.max(0, ...lines.map(line => ctx.measureText(line).width));
         const totalHeight = lines.length * lineHeight;
-        if (widest <= maxWidth && totalHeight <= 360) break;
+        if (widest <= maxWidth && totalHeight <= 210) break;
         fontSize -= 2;
     }
 
@@ -860,33 +861,16 @@ const drawBackdrop = (
     ctx.fillRect(0, top, TARGET_WIDTH, bottom - top);
 };
 
-const drawTextPlate = (
+// 판/칩 없는 미니멀 타이포그래피: 헤드라인 위 얇은 악센트 라인만 사용
+const drawAccentLine = (
     ctx: CanvasRenderingContext2D,
-    centerY: number,
-    blockHeight: number,
-    accentColor: string,
-    textColor: string
+    topY: number,
+    accentColor: string
 ) => {
-    const textIsLight = getColorLuminance(textColor) > 0.68;
-    const plateWidth = TARGET_WIDTH - 170;
-    const plateHeight = Math.min(460, blockHeight + 56);
-    const x = (TARGET_WIDTH - plateWidth) / 2;
-    const y = centerY - plateHeight / 2;
     ctx.save();
-    ctx.fillStyle = textIsLight ? 'rgba(15, 23, 42, 0.26)' : 'rgba(255, 255, 255, 0.26)';
-    ctx.strokeStyle = textIsLight ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.48)';
-    ctx.lineWidth = 1;
-    ctx.shadowColor = 'rgba(15, 23, 42, 0.14)';
-    ctx.shadowBlur = 24;
-    ctx.shadowOffsetY = 12;
+    ctx.fillStyle = withAlpha(accentColor, 0.92);
     ctx.beginPath();
-    ctx.roundRect(x, y, plateWidth, plateHeight, 30);
-    ctx.fill();
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = withAlpha(accentColor, 0.9);
-    ctx.beginPath();
-    ctx.roundRect(TARGET_WIDTH / 2 - 38, y + 18, 76, 4, 999);
+    ctx.roundRect(TARGET_WIDTH / 2 - 30, topY, 60, 4, 999);
     ctx.fill();
     ctx.restore();
 };
@@ -923,96 +907,64 @@ const overlayTextOnImage = async (
             }
             ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
 
+            // 미니멀 타이포그래피: 판·칩·필 없이 악센트 라인 + 텍스트만 (문구 최소화)
             const headline = buildHeadlineLayout(ctx, formatMainCopy(seg.mainCopy), seg.textPosition);
             const subCopy = normalizeOverlayCopy(seg.subCopy);
             const points = (seg.points || []).map(normalizeOverlayCopy).filter(Boolean).slice(0, 3);
-            const subFont = 28;
-            const pointFont = 23;
-            const subHeight = subCopy ? 42 : 0;
-            ctx.font = `800 ${pointFont}px ${DETAIL_FONT_FAMILY}`;
-            const pointLabels = points.map(p => `• ${p}`);
-            const pointGap = 12;
-            const maxPointRowWidth = TARGET_WIDTH - 120;
-            const pointRows = pointLabels.reduce<Array<Array<{ label: string; width: number }>>>((rows, label) => {
-                const item = { label, width: Math.min(ctx.measureText(label).width + 24, maxPointRowWidth) };
-                const current = rows[rows.length - 1];
-                const currentWidth = current?.reduce((sum, rowItem) => sum + rowItem.width, 0) || 0;
-                const nextWidth = current ? currentWidth + pointGap * current.length + item.width : item.width;
-                if (!current || nextWidth > maxPointRowWidth) rows.push([item]);
-                else current.push(item);
-                return rows;
-            }, []).slice(0, 2);
-            const pointHeight = pointRows.length > 0 ? pointRows.length * 44 : 0;
+            const subFont = 25;
+            const pointFont = 20;
+            const subHeight = subCopy ? 38 : 0;
+            const pointLine = points.join('   ·   ');
+            const pointHeight = pointLine ? 34 : 0;
+            const accentHeight = 20;
             const headlineHeight = headline.lines.length * headline.lineHeight;
-            const blockHeight = headlineHeight + subHeight + pointHeight + 20;
+            const blockHeight = accentHeight + headlineHeight + subHeight + pointHeight + 8;
             const centerY = seg.textPosition === 'top'
-                ? Math.max(118, blockHeight / 2 + 44)
+                ? Math.max(110, blockHeight / 2 + 48)
                 : seg.textPosition === 'middle'
                     ? TARGET_HEIGHT / 2
-                    : Math.min(TARGET_HEIGHT - 118, TARGET_HEIGHT - blockHeight / 2 - 54);
-            let y = centerY - blockHeight / 2 + headline.lineHeight / 2;
+                    : Math.min(TARGET_HEIGHT - 110, TARGET_HEIGHT - blockHeight / 2 - 58);
             const textColor = getTextColor(design);
             const accentColor = getAccentColor(design);
 
             drawBackdrop(ctx, seg.textPosition, centerY, blockHeight, textColor);
-            drawTextPlate(ctx, centerY, blockHeight, accentColor, textColor);
+            drawAccentLine(ctx, centerY - blockHeight / 2, accentColor);
 
+            let y = centerY - blockHeight / 2 + accentHeight + headline.lineHeight / 2;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.lineJoin = 'round';
             ctx.miterLimit = 2;
             ctx.shadowColor = getContrastStroke(textColor);
-            ctx.shadowBlur = Math.max(6, headline.fontSize * 0.12);
-            ctx.shadowOffsetY = 2;
-            ctx.font = `900 ${headline.fontSize}px ${DETAIL_FONT_FAMILY}`;
+            ctx.shadowBlur = Math.max(5, headline.fontSize * 0.1);
+            ctx.shadowOffsetY = 1;
+            ctx.font = `800 ${headline.fontSize}px ${DETAIL_FONT_FAMILY}`;
             headline.lines.forEach((line) => {
-                ctx.lineWidth = Math.max(1, headline.fontSize * 0.026);
-                ctx.strokeStyle = getContrastStroke(textColor);
-                ctx.strokeText(line, TARGET_WIDTH / 2, y);
                 ctx.fillStyle = textColor;
                 ctx.fillText(line, TARGET_WIDTH / 2, y);
                 y += headline.lineHeight;
             });
 
             if (subCopy) {
-                y += 8;
-                ctx.font = `700 ${subFont}px ${DETAIL_FONT_FAMILY}`;
-                const subLines = wrapText(ctx, subCopy, TARGET_WIDTH - 180, 1);
-                const subLine = subLines[0] || '';
-                const subWidth = Math.min(TARGET_WIDTH - 150, ctx.measureText(subLine).width + 42);
-                ctx.shadowBlur = 0;
-                ctx.fillStyle = getColorLuminance(textColor) > 0.68 ? 'rgba(15, 23, 42, 0.46)' : 'rgba(255, 255, 255, 0.72)';
-                ctx.beginPath();
-                ctx.roundRect(TARGET_WIDTH / 2 - subWidth / 2, y - 21, subWidth, 42, 21);
-                ctx.fill();
+                y += 4;
+                ctx.font = `500 ${subFont}px ${DETAIL_FONT_FAMILY}`;
+                ctx.shadowBlur = 4;
+                ctx.globalAlpha = 0.9;
                 ctx.fillStyle = textColor;
-                subLines.forEach((line) => {
+                wrapText(ctx, subCopy, TARGET_WIDTH - 180, 1).forEach((line) => {
                     ctx.fillText(line, TARGET_WIDTH / 2, y);
                 });
+                ctx.globalAlpha = 1;
                 y += subHeight;
             }
 
-            if (points.length > 0) {
-                ctx.shadowBlur = 0;
-                ctx.font = `800 ${pointFont}px ${DETAIL_FONT_FAMILY}`;
-                pointRows.forEach((row) => {
-                    const totalWidth = row.reduce((sum, item) => sum + item.width, 0) + pointGap * (row.length - 1);
-                    let x = (TARGET_WIDTH - totalWidth) / 2;
-                    row.forEach((item) => {
-                        ctx.fillStyle = getColorLuminance(textColor) > 0.68 ? 'rgba(15, 23, 42, 0.54)' : 'rgba(255, 255, 255, 0.86)';
-                        ctx.beginPath();
-                        ctx.roundRect(x, y - 18, item.width, 38, 19);
-                        ctx.fill();
-                        ctx.strokeStyle = withAlpha(accentColor, 0.28);
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                        ctx.fillStyle = getColorLuminance(textColor) > 0.68 ? '#ffffff' : accentColor;
-                        wrapText(ctx, item.label, item.width - 18, 1).forEach((line) => {
-                            ctx.fillText(line, x + item.width / 2, y + 1);
-                        });
-                        x += item.width + pointGap;
-                    });
-                    y += 44;
+            if (pointLine) {
+                y += 2;
+                ctx.font = `600 ${pointFont}px ${DETAIL_FONT_FAMILY}`;
+                ctx.shadowBlur = 3;
+                ctx.fillStyle = accentColor;
+                wrapText(ctx, pointLine, TARGET_WIDTH - 150, 1).forEach((line) => {
+                    ctx.fillText(line, TARGET_WIDTH / 2, y);
                 });
             }
 

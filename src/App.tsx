@@ -77,7 +77,7 @@ export default function App() {
                   onClick={() => setActiveTab('sourcing')}
                   className={getTabButtonClass(activeTab === 'sourcing')}
                 >
-                  <TrendingUp className="w-4 h-4 shrink-0" />소싱 파인더
+                  <TrendingUp className="w-4 h-4 shrink-0" />훈프로 소싱AI
                 </button>
                 <button
                   onClick={() => setActiveTab('analyzer')}
