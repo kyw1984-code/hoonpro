@@ -414,15 +414,15 @@ export function SourcingFinder() {
             <KeyRound className="w-4 h-4 text-accent" />
             <span className="text-sm font-semibold text-accent">니치 키워드 발굴 + 쿠팡 실데이터 분석</span>
           </div>
-          <p className="text-[11px] text-ink-3 font-bold hidden md:block">
+          <p className="text-[11px] text-ink-3 font-semibold hidden md:block">
             쿠팡 실시간 수집 데이터 기반
           </p>
           <div className="flex items-center gap-2 ml-auto">
             <button onClick={() => { setShowFavorites(v => !v); setError(null); }}
-              className={`flex items-center gap-1.5 px-4 py-2 rounded-card text-xs font-semibold transition-all ${
-                showFavorites ? 'bg-caution text-white shadow-raised shadow-amber-200' : 'bg-paper-2 text-ink-2 hover:bg-line'
+              className={`flex items-center gap-1.5 rounded-control border px-3 py-1.5 text-[12px] font-medium transition-colors ${
+                showFavorites ? 'border-ink bg-ink text-paper' : 'border-line text-ink-2 hover:border-line-strong hover:text-ink'
               }`}>
-              <Star className={`w-3.5 h-3.5 ${showFavorites ? 'fill-white' : ''}`} />관심 키워드 {favCount > 0 && `(${favCount})`}
+              <Star className={`h-3.5 w-3.5 ${showFavorites ? 'fill-paper' : ''}`} />관심 키워드 {favCount > 0 && `(${favCount})`}
             </button>
             <button onClick={() => { setSelectedProduct(null); setIsCalcOpen(true); }}
               className="flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
@@ -440,10 +440,10 @@ export function SourcingFinder() {
           <div className="flex gap-2 flex-wrap">
             {KW_CATEGORIES.map(cat => (
               <button key={cat} onClick={() => fetchCategoryKeywords(cat)} disabled={loading}
-                className={`px-4 py-2 rounded-card text-xs font-bold transition-all  ${
+                className={`rounded-control border px-3 py-1.5 text-[12px] font-medium transition-colors disabled:opacity-50 ${
                   activeKwCategory === cat
-                    ? 'bg-accent text-white shadow-indigo-200'
-                    : 'bg-paper-2 hover:bg-accent-soft/80 text-ink-2 border border-line'
+                    ? 'border-ink bg-ink text-paper'
+                    : 'border-line text-ink-2 hover:border-line-strong hover:text-ink'
                 }`}>
                 {cat}
               </button>
@@ -461,7 +461,7 @@ export function SourcingFinder() {
               onChange={e => setSeedInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && fetchKeywords(seedInput)}
               placeholder="시드 키워드 입력 (예: 캠핑의자) — 연관 니치 키워드를 발굴합니다"
-              className="w-full pl-12 pr-6 py-4 bg-paper-2 border border-line-strong rounded-card outline-none text-sm font-bold shadow-inner focus:ring-2 ring-accent/20 transition-all text-ink"
+              className="w-full rounded-control border border-line bg-paper-2 py-2.5 pl-11 pr-4 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
             />
           </div>
           <button
@@ -481,14 +481,14 @@ export function SourcingFinder() {
 
         {/* 심층 확장 경로 */}
         {!showFavorites && seedTrail.length > 1 && (
-          <div className="flex items-center gap-1.5 flex-wrap text-xs font-bold text-ink-2">
+          <div className="flex items-center gap-1.5 flex-wrap text-xs font-semibold text-ink-2">
             <Home className="w-3.5 h-3.5 text-ink-3" />
             {seedTrail.map((s, i) => (
               <React.Fragment key={s}>
                 {i > 0 && <ChevronRight className="w-3 h-3 text-ink-3" />}
                 <button onClick={() => fetchKeywords(s, 'trail')}
                   className={`px-2.5 py-1 rounded-control transition-all ${
-                    s === currentSeed ? 'bg-accent text-white' : 'bg-paper-2 hover:bg-accent-soft hover:text-accent'
+                    s === currentSeed ? 'bg-accent text-paper' : 'bg-paper-2 hover:bg-accent-soft hover:text-accent'
                   }`}>
                   {s}
                 </button>
@@ -498,7 +498,7 @@ export function SourcingFinder() {
         )}
 
         {error && (
-          <div className="bg-critical-soft border border-critical/30 rounded-card p-4 text-critical text-sm font-bold whitespace-pre-wrap">{error}</div>
+          <div className="bg-critical-soft border border-critical/30 rounded-card p-4 text-critical text-sm font-semibold whitespace-pre-wrap">{error}</div>
         )}
 
         {/* 시드 키워드 요약 */}
@@ -542,7 +542,7 @@ export function SourcingFinder() {
         {loading ? (
           <div className="bg-paper rounded-panel border border-line p-12 flex flex-col items-center gap-4 text-ink-3">
             <Loader2 className="w-10 h-10 animate-spin text-accent" />
-            <p className="text-sm font-bold">훈프로AI 연관 키워드를 수집 중...</p>
+            <p className="text-sm font-semibold">훈프로AI 연관 키워드를 수집 중...</p>
           </div>
         ) : displayKeywords.length > 0 || (showFavorites && favCount === 0) ? (
           <div className="bg-paper rounded-panel border border-line overflow-hidden">
@@ -555,12 +555,12 @@ export function SourcingFinder() {
                     : <>연관 니치 키워드 <span className="text-accent">{displayKeywords.length}개</span></>}
               </h3>
               {!showFavorites && cached && (
-                <span className="text-[10px] font-bold text-ink-3 flex items-center gap-1"><RefreshCw className="w-3 h-3" />캐시 데이터</span>
+                <span className="text-[10px] font-semibold text-ink-3 flex items-center gap-1"><RefreshCw className="w-3 h-3" />캐시 데이터</span>
               )}
               <div className="flex items-center gap-1.5 ml-auto flex-wrap">
                 {(['all', '낮음', '중간', '높음'] as const).map(c => (
                   <button key={c} onClick={() => setCompFilter(c)}
-                    className={`px-3 py-1.5 rounded-control text-xs font-bold transition-all ${compFilter === c ? 'bg-ink-2 text-white' : 'bg-paper-2 text-ink-2 hover:bg-line'}`}>
+                    className={`px-3 py-1.5 rounded-control text-xs font-semibold transition-all ${compFilter === c ? 'bg-ink-2 text-paper' : 'bg-paper-2 text-ink-2 hover:bg-line'}`}>
                     {c === 'all' ? '경쟁 전체' : `경쟁 ${c}`}
                   </button>
                 ))}
@@ -584,7 +584,7 @@ export function SourcingFinder() {
             {displayKeywords.length === 0 ? (
               <div className="p-12 flex flex-col items-center gap-3 text-ink-3">
                 <Star className="w-10 h-10 opacity-20" />
-                <p className="text-sm font-bold">저장된 관심 키워드가 없습니다. 테이블에서 ★을 눌러 저장하세요.</p>
+                <p className="text-sm font-semibold">저장된 관심 키워드가 없습니다. 테이블에서 ★을 눌러 저장하세요.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -669,7 +669,7 @@ export function SourcingFinder() {
         ) : !seedStat && !error && !activeKeyword && (
           <div className="flex flex-col items-center justify-center py-20 text-ink-3">
             <KeyRound className="w-16 h-16 mb-6 opacity-20" />
-            <h2 className="text-xl font-bold">니치 시장 발굴을 시작하세요</h2>
+            <h2 className="text-xl font-semibold">니치 시장 발굴을 시작하세요</h2>
             <p className="text-sm mt-2 font-medium text-center leading-relaxed">
               시드 키워드를 검색하거나, 위의 쿠팡 대표 카테고리를 눌러 추천 키워드를 받아보세요.<br />
               검색량은 많고 경쟁은 적은 키워드를 찾은 뒤 [쿠팡 분석]으로 실제 리뷰·로켓 비중까지 확인합니다
@@ -682,7 +682,7 @@ export function SourcingFinder() {
           {(activeKeyword || prodLoading || prodError) && (
             <div className="flex flex-col gap-5">
               {prodError && (
-                <div className="bg-critical-soft border border-critical/30 rounded-card p-4 text-critical text-sm font-bold whitespace-pre-wrap">{prodError}</div>
+                <div className="bg-critical-soft border border-critical/30 rounded-card p-4 text-critical text-sm font-semibold whitespace-pre-wrap">{prodError}</div>
               )}
               {prodDebug && !prodLoading && (
                 <div className="bg-paper-2 border border-line rounded-card p-4">
@@ -694,7 +694,7 @@ export function SourcingFinder() {
               {prodLoading ? (
                 <div className="bg-paper rounded-panel border border-line p-12 flex flex-col items-center gap-4 text-ink-3">
                   <Loader2 className="w-10 h-10 animate-spin text-critical" />
-                  <p className="text-sm font-bold">"{activeKeyword}" 쿠팡 검색 결과를 실시간 수집하는 중... (5~20초)</p>
+                  <p className="text-sm font-semibold">"{activeKeyword}" 쿠팡 검색 결과를 실시간 수집하는 중... (5~20초)</p>
                 </div>
               ) : market && (
                 <>
@@ -702,7 +702,7 @@ export function SourcingFinder() {
                   <div className="bg-paper rounded-panel p-6 border border-line">
                     <div className="flex items-center justify-between mb-5 flex-wrap gap-2">
                       <h3 className="text-base font-semibold text-ink">
-                        "{activeKeyword}" <span className="text-ink-3 font-bold">쿠팡 시장 분석</span>
+                        "{activeKeyword}" <span className="text-ink-3 font-semibold">쿠팡 시장 분석</span>
                         <a href={coupangSearchUrl(activeKeyword!)} target="_blank" rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 ml-3 text-[11px] font-semibold text-critical hover:text-critical">
                           쿠팡에서 보기 <ExternalLink className="w-3 h-3" />
@@ -753,8 +753,8 @@ export function SourcingFinder() {
                   <div className="flex items-center gap-3 flex-wrap">
                     <button onClick={() => setGemMode(v => !v)}
                       title="리뷰 30~1000개(수요 검증)이면서 로켓·브랜드가 아닌 상품만 — 진입 가능한 검증 시장"
-                      className={`px-3 py-2 rounded-card text-xs font-semibold border  transition-all ${
-                        gemMode ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-accent shadow-indigo-200' : 'bg-paper text-accent border-accent-line'
+                      className={`rounded-control border px-2.5 py-1.5 text-[12px] font-medium transition-colors ${
+                        gemMode ? 'border-ink bg-ink text-paper' : 'border-line text-ink-2 hover:border-line-strong hover:text-ink'
                       }`}>
                       💎 숨은 보석
                     </button>
@@ -766,7 +766,7 @@ export function SourcingFinder() {
                         { v: 'rocket', label: '로켓' },
                       ] as const).map(f => (
                         <button key={f.v} onClick={() => setRocketFilter(f.v)}
-                          className={`px-3 py-1.5 rounded-control text-xs font-bold ${rocketFilter === f.v ? 'bg-ink-2 text-white' : 'text-ink-2'}`}>
+                          className={`px-3 py-1.5 rounded-control text-xs font-semibold ${rocketFilter === f.v ? 'bg-ink-2 text-paper' : 'text-ink-2'}`}>
                           {f.label}
                         </button>
                       ))}
@@ -774,7 +774,7 @@ export function SourcingFinder() {
                     <div className="flex items-center gap-1.5 bg-paper rounded-card p-1 border border-line">
                       {(['all', 'Great', 'Good', 'Normal', 'Bad'] as const).map(g => (
                         <button key={g} onClick={() => setGradeFilter(g)}
-                          className={`px-3 py-1.5 rounded-control text-xs font-bold ${gradeFilter === g ? 'bg-ink-2 text-white' : 'text-ink-2'}`}>
+                          className={`px-3 py-1.5 rounded-control text-xs font-semibold ${gradeFilter === g ? 'bg-ink-2 text-paper' : 'text-ink-2'}`}>
                           {g === 'all' ? '등급 전체' : g}
                         </button>
                       ))}
@@ -789,8 +789,8 @@ export function SourcingFinder() {
                     </div>
                     <button onClick={() => setExcludeBrands(v => !v)}
                       title="브랜드 상품(나이키·네파 등)을 목록에서 숨기거나 표시"
-                      className={`px-3 py-2 rounded-card text-xs font-bold border  transition-all ${
-                        excludeBrands ? 'bg-ink-2 text-white border-ink' : 'bg-paper text-ink-2 border-line'
+                      className={`px-3 py-2 rounded-card text-xs font-semibold border  transition-all ${
+                        excludeBrands ? 'bg-ink-2 text-paper border-ink' : 'bg-paper text-ink-2 border-line'
                       }`}>
                       브랜드 제외 {excludeBrands ? 'ON' : 'OFF'}
                     </button>
@@ -805,11 +805,11 @@ export function SourcingFinder() {
                       </select>
                     </div>
                     <button onClick={exportProductsCSV}
-                      className="ml-auto flex items-center gap-2 px-4 py-2 bg-positive hover:bg-positive text-white rounded-card text-xs font-semibold transition-all">
+                      className="ml-auto flex items-center gap-2 px-4 py-2 bg-positive hover:bg-positive text-paper rounded-card text-xs font-semibold transition-all">
                       <Download className="w-3.5 h-3.5" />CSV 저장
                     </button>
                     {servedFrom !== 'fresh' && (
-                      <span className="text-[10px] font-bold text-ink-3 flex items-center gap-1">
+                      <span className="text-[10px] font-semibold text-ink-3 flex items-center gap-1">
                         <RefreshCw className="w-3 h-3" />{servedFrom === 'stale' ? '수집 실패로 이전 데이터 표시 중' : '캐시 데이터 (24시간)'}
                       </span>
                     )}
@@ -832,30 +832,30 @@ export function SourcingFinder() {
                                 {product.calculated.grade}
                               </div>
                               {product.deliveryType === 'rocket' && (
-                                <div className="px-2 py-0.5 bg-critical text-white text-[8px] font-semibold rounded uppercase flex items-center gap-1">
+                                <div className="px-2 py-0.5 bg-critical text-paper text-[8px] font-semibold rounded uppercase flex items-center gap-1">
                                   <Rocket className="w-2.5 h-2.5" />로켓
                                 </div>
                               )}
                               {product.deliveryType === 'jet' && (
-                                <div className="px-2 py-0.5 bg-caution text-white text-[8px] font-semibold rounded uppercase flex items-center gap-1">
+                                <div className="px-2 py-0.5 bg-caution text-paper text-[8px] font-semibold rounded uppercase flex items-center gap-1">
                                   <Rocket className="w-2.5 h-2.5" />판매자로켓
                                 </div>
                               )}
                               {product.deliveryType === 'general' && (
-                                <div className="px-2 py-0.5 bg-positive text-white text-[8px] font-semibold rounded uppercase flex items-center gap-1">
+                                <div className="px-2 py-0.5 bg-positive text-paper text-[8px] font-semibold rounded uppercase flex items-center gap-1">
                                   <Store className="w-2.5 h-2.5" />일반배송
                                 </div>
                               )}
                               {product.isBrand && (
-                                <div className="px-2 py-0.5 bg-ink-2 text-white text-[8px] font-semibold rounded uppercase">브랜드</div>
+                                <div className="px-2 py-0.5 bg-ink-2 text-paper text-[8px] font-semibold rounded uppercase">브랜드</div>
                               )}
                             </div>
-                            <div className="absolute top-3 left-3 px-2 py-1 bg-ink/70 text-white text-[10px] font-semibold rounded-control backdrop-blur-sm">
+                            <div className="absolute top-3 left-3 px-2 py-1 bg-ink/70 text-paper text-[10px] font-semibold rounded-control backdrop-blur-sm">
                               노출 {product.rank}위
                             </div>
                           </a>
                           <div className="p-5 flex-1 flex flex-col">
-                            <h3 className="font-bold text-[14px] text-ink line-clamp-2 mb-2 h-10 leading-snug">{product.productName}</h3>
+                            <h3 className="font-semibold text-[14px] text-ink line-clamp-2 mb-2 h-10 leading-snug">{product.productName}</h3>
                             <div className="flex items-center gap-1.5 mb-3 flex-wrap">
                               {product.reviewCount > 0 ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-control bg-positive-soft text-positive text-[10px] font-semibold ring-1 ring-positive/20">
@@ -863,7 +863,7 @@ export function SourcingFinder() {
                                   {product.rating.toFixed(1)} · 리뷰 {product.reviewCount.toLocaleString()}
                                 </span>
                               ) : (
-                                <span className="px-2 py-0.5 rounded-control bg-paper-2 text-ink-3 text-[10px] font-bold ring-1 ring-line">리뷰 없음</span>
+                                <span className="px-2 py-0.5 rounded-control bg-paper-2 text-ink-3 text-[10px] font-semibold ring-1 ring-line">리뷰 없음</span>
                               )}
                               {product.reviewGrowthPerDay !== null && product.reviewGrowthPerDay > 0 && (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-control bg-accent-soft text-accent text-[10px] font-semibold ring-1 ring-accent/20"
@@ -877,7 +877,7 @@ export function SourcingFinder() {
                                 title="수요검증(리뷰)·진입용이성(배송유형)·가격적합도 종합 (0~100)">
                                 기회지수 {product.calculated.opportunityScore}
                               </span>
-                              <span className={`px-2 py-0.5 rounded-control text-[10px] font-bold ring-1 ${
+                              <span className={`px-2 py-0.5 rounded-control text-[10px] font-semibold ring-1 ${
                                 product.deliveryType === 'rocket' ? 'bg-critical-soft text-critical ring-critical/20' : 'bg-positive-soft text-positive ring-positive/20'
                               }`}>
                                 {product.deliveryType === 'rocket' ? '로켓 직접경쟁' : '셀러 진입 가능'}
@@ -886,7 +886,7 @@ export function SourcingFinder() {
                             <div className="flex flex-col gap-1.5 mb-4">
                               <span className="text-lg font-semibold text-accent">{product.productPrice.toLocaleString()}원</span>
                               <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-ink-3 font-bold">예상 1688원가:</span>
+                                <span className="text-[10px] text-ink-3 font-semibold">예상 1688원가:</span>
                                 <input type="number" value={product.estimated1688Price || ''}
                                   onChange={e => {
                                     const newPrice = Number(e.target.value);
@@ -895,7 +895,7 @@ export function SourcingFinder() {
                                     saved[product.productId] = newPrice;
                                     localStorage.setItem('1688prices', JSON.stringify(saved));
                                   }}
-                                  className="w-16 px-2 py-0.5 text-[11px] font-bold text-caution bg-caution-soft border border-caution/30 rounded-control outline-none focus:ring-1 ring-caution"
+                                  className="w-16 px-2 py-0.5 text-[11px] font-semibold text-caution bg-caution-soft border border-caution/30 rounded-control outline-none focus:ring-1 ring-caution"
                                   placeholder="0"
                                 />
                                 <span className="text-[10px] text-caution font-semibold">¥</span>
@@ -920,11 +920,11 @@ export function SourcingFinder() {
                               <div className="flex gap-2">
                                 <button onClick={() => handle1688Click(product)}
                                   title="상품 이미지로 1688 소싱처 검색"
-                                  className="flex-1 py-3 bg-accent-soft rounded-card text-[11px] font-bold text-accent flex items-center justify-center gap-2 hover:bg-accent-soft transition-colors">
+                                  className="flex-1 py-3 bg-accent-soft rounded-card text-[11px] font-semibold text-accent flex items-center justify-center gap-2 hover:bg-accent-soft transition-colors">
                                   1688 소싱처
                                 </button>
                                 <button onClick={() => openCalcForProduct(product)}
-                                  className="flex-1 py-3 bg-ink text-white rounded-card text-[11px] font-bold flex items-center justify-center gap-2 hover:bg-ink-2 transition-colors">
+                                  className="flex-1 py-3 bg-ink text-paper rounded-card text-[11px] font-semibold flex items-center justify-center gap-2 hover:bg-ink-2 transition-colors">
                                   <Calculator className="w-3 h-3" />마진 분석
                                 </button>
                               </div>
@@ -936,7 +936,7 @@ export function SourcingFinder() {
                   ) : (
                     <div className="flex flex-col items-center justify-center py-16 text-ink-3">
                       <Search className="w-12 h-12 mb-4 opacity-20" />
-                      <p className="text-sm font-bold">필터 조건에 맞는 상품이 없습니다</p>
+                      <p className="text-sm font-semibold">필터 조건에 맞는 상품이 없습니다</p>
                     </div>
                   )}
                 </>
@@ -955,7 +955,7 @@ export function SourcingFinder() {
               <motion.div initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
                 className="fixed top-0 right-0 h-full w-full sm:w-[420px] bg-paper z-[60] shadow-overlay flex flex-col">
                 <div className="p-6 sm:p-8 border-b border-line flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-ink flex items-center gap-2">
+                  <h2 className="text-xl font-semibold text-ink flex items-center gap-2">
                     <Calculator className="w-5 h-5 text-accent" />소싱 마진 계산기
                   </h2>
                   <button onClick={() => setIsCalcOpen(false)}>
@@ -969,8 +969,8 @@ export function SourcingFinder() {
                         <img src={selectedProduct.productImage} className="w-16 h-16 rounded-card object-cover border" alt="" />
                       )}
                       <div>
-                        <h3 className="font-bold text-sm line-clamp-2 leading-tight text-ink">{selectedProduct.productName}</h3>
-                        <p className="text-xs font-bold text-ink-2 mt-1">
+                        <h3 className="font-semibold text-sm line-clamp-2 leading-tight text-ink">{selectedProduct.productName}</h3>
+                        <p className="text-xs font-semibold text-ink-2 mt-1">
                           쿠팡가 {selectedProduct.productPrice.toLocaleString()}원 · 리뷰 {selectedProduct.reviewCount.toLocaleString()}개
                         </p>
                       </div>
@@ -978,55 +978,55 @@ export function SourcingFinder() {
                   )}
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="text-[10px] font-bold text-ink-2 mb-2 block uppercase text-center">판매가 (원)</label>
+                      <label className="text-[10px] font-semibold text-ink-2 mb-2 block uppercase text-center">판매가 (원)</label>
                       <input type="number" value={salePrice} onChange={e => setSalePrice(e.target.value)}
-                        className="text-center w-full px-4 py-4 bg-accent-soft border border-accent-line rounded-card text-sm font-bold outline-none focus:ring-2 ring-accent" />
+                        className="text-center w-full px-4 py-4 bg-accent-soft border border-accent-line rounded-card text-sm font-semibold outline-none focus:ring-2 ring-accent" />
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-ink-2 mb-2 block uppercase text-center">1688 매입가 (위안)</label>
+                      <label className="text-[10px] font-semibold text-ink-2 mb-2 block uppercase text-center">1688 매입가 (위안)</label>
                       <input type="number" value={yuanPrice} onChange={e => setYuanPrice(e.target.value)} placeholder="예: 25.5"
-                        className="text-center w-full px-4 py-4 bg-caution-soft border border-caution/30 rounded-card text-sm font-bold outline-none focus:ring-2 ring-caution" />
+                        className="text-center w-full px-4 py-4 bg-caution-soft border border-caution/30 rounded-card text-sm font-semibold outline-none focus:ring-2 ring-caution" />
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-ink-2 mb-2 block uppercase text-center">소싱 배수(환율/관세)</label>
+                      <label className="text-[10px] font-semibold text-ink-2 mb-2 block uppercase text-center">소싱 배수(환율/관세)</label>
                       <input type="number" value={sourcingMultiplier} onChange={e => handleMultiplierChange(Number(e.target.value))}
-                        className="text-center w-full px-4 py-4 bg-paper-2 border border-line rounded-card text-sm font-bold outline-none" />
+                        className="text-center w-full px-4 py-4 bg-paper-2 border border-line rounded-card text-sm font-semibold outline-none" />
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-ink-2 mb-2 block uppercase text-center">국내 배송비 (원)</label>
+                      <label className="text-[10px] font-semibold text-ink-2 mb-2 block uppercase text-center">국내 배송비 (원)</label>
                       <input type="number" value={shippingFee} onChange={e => setShippingFee(e.target.value)}
-                        className="text-center w-full px-4 py-4 bg-paper-2 border border-line rounded-card text-sm font-bold outline-none" />
+                        className="text-center w-full px-4 py-4 bg-paper-2 border border-line rounded-card text-sm font-semibold outline-none" />
                     </div>
                   </div>
                   <div className="space-y-2">
                     <div className="bg-paper-2 rounded-card p-4 flex items-center justify-between border border-line">
-                      <span className="text-xs font-bold text-ink-2">예상 원가 (위안 × 배수)</span>
+                      <span className="text-xs font-semibold text-ink-2">예상 원가 (위안 × 배수)</span>
                       <span className="text-sm font-semibold text-accent">{cost.toLocaleString()}원</span>
                     </div>
                     <div className="bg-paper-2 rounded-card p-4 flex items-center justify-between border border-line">
-                      <span className="text-xs font-bold text-ink-2">판매 수수료 (12%)</span>
+                      <span className="text-xs font-semibold text-ink-2">판매 수수료 (12%)</span>
                       <span className="text-sm font-semibold text-ink-2">{fee.toLocaleString()}원</span>
                     </div>
                   </div>
                   <div className={`p-8 rounded-panel border-2 ${margin > 20 ? 'bg-positive-soft border-positive/20' : 'bg-paper-2 border-line'}`}>
                     <div className="flex justify-between items-center mb-6">
-                      <span className="text-sm font-bold text-ink-2">예상 마진율</span>
-                      <span className={`text-3xl font-semibold ${margin > 0 ? 'text-positive' : 'text-critical'}`}>{margin.toFixed(1)}%</span>
+                      <span className="text-sm font-semibold text-ink-2">예상 마진율</span>
+                      <span className={`text-[26px] font-semibold ${margin > 0 ? 'text-positive' : 'text-critical'}`}>{margin.toFixed(1)}%</span>
                     </div>
                     <div className="pt-6 flex justify-between items-center border-t border-dashed border-line">
-                      <span className="font-bold text-lg text-ink">개당 수익</span>
-                      <span className={`text-2xl font-semibold ${profit > 0 ? 'text-positive' : 'text-critical'}`}>
+                      <span className="font-semibold text-lg text-ink">개당 수익</span>
+                      <span className={`text-[20px] font-semibold ${profit > 0 ? 'text-positive' : 'text-critical'}`}>
                         {profit.toLocaleString()}원
                       </span>
                     </div>
                   </div>
                   <button onClick={() => handle1688Click(selectedProduct || 'generic')}
-                    className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-card text-sm font-semibold flex items-center justify-center gap-2 transition-all shadow-raised">
+                    className="w-full py-4 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-paper rounded-card text-sm font-semibold flex items-center justify-center gap-2 transition-all shadow-raised">
                     <DollarSign className="w-4 h-4" />1688 소싱처 찾기 (중달이)
                   </button>
                 </div>
                 <div className="p-6 sm:p-8 bg-paper-2 border-t border-line">
-                  <button onClick={() => setIsCalcOpen(false)} className="w-full py-5 bg-ink text-white font-semibold rounded-card">닫기</button>
+                  <button onClick={() => setIsCalcOpen(false)} className="w-full py-5 bg-ink text-paper font-semibold rounded-card">닫기</button>
                 </div>
               </motion.div>
             </>
@@ -1041,7 +1041,7 @@ export function SourcingFinder() {
                 onClick={() => setPopupProduct(null)}
                 className="fixed inset-0 z-[80] bg-ink/50 backdrop-blur-sm" />
               <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-                className="fixed inset-0 m-auto z-[90] w-[92%] max-w-[480px] h-fit bg-paper rounded-panel shadow-[0_24px_80px_-12px_rgba(0,0,0,0.3)] border border-line overflow-hidden flex flex-col">
+                className="fixed inset-0 m-auto z-[90] w-[92%] max-w-[480px] h-fit bg-paper rounded-panel border border-line shadow-overlay overflow-hidden flex flex-col">
                 <div className="px-7 pt-7 pb-2 flex items-start justify-between gap-4">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-widest text-accent">Hoonpro Special</p>
@@ -1053,13 +1053,13 @@ export function SourcingFinder() {
                 </div>
                 <div className="px-7 pb-6 pt-2 flex flex-col gap-5">
                   <div className="bg-accent-soft border border-accent-line rounded-card px-5 py-4">
-                    <p className="text-[13px] font-bold text-ink leading-relaxed">
+                    <p className="text-[13px] font-semibold text-ink leading-relaxed">
                       회원가입 후{' '}
-                      <span className="inline-block px-2 py-0.5 bg-accent text-white font-semibold rounded-control text-xs tracking-wide">hoonpro05</span>{' '}
+                      <span className="inline-block px-2 py-0.5 bg-accent text-paper font-semibold rounded-control text-xs tracking-wide">hoonpro05</span>{' '}
                       추천인 코드를 입력하면 아래 추가 혜택이 제공됩니다.
                     </p>
                   </div>
-                  <ul className="flex flex-col gap-2 text-[13px] font-bold text-ink">
+                  <ul className="flex flex-col gap-2 text-[13px] font-semibold text-ink">
                     <li className="flex items-start gap-2"><span className="text-accent font-semibold">①</span>LCL 중달이 사업자 통관 시 통관수수료 면제 <span className="text-ink-3">(3만 원 상당)</span></li>
                     <li className="flex items-start gap-2"><span className="text-accent font-semibold">②</span>OEM 공장조사 1회 무료 제공 <span className="text-ink-3">(5만 원 상당)</span></li>
                   </ul>
@@ -1071,7 +1071,7 @@ export function SourcingFinder() {
                   }} className="flex-1 py-3 bg-paper-2 hover:bg-line text-ink rounded-card text-xs font-semibold transition-all">오늘 그만보기</button>
                   <button onClick={() => {
                     const p = popupProduct; setPopupProduct(null); if (p) proceed1688(p);
-                  }} className="flex-1 py-3 bg-accent hover:bg-accent-hover text-white rounded-card text-xs font-semibold transition-all">이동하기</button>
+                  }} className="flex-1 py-3 bg-accent hover:bg-accent-hover text-paper rounded-card text-xs font-semibold transition-all">이동하기</button>
                 </div>
               </motion.div>
             </>

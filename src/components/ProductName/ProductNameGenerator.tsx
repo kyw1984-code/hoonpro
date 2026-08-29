@@ -45,14 +45,14 @@ export const ProductNameGenerator: React.FC = () => {
         {/* 헤더 */}
         <div className="flex items-center gap-3 mb-2">
           <div className="w-10 h-10 bg-orange-500 rounded-card flex items-center justify-center">
-            <Tag className="w-5 h-5 text-white" />
+            <Tag className="w-5 h-5 text-paper" />
           </div>
-          <h2 className="text-2xl font-bold text-ink">쿠팡 상품명 제조기</h2>
+          <h2 className="text-[20px] font-semibold text-ink">쿠팡 상품명 제조기</h2>
         </div>
         <p className="text-ink-2 mb-8">입력값이 수정되면 상품명이 <span className="font-semibold text-ink">실시간으로 자동 변경</span>됩니다.</p>
 
         {/* 입력 섹션 */}
-        <h3 className="text-lg font-bold text-ink mb-4">1. 상품 정보 입력</h3>
+        <h3 className="text-lg font-semibold text-ink mb-4">1. 상품 정보 입력</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* 왼쪽 */}
           <div className="space-y-4">
@@ -87,7 +87,7 @@ export const ProductNameGenerator: React.FC = () => {
                     onClick={() => toggleSeason(s)}
                     className={`px-3 py-1.5 rounded-control text-sm font-medium transition-all border ${
                       season.includes(s)
-                        ? 'bg-orange-500 text-white border-orange-500'
+                        ? 'bg-orange-500 text-paper border-orange-500'
                         : 'bg-paper text-ink-2 border-line-strong hover:border-orange-400'
                     }`}
                   >
@@ -145,7 +145,7 @@ export const ProductNameGenerator: React.FC = () => {
 
         {/* 결과 섹션 */}
         <div className="mt-8 border-t border-line pt-8">
-          <h3 className="text-lg font-bold text-ink mb-4">2. 생성된 상품명 확인</h3>
+          <h3 className="text-lg font-semibold text-ink mb-4">2. 생성된 상품명 확인</h3>
 
           {mainKeyword ? (
             <div className="space-y-4">
@@ -170,18 +170,18 @@ export const ProductNameGenerator: React.FC = () => {
 
               {/* 진단 */}
               <div className="border-t border-line pt-4">
-                <h4 className="text-base font-bold text-ink mb-3">🔍 훈프로의 상품명 진단</h4>
+                <h4 className="text-base font-semibold text-ink mb-3">🔍 훈프로의 상품명 진단</h4>
                 <div className="space-y-2">
                   {/* 길이 체크 */}
                   {textLen > 50 ? (
                     <div className="flex items-start gap-2 bg-caution-soft border border-caution/30 rounded-card p-3">
                       <AlertTriangle className="w-5 h-5 text-caution mt-0.5 shrink-0" />
-                      <p className="text-sm text-caution"><span className="font-bold">길이 주의 ({textLen}자):</span> 50자를 넘으면 모바일 목록에서 뒷부분이 잘릴 수 있습니다.</p>
+                      <p className="text-sm text-caution"><span className="font-semibold">길이 주의 ({textLen}자):</span> 50자를 넘으면 모바일 목록에서 뒷부분이 잘릴 수 있습니다.</p>
                     </div>
                   ) : (
                     <div className="flex items-start gap-2 bg-positive-soft border border-positive/30 rounded-card p-3">
                       <CheckCircle className="w-5 h-5 text-positive mt-0.5 shrink-0" />
-                      <p className="text-sm text-positive"><span className="font-bold">길이 적합 ({textLen}자):</span> 모바일 가독성이 좋은 길이입니다.</p>
+                      <p className="text-sm text-positive"><span className="font-semibold">길이 적합 ({textLen}자):</span> 모바일 가독성이 좋은 길이입니다.</p>
                     </div>
                   )}
 
@@ -189,12 +189,12 @@ export const ProductNameGenerator: React.FC = () => {
                   {duplicates.length > 0 ? (
                     <div className="flex items-start gap-2 bg-critical-soft border border-critical/30 rounded-card p-3">
                       <XCircle className="w-5 h-5 text-critical mt-0.5 shrink-0" />
-                      <p className="text-sm text-critical"><span className="font-bold">중복 단어 발견:</span> '{duplicates.join(', ')}' 단어가 중복되었습니다. 쿠팡 어뷰징 방지를 위해 하나를 삭제해주세요.</p>
+                      <p className="text-sm text-critical"><span className="font-semibold">중복 단어 발견:</span> '{duplicates.join(', ')}' 단어가 중복되었습니다. 쿠팡 어뷰징 방지를 위해 하나를 삭제해주세요.</p>
                     </div>
                   ) : (
                     <div className="flex items-start gap-2 bg-positive-soft border border-positive/30 rounded-card p-3">
                       <CheckCircle className="w-5 h-5 text-positive mt-0.5 shrink-0" />
-                      <p className="text-sm text-positive"><span className="font-bold">중복 없음:</span> 깔끔한 키워드 조합입니다.</p>
+                      <p className="text-sm text-positive"><span className="font-semibold">중복 없음:</span> 깔끔한 키워드 조합입니다.</p>
                     </div>
                   )}
                 </div>

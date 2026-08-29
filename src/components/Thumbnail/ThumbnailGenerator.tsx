@@ -186,11 +186,11 @@ export const ThumbnailGenerator: React.FC = () => {
         <div className="max-w-7xl mx-auto px-6 py-8">
             <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-accent-line bg-accent-soft px-3 py-1 text-xs font-bold text-accent">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-accent-line bg-accent-soft px-3 py-1 text-xs font-semibold text-accent">
                         <Sparkles className="h-3.5 w-3.5" />
                         THUMBNAIL STUDIO
                     </div>
-                    <h2 className="mt-3 text-3xl font-semibold tracking-tight text-ink">썸네일 제작</h2>
+                    <h2 className="mt-3 text-[26px] font-semibold tracking-tight text-ink">썸네일 제작</h2>
                     <p className="mt-2 text-sm text-ink-2">제품 사진을 기반으로 커머스용 정사각 썸네일을 생성합니다.</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
@@ -200,7 +200,7 @@ export const ThumbnailGenerator: React.FC = () => {
                         ['레퍼런스', `${referenceImages.length}장`],
                     ].map(([label, value]) => (
                         <div key={label} className="rounded-card border border-line bg-paper px-4 py-3">
-                            <p className="font-bold text-ink-3">{label}</p>
+                            <p className="font-semibold text-ink-3">{label}</p>
                             <p className="mt-1 font-semibold text-ink">{value}</p>
                         </div>
                     ))}
@@ -212,7 +212,7 @@ export const ThumbnailGenerator: React.FC = () => {
                 <div className="rounded-card border border-line bg-paper">
                     <div className="border-b border-line px-6 py-5">
                         <div className="flex items-center gap-2">
-                            <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-white">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-paper">
                                 <Palette className="h-4.5 w-4.5" />
                             </div>
                             <div>
@@ -229,7 +229,7 @@ export const ThumbnailGenerator: React.FC = () => {
                             type="text" 
                             value={productName} 
                             onChange={e => setProductName(e.target.value)} 
-                            className="w-full p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none" 
+                            className="w-full p-3 border border-line-strong rounded-card focus:border-accent outline-none" 
                             placeholder="상품명을 입력해주세요" 
                         />
                     </div>
@@ -239,14 +239,14 @@ export const ThumbnailGenerator: React.FC = () => {
                         <div className="grid grid-cols-2 gap-3 mb-5">
                             <button
                                 onClick={() => setShotType('product')}
-                                className={`flex items-center justify-center gap-2 p-3 rounded-card border font-bold transition-all ${shotType === 'product' ? 'border-ink bg-ink text-white ' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
+                                className={`flex items-center justify-center gap-2 p-3 rounded-card border font-semibold transition-all ${shotType === 'product' ? 'border-ink bg-ink text-paper ' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
                             >
                                 <Box className="h-4 w-4" />
                                 제품컷 (Product)
                             </button>
                             <button
                                 onClick={() => setShotType('model')}
-                                className={`flex items-center justify-center gap-2 p-3 rounded-card border font-bold transition-all ${shotType === 'model' ? 'border-ink bg-ink text-white ' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
+                                className={`flex items-center justify-center gap-2 p-3 rounded-card border font-semibold transition-all ${shotType === 'model' ? 'border-ink bg-ink text-paper ' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
                             >
                                 <UserRound className="h-4 w-4" />
                                 모델컷 (Model)
@@ -257,34 +257,34 @@ export const ThumbnailGenerator: React.FC = () => {
                     {shotType === 'model' && (
                         <div className="space-y-4 mb-5 p-4 bg-paper-2 rounded-card border border-line">
                             <div>
-                                <label className="block text-xs font-bold text-ink-2 uppercase mb-2">모델 인종</label>
+                                <label className="block text-xs font-semibold text-ink-2 uppercase mb-2">모델 인종</label>
                                 <div className="grid grid-cols-2 gap-2">
                                     <button
                                         onClick={() => setModelEthnicity('asian')}
-                                        className={`p-2 rounded-control border text-sm font-bold transition-all ${modelEthnicity === 'asian' ? 'bg-paper border-ink text-ink ' : 'bg-transparent border-line text-ink-2 hover:bg-paper'}`}
+                                        className={`p-2 rounded-control border text-sm font-semibold transition-all ${modelEthnicity === 'asian' ? 'bg-paper border-ink text-ink ' : 'bg-transparent border-line text-ink-2 hover:bg-paper'}`}
                                     >
                                         동양인
                                     </button>
                                     <button
                                         onClick={() => setModelEthnicity('western')}
-                                        className={`p-2 rounded-control border text-sm font-bold transition-all ${modelEthnicity === 'western' ? 'bg-paper border-ink text-ink ' : 'bg-transparent border-line text-ink-2 hover:bg-paper'}`}
+                                        className={`p-2 rounded-control border text-sm font-semibold transition-all ${modelEthnicity === 'western' ? 'bg-paper border-ink text-ink ' : 'bg-transparent border-line text-ink-2 hover:bg-paper'}`}
                                     >
                                         서양인
                                     </button>
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-xs font-bold text-ink-2 uppercase mb-2">모델 성별</label>
+                                <label className="block text-xs font-semibold text-ink-2 uppercase mb-2">모델 성별</label>
                                 <div className="grid grid-cols-2 gap-2">
                                     <button
                                         onClick={() => setModelGender('female')}
-                                        className={`p-2 rounded-control border text-sm font-bold transition-all ${modelGender === 'female' ? 'bg-paper border-ink text-ink ' : 'bg-transparent border-line text-ink-2 hover:bg-paper'}`}
+                                        className={`p-2 rounded-control border text-sm font-semibold transition-all ${modelGender === 'female' ? 'bg-paper border-ink text-ink ' : 'bg-transparent border-line text-ink-2 hover:bg-paper'}`}
                                     >
                                         여성
                                     </button>
                                     <button
                                         onClick={() => setModelGender('male')}
-                                        className={`p-2 rounded-control border text-sm font-bold transition-all ${modelGender === 'male' ? 'bg-paper border-ink text-ink ' : 'bg-transparent border-line text-ink-2 hover:bg-paper'}`}
+                                        className={`p-2 rounded-control border text-sm font-semibold transition-all ${modelGender === 'male' ? 'bg-paper border-ink text-ink ' : 'bg-transparent border-line text-ink-2 hover:bg-paper'}`}
                                     >
                                         남성
                                     </button>
@@ -298,14 +298,14 @@ export const ThumbnailGenerator: React.FC = () => {
                         <div className="grid grid-cols-2 gap-3 mb-5">
                             <button
                                 onClick={() => setBackgroundType('white')}
-                                className={`flex items-center justify-center gap-2 p-3 rounded-card border font-bold transition-all ${backgroundType === 'white' ? 'border-ink bg-ink text-white ' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
+                                className={`flex items-center justify-center gap-2 p-3 rounded-card border font-semibold transition-all ${backgroundType === 'white' ? 'border-ink bg-ink text-paper ' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
                             >
                                 <ImageIcon className="h-4 w-4" />
                                 화이트 배경
                             </button>
                             <button
                                 onClick={() => setBackgroundType('natural')}
-                                className={`flex items-center justify-center gap-2 p-3 rounded-card border font-bold transition-all ${backgroundType === 'natural' ? 'border-ink bg-ink text-white ' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
+                                className={`flex items-center justify-center gap-2 p-3 rounded-card border font-semibold transition-all ${backgroundType === 'natural' ? 'border-ink bg-ink text-paper ' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
                             >
                                 <Layers3 className="h-4 w-4" />
                                 자연스러운 배경
@@ -319,7 +319,7 @@ export const ThumbnailGenerator: React.FC = () => {
                             type="text" 
                             value={overlayText} 
                             onChange={e => setOverlayText(e.target.value)} 
-                            className="w-full p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none mb-3" 
+                            className="w-full p-3 border border-line-strong rounded-card focus:border-accent outline-none mb-3" 
                             placeholder="이미지 위에 표시할 문구를 입력하세요" 
                         />
                         <div className="grid grid-cols-3 gap-2">
@@ -327,7 +327,7 @@ export const ThumbnailGenerator: React.FC = () => {
                                 <button
                                     key={pos}
                                     onClick={() => setTextPosition(pos)}
-                                    className={`py-2 px-3 rounded-control border text-sm font-bold transition-all ${textPosition === pos ? 'border-ink bg-ink text-white' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
+                                    className={`py-2 px-3 rounded-control border text-sm font-semibold transition-all ${textPosition === pos ? 'border-ink bg-ink text-paper' : 'border-line text-ink-2 hover:border-line-strong hover:bg-paper-2'}`}
                                 >
                                     {pos === 'top' ? '상단' : pos === 'middle' ? '중간' : '하단'}
                                 </button>
@@ -341,7 +341,7 @@ export const ThumbnailGenerator: React.FC = () => {
                             value={customPrompt} 
                             onChange={e => setCustomPrompt(e.target.value)} 
                             rows={2}
-                            className="w-full p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none resize-none" 
+                            className="w-full p-3 border border-line-strong rounded-card focus:border-accent outline-none resize-none" 
                             placeholder="예: 상의만 두 사진을 한 장에 넣어줘, 배경은 바다로 해줘 등" 
                         />
                     </div>
@@ -351,7 +351,7 @@ export const ThumbnailGenerator: React.FC = () => {
                         <div className="flex flex-col gap-3">
                             <div 
                                 onClick={() => fileInputRef.current?.click()}
-                                className="border-2 border-dashed border-line-strong rounded-card bg-paper-2/70 p-6 text-center cursor-pointer transition-colors hover:border-ink hover:bg-paper"
+                                className="border border-dashed border-line-strong rounded-card bg-paper-2/70 p-6 text-center cursor-pointer transition-colors hover:border-ink hover:bg-paper"
                             >
                                 <div className="flex flex-col items-center text-ink-2">
                                     <Upload className="w-6 h-6 mb-2 text-ink-3" />
@@ -367,7 +367,7 @@ export const ThumbnailGenerator: React.FC = () => {
                                             <img src={img} alt={`Ref ${idx}`} className="w-full h-full object-cover" />
                                             <button 
                                                 onClick={() => removeImage(idx)}
-                                                className="absolute top-1 right-1 bg-black/50 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                                                className="absolute top-1 right-1 bg-black/50 text-paper p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
                                             >
                                                 <X className="w-4 h-4" />
                                             </button>
@@ -381,7 +381,7 @@ export const ThumbnailGenerator: React.FC = () => {
                     <button 
                         onClick={handleGenerate} 
                         disabled={loading}
-                        className="w-full bg-ink hover:bg-ink-2 disabled:bg-line-strong text-white font-semibold py-3.5 px-8 rounded-card flex items-center justify-center transition-colors mt-4"
+                        className="w-full bg-ink hover:bg-ink-2 disabled:bg-line-strong text-paper font-semibold py-3.5 px-8 rounded-card flex items-center justify-center transition-colors mt-4"
                     >
                         {loading ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Wand2 className="w-5 h-5 mr-2" />}
                         썸네일 생성하기
@@ -400,7 +400,7 @@ export const ThumbnailGenerator: React.FC = () => {
                         <a 
                             href={resultImage}
                             download="thumbnail.png"
-                            className="bg-ink hover:bg-ink-2 text-white font-bold py-2.5 px-4 rounded-card flex items-center transition-colors"
+                            className="bg-ink hover:bg-ink-2 text-paper font-semibold py-2.5 px-4 rounded-card flex items-center transition-colors"
                         >
                             <Download className="w-4 h-4 mr-2" />
                             다운로드

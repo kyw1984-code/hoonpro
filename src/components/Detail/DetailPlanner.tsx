@@ -1147,12 +1147,12 @@ const STATUS_LABEL: Record<ImageStatus, string> = {
 };
 
 const STATUS_CLASS: Record<ImageStatus, string> = {
-    idle: 'bg-paper-2 text-ink-2',
-    queued: 'bg-sky-50 text-sky-600',
-    generating: 'bg-accent-soft text-accent',
-    done: 'bg-positive-soft text-positive',
-    failed: 'bg-critical-soft text-critical',
-    retrying: 'bg-caution-soft text-caution',
+    idle: 'border-line bg-paper-2 text-ink-3',
+    queued: 'border-line bg-paper-2 text-ink-2',
+    generating: 'border-accent/35 bg-accent-soft text-accent',
+    done: 'border-positive/35 bg-positive-soft text-positive',
+    failed: 'border-critical/35 bg-critical-soft text-critical',
+    retrying: 'border-caution/35 bg-caution-soft text-caution',
 };
 
 const getImageGenerationPriority = (img: GenImage): number => {
@@ -1806,57 +1806,60 @@ export const DetailPlanner: React.FC = () => {
 
     // ────────────────────────────── 렌더 ──────────────────────────────
     return (
-        <div className="max-w-7xl mx-auto px-6 py-8">
-            <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="mx-auto max-w-[1240px] px-6 py-8">
+            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-accent-line bg-accent-soft px-3 py-1 text-xs font-bold text-accent">
-                        <Sparkles className="h-3.5 w-3.5" />
-                        DETAIL PAGE STUDIO
-                    </div>
-                    <h2 className="mt-3 text-3xl font-semibold tracking-tight text-ink">상세페이지 제작</h2>
-                    <p className="mt-2 text-sm text-ink-2">전환 흐름 기획부터 이미지 생성, 카피 합성까지 한 번에 제작합니다.</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-3">상세페이지 제작</p>
+                    <h2 className="mt-1.5 text-[26px] font-semibold tracking-tight text-ink">전환 흐름부터 이미지까지</h2>
+                    <p className="mt-1.5 text-[13px] text-ink-2">기획, 이미지 생성, 카피 합성을 한 번에 진행합니다.</p>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="flex flex-wrap gap-2">
                     {[
                         ['구성', getCombinationLabel(info.combinationType)],
                         ['길이', length === 'auto' ? 'Auto' : `${length}장`],
-                        ['텍스트', TEXT_RENDER_MODE_LABEL[textRenderMode]],
                     ].map(([label, value]) => (
-                        <div key={label} className="rounded-card border border-line bg-paper px-4 py-3">
-                            <p className="font-bold text-ink-3">{label}</p>
-                            <p className="mt-1 font-semibold text-ink">{value}</p>
+                        <div key={label} className="rounded-control border border-line bg-paper px-3 py-2">
+                            <span className="text-[11px] text-ink-3">{label}</span>
+                            <span className="ml-2 text-[13px] font-semibold text-ink">{value}</span>
                         </div>
                     ))}
                 </div>
             </div>
 
-            {/* Stepper */}
-            <div className="mb-8 grid grid-cols-1 gap-3 rounded-card border border-line bg-paper p-3 md:grid-cols-3">
-                {[1, 2, 3].map((s) => (
-                    <div
-                        key={s}
-                        onClick={() => { if (s < step) setStep(s as 1 | 2 | 3); }}
-                        className={`flex items-center gap-3 rounded-card px-4 py-3 transition-all ${
-                            step >= s ? 'bg-ink text-white ' : 'bg-paper-2 text-ink-2'
-                        } ${s < step ? 'cursor-pointer hover:bg-ink-2' : 'cursor-default'}`}
-                    >
-                        <div
-                            className={`flex h-9 w-9 items-center justify-center rounded-control font-semibold ${
-                                step >= s ? 'bg-paper text-ink' : 'bg-paper text-ink-3'
-                            }`}
+            {/* 단계 표시 — 완료한 단계로만 되돌아갈 수 있다 */}
+            <div className="mb-7 flex items-stretch overflow-hidden rounded-card border border-line bg-paper">
+                {[1, 2, 3].map((s, i) => {
+                    const active = step === s;
+                    const done = step > s;
+                    return (
+                        <button
+                            key={s}
+                            type="button"
+                            disabled={!done}
+                            onClick={() => { if (done) setStep(s as 1 | 2 | 3); }}
+                            aria-current={active ? 'step' : undefined}
+                            className={`flex flex-1 items-center gap-2.5 px-4 py-3 text-left transition-colors ${
+                                i > 0 ? 'border-l border-line' : ''
+                            } ${done ? 'cursor-pointer hover:bg-paper-2' : 'cursor-default'} ${active ? 'bg-paper-2' : ''}`}
                         >
-                            {s}
-                        </div>
-                        <div>
-                            <p className="text-sm font-semibold">
-                                {s === 1 ? '정보 입력' : s === 2 ? '기획안 확인' : '이미지 생성'}
-                            </p>
-                            <p className={`mt-0.5 text-xs ${step >= s ? 'text-ink-3' : 'text-ink-3'}`}>
-                                {s === 1 ? '상품·사진' : s === 2 ? '전략·카피' : '생성·다운로드'}
-                            </p>
-                        </div>
-                    </div>
-                ))}
+                            <span
+                                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+                                    active ? 'bg-ink text-paper' : done ? 'bg-positive-soft text-positive' : 'bg-line text-ink-3'
+                                }`}
+                            >
+                                {done ? '✓' : s}
+                            </span>
+                            <span className="min-w-0">
+                                <span className={`block truncate text-[13px] ${active || done ? 'font-semibold text-ink' : 'font-medium text-ink-3'}`}>
+                                    {s === 1 ? '정보 입력' : s === 2 ? '기획안 확인' : '이미지 생성'}
+                                </span>
+                                <span className="mt-0.5 hidden truncate text-[11px] text-ink-3 sm:block">
+                                    {s === 1 ? '상품·사진' : s === 2 ? '전략·카피' : '생성·다운로드'}
+                                </span>
+                            </span>
+                        </button>
+                    );
+                })}
             </div>
 
             {/* ───── STEP 1: 정보 입력 ───── */}
@@ -1865,7 +1868,7 @@ export const DetailPlanner: React.FC = () => {
                     <div className="rounded-card border border-line bg-paper">
                         <div className="border-b border-line px-6 py-5">
                             <div className="flex items-center gap-2">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-white">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-paper">
                                     <FileText className="h-4.5 w-4.5" />
                                 </div>
                                 <div>
@@ -1945,7 +1948,7 @@ export const DetailPlanner: React.FC = () => {
                                             key={opt.value}
                                             type="button"
                                             onClick={() => setProductVisualLock({ ...visualLockSummary, genderLock: opt.value, inferredGenderReason: opt.value === 'none' ? '사용자가 자동 판정으로 설정했습니다.' : `사용자가 ${opt.label} 모델 기준으로 설정했습니다.` })}
-                                            className={`rounded-control border px-3 py-2 text-xs font-semibold transition-colors ${visualLockSummary.genderLock === opt.value ? 'border-ink bg-ink text-white' : 'border-line bg-paper text-ink-2 hover:border-line-strong'}`}
+                                            className={`rounded-control border px-3 py-2 text-xs font-semibold transition-colors ${visualLockSummary.genderLock === opt.value ? 'border-ink bg-ink text-paper' : 'border-line bg-paper text-ink-2 hover:border-line-strong'}`}
                                         >
                                             {opt.label}
                                         </button>
@@ -1968,7 +1971,7 @@ export const DetailPlanner: React.FC = () => {
                                     const selected = info.combinationType === opt.value;
                                     return (
                                         <button key={opt.value} type="button" onClick={() => setInfo({ ...info, combinationType: opt.value })}
-                                            className={`h-10 rounded-control text-xs font-bold transition-all sm:text-sm ${selected ? 'bg-ink text-white ' : 'text-ink-2 hover:bg-paper hover:text-ink'}`}>
+                                            className={`h-10 rounded-control text-xs font-semibold transition-all sm:text-sm ${selected ? 'bg-ink text-paper ' : 'text-ink-2 hover:bg-paper hover:text-ink'}`}>
                                             {opt.label}
                                         </button>
                                     );
@@ -1978,7 +1981,7 @@ export const DetailPlanner: React.FC = () => {
                             <label className="mb-2 mt-5 block text-sm font-medium text-ink">상세페이지 길이</label>
                             <div className="grid grid-cols-4 gap-1.5 rounded-card bg-paper-2 p-1.5">
                                 {LENGTH_OPTIONS.map(opt => (
-                                    <button key={String(opt.val)} type="button" onClick={() => setLength(opt.val)} className={`h-10 rounded-control text-sm font-bold transition-all ${length === opt.val ? 'bg-ink text-white ' : 'text-ink-2 hover:bg-paper hover:text-ink'}`}>
+                                    <button key={String(opt.val)} type="button" onClick={() => setLength(opt.val)} className={`h-10 rounded-control text-sm font-semibold transition-all ${length === opt.val ? 'bg-ink text-paper ' : 'text-ink-2 hover:bg-paper hover:text-ink'}`}>
                                         {opt.label}
                                     </button>
                                 ))}
@@ -1992,7 +1995,7 @@ export const DetailPlanner: React.FC = () => {
                                 <h3 className="font-semibold text-ink">레퍼런스 이미지</h3>
                             </div>
                             <div onClick={() => fileInputRef.current?.click()} onDrop={onDrop} onDragOver={e => e.preventDefault()}
-                                className="border-2 border-dashed border-line-strong rounded-card bg-paper-2/70 p-8 text-center cursor-pointer transition-colors hover:border-ink hover:bg-paper">
+                                className="cursor-pointer rounded-card border border-dashed border-line-strong bg-paper-2 p-8 text-center transition-colors hover:border-ink hover:bg-paper">
                                 <Upload className="w-8 h-8 mx-auto text-ink-3 mb-2" />
                                 <p className="font-medium text-ink">클릭 또는 드래그하여 제품 사진 업로드</p>
                                 <p className="text-xs text-ink-3 mt-1">여러 각도(앞/뒤/옆) 사진을 넣으면 더 정확합니다</p>
@@ -2005,16 +2008,16 @@ export const DetailPlanner: React.FC = () => {
                                         <div key={idx} className="relative w-20 h-20">
                                             <img src={img} alt="" className="w-full h-full object-cover rounded-control border border-line" />
                                             {referenceProfiles[idx] && (
-                                                <span className="absolute bottom-1 left-1 rounded-full bg-positive px-1.5 py-0.5 text-[9px] font-semibold text-white">QA</span>
+                                                <span className="absolute bottom-1 left-1 rounded-full bg-positive px-1.5 py-0.5 text-[9px] font-semibold text-paper">QA</span>
                                             )}
-                                            <button onClick={() => removeImage(idx)} className="absolute -top-2 -right-2 bg-critical text-white rounded-full p-0.5">
+                                            <button onClick={() => removeImage(idx)} className="absolute -top-2 -right-2 bg-critical text-paper rounded-full p-0.5">
                                                 <X className="w-3.5 h-3.5" />
                                             </button>
                                         </div>
                                     ))}
                                 </div>
                                 {referenceAnalyzing && (
-                                    <div className="flex items-center gap-2 rounded-card border border-accent-line bg-accent-soft px-3 py-2 text-xs font-bold text-accent">
+                                    <div className="flex items-center gap-2 rounded-card border border-accent-line bg-accent-soft px-3 py-2 text-xs font-semibold text-accent">
                                         <Loader2 className="h-3.5 w-3.5 animate-spin" /> 레퍼런스 제품 보존 요소 분석 중...
                                     </div>
                                 )}
@@ -2032,7 +2035,7 @@ export const DetailPlanner: React.FC = () => {
 
                         <div className="rounded-card border border-line bg-paper p-4">
                         <button onClick={handleGeneratePlan} disabled={loading || referenceImages.length < 1}
-                            className="w-full bg-ink hover:bg-ink-2 disabled:bg-line-strong text-white font-semibold py-3.5 px-8 rounded-card flex items-center justify-center transition-colors">
+                            className="flex w-full items-center justify-center rounded-control bg-ink px-8 py-3 text-[14px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
                             {loading ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> {referenceAnalyzing ? '레퍼런스 분석 중...' : '기획안 생성 중...'}</> : <><Wand2 className="w-5 h-5 mr-2" /> 기획안 생성</>}
                         </button>
                         </div>
@@ -2047,18 +2050,18 @@ export const DetailPlanner: React.FC = () => {
                     <div className="rounded-card border border-line bg-paper p-6">
                         <div className="mb-5 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-white">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-paper">
                                     <Palette className="h-4.5 w-4.5" />
                                 </div>
                                 <div>
-                                    <h2 className="text-xl font-semibold text-ink">상품·전환 전략 분석</h2>
+                                    <h2 className="text-[17px] font-semibold tracking-tight text-ink">상품·전환 전략 분석</h2>
                                     <p className="text-xs text-ink-2">AI가 도출한 구매 설득 구조입니다.</p>
                                 </div>
                             </div>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                             <div className="rounded-card border border-line bg-paper-2 p-4">
-                                <p className="font-bold text-ink mb-1">제품 정의</p>
+                                <p className="font-semibold text-ink mb-1">제품 정의</p>
                                 <p className="text-ink-2 leading-relaxed">{plan.productDefinition}</p>
                                 {plan.productReason && (
                                     <p className="mt-2 text-ink-2"><span className="text-ink-3">왜 존재하는가:</span> {plan.productReason}</p>
@@ -2068,7 +2071,7 @@ export const DetailPlanner: React.FC = () => {
                                 )}
                             </div>
                             <div className="rounded-card border border-line bg-paper-2 p-4">
-                                <p className="font-bold text-ink mb-1">고객 분석</p>
+                                <p className="font-semibold text-ink mb-1">고객 분석</p>
                                 <p className="text-ink-2"><span className="text-ink-3">타겟:</span> {plan.customer?.target}</p>
                                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                                     {([
@@ -2076,7 +2079,7 @@ export const DetailPlanner: React.FC = () => {
                                         ['성별', plan.customer?.gender],
                                         ['직업', plan.customer?.job],
                                     ] as const).filter(([, v]) => !!v).map(([k, v]) => (
-                                        <span key={k} className="rounded-control bg-paper px-2 py-0.5 text-[11px] font-bold text-ink-2 ring-1 ring-line">
+                                        <span key={k} className="rounded-control bg-paper px-2 py-0.5 text-[11px] font-semibold text-ink-2 ring-1 ring-line">
                                             {k} {v}
                                         </span>
                                     ))}
@@ -2088,16 +2091,16 @@ export const DetailPlanner: React.FC = () => {
                                     <p className="text-ink-2"><span className="text-ink-3">구매 상황:</span> {plan.customer.purchaseSituation}</p>
                                 )}
                                 <p className="mt-1.5 text-ink-2"><span className="text-ink-3">표면 니즈:</span> {plan.customer?.surfaceNeed}</p>
-                                <p className="text-ink-2"><span className="text-accent font-bold">실제 니즈:</span> {plan.customer?.realNeed}</p>
+                                <p className="text-ink-2"><span className="text-accent font-semibold">실제 니즈:</span> {plan.customer?.realNeed}</p>
                             </div>
                             <div className="rounded-card border border-line bg-paper-2 p-4">
-                                <p className="font-bold text-ink mb-1">경쟁 대비 차별점</p>
+                                <p className="font-semibold text-ink mb-1">경쟁 대비 차별점</p>
                                 <ul className="list-disc list-inside text-ink-2 space-y-0.5">
                                     {plan.differentiators?.map((d, i) => <li key={i}>{d}</li>)}
                                 </ul>
                             </div>
                             <div className="rounded-card border border-line bg-paper-2 p-4">
-                                <p className="font-bold text-ink mb-1">구매 저항 요소 (해소 대상)</p>
+                                <p className="font-semibold text-ink mb-1">구매 저항 요소 (해소 대상)</p>
                                 <ul className="list-disc list-inside text-ink-2 space-y-0.5">
                                     {plan.purchaseResistances?.map((d, i) => <li key={i}>{d}</li>)}
                                 </ul>
@@ -2116,7 +2119,7 @@ export const DetailPlanner: React.FC = () => {
                                     <tbody>
                                         {plan.competitorComparison.map((row, i) => (
                                             <tr key={i} className="border-t border-line">
-                                                <td className="px-4 py-2 font-bold text-ink">{row.item}</td>
+                                                <td className="px-4 py-2 font-semibold text-ink">{row.item}</td>
                                                 <td className="px-4 py-2 text-ink-2">{row.competitor}</td>
                                                 <td className="px-4 py-2 font-medium text-accent">{row.ours}</td>
                                             </tr>
@@ -2133,19 +2136,19 @@ export const DetailPlanner: React.FC = () => {
                                 </div>
                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                                     <div>
-                                        <p className="text-xs font-bold text-accent">핵심특징</p>
+                                        <p className="text-xs font-semibold text-accent">핵심특징</p>
                                         <p className="mt-1 text-ink">{productBrief.coreFeatures.join(' · ')}</p>
                                     </div>
                                     <div>
-                                        <p className="text-xs font-bold text-accent">제품정체성</p>
+                                        <p className="text-xs font-semibold text-accent">제품정체성</p>
                                         <p className="mt-1 text-ink">{productBrief.productIdentity}</p>
                                     </div>
                                     <div>
-                                        <p className="text-xs font-bold text-accent">보존요소</p>
+                                        <p className="text-xs font-semibold text-accent">보존요소</p>
                                         <p className="mt-1 text-ink">{productBrief.visualMustKeep.join(' · ')}</p>
                                     </div>
                                     <div>
-                                        <p className="text-xs font-bold text-accent">Hook 방향</p>
+                                        <p className="text-xs font-semibold text-accent">Hook 방향</p>
                                         <p className="mt-1 text-ink">{productBrief.heroDirection}</p>
                                     </div>
                                 </div>
@@ -2163,7 +2166,7 @@ export const DetailPlanner: React.FC = () => {
                                             key={value}
                                             type="button"
                                             onClick={() => setProductVisualLock({ ...visualLockSummary, genderLock: value, inferredGenderReason: value === 'none' ? '사용자가 자동 판정으로 설정했습니다.' : `사용자가 ${getGenderLabel(value)} 모델 기준으로 설정했습니다.` })}
-                                            className={`rounded-control px-3 py-1.5 text-xs font-semibold ${visualLockSummary.genderLock === value ? 'bg-ink text-white' : 'bg-paper-2 text-ink-2 hover:bg-line'}`}
+                                            className={`rounded-control px-3 py-1.5 text-xs font-semibold ${visualLockSummary.genderLock === value ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-line'}`}
                                         >
                                             {getGenderLabel(value)}
                                         </button>
@@ -2172,16 +2175,16 @@ export const DetailPlanner: React.FC = () => {
                             </div>
                             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                                 <div className="rounded-control bg-paper-2 p-3">
-                                    <p className="text-xs font-bold text-ink-2">Hook 성별</p>
+                                    <p className="text-xs font-semibold text-ink-2">Hook 성별</p>
                                     <p className="mt-1 font-semibold text-ink">{getGenderLabel(visualLockSummary.genderLock)}</p>
                                     <p className="mt-1 text-xs text-ink-2">{visualLockSummary.inferredGenderReason}</p>
                                 </div>
                                 <div className="rounded-control bg-paper-2 p-3">
-                                    <p className="text-xs font-bold text-ink-2">색상/표면</p>
+                                    <p className="text-xs font-semibold text-ink-2">색상/표면</p>
                                     <p className="mt-1 font-semibold text-ink">{visualLockSummary.colorLock} · {visualLockSummary.surfaceLock}</p>
                                 </div>
                                 <div className="rounded-control bg-paper-2 p-3">
-                                    <p className="text-xs font-bold text-ink-2">보존 요소</p>
+                                    <p className="text-xs font-semibold text-ink-2">보존 요소</p>
                                     <p className="mt-1 text-ink">{visualLockSummary.mustPreserve.slice(0, 3).join(' · ')}</p>
                                 </div>
                             </div>
@@ -2189,7 +2192,7 @@ export const DetailPlanner: React.FC = () => {
                         {plan.designSystem && (
                             <div className="mt-4 rounded-card border border-line bg-paper-2 p-4">
                                 <div className="flex items-center gap-3 flex-wrap">
-                                    <span className="text-sm font-bold text-ink">디자인 톤: {plan.designSystem.tone}</span>
+                                    <span className="text-sm font-semibold text-ink">디자인 톤: {plan.designSystem.tone}</span>
                                     {plan.designSystem.colors && Object.entries(plan.designSystem.colors).map(([k, v]) => (
                                         <span key={k} className="flex items-center gap-1.5 text-xs text-ink-2">
                                             <span className="w-5 h-5 rounded border border-line" style={{ background: v as string }} />{k}
@@ -2205,7 +2208,7 @@ export const DetailPlanner: React.FC = () => {
                                             ['CTA', plan.designSystem.fonts.cta],
                                         ] as const).map(([k, v]) => (
                                             <span key={k} className="rounded-control bg-paper px-2 py-1 text-[11px] text-ink-2 ring-1 ring-line">
-                                                <span className="font-bold text-ink-3">{k}</span> {v}
+                                                <span className="font-semibold text-ink-3">{k}</span> {v}
                                             </span>
                                         ))}
                                     </div>
@@ -2214,7 +2217,7 @@ export const DetailPlanner: React.FC = () => {
                         )}
                         {plan.isFallback && (
                             <div className="mt-4 rounded-card border border-caution/30 bg-caution-soft p-4 text-sm text-caution">
-                                <div className="flex items-center gap-2 font-bold">
+                                <div className="flex items-center gap-2 font-semibold">
                                     <AlertTriangle className="h-4 w-4" />
                                     기본 기획안으로 자동 복구했습니다
                                 </div>
@@ -2229,7 +2232,7 @@ export const DetailPlanner: React.FC = () => {
                     <div className="rounded-card border border-line bg-paper p-6">
                         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div>
-                                <h2 className="text-xl font-semibold text-ink">이미지별 기획안 <span className="text-ink-3">({images.length}장)</span></h2>
+                                <h2 className="text-[17px] font-semibold tracking-tight text-ink">이미지별 기획안 <span className="font-medium text-ink-3">({images.length}장)</span></h2>
                                 <p className="mt-1 text-sm text-ink-2">
                                     카피는 생성된 배경 이미지 위에 선명하게 합성됩니다.
                                 </p>
@@ -2240,22 +2243,22 @@ export const DetailPlanner: React.FC = () => {
                                     onClick={() => setUseHybridReferences(prev => !prev)}
                                     className={`rounded-card px-4 py-3 text-sm font-semibold transition-colors ${
                                         useHybridReferences
-                                            ? 'bg-accent text-white hover:bg-accent-hover'
+                                            ? 'bg-accent text-paper hover:bg-accent-hover'
                                             : 'bg-paper-2 text-ink-2 hover:bg-line'
                                     }`}
                                 >
                                     {useHybridReferences ? '기준컷 사용 중' : '빠른 생성 모드'}
                                 </button>
-                                <button onClick={() => handleTidyCopy()} className="bg-accent-soft hover:bg-accent-soft text-accent font-semibold py-3 px-5 rounded-card flex items-center justify-center">
+                                <button onClick={() => handleTidyCopy()} className="flex items-center justify-center rounded-control border border-line px-5 py-2.5 text-[13px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
                                     <Sparkles className="w-5 h-5 mr-2" /> 카피 정리
                                 </button>
-                                <button onClick={handleGenerateAll} className="bg-ink hover:bg-ink-2 text-white font-semibold py-3 px-5 rounded-card flex items-center justify-center">
+                                <button onClick={handleGenerateAll} className="flex items-center justify-center rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90">
                                     <Wand2 className="w-5 h-5 mr-2" /> 이미지 생성 시작
                                 </button>
                             </div>
                         </div>
                         <div className={`mb-5 rounded-card border p-4 text-sm ${qualityWarningCount > 0 ? 'border-caution/30 bg-caution-soft text-caution' : 'border-positive/30 bg-positive-soft text-positive'}`}>
-                            <div className="flex items-center gap-2 font-bold">
+                            <div className="flex items-center gap-2 font-semibold">
                                 {qualityWarningCount > 0 ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
                                 {qualityWarningCount > 0 ? `기획 QA 경고 ${qualityWarningCount}건` : '기획 QA 통과'}
                             </div>
@@ -2267,8 +2270,8 @@ export const DetailPlanner: React.FC = () => {
                             {images.map((img) => (
                                 <div key={img.id} className="rounded-card border border-line p-4 transition-colors hover:border-line-strong hover:bg-paper-2/50">
                                     <div className="flex items-center gap-2 mb-3 flex-wrap">
-                                        <span className="bg-ink text-white text-xs font-bold rounded-full w-7 h-7 flex items-center justify-center shrink-0">{img.number}</span>
-                                        <span className="font-bold text-ink">{img.role}</span>
+                                        <span className="bg-ink text-paper text-xs font-semibold rounded-full w-7 h-7 flex items-center justify-center shrink-0">{img.number}</span>
+                                        <span className="font-semibold text-ink">{img.role}</span>
                                         {img.layoutPreset && <span className="text-xs bg-accent-soft text-accent px-2 py-0.5 rounded-full">{img.layoutPreset}</span>}
                                         {img.shotType && <span className="text-xs bg-positive-soft text-positive px-2 py-0.5 rounded-full">{SHOT_TYPE_LABEL[img.shotType]}</span>}
                                         {img.stage && <span className="text-xs bg-paper-2 text-ink-2 px-2 py-0.5 rounded-full">{img.stage}</span>}
@@ -2289,7 +2292,7 @@ export const DetailPlanner: React.FC = () => {
                                                     <option value="middle">중앙</option>
                                                     <option value="bottom">하단</option>
                                                 </select>
-                                                <button onClick={() => handleTidyCopy(img.id)} className="ml-2 rounded-control bg-accent-soft px-2 py-1 text-xs font-bold text-accent hover:bg-accent-soft">
+                                                <button onClick={() => handleTidyCopy(img.id)} className="ml-2 rounded-control bg-accent-soft px-2 py-1 text-xs font-semibold text-accent hover:bg-accent-soft">
                                                     정리
                                                 </button>
                                             </div>
@@ -2323,8 +2326,8 @@ export const DetailPlanner: React.FC = () => {
                     </div>
 
                     <div className="flex justify-between">
-                        <button onClick={() => setStep(1)} className="text-ink-2 hover:text-ink font-medium py-3 px-6">← 정보 수정</button>
-                        <button onClick={handleGenerateAll} className="bg-ink hover:bg-ink-2 text-white font-semibold py-3 px-8 rounded-card flex items-center">
+                        <button onClick={() => setStep(1)} className="rounded-control px-5 py-2.5 text-[13px] font-medium text-ink-2 transition-colors hover:text-ink">← 정보 수정</button>
+                        <button onClick={handleGenerateAll} className="flex items-center rounded-control bg-ink px-6 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90">
                             <Wand2 className="w-5 h-5 mr-2" /> 이미지 생성 시작 ({images.length}장)
                         </button>
                     </div>
@@ -2336,7 +2339,7 @@ export const DetailPlanner: React.FC = () => {
                 <div className="space-y-6">
                     <div className="bg-paper rounded-card border border-line p-6 flex flex-wrap items-center justify-between gap-3">
                         <div>
-                            <h2 className="text-xl font-semibold text-ink">이미지 생성</h2>
+                            <h2 className="text-[17px] font-semibold tracking-tight text-ink">이미지 생성</h2>
                             <p className="text-sm text-ink-2 mt-1">
                                 {masterGenerating
                                     ? '제품 보존용 마스터 기준컷을 먼저 생성 중입니다...'
@@ -2346,14 +2349,14 @@ export const DetailPlanner: React.FC = () => {
                             </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                            <button onClick={() => setStep(2)} className="text-ink-2 hover:text-ink font-medium py-2.5 px-5 rounded-card border border-line">← 기획안</button>
-                            <button onClick={handleRetryFailed} disabled={failedCount === 0 || generatingCount > 0} className="text-caution hover:text-caution disabled:text-ink-3 font-bold py-2.5 px-5 rounded-card border border-caution/30 disabled:border-line flex items-center gap-1">
+                            <button onClick={() => setStep(2)} className="rounded-control border border-line px-5 py-2.5 text-[13px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">← 기획안</button>
+                            <button onClick={handleRetryFailed} disabled={failedCount === 0 || generatingCount > 0} className="flex items-center gap-1 rounded-control border border-caution/35 px-5 py-2.5 text-[13px] font-medium text-caution transition-colors disabled:border-line disabled:text-ink-3">
                                 <RefreshCw className="w-4 h-4" /> 실패분 재시도 ({failedCount})
                             </button>
-                            <button onClick={handleRetryVisionWarnings} disabled={visionWarningCount === 0 || generatingCount > 0} className="text-accent hover:text-accent-hover disabled:text-ink-3 font-bold py-2.5 px-5 rounded-card border border-accent-line disabled:border-line flex items-center gap-1">
+                            <button onClick={handleRetryVisionWarnings} disabled={visionWarningCount === 0 || generatingCount > 0} className="flex items-center gap-1 rounded-control border border-accent/35 px-5 py-2.5 text-[13px] font-medium text-accent transition-colors disabled:border-line disabled:text-ink-3">
                                 <RefreshCw className="w-4 h-4" /> QA 경고 재생성 ({visionWarningCount})
                             </button>
-                            <button onClick={handleDownloadAll} disabled={generatedCount === 0} className="bg-ink hover:bg-ink-2 disabled:bg-line-strong text-white font-semibold py-2.5 px-5 rounded-card flex items-center">
+                            <button onClick={handleDownloadAll} disabled={generatedCount === 0} className="flex items-center rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
                                 <Download className="w-5 h-5 mr-2" /> 전체 다운로드
                             </button>
                         </div>
@@ -2376,7 +2379,7 @@ export const DetailPlanner: React.FC = () => {
                                 { label: '제품 디테일 기준컷', url: masterReferences.productDetail },
                             ].map(item => (
                                 <div key={item.label} className="overflow-hidden rounded-card border border-accent-line bg-paper">
-                                    <div className="flex aspect-[860/1000] items-center justify-center bg-paper-2 text-xs font-bold text-ink-3">
+                                    <div className="flex aspect-[860/1000] items-center justify-center bg-paper-2 text-xs font-semibold text-ink-3">
                                         {item.url ? <img src={item.url} alt={item.label} className="h-full w-full object-cover" /> : item.label}
                                     </div>
                                     <div className="px-3 py-2 text-xs font-semibold text-ink">{item.label}</div>
@@ -2403,7 +2406,7 @@ export const DetailPlanner: React.FC = () => {
                                     onClick={() => setImageFilter(filter.value)}
                                     className={`rounded-card px-3 py-2 text-xs font-semibold transition-colors ${
                                         imageFilter === filter.value
-                                            ? 'bg-ink text-white'
+                                            ? 'bg-ink text-paper'
                                             : 'bg-paper-2 text-ink-2 hover:bg-line'
                                     }`}
                                 >
@@ -2430,8 +2433,8 @@ export const DetailPlanner: React.FC = () => {
                                             <button onClick={() => generateOne(seg, seg.status === 'failed')} className="text-xs text-accent flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> 다시 생성</button>
                                         </div>
                                     )}
-                                    <span className="absolute top-2 left-2 bg-black/70 text-white text-xs font-bold rounded-full px-2 py-0.5 backdrop-blur">{seg.number}. {seg.role}</span>
-                                    <span className={`absolute top-2 right-2 rounded-full px-2 py-0.5 text-xs font-bold ${STATUS_CLASS[seg.status]}`}>{STATUS_LABEL[seg.status]}</span>
+                                    <span className="absolute left-2 top-2 rounded-control bg-ink/80 px-2 py-0.5 text-[11px] font-medium text-paper backdrop-blur">{seg.number}. {seg.role}</span>
+                                    <span className={`absolute right-2 top-2 rounded-control border px-2 py-0.5 text-[11px] font-semibold backdrop-blur ${STATUS_CLASS[seg.status]}`}>{STATUS_LABEL[seg.status]}</span>
                                 </div>
                                 {seg.imageUrl && (
                                     <div className="p-3 space-y-2">
@@ -2447,14 +2450,14 @@ export const DetailPlanner: React.FC = () => {
                                                     <button
                                                         onClick={() => applyTextPatch(seg, { subCopy: seg.subCopy })}
                                                         disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
-                                                        className="rounded-full bg-accent-soft px-2 py-1 text-[10px] font-bold text-accent hover:bg-accent-soft disabled:opacity-40"
+                                                        className="rounded-full bg-accent-soft px-2 py-1 text-[10px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40"
                                                     >
                                                         적용
                                                     </button>
                                                     <button
                                                         onClick={() => applyTextPatch(seg, { subCopy: '' })}
                                                         disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || !seg.subCopy}
-                                                        className="rounded-full bg-critical-soft px-2 py-1 text-[10px] font-bold text-critical hover:bg-critical-soft disabled:opacity-40"
+                                                        className="rounded-full bg-critical-soft px-2 py-1 text-[10px] font-semibold text-critical hover:bg-critical-soft disabled:opacity-40"
                                                     >
                                                         서브 제거
                                                     </button>
@@ -2468,16 +2471,16 @@ export const DetailPlanner: React.FC = () => {
                                             />
                                         </div>
                                         <div>
-                                            <p className="mb-1 text-[11px] font-bold text-ink-2">텍스트 위치</p>
+                                            <p className="mb-1 text-[11px] font-semibold text-ink-2">텍스트 위치</p>
                                             <div className="grid grid-cols-3 gap-1.5">
                                                 {(['top', 'middle', 'bottom'] as const).map(position => (
                                                     <button
                                                         key={position}
                                                         onClick={() => changeTextPosition(seg, position)}
                                                         disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
-                                                        className={`rounded-control border px-2 py-1.5 text-xs font-bold transition-colors ${
+                                                        className={`rounded-control border px-2 py-1.5 text-xs font-semibold transition-colors ${
                                                             seg.textPosition === position
-                                                                ? 'border-ink bg-ink text-white'
+                                                                ? 'border-ink bg-ink text-paper'
                                                                 : 'border-line bg-paper text-ink-2 hover:border-line-strong'
                                                         }`}
                                                     >
@@ -2513,7 +2516,7 @@ export const DetailPlanner: React.FC = () => {
                                                 <p className="mb-1 text-[11px] font-semibold text-ink-2">QA 체크</p>
                                                 <div className="flex flex-wrap gap-1">
                                                 {seg.qaTags.slice(0, 5).map(tag => (
-                                                    <span key={tag} className="rounded-full bg-paper-2 px-2 py-0.5 text-[10px] font-bold text-ink-2">{tag}</span>
+                                                    <span key={tag} className="rounded-full bg-paper-2 px-2 py-0.5 text-[10px] font-semibold text-ink-2">{tag}</span>
                                                 ))}
                                                 </div>
                                             </div>
@@ -2526,7 +2529,7 @@ export const DetailPlanner: React.FC = () => {
                                                         key={preset.label}
                                                         onClick={() => regenerateWithPreset(seg, preset.hint)}
                                                         disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
-                                                        className="rounded-full bg-paper-2 px-2 py-1 text-[10px] font-bold text-ink-2 hover:bg-line disabled:opacity-50"
+                                                        className="rounded-full bg-paper-2 px-2 py-1 text-[10px] font-semibold text-ink-2 hover:bg-line disabled:opacity-50"
                                                     >
                                                         {preset.label}
                                                     </button>
@@ -2548,7 +2551,7 @@ export const DetailPlanner: React.FC = () => {
                     <div className="rounded-card border border-line bg-paper p-6">
                         <div className="mb-5 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-white">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-paper">
                                     <Eye className="h-4.5 w-4.5" />
                                 </div>
                                 <div>
@@ -2556,7 +2559,7 @@ export const DetailPlanner: React.FC = () => {
                                     <p className="text-xs text-ink-2">완성 이미지를 실제 상세페이지 순서대로 이어서 확인합니다.</p>
                                 </div>
                             </div>
-                            <span className="rounded-full bg-paper-2 px-3 py-1 text-xs font-bold text-ink-2">
+                            <span className="rounded-full bg-paper-2 px-3 py-1 text-xs font-semibold text-ink-2">
                                 {generatedCount}/{images.length} 완료
                             </span>
                         </div>
@@ -2567,7 +2570,7 @@ export const DetailPlanner: React.FC = () => {
                                 ) : (
                                     <div key={seg.id} className="flex aspect-[860/1000] w-full flex-col items-center justify-center border-b border-line bg-paper-2 text-ink-3">
                                         <ImageIcon className="mb-2 h-8 w-8" />
-                                        <p className="text-xs font-bold">{seg.number}. {seg.role}</p>
+                                        <p className="text-xs font-semibold">{seg.number}. {seg.role}</p>
                                         <p className="mt-1 text-[11px]">{STATUS_LABEL[seg.status]}</p>
                                     </div>
                                 )

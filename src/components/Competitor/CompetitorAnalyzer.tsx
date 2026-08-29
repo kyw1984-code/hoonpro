@@ -182,7 +182,7 @@ ${myInfo}
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-ink">🔍 경쟁사 분석기</h2>
+        <h2 className="text-[20px] font-semibold text-ink">🔍 경쟁사 분석기</h2>
         <p className="text-ink-2 mt-1">경쟁사 상품명만 입력하면 AI가 시장 데이터를 추정하고 전략을 분석해드려요.</p>
       </div>
 
@@ -190,12 +190,12 @@ ${myInfo}
       <div className="bg-paper rounded-card border border-line p-8 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-bold text-ink">1. 경쟁사 상품명 입력</h3>
+            <h3 className="text-lg font-semibold text-ink">1. 경쟁사 상품명 입력</h3>
             <p className="text-sm text-ink-3 mt-0.5">쿠팡에서 경쟁사 상품명을 복사해서 붙여넣으세요.</p>
           </div>
           <button
             onClick={estimateAll}
-            className="flex items-center gap-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium px-4 py-2 rounded-control transition-colors"
+            className="flex items-center gap-2 bg-accent hover:bg-accent-hover text-paper text-sm font-medium px-4 py-2 rounded-control transition-colors"
           >
             <Sparkles className="w-4 h-4" />
             전체 AI 추정
@@ -207,7 +207,7 @@ ${myInfo}
             <div key={c.id} className="space-y-2">
               <div className="flex gap-2">
                 <div className="flex items-center gap-2 flex-1 border border-line-strong rounded-card px-3 focus-within:ring-2 focus-within:ring-accent">
-                  <span className="text-xs font-bold text-accent shrink-0">{i + 1}</span>
+                  <span className="text-xs font-semibold text-accent shrink-0">{i + 1}</span>
                   <input
                     type="text"
                     value={c.productName}
@@ -245,19 +245,19 @@ ${myInfo}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
                     <div className="bg-paper rounded-control p-2 text-center border border-line">
                       <p className="text-xs text-ink-3">추정 판매가</p>
-                      <p className="font-bold text-ink text-sm">{c.price.toLocaleString()}원</p>
+                      <p className="font-semibold text-ink text-sm">{c.price.toLocaleString()}원</p>
                     </div>
                     <div className="bg-paper rounded-control p-2 text-center border border-line">
                       <p className="text-xs text-ink-3">추정 리뷰/평점</p>
-                      <p className="font-bold text-ink text-sm">{c.reviewCount.toLocaleString()}개 / {c.rating}점</p>
+                      <p className="font-semibold text-ink text-sm">{c.reviewCount.toLocaleString()}개 / {c.rating}점</p>
                     </div>
                     <div className="bg-accent-soft rounded-control p-2 text-center border border-accent-line">
                       <p className="text-xs text-accent">추정 판매수량</p>
-                      <p className="font-bold text-accent text-sm">{c.estimatedSales.toLocaleString()}개</p>
+                      <p className="font-semibold text-accent text-sm">{c.estimatedSales.toLocaleString()}개</p>
                     </div>
                     <div className="bg-positive-soft rounded-control p-2 text-center border border-positive/20">
                       <p className="text-xs text-positive">추정 매출</p>
-                      <p className="font-bold text-positive text-sm">{formatNumber(c.estimatedRevenue)}</p>
+                      <p className="font-semibold text-positive text-sm">{formatNumber(c.estimatedRevenue)}</p>
                     </div>
                   </div>
                   {(c as any).marketComment && (
@@ -279,7 +279,7 @@ ${myInfo}
 
       {/* 내 상품 정보 */}
       <div className="bg-paper rounded-card border border-line p-8">
-        <h3 className="text-lg font-bold text-ink mb-1">2. 내 상품 정보 <span className="text-ink-3 text-sm font-normal">(선택)</span></h3>
+        <h3 className="text-lg font-semibold text-ink mb-1">2. 내 상품 정보 <span className="text-ink-3 text-sm font-normal">(선택)</span></h3>
         <p className="text-sm text-ink-3 mb-4">입력하면 더 정확한 차별화 전략을 제안해드려요.</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <input type="text" value={myProduct.name} onChange={e => setMyProduct({ ...myProduct, name: e.target.value })} placeholder="내 상품명" className="p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none text-sm" />
@@ -293,7 +293,7 @@ ${myInfo}
       <button
         onClick={handleAnalyze}
         disabled={analyzing}
-        className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-line-strong text-white font-medium py-4 rounded-card flex items-center justify-center gap-2 transition-colors text-lg"
+        className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-line-strong text-paper font-medium py-4 rounded-card flex items-center justify-center gap-2 transition-colors text-lg"
       >
         {analyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />}
         {analyzing ? 'AI 분석 중...' : 'AI 차별화 전략 분석 시작'}
@@ -304,13 +304,13 @@ ${myInfo}
         <div className="bg-paper rounded-card border border-line p-8">
           <div className="flex items-center gap-2 mb-6">
             <BarChart2 className="w-5 h-5 text-purple-600" />
-            <h3 className="text-lg font-bold text-ink">AI 차별화 전략 분석 결과</h3>
+            <h3 className="text-lg font-semibold text-ink">AI 차별화 전략 분석 결과</h3>
           </div>
           <div className="space-y-2">
             {analysis.split('\n').map((line, i) => {
               if (!line.trim()) return <div key={i} className="h-2" />;
-              if (line.match(/^#{1,3}\s/)) return <h3 key={i} className="text-lg font-bold text-ink mt-4 mb-1">{line.replace(/^#+\s*/, '')}</h3>;
-              if (line.match(/^\d+\.\s/)) return <p key={i} className="font-bold text-ink mt-4 text-base">{line}</p>;
+              if (line.match(/^#{1,3}\s/)) return <h3 key={i} className="text-lg font-semibold text-ink mt-4 mb-1">{line.replace(/^#+\s*/, '')}</h3>;
+              if (line.match(/^\d+\.\s/)) return <p key={i} className="font-semibold text-ink mt-4 text-base">{line}</p>;
               if (line.startsWith('- ')) return <p key={i} className="text-ink-2 ml-4 text-sm">• {line.slice(2)}</p>;
               if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-semibold text-ink">{line.replace(/\*\*/g, '')}</p>;
               return <p key={i} className="text-ink-2 text-sm leading-relaxed">{line}</p>;

@@ -163,7 +163,7 @@ export function AdminPanel() {
       />}
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-ink text-white text-sm px-5 py-3 rounded-card shadow-raised z-50">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-ink text-paper text-sm px-5 py-3 rounded-card shadow-raised z-50">
           {toast}
         </div>
       )}
@@ -191,7 +191,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
           <Users className="w-5 h-5 text-accent" />
-          <h2 className="text-lg font-bold text-ink">회원 관리 ({users.length})</h2>
+          <h2 className="text-lg font-semibold text-ink">회원 관리 ({users.length})</h2>
         </div>
         <button onClick={fetchUsers} className="flex items-center gap-1.5 text-sm text-ink-2 hover:text-ink transition-colors">
           <RefreshCw className="w-4 h-4" /> 새로고침
@@ -205,8 +205,8 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                filter === f ? 'bg-accent text-white' : 'bg-paper-2 text-ink-2 hover:bg-line'
+              className={`rounded-control px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                filter === f ? 'bg-accent text-paper' : 'bg-paper-2 text-ink-2 hover:bg-line'
               }`}
             >
               {f === 'all' ? '전체' : STATUS_LABEL[f]} ({counts[f]})
@@ -216,7 +216,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
         <button
           onClick={handleBulkApprove}
           disabled={actionLoading === 'bulk-approve' || counts.pending === 0}
-          className="flex items-center gap-1.5 px-4 py-1.5 bg-positive hover:bg-positive disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-full transition-colors"
+          className="flex items-center gap-1.5 px-4 py-1.5 bg-positive hover:bg-positive disabled:opacity-40 disabled:cursor-not-allowed text-paper text-sm font-medium rounded-full transition-colors"
         >
           <CheckCheck className="w-4 h-4" />
           대기 회원 일괄 승인 ({counts.pending})
@@ -273,7 +273,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
                         <button
                           onClick={() => handleAction(user.id, 'approve')}
                           disabled={actionLoading === user.id + 'approve'}
-                          className="px-3 py-1 bg-positive hover:bg-positive disabled:opacity-50 text-white text-xs rounded-control transition-colors"
+                          className="px-3 py-1 bg-positive hover:bg-positive disabled:opacity-50 text-paper text-xs rounded-control transition-colors"
                         >
                           승인
                         </button>
@@ -282,7 +282,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
                         <button
                           onClick={() => handleAction(user.id, 'reject')}
                           disabled={actionLoading === user.id + 'reject'}
-                          className="px-3 py-1 bg-critical hover:bg-critical disabled:opacity-50 text-white text-xs rounded-control transition-colors"
+                          className="px-3 py-1 bg-critical hover:bg-critical disabled:opacity-50 text-paper text-xs rounded-control transition-colors"
                         >
                           거절
                         </button>
@@ -383,7 +383,7 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
     <div className="max-w-2xl">
       <div className="flex items-center gap-2 mb-2">
         <ImageIcon className="w-5 h-5 text-accent" />
-        <h2 className="text-lg font-bold text-ink">AI 생성 모델 설정</h2>
+        <h2 className="text-lg font-semibold text-ink">AI 생성 모델 설정</h2>
       </div>
       <p className="text-sm text-ink-2 mb-6">선택한 모델 계열은 <b>모든 사용자</b>의 카피, 기획안, 이미지 생성에 동일하게 적용됩니다. GPT 선택 시 GPT, Gemini 선택 시 Gemini로 전체 작업이 처리됩니다.</p>
 
@@ -404,7 +404,7 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
                 onClick={() => setImageModel(opt.value)}
                 className={`w-full text-left p-3 rounded-card border transition-all ${imageModel === opt.value ? 'border-accent bg-accent-soft ring-1 ring-accent' : 'border-line hover:border-accent-line'}`}
               >
-                <div className={`font-bold text-sm ${imageModel === opt.value ? 'text-accent' : 'text-ink'}`}>{opt.label}</div>
+                <div className={`font-semibold text-sm ${imageModel === opt.value ? 'text-accent' : 'text-ink'}`}>{opt.label}</div>
                 <div className="text-xs text-ink-2">{opt.desc}</div>
               </button>
             ))}
@@ -428,14 +428,14 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
 
         <div className="bg-paper-2 rounded-card px-4 py-3 text-sm">
           <span className="text-ink-2">장당 예상 비용 (세로 1024×1536 기준): </span>
-          <span className="font-bold text-ink">약 ${costUsd.toFixed(3)} / 장 (₩{costKrw.toLocaleString('ko-KR')})</span>
+          <span className="font-semibold text-ink">약 ${costUsd.toFixed(3)} / 장 (₩{costKrw.toLocaleString('ko-KR')})</span>
           <p className="text-xs text-ink-3 mt-1">12~15장 1페이지 기준 약 ${(costUsd * 13).toFixed(2)} 내외. GPT 모델은 OpenAI로, Gemini 모델은 Gemini API로 카피/기획/이미지가 모두 처리됩니다.</p>
         </div>
 
         <button
           onClick={handleSave}
           disabled={saving}
-          className="w-full bg-accent hover:bg-accent-hover disabled:bg-line-strong text-white font-medium py-3 rounded-card flex items-center justify-center gap-2 transition-colors"
+          className="w-full bg-accent hover:bg-accent-hover disabled:bg-line-strong text-paper font-medium py-3 rounded-card flex items-center justify-center gap-2 transition-colors"
         >
           {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> 저장 중...</> : <><Save className="w-4 h-4" /> 저장</>}
         </button>

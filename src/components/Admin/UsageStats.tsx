@@ -72,8 +72,8 @@ export function UsageStats() {
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                period === p ? 'bg-accent text-white' : 'bg-paper-2 text-ink-2 hover:bg-line'
+              className={`rounded-control px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                period === p ? 'bg-accent text-paper' : 'bg-paper-2 text-ink-2 hover:bg-line'
               }`}
             >
               {PERIOD_LABEL[p]}
@@ -119,7 +119,7 @@ export function UsageStats() {
           {/* 일자별 차트 */}
           {stats.timeline.length > 0 && (
             <div className="bg-paper border border-line rounded-card p-5">
-              <h3 className="text-sm font-bold text-ink mb-3">일자별 비용 추이</h3>
+              <h3 className="text-sm font-semibold text-ink mb-3">일자별 비용 추이</h3>
               <div className="flex items-end gap-1 h-32">
                 {stats.timeline.map(d => (
                   <div key={d.date} className="flex-1 flex flex-col items-center gap-1" title={`${d.date}\n호출: ${d.calls}\n비용: ${formatUsd(d.costUsd)}`}>
@@ -188,7 +188,7 @@ function SummaryCard({ icon, label, value, sub }: { icon: React.ReactNode; label
       <div className="flex items-center gap-1.5 text-xs text-ink-2 mb-1">
         {icon} {label}
       </div>
-      <div className="text-xl font-bold text-ink">{value}</div>
+      <div className="text-xl font-semibold text-ink">{value}</div>
       {sub && <div className="text-xs text-ink-2 mt-0.5">{sub}</div>}
     </div>
   );
@@ -199,7 +199,7 @@ function BreakdownTable({ title, columns, rows }: { title: string; columns: stri
     <div className="bg-paper border border-line rounded-card overflow-hidden">
       <div className="px-5 py-3 border-b border-line flex items-center gap-2">
         <BarChart3 className="w-4 h-4 text-ink-2" />
-        <h3 className="text-sm font-bold text-ink">{title}</h3>
+        <h3 className="text-sm font-semibold text-ink">{title}</h3>
       </div>
       {rows.length === 0 ? (
         <div className="text-center py-8 text-ink-3 text-sm">데이터가 없습니다.</div>

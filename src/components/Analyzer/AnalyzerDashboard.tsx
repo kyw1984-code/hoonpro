@@ -332,7 +332,7 @@ export function AnalyzerDashboard() {
     <div className="flex h-[calc(100vh-4rem)] bg-paper-2 overflow-hidden">
       {/* Sidebar */}
       <div className="w-80 bg-paper border-r border-line p-6 flex flex-col h-full overflow-y-auto shrink-0">
-        <h2 className="text-lg font-bold text-ink mb-6">💰 마진 계산 설정</h2>
+        <h2 className="text-lg font-semibold text-ink mb-6">💰 마진 계산 설정</h2>
         <div className="space-y-4">
           {[
             { label: "상품 판매가 (원)", val: unitPrice, set: setUnitPrice, step: "1" },
@@ -354,9 +354,9 @@ export function AnalyzerDashboard() {
         <div className="mt-6 pt-6 border-t border-line space-y-3">
           <div className="flex justify-between text-sm"><span className="text-ink-2">📦 입출고비 합계:</span><span>{deliveryFee.toLocaleString()}원</span></div>
           <div className="flex justify-between text-sm"><span className="text-ink-2">📊 예상 수수료 ({coupangFeeRate}%):</span><span>{totalFeeAmount.toLocaleString()}원</span></div>
-          <div className="flex justify-between text-base font-bold"><span className="text-ink">💡 개당 예상 마진:</span><span className="text-positive">{netUnitMargin.toLocaleString()}원</span></div>
-          {unitPrice > 0 && <div className="flex justify-between text-sm font-bold"><span>📈 예상 마진율:</span><span className="text-accent">{marginRate.toFixed(1)}%</span></div>}
-          {breakEvenROAS > 0 && <div className="flex justify-between text-sm font-bold"><span>🎯 손익분기 ROAS:</span><span className="text-orange-600">{breakEvenROAS.toFixed(0)}%</span></div>}
+          <div className="flex justify-between text-base font-semibold"><span className="text-ink">💡 개당 예상 마진:</span><span className="text-positive">{netUnitMargin.toLocaleString()}원</span></div>
+          {unitPrice > 0 && <div className="flex justify-between text-sm font-semibold"><span>📈 예상 마진율:</span><span className="text-accent">{marginRate.toFixed(1)}%</span></div>}
+          {breakEvenROAS > 0 && <div className="flex justify-between text-sm font-semibold"><span>🎯 손익분기 ROAS:</span><span className="text-orange-600">{breakEvenROAS.toFixed(0)}%</span></div>}
         </div>
       </div>
 
@@ -364,7 +364,7 @@ export function AnalyzerDashboard() {
       <div className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-6xl mx-auto">
           <div className="mb-8">
-            <h1 className="text-2xl font-bold text-ink mb-2">📊 쇼크트리 훈프로 쿠팡 광고 성과 분석기</h1>
+            <h1 className="text-[20px] font-semibold text-ink mb-2">📊 쇼크트리 훈프로 쿠팡 광고 성과 분석기</h1>
             <p className="text-ink-2">쿠팡 보고서(CSV 또는 XLSX)를 업로드하면 훈프로의 정밀 운영 전략이 자동으로 생성됩니다.</p>
           </div>
 
@@ -386,7 +386,7 @@ export function AnalyzerDashboard() {
             <div className="space-y-8">
               {/* KPI Cards */}
               <div>
-                <h3 className="text-lg font-bold text-ink mb-4">📌 핵심 성과 지표</h3>
+                <h3 className="text-lg font-semibold text-ink mb-4">📌 핵심 성과 지표</h3>
                 <div className="grid grid-cols-5 gap-3">
                   {[
                     { label: "최종 실질 순이익", value: `${processedData.totalProfit.toLocaleString()}원`, color: processedData.totalProfit >= 0 ? "text-critical" : "text-accent" },
@@ -397,7 +397,7 @@ export function AnalyzerDashboard() {
                   ].map(({ label, value, color }) => (
                     <div key={label} className="bg-paper p-4 rounded-card border border-line text-center">
                       <p className="text-xs text-ink-2 font-medium mb-1">{label}</p>
-                      <p className={`text-xl font-bold ${color}`}>{value}</p>
+                      <p className={`text-xl font-semibold ${color}`}>{value}</p>
                     </div>
                   ))}
                 </div>
@@ -406,7 +406,7 @@ export function AnalyzerDashboard() {
               {/* 종합 등급 */}
               {processedData.precision && (
                 <div>
-                  <h3 className="text-lg font-bold text-ink mb-4">🎯 종합 진단 등급</h3>
+                  <h3 className="text-lg font-semibold text-ink mb-4">🎯 종합 진단 등급</h3>
                   <div className={`border rounded-card p-6 ${gradeBg(processedData.precision.grade)}`}>
                     <div className="flex items-center gap-6 mb-6">
                       <div className="text-center">
@@ -424,7 +424,7 @@ export function AnalyzerDashboard() {
                         ].map(({ label, score }) => (
                           <div key={label} className="text-center">
                             <p className="text-xs text-ink-2 mb-1">{label}</p>
-                            <p className="text-lg font-bold text-ink">{score.toFixed(0)}</p>
+                            <p className="text-lg font-semibold text-ink">{score.toFixed(0)}</p>
                             <div className="w-full bg-line rounded-full h-2 mt-1">
                               <div className="bg-accent h-2 rounded-full" style={{ width: `${Math.min(score, 100)}%` }} />
                             </div>
@@ -438,7 +438,7 @@ export function AnalyzerDashboard() {
 
               {/* Placement Table */}
               <div>
-                <h3 className="text-lg font-bold text-ink mb-4">📍 지면별 상세 분석</h3>
+                <h3 className="text-lg font-semibold text-ink mb-4">📍 지면별 상세 분석</h3>
                 <div className="overflow-x-auto border border-line rounded-card">
                   <table className="w-full text-sm text-left">
                     <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line">
@@ -461,7 +461,7 @@ export function AnalyzerDashboard() {
                           <td className="px-4 py-3 text-right">{(row.클릭률 * 100).toFixed(2)}%</td>
                           <td className="px-4 py-3 text-right">{(row.구매전환율 * 100).toFixed(2)}%</td>
                           <td className="px-4 py-3 text-right">{(row.실제ROAS * 100).toFixed(0)}%</td>
-                          <td className={`px-4 py-3 text-right font-bold ${row.실질순이익 >= 0 ? "text-critical" : "text-accent"}`}>{row.실질순이익.toLocaleString()}원</td>
+                          <td className={`px-4 py-3 text-right font-semibold ${row.실질순이익 >= 0 ? "text-critical" : "text-accent"}`}>{row.실질순이익.toLocaleString()}원</td>
                         </tr>
                       ))}
                     </tbody>
@@ -472,7 +472,7 @@ export function AnalyzerDashboard() {
               {/* Products */}
               {processedData.productSummary && (
                 <div>
-                  <h3 className="text-lg font-bold text-ink mb-4">🛍️ 옵션별 성과 분석</h3>
+                  <h3 className="text-lg font-semibold text-ink mb-4">🛍️ 옵션별 성과 분석</h3>
                   <div className="flex flex-col gap-6">
                     <div>
                       <h4 className="font-semibold text-ink mb-3">🏆 효자 옵션 (판매순)</h4>
@@ -487,7 +487,7 @@ export function AnalyzerDashboard() {
                                 <td className="px-4 py-3 font-medium text-ink whitespace-normal break-words">{row.상품명}</td>
                                 <td className="px-4 py-3 text-right">{row.판매수량.toLocaleString()}개</td>
                                 <td className="px-4 py-3 text-right">{row.광고비.toLocaleString()}원</td>
-                                <td className={`px-4 py-3 text-right font-bold ${row.실질순이익 >= 0 ? "text-critical" : "text-accent"}`}>{row.실질순이익.toLocaleString()}원</td>
+                                <td className={`px-4 py-3 text-right font-semibold ${row.실질순이익 >= 0 ? "text-critical" : "text-accent"}`}>{row.실질순이익.toLocaleString()}원</td>
                               </tr>
                             ))}
                           </tbody>
@@ -520,11 +520,11 @@ export function AnalyzerDashboard() {
               {/* Bad Keywords */}
               {processedData.badKeywords && processedData.badKeywords.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-bold text-ink mb-4">✂️ 제외 키워드 제안</h3>
+                  <h3 className="text-lg font-semibold text-ink mb-4">✂️ 제외 키워드 제안</h3>
                   <div className="bg-paper border border-line rounded-card p-4">
                     <p className="text-sm text-ink-2 mb-1">
-                      광고비만 소진하고 판매가 없는 키워드 <span className="font-bold text-critical">{processedData.badKeywords.length}개</span> —
-                      낭비 광고비: <span className="font-bold text-critical">₩{processedData.badKeywords.reduce((s: number, k: any) => s + k.광고비, 0).toLocaleString()}</span>
+                      광고비만 소진하고 판매가 없는 키워드 <span className="font-semibold text-critical">{processedData.badKeywords.length}개</span> —
+                      낭비 광고비: <span className="font-semibold text-critical">₩{processedData.badKeywords.reduce((s: number, k: any) => s + k.광고비, 0).toLocaleString()}</span>
                     </p>
                     <p className="text-sm text-ink-2 mb-2">복사해서 제외 등록하세요:</p>
                     <textarea
@@ -539,7 +539,7 @@ export function AnalyzerDashboard() {
               {/* Recommendations */}
               {processedData.recommendations.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-bold text-ink mb-4">💡 훈프로의 정밀 운영 제안</h3>
+                  <h3 className="text-lg font-semibold text-ink mb-4">💡 훈프로의 정밀 운영 제안</h3>
                   <div className="space-y-3">
                     {processedData.recommendations.map((rec: string, idx: number) => (
                       <div key={idx} className="bg-paper border border-line rounded-card p-4">
