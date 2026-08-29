@@ -160,9 +160,31 @@ function scoreKeyword(kw: any) {
   };
 }
 
+// 쿠팡 대표 카테고리별 시드 키워드 (시드 없이 카테고리 클릭만으로 추천 키워드 제공)
+// keywordstool은 호출당 힌트 5개까지 허용 — 5개의 연관 키워드가 합쳐져 반환된다.
+const CATEGORY_SEEDS: Record<string, string[]> = {
+  "여성패션": ["원피스", "블라우스", "여성가디건", "롱스커트", "여성슬랙스"],
+  "남성패션": ["남자반팔티", "남자슬랙스", "맨투맨", "남자셔츠", "남자반바지"],
+  "뷰티": ["수분크림", "선크림", "클렌징폼", "마스크팩", "립밤"],
+  "출산/유아": ["아기옷", "젖병", "기저귀가방", "아기장난감", "유아식기"],
+  "식품": ["견과류", "곤약젤리", "누룽지", "캡슐커피", "간편식"],
+  "주방용품": ["프라이팬", "밀폐용기", "주방수납", "조리도구", "텀블러"],
+  "생활용품": ["욕실용품", "세탁바구니", "제습제", "옷걸이", "슬리퍼"],
+  "홈인테리어": ["무드등", "커튼", "러그", "수납장", "벽선반"],
+  "가전디지털": ["무선이어폰", "보조배터리", "가습기", "무선청소기", "휴대폰거치대"],
+  "스포츠/레저": ["요가매트", "캠핑의자", "등산가방", "자전거용품", "낚시용품"],
+  "자동차용품": ["차량용방향제", "차량용거치대", "세차용품", "차량수납", "차량용충전기"],
+  "완구/취미": ["보드게임", "퍼즐", "프라모델", "인형", "물감세트"],
+  "문구/오피스": ["다이어리", "볼펜", "데스크정리", "파일철", "스티커"],
+  "헬스/건강": ["폼롤러", "마사지볼", "무릎보호대", "닭가슴살", "단백질쉐이크"],
+  "반려동물": ["강아지장난감", "고양이용품", "펫방석", "강아지옷", "강아지급식기"],
+};
+
 async function handleKeywords(req: VercelRequest, res: VercelResponse) {
   const seed = typeof req.query.seed === "string" ? req.query.seed.trim() : "";
-  if (!seed) return res.status(400).json({ error: "seed 키워드가 필요합니다." });
+  const category = typeof req.query.category === "string" ? req.query.category.trim() : "";
+  if (!seed && !category) return res.status(400).json({ error: "seed 키워드 또는 category가 필요합니다." });
+  if (category && !CATEGORY_SEEDS[category]) return res.status(400).json({ error: "지원하지 않는 카테고리입니다." });
   if (!NAVER_AD_API_KEY || !NAVER_AD_SECRET_KEY || !NAVER_AD_CUSTOMER_ID) {
     return res.status(500).json({
       error:
@@ -171,20 +193,23 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
   }
 
   // 시드 자체가 브랜드 검색이면 브랜드 필터를 끈다 (예: "나이키 운동화")
-  const seedIsBrand = isBrandKeyword(seed);
+  const seedIsBrand = !category && isBrandKeyword(seed);
   const applyBrandFilter = (payload: any) =>
     seedIsBrand ? payload : {
       ...payload,
       keywords: (payload.keywords || []).filter((k: any) => !isBrandKeyword(k.keyword)),
     };
 
-  const cacheKey = `kw:${seed.replace(/\s+/g, "")}`;
+  const hints = category ? CATEGORY_SEEDS[category] : [seed];
+  const cacheKey = category ? `kwcat:${category}` : `kw:${seed.replace(/\s+/g, "")}`;
+  const ttlMs = (category ? 24 : 12) * 3600 * 1000;
+
   const cached = await cacheGet(cacheKey);
-  if (cached && cached.ageMs < 12 * 3600 * 1000) {
+  if (cached && cached.ageMs < ttlMs) {
     return res.status(200).json({ ...applyBrandFilter(cached.payload), cached: true });
   }
 
-  const result = await callKeywordTool([seed]);
+  const result = await callKeywordTool(hints);
   if (!result.ok) {
     if (cached) return res.status(200).json({ ...applyBrandFilter(cached.payload), cached: true, stale: true });
     return res.status(502).json({ error: result.error });
@@ -192,13 +217,13 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
 
   const seedNorm = seed.replace(/\s+/g, "");
   const scoredAll = (result.list || []).map(scoreKeyword).filter(k => k.keyword);
-  const seedStat = scoredAll.find(k => k.keyword.replace(/\s+/g, "") === seedNorm) || null;
+  const seedStat = category ? null : scoredAll.find(k => k.keyword.replace(/\s+/g, "") === seedNorm) || null;
   const related = scoredAll
-    .filter(k => k.keyword.replace(/\s+/g, "") !== seedNorm)
+    .filter(k => category || k.keyword.replace(/\s+/g, "") !== seedNorm)
     .sort((a, b) => b.opportunityScore - a.opportunityScore || b.monthlyVolume - a.monthlyVolume)
     .slice(0, 200);
 
-  const payload = { seed, seedStat, keywords: related };
+  const payload = { seed: category || seed, category: category || null, seedStat, keywords: related };
   await cacheSet(cacheKey, payload); // 캐시에는 원본 저장, 필터는 응답 시 적용
   return res.status(200).json(applyBrandFilter(payload));
 }

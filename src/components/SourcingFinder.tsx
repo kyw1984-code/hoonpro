@@ -84,6 +84,12 @@ const loadFavorites = (): Record<string, KeywordStat> => {
   try { return JSON.parse(localStorage.getItem(FAV_KEY) || '{}'); } catch { return {}; }
 };
 
+// 쿠팡 대표 카테고리 (서버 CATEGORY_SEEDS와 키가 일치해야 함)
+const KW_CATEGORIES = [
+  '여성패션', '남성패션', '뷰티', '출산/유아', '식품', '주방용품', '생활용품', '홈인테리어',
+  '가전디지털', '스포츠/레저', '자동차용품', '완구/취미', '문구/오피스', '헬스/건강', '반려동물',
+];
+
 const coupangSearchUrl = (kw: string) => `https://www.coupang.com/np/search?q=${encodeURIComponent(kw)}`;
 const naverShopUrl = (kw: string) => `https://search.shopping.naver.com/search/all?query=${encodeURIComponent(kw)}`;
 
@@ -111,6 +117,7 @@ export function SourcingFinder() {
   const [keywords, setKeywords] = useState<KeywordStat[]>([]);
   const [cached, setCached] = useState(false);
   const [seedTrail, setSeedTrail] = useState<string[]>([]);
+  const [activeKwCategory, setActiveKwCategory] = useState<string | null>(null);
 
   // 필터/정렬 (키워드)
   const [sortKey, setSortKey] = useState<'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('opportunityScore');
@@ -159,6 +166,7 @@ export function SourcingFinder() {
   const fetchKeywords = async (kw: string, mode: 'new' | 'drill' | 'trail' = 'new') => {
     const trimmed = kw.trim();
     if (!trimmed) return;
+    setActiveKwCategory(null);
     setLoading(true);
     setError(null);
     setShowFavorites(false);
@@ -179,6 +187,34 @@ export function SourcingFinder() {
       else setSeedTrail(prev => prev.slice(0, prev.indexOf(trimmed) + 1));
     } catch (e: any) {
       setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── API: 카테고리 추천 키워드 (시드 없이) ──────────────────────────────────
+  const fetchCategoryKeywords = async (cat: string) => {
+    setActiveKwCategory(cat);
+    setLoading(true);
+    setError(null);
+    setShowFavorites(false);
+    setSeedStat(null);
+    setSeedTrail([]);
+    setSeedInput('');
+    setCurrentSeed(cat);
+    try {
+      const res = await fetch(`/api/sourcing?type=keywords&category=${encodeURIComponent(cat)}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setError(data.error || '추천 키워드 조회 실패');
+        setKeywords([]);
+        return;
+      }
+      setKeywords(Array.isArray(data.keywords) ? data.keywords : []);
+      setCached(!!data.cached);
+    } catch (e: any) {
+      setError(e.message);
+      setKeywords([]);
     } finally {
       setLoading(false);
     }
@@ -354,6 +390,26 @@ export function SourcingFinder() {
           </div>
         </div>
 
+        {/* 쿠팡 대표 카테고리 (시드 없이 추천 키워드) */}
+        <div className="bg-white rounded-[28px] p-5 border border-slate-200 shadow-sm">
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
+            쿠팡 대표 카테고리 — 시드 키워드가 떠오르지 않으면 카테고리만 눌러도 추천 키워드가 나옵니다
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            {KW_CATEGORIES.map(cat => (
+              <button key={cat} onClick={() => fetchCategoryKeywords(cat)} disabled={loading}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm ${
+                  activeKwCategory === cat
+                    ? 'bg-indigo-600 text-white shadow-indigo-200'
+                    : 'bg-slate-50 hover:bg-indigo-50/80 text-slate-600 border border-slate-100'
+                }`}>
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* 검색바 */}
         <div className="bg-white rounded-[28px] p-4 border-2 border-indigo-100 shadow-xl flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           <div className="flex-1 relative">
@@ -453,7 +509,9 @@ export function SourcingFinder() {
               <h3 className="text-sm font-black text-slate-800">
                 {showFavorites
                   ? <>관심 키워드 <span className="text-amber-500">{displayKeywords.length}개</span></>
-                  : <>연관 니치 키워드 <span className="text-indigo-600">{displayKeywords.length}개</span></>}
+                  : activeKwCategory
+                    ? <>"{activeKwCategory}" 추천 키워드 <span className="text-indigo-600">{displayKeywords.length}개</span></>
+                    : <>연관 니치 키워드 <span className="text-indigo-600">{displayKeywords.length}개</span></>}
               </h3>
               {!showFavorites && cached && (
                 <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1"><RefreshCw className="w-3 h-3" />캐시 데이터</span>
@@ -564,10 +622,10 @@ export function SourcingFinder() {
         ) : !seedStat && !error && !activeKeyword && (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400">
             <KeyRound className="w-16 h-16 mb-6 opacity-20" />
-            <h2 className="text-xl font-bold">시드 키워드로 니치 시장을 발굴하세요</h2>
+            <h2 className="text-xl font-bold">니치 시장 발굴을 시작하세요</h2>
             <p className="text-sm mt-2 font-medium text-center leading-relaxed">
-              검색량은 많고 경쟁은 적은 키워드를 찾은 뒤, [쿠팡 분석]으로<br />
-              실제 리뷰수·로켓 비중까지 확인하고 1688 소싱으로 이어가세요
+              시드 키워드를 검색하거나, 위의 쿠팡 대표 카테고리를 눌러 추천 키워드를 받아보세요.<br />
+              검색량은 많고 경쟁은 적은 키워드를 찾은 뒤 [쿠팡 분석]으로 실제 리뷰·로켓 비중까지 확인합니다
             </p>
           </div>
         )}
