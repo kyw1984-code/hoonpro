@@ -905,6 +905,109 @@ const drawAccentLine = (
     ctx.restore();
 };
 
+// 경쟁 대비 섹션 전용: AI 이미지에 한글 표를 맡기면 글자가 깨지므로
+// 비교표를 캔버스로 직접 그린다 (기획안의 competitorComparison 데이터 사용)
+const drawComparisonTable = (
+    ctx: CanvasRenderingContext2D,
+    rows: { item: string; competitor: string; ours: string }[],
+    design?: { colors?: Record<string, string> }
+) => {
+    const cardX = 64;
+    const cardW = TARGET_WIDTH - cardX * 2;
+    const padX = 24;
+    const colGap = 14;
+    const colItemW = 150;
+    const colW = (cardW - padX * 2 - colItemW - colGap * 2) / 2;
+    const rawAccent = getAccentColor(design);
+    const accent = getColorLuminance(rawAccent) > 0.62 ? '#2563eb' : rawAccent;
+
+    // 셀 텍스트 줄바꿈을 먼저 계산해 전체 높이를 확정
+    const cellFont = `500 18px ${DETAIL_FONT_FAMILY}`;
+    const itemFont = `700 18px ${DETAIL_FONT_FAMILY}`;
+    const lineH = 25;
+    const measured = rows.map((row) => {
+        ctx.font = itemFont;
+        const itemLines = wrapText(ctx, row.item, colItemW, 2);
+        ctx.font = cellFont;
+        const compLines = wrapText(ctx, row.competitor, colW, 2);
+        const oursLines = wrapText(ctx, row.ours, colW, 2);
+        const maxLines = Math.max(itemLines.length, compLines.length, oursLines.length, 1);
+        return { itemLines, compLines, oursLines, height: maxLines * lineH + 22 };
+    });
+    const headerH = 50;
+    const tableH = 18 + headerH + measured.reduce((s, r) => s + r.height, 0) + 16;
+    const cardY = Math.max(240, Math.min(TARGET_HEIGHT - 56 - tableH, 620 - tableH / 2));
+
+    ctx.save();
+
+    // 카드 (흰 배경 + 부드러운 그림자)
+    ctx.shadowColor = 'rgba(15, 23, 42, 0.18)';
+    ctx.shadowBlur = 28;
+    ctx.shadowOffsetY = 10;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.97)';
+    ctx.beginPath();
+    ctx.roundRect(cardX, cardY, cardW, tableH, 18);
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = 'rgba(17, 24, 39, 0.08)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const innerX = cardX + padX;
+    const compX = innerX + colItemW + colGap;
+    const oursX = compX + colW + colGap;
+    const contentTop = cardY + 18;
+
+    // '이 제품' 열 하이라이트
+    ctx.fillStyle = withAlpha(accent, 0.07);
+    ctx.beginPath();
+    ctx.roundRect(oursX - 10, contentTop, colW + 20, tableH - 34, 12);
+    ctx.fill();
+
+    // 헤더
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const headerY = contentTop + headerH / 2 - 4;
+    ctx.font = `700 17px ${DETAIL_FONT_FAMILY}`;
+    ctx.fillStyle = 'rgba(17, 24, 39, 0.45)';
+    ctx.fillText('비교 항목', innerX, headerY);
+    ctx.fillText('일반 제품', compX, headerY);
+    ctx.fillStyle = accent;
+    ctx.fillText('이 제품', oursX, headerY);
+    ctx.strokeStyle = 'rgba(17, 24, 39, 0.12)';
+    ctx.beginPath();
+    ctx.moveTo(innerX, contentTop + headerH - 6);
+    ctx.lineTo(cardX + cardW - padX, contentTop + headerH - 6);
+    ctx.stroke();
+
+    // 데이터 행
+    let rowY = contentTop + headerH;
+    measured.forEach((row, i) => {
+        const textTop = rowY + 11 + lineH / 2;
+        ctx.font = itemFont;
+        ctx.fillStyle = '#111827';
+        row.itemLines.forEach((line, li) => ctx.fillText(line, innerX, textTop + li * lineH));
+        ctx.font = cellFont;
+        ctx.fillStyle = '#6b7280';
+        row.compLines.forEach((line, li) => ctx.fillText(line, compX, textTop + li * lineH));
+        ctx.font = `600 18px ${DETAIL_FONT_FAMILY}`;
+        ctx.fillStyle = '#111827';
+        row.oursLines.forEach((line, li) => ctx.fillText(line, oursX, textTop + li * lineH));
+        rowY += row.height;
+        if (i < measured.length - 1) {
+            ctx.strokeStyle = 'rgba(17, 24, 39, 0.07)';
+            ctx.beginPath();
+            ctx.moveTo(innerX, rowY);
+            ctx.lineTo(cardX + cardW - padX, rowY);
+            ctx.stroke();
+        }
+    });
+
+    ctx.restore();
+};
+
 const overlayTextOnImage = async (
     imageUrl: string,
     seg: GenImage,
@@ -937,8 +1040,12 @@ const overlayTextOnImage = async (
             }
             ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
 
+            // 경쟁 대비 섹션은 캔버스 비교표가 본문이므로 카피를 상단에 고정
+            const hasComparisonTable = !!(seg.comparisonRows && seg.comparisonRows.length > 0);
+            const effectivePosition = hasComparisonTable ? 'top' : seg.textPosition;
+
             // 미니멀 타이포그래피: 판·칩·필 없이 악센트 라인 + 텍스트만 (문구 최소화)
-            const headline = buildHeadlineLayout(ctx, formatMainCopy(seg.mainCopy), seg.textPosition);
+            const headline = buildHeadlineLayout(ctx, formatMainCopy(seg.mainCopy), effectivePosition);
             const subCopy = normalizeOverlayCopy(seg.subCopy);
             const subFont = 25;
             const subHeight = subCopy ? 38 : 0;
@@ -950,9 +1057,9 @@ const overlayTextOnImage = async (
             const SAFE_MARGIN = 56;
             const minCenter = SAFE_MARGIN + blockHeight / 2;
             const maxCenter = TARGET_HEIGHT - SAFE_MARGIN - blockHeight / 2;
-            const desiredCenter = seg.textPosition === 'top'
+            const desiredCenter = effectivePosition === 'top'
                 ? blockHeight / 2 + 64
-                : seg.textPosition === 'middle'
+                : effectivePosition === 'middle'
                     ? TARGET_HEIGHT / 2
                     : TARGET_HEIGHT - blockHeight / 2 - 72;
             const centerY = maxCenter < minCenter
@@ -998,6 +1105,10 @@ const overlayTextOnImage = async (
             }
             ctx.shadowBlur = 0;
 
+            if (hasComparisonTable) {
+                drawComparisonTable(ctx, seg.comparisonRows!, design);
+            }
+
             resolve(canvas.toDataURL('image/png'));
         };
         img.onerror = () => resolve(imageUrl);
@@ -1018,6 +1129,9 @@ interface GenImage {
     purpose?: string;
     trustElement: string;
     designLayout?: string;
+    heightPx?: number;
+    // 경쟁 대비 섹션: AI가 아닌 캔버스로 직접 그리는 비교표 데이터 (한글 깨짐 방지)
+    comparisonRows?: { item: string; competitor: string; ours: string }[];
     trigger: string;
     textPosition: 'top' | 'middle' | 'bottom';
     visualPrompt: string;
@@ -1109,6 +1223,10 @@ const createGenImagesFromPlan = (result: DetailPlan, combinationType: Combinatio
             purpose: img.purpose,
             trustElement: img.trustElement,
             designLayout: img.designLayout,
+            heightPx: img.heightPx,
+            comparisonRows: /경쟁/.test(img.role) && result.competitorComparison?.length > 0
+                ? result.competitorComparison.slice(0, 4)
+                : undefined,
             trigger: img.trigger,
             textPosition,
             visualPrompt: img.visualPrompt,
@@ -2105,6 +2223,20 @@ export const DetailPlanner: React.FC = () => {
                                     {plan.purchaseResistances?.map((d, i) => <li key={i}>{d}</li>)}
                                 </ul>
                             </div>
+                            {plan.detailInfoItems && plan.detailInfoItems.length > 0 && (
+                                <div className="rounded-card border border-line bg-paper-2 p-4 md:col-span-2">
+                                    <div className="mb-1.5 flex items-center gap-2">
+                                        <p className="font-semibold text-ink">카테고리별 상세 정보</p>
+                                        {plan.productCategory && (
+                                            <span className="rounded-control bg-paper px-2 py-0.5 text-[11px] font-semibold text-ink-2 ring-1 ring-line">{plan.productCategory}</span>
+                                        )}
+                                    </div>
+                                    <ul className="grid grid-cols-1 gap-x-6 gap-y-0.5 text-ink-2 md:grid-cols-2">
+                                        {plan.detailInfoItems.map((d, i) => <li key={i} className="list-disc list-inside">{d}</li>)}
+                                    </ul>
+                                    <p className="mt-1.5 text-[11px] text-ink-3">"상품 등록 정보 확인 필요" 항목은 실제 값으로 채워서 상세페이지 텍스트 영역에 사용하세요.</p>
+                                </div>
+                            )}
                         </div>
                         {plan.competitorComparison?.length > 0 && (
                             <div className="mt-4 overflow-hidden rounded-card border border-line">
@@ -2308,6 +2440,10 @@ export const DetailPlanner: React.FC = () => {
                                         <div className="text-sm text-ink-2 space-y-1">
                                             {img.purpose && <p className="text-xs text-ink-2"><span className="text-ink-3">목적:</span> {img.purpose}</p>}
                                             {img.designLayout && <p className="text-xs text-ink-2"><span className="text-ink-3">레이아웃:</span> {img.designLayout}</p>}
+                                            {img.heightPx ? <p className="text-xs text-ink-2"><span className="text-ink-3">추천 높이:</span> {img.heightPx}px</p> : null}
+                                            {img.comparisonRows && img.comparisonRows.length > 0 && (
+                                                <p className="text-xs font-medium text-accent">경쟁 비교표는 기획안 데이터로 캔버스에 선명하게 합성됩니다 (글자 깨짐 없음)</p>
+                                            )}
                                             {img.trustElement && <p className="text-xs text-ink-2"><span className="text-ink-3">신뢰:</span> {img.trustElement}</p>}
                                             {img.qualityWarnings && img.qualityWarnings.length > 0 && (
                                                 <div className="rounded-control border border-caution/20 bg-caution-soft p-2 text-[11px] text-caution">

@@ -239,6 +239,7 @@ export interface DetailPlanImage {
   trustElement: string;  // 신뢰 요소
   trigger: string;       // 전환 트리거
   designLayout: string;  // 디자인 레이아웃 설명 (STEP 4)
+  heightPx: number;      // 추천 높이(px) — 실제 상세페이지 배치 시 참고용 (STEP 4)
   textPosition: 'top' | 'middle' | 'bottom';
   visualPrompt: string;  // 이미지 생성 프롬프트 (영어, 텍스트 없는 비주얼)
 }
@@ -281,6 +282,9 @@ export interface DetailPlan {
   differentiators: string[];
   competitorComparison: CompetitorComparisonRow[];
   purchaseResistances: string[];
+  // STEP 3 이미지 13 — 카테고리별 상세 정보 자동 생성
+  productCategory: string;      // 식품·건기식 / 의류·패션 / 뷰티·화장품 / 가전·전자 / 생활·주방 / 가구·인테리어 / 기타
+  detailInfoItems: string[];    // 카테고리에 맞는 상세 정보 항목 (예: 사이즈표, 소재, 세탁법 ...)
   // STEP 5 — 디자인 시스템
   designSystem: {
     tone: string;
@@ -312,11 +316,11 @@ const V21_SECTIONS: SectionSpec[] = [
   { role: '비교 우위', stage: '근거', sectionType: 'proof', shotType: 'detail', priority: 4, desc: '셀링포인트 3 — 비교 중심. 일반 제품 대비 나은 점을 시각적으로 대비' },
   { role: '소재 디테일', stage: '근거', sectionType: 'detail', shotType: 'texture', priority: 3, desc: '셀링포인트 4 — 수치·근거 중심. 소재/마감/디테일 극단 클로즈업' },
   { role: '사용 장면', stage: '신뢰 형성', sectionType: 'lifestyle', shotType: 'lifestyle', priority: 4, desc: '셀링포인트 5 — 사용 장면 중심. 일상 속 자연스러운 활용 컷' },
-  { role: '경쟁 대비', stage: '신뢰 형성', sectionType: 'proof', shotType: 'product', priority: 7, desc: '일반 제품과의 차이를 한 장면 안에서 시각적으로 대비 (표가 아닌 사진 연출로)' },
+  { role: '경쟁 대비', stage: '신뢰 형성', sectionType: 'proof', shotType: 'product', priority: 7, desc: '일반 제품 대비 우위를 비교표로 보여주는 섹션. 배경은 여백 중심의 차분한 연출 (비교표는 앱이 캔버스로 선명하게 그려 넣음)' },
   { role: '실사용 후기', stage: '신뢰 형성', sectionType: 'proof', shotType: 'lifestyle', priority: 8, desc: '상황 기반의 사용 전/후 변화를 보여주는 장면 (허위 후기 문구 금지)' },
   { role: '신뢰 강화', stage: '신뢰 형성', sectionType: 'trust', shotType: 'detail', priority: 5, desc: '원재료/제조공정/품질관리/생산환경으로 신뢰를 높이는 장면' },
   { role: '구성품 안내', stage: '구매 확신', sectionType: 'detail', shotType: 'product', priority: 9, desc: '무엇을 받게 되는지 한눈에 보여주는 구성 안내 장면' },
-  { role: '상세 정보', stage: '구매 확신', sectionType: 'detail', shotType: 'product', priority: 6, desc: '구성/사양/사용법 등 카테고리별 핵심 정보를 보여주는 정돈된 장면' },
+  { role: '상세 정보', stage: '구매 확신', sectionType: 'detail', shotType: 'product', priority: 6, desc: '카테고리별 상세 정보 항목(detailInfoItems)을 보여주는 정돈된 장면 (사이즈/소재/사용법/보관법 등)' },
   { role: 'CTA', stage: '결제', sectionType: 'trust', shotType: 'cta', priority: 1, desc: '지금 구매해야 하는 이유와 행동 유도로 마무리하는 제품 중심 컷' },
 ];
 
@@ -506,6 +510,7 @@ const createFallbackDetailPlan = (data: any, reason = 'GPT 기획안 생성 실�
       trustElement: index >= count - 2 ? '품질과 사용성 중심의 신뢰 요소' : '제품 장점 기반 설득 요소',
       trigger: base.trigger,
       designLayout: `${textPosition === 'top' ? '상단' : textPosition === 'middle' ? '중앙' : '하단'} 카피 영역 + 제품 중심 단일 포컬 구성`,
+      heightPx: 1000,
       textPosition,
       visualPrompt: [
         (base as any).visualPrompt || buildFallbackVisualPrompt(productName, role, index === count - 1 ? 'cta' : base.shotType, textPosition, index),
@@ -539,6 +544,14 @@ const createFallbackDetailPlan = (data: any, reason = 'GPT 기획안 생성 실�
       { item: '정보 제공', competitor: '사진 위주의 단순 나열', ours: '구매 판단에 필요한 정보까지 제공' },
     ],
     purchaseResistances: ['내게 맞을까', '품질이 괜찮을까', '오래 쓸 수 있을까', '사진과 다르지 않을까', '구매 후 후회하지 않을까'],
+    productCategory: '기타',
+    detailInfoItems: [
+      '제품 구성: 상품 등록 정보 확인 필요',
+      '핵심 사양: 상품 등록 정보 확인 필요',
+      '사용 방법: 상품 등록 정보 확인 필요',
+      '보관 방법: 상품 등록 정보 확인 필요',
+      '주의사항: 상품 등록 정보 확인 필요',
+    ],
     designSystem: {
       tone,
       colors: { primary: '#111827', secondary: '#f8fafc', accent: '#2563eb', background: '#ffffff', text: '#111827' },
@@ -603,6 +616,7 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
       trustElement: String(img?.trustElement || fallbackImage.trustElement),
       trigger: String(img?.trigger || fallbackImage.trigger),
       designLayout: String(img?.designLayout || fallbackImage.designLayout),
+      heightPx: Math.min(1600, Math.max(600, Math.round(Number(img?.heightPx)) || 1000)),
       textPosition: validPositions.includes(img?.textPosition) ? img.textPosition : fallbackImage.textPosition,
       visualPrompt: String(img?.visualPrompt || fallbackImage.visualPrompt),
     };
@@ -659,6 +673,8 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
     differentiators: Array.isArray(plan.differentiators) && plan.differentiators.length > 0 ? plan.differentiators.map(String) : fallback.differentiators,
     competitorComparison: comparison,
     purchaseResistances: Array.isArray(plan.purchaseResistances) && plan.purchaseResistances.length > 0 ? plan.purchaseResistances.map(String) : fallback.purchaseResistances,
+    productCategory: String(plan.productCategory || fallback.productCategory),
+    detailInfoItems: Array.isArray(plan.detailInfoItems) && plan.detailInfoItems.length > 0 ? plan.detailInfoItems.slice(0, 8).map(String) : fallback.detailInfoItems,
     designSystem: {
       tone: String(plan.designSystem?.tone || fallback.designSystem.tone),
       colors: {
@@ -731,6 +747,16 @@ ${productBriefGuide}
   예) 운동기구 → 표면: 운동하고 싶음 / 실제: 자기관리 잘하는 사람으로 보이고 싶음
 - 차별점(differentiators) 3개 이상, 그리고 경쟁상품 대비 비교표(competitorComparison)를 3~5행으로 작성하세요.
 - 구매 저항 요소(purchaseResistances) 5개 이상을 도출하고, 각 이미지가 이 불안을 해소하도록 설계하세요.
+- 상품 카테고리(productCategory)를 다음 중 하나로 판별하세요: 식품·건기식 / 의류·패션 / 뷰티·화장품 / 가전·전자 / 생활·주방 / 가구·인테리어 / 기타
+- 카테고리별 상세 정보 항목(detailInfoItems)을 4~6개 생성하세요. 각 항목은 "항목명: 이 상품에 맞는 실제 내용" 형태로 작성합니다.
+  · 식품·건기식 → 구성, 성분, 섭취법, 보관법, 유통기한, 주의사항
+  · 의류·패션 → 사이즈표, 소재, 핏 가이드, 세탁법, 제조국
+  · 뷰티·화장품 → 용량, 전성분, 사용법, 피부타입, 사용 시 주의
+  · 가전·전자 → 스펙, 크기, 무게, 소비전력, 구성품, 보증
+  · 생활·주방 → 소재, 크기, 용량, 사용법, 관리법
+  · 가구·인테리어 → 사이즈, 소재, 조립 여부, 관리법, 배송 정보
+  · 기타 → 제품 구성, 핵심 사양, 사용 방법, 보관 방법, 주의사항
+  '상세 정보' 섹션 이미지의 trustElement와 designLayout에는 이 항목들이 반영되어야 합니다. 확인 불가능한 값은 지어내지 말고 "상품 등록 정보 확인 필요"로 표기하세요.
 
 [STEP 2 — 전환 전략]
 - 심리 흐름: 인지 → 공감 → 문제 인식 → 해결책 발견 → 신뢰 형성 → 구매 확신 → 결제
@@ -740,11 +766,13 @@ ${productBriefGuide}
 - 이미지 기획은 정확히 ${count}장. 1번은 Hook, 마지막은 CTA.
 - 각 이미지마다 목적(purpose), 메인 카피, 서브 카피, 신뢰 요소(trustElement), 전환 트리거(trigger),
   디자인 레이아웃(designLayout: 구도와 카피 배치를 한 문장으로), 텍스트 배치(textPosition), 이미지 생성 프롬프트(visualPrompt)를 작성하세요.
+- 각 이미지마다 추천 높이(heightPx)를 600~1400 사이 숫자로 지정하세요. 정보가 많은 섹션(비교/상세 정보)은 길게, Hook/CTA는 900~1100 표준으로.
 
 [섹션 구성 템플릿 — 아래 순서를 반드시 따르세요]
 ${buildSectionTemplate(imageCount)}
 - 각 섹션의 role은 위 템플릿의 역할명을 그대로 사용하세요.
 - 셀링포인트 구간은 표현 방식이 절대 중복되면 안 됩니다(기능 → 감성 → 비교 → 수치·근거 → 사용 장면 순서로 서로 다른 각도).
+- '경쟁 대비' 섹션의 visualPrompt는 비교표가 올라갈 자리를 비워둔 차분한 배경으로 작성하세요: 제품은 상단 1/3에만 작게 배치하고, 하단 2/3는 깨끗한 단색 또는 부드러운 그라데이션 여백(clean empty space for a comparison table overlay). 비교표 자체는 앱이 캔버스로 직접 그리므로 이미지에 표를 그리라고 지시하지 마세요.
 - 한 이미지 = 하나의 설득 완결. 각 이미지는 단독으로 보더라도 구매 설득이 가능해야 합니다.
 - 1번 Hook은 반드시 shotType=model 입니다. 제품을 착용/사용한 강한 모델컷으로, 제품이 크게 보이고 첫인상이 강해야 합니다.
 - 1번 Hook의 visualPrompt에는 productBrief.heroDirection과 핵심특징 중 가장 강한 USP를 반영하세요.
@@ -815,9 +843,11 @@ ${bundleRules}
     { "item": "비교 항목", "competitor": "경쟁상품은 이렇다", "ours": "본 제품은 이렇다" }
   ],
   "purchaseResistances": ["저항1", "저항2", "저항3", "저항4", "저항5"],
+  "productCategory": "의류·패션",
+  "detailInfoItems": ["사이즈표: S/M/L 상세 치수는 상품 등록 정보 확인 필요", "소재: 코튼 100%", "세탁법: 찬물 단독 세탁"],
   "designSystem": { "tone": "프리미엄/미니멀/감성 등 1개", "colors": { "primary": "#hex", "secondary": "#hex", "accent": "#hex", "background": "#hex", "text": "#hex" } },
   "images": [
-    { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "shotType": "model", "purpose": "3초 안에 시선을 잡아 스크롤을 멈추게 한다", "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "trustElement": "신뢰 요소", "trigger": "감정적 보상", "designLayout": "하단 카피 영역 + 제품 중심 단일 포컬 구성", "textPosition": "bottom", "visualPrompt": "A premium Hook model cut with one fictional Korean model wearing or using the exact reference product, strong first impression, product large and clearly visible, designer-made detail-page hero scene ..." }
+    { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "shotType": "model", "purpose": "3초 안에 시선을 잡아 스크롤을 멈추게 한다", "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "trustElement": "신뢰 요소", "trigger": "감정적 보상", "designLayout": "하단 카피 영역 + 제품 중심 단일 포컬 구성", "heightPx": 1000, "textPosition": "bottom", "visualPrompt": "A premium Hook model cut with one fictional Korean model wearing or using the exact reference product, strong first impression, product large and clearly visible, designer-made detail-page hero scene ..." }
   ]
 }
 images 배열은 정확히 ${count}개여야 하며 1번은 Hook, 마지막은 CTA여야 합니다.
