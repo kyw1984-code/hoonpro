@@ -100,6 +100,32 @@ async function callKeywordTool(hintKeywords: string[]): Promise<{ ok: boolean; l
   }
 }
 
+// 브랜드/유통사 키워드 제외 목록 (소싱 불가 키워드) — 소문자·공백 제거 기준
+const BRAND_EXCLUDE = [
+  "나이키", "nike", "아디다스", "adidas", "뉴발란스", "newbalance", "푸마", "puma", "리복", "reebok",
+  "아식스", "asics", "미즈노", "mizuno", "휠라", "fila", "챔피언", "언더아머", "underarmour",
+  "카파", "kappa", "폴로", "polo", "라코스테", "lacoste", "타미힐피거", "tommyhilfiger",
+  "캘빈클라인", "calvinklein", "게스", "guess", "리바이스", "levis", "버버리", "burberry",
+  "구찌", "gucci", "샤넬", "chanel", "루이비통", "louisvuitton", "프라다", "prada",
+  "유니클로", "uniqlo", "스파오", "spao", "탑텐", "topten", "지오다노", "giordano",
+  "노스페이스", "northface", "컬럼비아", "columbia", "디스커버리", "discovery",
+  "아이더", "eider", "블랙야크", "blackyak", "코오롱", "kolon", "밀레", "millet", "네파", "nepa",
+  "mlb", "nba", "코베아", "kovea", "헬리녹스", "helinox", "스노우피크", "snowpeak",
+  "삼성", "samsung", "lg전자", "엘지", "애플", "apple", "아이폰", "iphone", "갤럭시", "galaxy",
+  "샤오미", "xiaomi", "필립스", "philips", "소니", "sony", "파나소닉", "panasonic",
+  "레노버", "lenovo", "에이수스", "asus", "캐논", "canon", "니콘", "nikon", "다이슨", "dyson",
+  "다이소", "daiso", "이케아", "ikea", "코스트코", "costco", "이마트", "emart", "홈플러스",
+  "쿠팡", "coupang", "지마켓", "gmarket", "11번가", "옥션", "auction", "티몬", "위메프",
+  "무신사", "musinsa", "올리브영", "oliveyoung", "알리익스프레스", "aliexpress", "테무", "temu",
+  "스타벅스", "starbucks", "락앤락", "locknlock", "쿠쿠", "cuckoo", "쿠첸", "테팔", "tefal",
+  "감사제", "빅세일", "브랜드위크",
+];
+
+function isBrandKeyword(keyword: string): boolean {
+  const norm = keyword.toLowerCase().replace(/\s+/g, "");
+  return BRAND_EXCLUDE.some(b => norm.includes(b));
+}
+
 const COMP_SCORE: Record<string, number> = { 낮음: 15, 중간: 50, 높음: 85 };
 
 function scoreKeyword(kw: any) {
@@ -144,15 +170,23 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  // 시드 자체가 브랜드 검색이면 브랜드 필터를 끈다 (예: "나이키 운동화")
+  const seedIsBrand = isBrandKeyword(seed);
+  const applyBrandFilter = (payload: any) =>
+    seedIsBrand ? payload : {
+      ...payload,
+      keywords: (payload.keywords || []).filter((k: any) => !isBrandKeyword(k.keyword)),
+    };
+
   const cacheKey = `kw:${seed.replace(/\s+/g, "")}`;
   const cached = await cacheGet(cacheKey);
   if (cached && cached.ageMs < 12 * 3600 * 1000) {
-    return res.status(200).json({ ...cached.payload, cached: true });
+    return res.status(200).json({ ...applyBrandFilter(cached.payload), cached: true });
   }
 
   const result = await callKeywordTool([seed]);
   if (!result.ok) {
-    if (cached) return res.status(200).json({ ...cached.payload, cached: true, stale: true });
+    if (cached) return res.status(200).json({ ...applyBrandFilter(cached.payload), cached: true, stale: true });
     return res.status(502).json({ error: result.error });
   }
 
@@ -165,8 +199,8 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
     .slice(0, 200);
 
   const payload = { seed, seedStat, keywords: related };
-  await cacheSet(cacheKey, payload);
-  return res.status(200).json(payload);
+  await cacheSet(cacheKey, payload); // 캐시에는 원본 저장, 필터는 응답 시 적용
+  return res.status(200).json(applyBrandFilter(payload));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
