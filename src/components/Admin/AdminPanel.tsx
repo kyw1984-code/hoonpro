@@ -21,9 +21,9 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-700',
-  approved: 'bg-green-100 text-green-700',
-  rejected: 'bg-red-100 text-red-700',
+  pending: 'bg-caution-soft text-caution',
+  approved: 'bg-positive-soft text-positive',
+  rejected: 'bg-critical-soft text-critical',
 };
 
 const DAILY_USAGE_LIMIT = 40;
@@ -121,11 +121,11 @@ export function AdminPanel() {
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       {/* 탭 네비게이션 */}
-      <div className="flex gap-1 mb-6 border-b border-slate-200">
+      <div className="flex gap-1 mb-6 border-b border-line">
         <button
           onClick={() => setTab('users')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            tab === 'users' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+            tab === 'users' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
           <Users className="w-4 h-4" /> 회원 관리
@@ -133,7 +133,7 @@ export function AdminPanel() {
         <button
           onClick={() => setTab('stats')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            tab === 'stats' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+            tab === 'stats' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
           <BarChart3 className="w-4 h-4" /> API 사용량 통계
@@ -141,7 +141,7 @@ export function AdminPanel() {
         <button
           onClick={() => setTab('config')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-            tab === 'config' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+            tab === 'config' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
           <ImageIcon className="w-4 h-4" /> 이미지 설정
@@ -163,7 +163,7 @@ export function AdminPanel() {
       />}
 
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm px-5 py-3 rounded-xl shadow-lg z-50">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-ink text-paper text-sm px-5 py-3 rounded-card shadow-raised z-50">
           {toast}
         </div>
       )}
@@ -190,10 +190,10 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
     <div>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-2">
-          <Users className="w-5 h-5 text-blue-600" />
-          <h2 className="text-lg font-bold text-slate-900">회원 관리 ({users.length})</h2>
+          <Users className="w-5 h-5 text-accent" />
+          <h2 className="text-lg font-semibold text-ink">회원 관리 ({users.length})</h2>
         </div>
-        <button onClick={fetchUsers} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 transition-colors">
+        <button onClick={fetchUsers} className="flex items-center gap-1.5 text-sm text-ink-2 hover:text-ink transition-colors">
           <RefreshCw className="w-4 h-4" /> 새로고침
         </button>
       </div>
@@ -205,8 +205,8 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                filter === f ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              className={`rounded-control px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                filter === f ? 'bg-accent text-paper' : 'bg-paper-2 text-ink-2 hover:bg-line'
               }`}
             >
               {f === 'all' ? '전체' : STATUS_LABEL[f]} ({counts[f]})
@@ -216,7 +216,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
         <button
           onClick={handleBulkApprove}
           disabled={actionLoading === 'bulk-approve' || counts.pending === 0}
-          className="flex items-center gap-1.5 px-4 py-1.5 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-full transition-colors"
+          className="flex items-center gap-1.5 px-4 py-1.5 bg-positive hover:bg-positive disabled:opacity-40 disabled:cursor-not-allowed text-paper text-sm font-medium rounded-full transition-colors"
         >
           <CheckCheck className="w-4 h-4" />
           대기 회원 일괄 승인 ({counts.pending})
@@ -224,25 +224,25 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
       </div>
 
       {loading ? (
-        <div className="text-center py-16 text-slate-400">불러오는 중...</div>
+        <div className="text-center py-16 text-ink-3">불러오는 중...</div>
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-slate-400">회원이 없습니다.</div>
+        <div className="text-center py-16 text-ink-3">회원이 없습니다.</div>
       ) : (
-        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="bg-paper rounded-card border border-line overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-paper-2 border-b border-line">
               <tr>
                 {['성함', '연락처', '이메일', '상태', '오늘 사용', '가입일', '관리'].map(h => (
-                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">{h}</th>
+                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-ink-2 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-line">
               {filtered.map(user => (
-                <tr key={user.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 font-medium text-slate-900">{user.name}</td>
-                  <td className="px-4 py-3 text-slate-600">{user.phone}</td>
-                  <td className="px-4 py-3 text-slate-600">{user.email}</td>
+                <tr key={user.id} className="hover:bg-paper-2 transition-colors">
+                  <td className="px-4 py-3 font-medium text-ink">{user.name}</td>
+                  <td className="px-4 py-3 text-ink-2">{user.phone}</td>
+                  <td className="px-4 py-3 text-ink-2">{user.email}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLOR[user.status]}`}>
                       {user.status === 'pending' && <Clock className="w-3 h-3" />}
@@ -251,20 +251,20 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
                       {STATUS_LABEL[user.status]}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
+                  <td className="px-4 py-3 text-ink-2">
                     <div className="flex items-center gap-2">
                       <span>{user.today_calls} / {DAILY_USAGE_LIMIT}</span>
                       <button
                         onClick={() => handleReset(user.id, user.name)}
                         disabled={actionLoading === user.id + 'reset' || user.today_calls === 0}
-                        className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed text-slate-700 text-xs rounded-md transition-colors"
+                        className="px-2 py-0.5 bg-paper-2 hover:bg-line disabled:opacity-40 disabled:cursor-not-allowed text-ink text-xs rounded-control transition-colors"
                         title="오늘 사용 횟수 리셋"
                       >
                         리셋
                       </button>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-slate-500 text-xs">
+                  <td className="px-4 py-3 text-ink-2 text-xs">
                     {new Date(user.created_at).toLocaleDateString('ko-KR')}
                   </td>
                   <td className="px-4 py-3">
@@ -273,7 +273,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
                         <button
                           onClick={() => handleAction(user.id, 'approve')}
                           disabled={actionLoading === user.id + 'approve'}
-                          className="px-3 py-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-xs rounded-lg transition-colors"
+                          className="px-3 py-1 bg-positive hover:bg-positive disabled:opacity-50 text-paper text-xs rounded-control transition-colors"
                         >
                           승인
                         </button>
@@ -282,7 +282,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
                         <button
                           onClick={() => handleAction(user.id, 'reject')}
                           disabled={actionLoading === user.id + 'reject'}
-                          className="px-3 py-1 bg-red-500 hover:bg-red-600 disabled:opacity-50 text-white text-xs rounded-lg transition-colors"
+                          className="px-3 py-1 bg-critical hover:bg-critical disabled:opacity-50 text-paper text-xs rounded-control transition-colors"
                         >
                           거절
                         </button>
@@ -377,48 +377,48 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
   const costUsd = COST_TABLE[imageModel]?.[imageQuality] ?? 0;
   const costKrw = Math.round(costUsd * USD_TO_KRW);
 
-  if (loading) return <div className="text-center py-16 text-slate-400">불러오는 중...</div>;
+  if (loading) return <div className="text-center py-16 text-ink-3">불러오는 중...</div>;
 
   return (
     <div className="max-w-2xl">
       <div className="flex items-center gap-2 mb-2">
-        <ImageIcon className="w-5 h-5 text-blue-600" />
-        <h2 className="text-lg font-bold text-slate-900">AI 생성 모델 설정</h2>
+        <ImageIcon className="w-5 h-5 text-accent" />
+        <h2 className="text-lg font-semibold text-ink">AI 생성 모델 설정</h2>
       </div>
-      <p className="text-sm text-slate-500 mb-6">선택한 모델 계열은 <b>모든 사용자</b>의 카피, 기획안, 이미지 생성에 동일하게 적용됩니다. GPT 선택 시 GPT, Gemini 선택 시 Gemini로 전체 작업이 처리됩니다.</p>
+      <p className="text-sm text-ink-2 mb-6">선택한 모델 계열은 <b>모든 사용자</b>의 카피, 기획안, 이미지 생성에 동일하게 적용됩니다. GPT 선택 시 GPT, Gemini 선택 시 Gemini로 전체 작업이 처리됩니다.</p>
 
       {!migrated && (
-        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-700 text-sm rounded-xl px-4 py-3 mb-5">
+        <div className="flex items-start gap-2 bg-caution-soft border border-caution/30 text-caution text-sm rounded-card px-4 py-3 mb-5">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
           <span><b>app_config 테이블이 없습니다.</b> Supabase에서 <code>supabase-schema.sql</code> 마이그레이션을 먼저 실행하세요. (지금은 기본값으로 동작합니다.)</span>
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5">
+      <div className="bg-paper rounded-card border border-line p-6 space-y-5">
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">AI 모델 계열</label>
+          <label className="block text-sm font-medium text-ink mb-2">AI 모델 계열</label>
           <div className="space-y-2">
             {MODEL_OPTIONS.map(opt => (
               <button
                 key={opt.value}
                 onClick={() => setImageModel(opt.value)}
-                className={`w-full text-left p-3 rounded-xl border transition-all ${imageModel === opt.value ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600' : 'border-slate-200 hover:border-blue-300'}`}
+                className={`w-full text-left p-3 rounded-card border transition-all ${imageModel === opt.value ? 'border-accent bg-accent-soft ring-1 ring-accent' : 'border-line hover:border-accent-line'}`}
               >
-                <div className={`font-bold text-sm ${imageModel === opt.value ? 'text-blue-700' : 'text-slate-800'}`}>{opt.label}</div>
-                <div className="text-xs text-slate-500">{opt.desc}</div>
+                <div className={`font-semibold text-sm ${imageModel === opt.value ? 'text-accent' : 'text-ink'}`}>{opt.label}</div>
+                <div className="text-xs text-ink-2">{opt.desc}</div>
               </button>
             ))}
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">품질</label>
+          <label className="block text-sm font-medium text-ink mb-2">품질</label>
           <div className="grid grid-cols-3 gap-2">
             {QUALITY_OPTIONS.map(opt => (
               <button
                 key={opt.value}
                 onClick={() => setImageQuality(opt.value)}
-                className={`p-3 rounded-xl border text-sm font-medium transition-all ${imageQuality === opt.value ? 'border-blue-600 bg-blue-50 text-blue-700 ring-1 ring-blue-600' : 'border-slate-200 text-slate-700 hover:border-blue-300'}`}
+                className={`p-3 rounded-card border text-sm font-medium transition-all ${imageQuality === opt.value ? 'border-accent bg-accent-soft text-accent ring-1 ring-accent' : 'border-line text-ink hover:border-accent-line'}`}
               >
                 {opt.label}
               </button>
@@ -426,35 +426,20 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
           </div>
         </div>
 
-        <div className="bg-slate-50 rounded-xl px-4 py-3 text-sm">
-          <span className="text-slate-500">장당 예상 비용 (세로 1024×1536 기준): </span>
-          <span className="font-bold text-slate-900">약 ${costUsd.toFixed(3)} / 장 (₩{costKrw.toLocaleString('ko-KR')})</span>
-          <p className="text-xs text-slate-400 mt-1">12~15장 1페이지 기준 약 ${(costUsd * 13).toFixed(2)} 내외. GPT 모델은 OpenAI로, Gemini 모델은 Gemini API로 카피/기획/이미지가 모두 처리됩니다.</p>
-        </div>
-
-        <div className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 px-4 py-3">
-          <div>
-            <div className="text-sm font-bold text-slate-900">AI 통합 텍스트 실험 허용</div>
-            <p className="mt-1 text-xs text-slate-500">OFF이면 제작 화면에서 실험 모드가 잠기고 안전 모드만 사용할 수 있습니다.</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setAiIntegratedTextEnabled(v => !v)}
-            className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${aiIntegratedTextEnabled ? 'bg-blue-600' : 'bg-slate-300'}`}
-            aria-pressed={aiIntegratedTextEnabled}
-          >
-            <span className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${aiIntegratedTextEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
-          </button>
+        <div className="bg-paper-2 rounded-card px-4 py-3 text-sm">
+          <span className="text-ink-2">장당 예상 비용 (세로 1024×1536 기준): </span>
+          <span className="font-semibold text-ink">약 ${costUsd.toFixed(3)} / 장 (₩{costKrw.toLocaleString('ko-KR')})</span>
+          <p className="text-xs text-ink-3 mt-1">12~15장 1페이지 기준 약 ${(costUsd * 13).toFixed(2)} 내외. GPT 모델은 OpenAI로, Gemini 모델은 Gemini API로 카피/기획/이미지가 모두 처리됩니다.</p>
         </div>
 
         <button
           onClick={handleSave}
           disabled={saving}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-medium py-3 rounded-xl flex items-center justify-center gap-2 transition-colors"
+          className="w-full bg-accent hover:bg-accent-hover disabled:bg-line-strong text-paper font-medium py-3 rounded-card flex items-center justify-center gap-2 transition-colors"
         >
           {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> 저장 중...</> : <><Save className="w-4 h-4" /> 저장</>}
         </button>
-        <p className="text-xs text-slate-400 text-center">변경 후 모든 사용자에게 약 45초 이내 반영됩니다.</p>
+        <p className="text-xs text-ink-3 text-center">변경 후 모든 사용자에게 약 45초 이내 반영됩니다.</p>
       </div>
     </div>
   );

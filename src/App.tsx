@@ -8,18 +8,35 @@ import { SourcingFinder } from './components/SourcingFinder';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { ProductNameGenerator } from './components/ProductName/ProductNameGenerator';
+import { RankTracker } from './components/RankTracker';
+import { ReviewAnalyzer } from './components/ReviewAnalyzer';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdminPanel } from './components/Admin/AdminPanel';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp } from 'lucide-react';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText } from 'lucide-react';
 import { getUser, removeToken, type AuthUser } from './lib/auth';
 
-type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'analyzer' | 'productname' | 'admin';
+type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'productname' | 'admin';
 
+type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
+
+const TABS: TabDef[] = [
+  { id: 'thumbnail', label: '썸네일 제작', icon: ImageIcon },
+  { id: 'detail', label: '상세페이지 제작', icon: LayoutTemplate },
+  { id: 'sourcing', label: '훈프로 소싱AI', icon: TrendingUp },
+  { id: 'ranktracker', label: '순위 추적', icon: ListOrdered },
+  { id: 'review', label: '리뷰 분석', icon: MessageSquareText },
+  { id: 'analyzer', label: '광고 성과 분석', icon: BarChart3 },
+  { id: 'productname', label: '상품명 제조기', icon: Tag },
+];
+
+// 밑줄형 탭 — 개수가 늘어도 줄바꿈으로 무너지지 않고 헤더 높이가 일정하게 유지된다.
 const getTabButtonClass = (active: boolean): string => (
-  `flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold transition-all lg:text-sm ${
-    active ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
+  `relative flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-[13px] transition-colors -mb-px ${
+    active
+      ? 'border-ink text-ink font-semibold'
+      : 'border-transparent text-ink-2 font-medium hover:text-ink'
   }`
 );
 
@@ -48,76 +65,59 @@ export default function App() {
 
   return (
     <ApiKeyCheck>
-      <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-          <div className="max-w-7xl mx-auto px-6 py-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex shrink-0 items-center gap-2">
-              <div className="w-8 h-8 shrink-0 bg-blue-600 rounded-lg flex items-center justify-center">
-                <LayoutTemplate className="w-5 h-5 text-white" />
+      <div className="min-h-screen bg-paper-2 flex flex-col font-sans">
+        <header className="bg-paper border-b border-line sticky top-0 z-20">
+          {/* 상단 줄 — 브랜드와 계정 */}
+          <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-4 px-6">
+            <div className="flex shrink-0 items-center gap-2.5">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control bg-ink">
+                <LayoutTemplate className="h-4 w-4 text-paper" />
               </div>
-              <h1 className="text-lg font-bold text-slate-900 tracking-tight lg:text-xl">쇼크트리 훈프로 AI 자동화 프로그램</h1>
+              <h1 className="truncate text-[15px] font-semibold tracking-tight text-ink">
+                쇼크트리 훈프로 <span className="text-ink-3 font-medium">AI 자동화</span>
+              </h1>
             </div>
 
-            <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center">
-              {/* 탭 네비게이션 */}
-              <div className="grid w-full grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 sm:grid-cols-3 lg:grid-cols-6 xl:w-auto">
-                <button
-                  onClick={() => setActiveTab('thumbnail')}
-                  className={getTabButtonClass(activeTab === 'thumbnail')}
-                >
-                  <ImageIcon className="w-4 h-4 shrink-0" />썸네일 제작
-                </button>
-                <button
-                  onClick={() => setActiveTab('detail')}
-                  className={getTabButtonClass(activeTab === 'detail')}
-                >
-                  <LayoutTemplate className="w-4 h-4 shrink-0" />상세페이지 제작
-                </button>
-                <button
-                  onClick={() => setActiveTab('sourcing')}
-                  className={getTabButtonClass(activeTab === 'sourcing')}
-                >
-                  <TrendingUp className="w-4 h-4 shrink-0" />소싱 파인더
-                </button>
-                <button
-                  onClick={() => setActiveTab('analyzer')}
-                  className={getTabButtonClass(activeTab === 'analyzer')}
-                >
-                  <BarChart3 className="w-4 h-4 shrink-0" />광고 성과 분석
-                </button>
-                <button
-                  onClick={() => setActiveTab('productname')}
-                  className={getTabButtonClass(activeTab === 'productname')}
-                >
-                  <Tag className="w-4 h-4 shrink-0" />상품명 제조기
-                </button>
-                {user.isAdmin && (
-                  <button
-                    onClick={() => setActiveTab('admin')}
-                    className={getTabButtonClass(activeTab === 'admin')}
-                  >
-                    <ShieldCheck className="w-4 h-4 shrink-0" />관리자
-                  </button>
-                )}
-              </div>
-
-              {/* 사용자 정보 */}
-              <div className="flex shrink-0 items-center justify-end gap-3 xl:border-l xl:border-slate-200 xl:pl-3">
-                {!user.isAdmin && remainingCalls !== null && (
-                  <div className="flex items-center gap-1 whitespace-nowrap text-xs text-slate-500">
-                    <Zap className="w-3.5 h-3.5 text-amber-500" />
-                    <span>오늘 {remainingCalls}회 남음</span>
-                  </div>
-                )}
-                <span className="whitespace-nowrap text-sm text-slate-700 font-medium">{user.name}</span>
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-1 whitespace-nowrap text-xs text-slate-400 hover:text-red-500 transition-colors"
-                >
-                  <LogOut className="w-3.5 h-3.5" />로그아웃
-                </button>
-              </div>
+            <div className="flex shrink-0 items-center gap-3">
+              {!user.isAdmin && remainingCalls !== null && (
+                <span className="hidden items-center gap-1.5 rounded-full border border-line bg-paper-2 px-2.5 py-1 text-xs text-ink-2 sm:inline-flex">
+                  <Zap className="h-3.5 w-3.5 text-caution" />
+                  <span className="tabular">오늘 {remainingCalls}회</span>
+                </span>
+              )}
+              <span className="hidden whitespace-nowrap text-[13px] font-medium text-ink sm:inline">{user.name}</span>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-1 whitespace-nowrap rounded-control px-2 py-1 text-xs text-ink-3 transition-colors hover:bg-paper-2 hover:text-ink"
+              >
+                <LogOut className="h-3.5 w-3.5" />로그아웃
+              </button>
             </div>
+          </div>
+
+          {/* 아래 줄 — 탭 */}
+          <div className="border-t border-line">
+            <nav className="mx-auto flex max-w-[1240px] gap-1 overflow-x-auto px-6" aria-label="주요 기능">
+              {TABS.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  aria-current={activeTab === tab.id ? 'page' : undefined}
+                  className={getTabButtonClass(activeTab === tab.id)}
+                >
+                  <tab.icon className="h-4 w-4 shrink-0" />{tab.label}
+                </button>
+              ))}
+              {user.isAdmin && (
+                <button
+                  onClick={() => setActiveTab('admin')}
+                  aria-current={activeTab === 'admin' ? 'page' : undefined}
+                  className={`${getTabButtonClass(activeTab === 'admin')} ml-auto`}
+                >
+                  <ShieldCheck className="h-4 w-4 shrink-0" />관리자
+                </button>
+              )}
+            </nav>
           </div>
         </header>
 
@@ -125,6 +125,8 @@ export default function App() {
           {activeTab === 'thumbnail' && <ThumbnailGenerator />}
           {activeTab === 'detail' && <DetailPlanner />}
           {activeTab === 'sourcing' && <SourcingFinder />}
+          {activeTab === 'ranktracker' && <RankTracker />}
+          {activeTab === 'review' && <ReviewAnalyzer />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
           {activeTab === 'productname' && <ProductNameGenerator />}
           {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
