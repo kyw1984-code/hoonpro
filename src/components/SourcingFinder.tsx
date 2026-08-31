@@ -11,7 +11,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Search, DollarSign, ChevronRight, Loader2, ExternalLink, Sparkles,
   Download, X, ArrowUpDown, KeyRound, RefreshCw, Star, Calculator,
-  TrendingUp, Home, Rocket, Store, LayoutDashboard, Zap, BarChart3,
+  TrendingUp, Home, Rocket, Store, LayoutDashboard, Zap, BarChart3, HelpCircle,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getToken } from '../lib/auth';
@@ -75,6 +75,7 @@ interface Market {
 // ─── 공통 헬퍼 ────────────────────────────────────────────────────────────────
 const FAV_KEY = 'sourcingFavKeywords';
 const PURCHASE_POPUP_HIDE_KEY = 'purchase_popup_hide_date';
+const GUIDE_HIDE_KEY = 'sourcing_guide_hide'; // 'forever' 또는 'YYYY-MM-DD'(오늘 하루 닫기)
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -130,6 +131,24 @@ export function SourcingFinder() {
   // 관심 키워드 리포트 (크론이 축적한 리뷰 증가 속도)
   const [favReport, setFavReport] = useState<any[] | null>(null);
   const [favReportLoading, setFavReportLoading] = useState(false);
+  // 사용 방법 안내 팝업
+  const [showGuide, setShowGuide] = useState(false);
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(GUIDE_HIDE_KEY);
+      const today = new Date().toISOString().slice(0, 10);
+      if (v !== 'forever' && v !== today) setShowGuide(true);
+    } catch { /* localStorage 접근 실패 시 팝업 생략 */ }
+  }, []);
+
+  const closeGuide = (mode: 'today' | 'forever' | 'plain') => {
+    try {
+      if (mode === 'forever') localStorage.setItem(GUIDE_HIDE_KEY, 'forever');
+      else if (mode === 'today') localStorage.setItem(GUIDE_HIDE_KEY, new Date().toISOString().slice(0, 10));
+    } catch { /* 저장 실패해도 닫기는 동작 */ }
+    setShowGuide(false);
+  };
 
   // 필터/정렬 (키워드)
   const [sortKey, setSortKey] = useState<'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('opportunityScore');
@@ -519,6 +538,10 @@ export function SourcingFinder() {
                 showFavorites ? 'border-ink bg-ink text-paper' : 'border-line text-ink-2 hover:border-line-strong hover:text-ink'
               }`}>
               <Star className={`h-3.5 w-3.5 ${showFavorites ? 'fill-paper' : ''}`} />관심 키워드 {favCount > 0 && `(${favCount})`}
+            </button>
+            <button onClick={() => setShowGuide(true)}
+              className="flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
+              <HelpCircle className="w-3.5 h-3.5" />사용 방법
             </button>
             <button onClick={() => { setSelectedProduct(null); setIsCalcOpen(true); }}
               className="flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
@@ -1335,6 +1358,59 @@ export function SourcingFinder() {
                   <button onClick={() => {
                     const p = popupProduct; setPopupProduct(null); if (p) proceed1688(p);
                   }} className="flex-1 py-3 bg-accent hover:bg-accent-hover text-paper rounded-card text-xs font-semibold transition-all">이동하기</button>
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+
+        {/* ══════════ 사용 방법 안내 팝업 ══════════ */}
+        <AnimatePresence>
+          {showGuide && (
+            <>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => closeGuide('plain')}
+                className="fixed inset-0 z-[80] bg-ink/50 backdrop-blur-sm" />
+              <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                className="fixed inset-0 m-auto z-[90] w-[92%] max-w-[540px] h-fit max-h-[88vh] bg-paper rounded-panel border border-line shadow-overlay overflow-y-auto flex flex-col">
+                <div className="px-7 pt-7 pb-2 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-widest text-accent">How to use</p>
+                    <h3 className="text-xl font-semibold text-ink mt-1.5">훈프로 소싱AI 사용 방법</h3>
+                  </div>
+                  <button onClick={() => closeGuide('plain')} className="p-1.5 text-ink-3 hover:text-ink-2 hover:bg-paper-2 rounded-full transition-all">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="px-7 pb-4 pt-2 flex flex-col gap-3">
+                  {[
+                    { n: '1', title: '키워드 찾기', desc: '시드 키워드가 떠오르지 않으면 월별 시즌 칩(✓ 표시된 달이 지금 준비할 달)이나 카테고리를 누르세요. 아이디어가 있으면 검색창에 직접 입력합니다.' },
+                    { n: '2', title: '키워드 고르기', desc: '검색량은 많고 광고경쟁은 낮은(기회점수·Great 등급) 키워드가 좋은 키워드입니다. [트렌드]를 누르면 매년 몇 월에 뜨는 키워드인지와 소싱 적기가 나옵니다.' },
+                    { n: '3', title: '쿠팡 분석', desc: '[쿠팡 분석]을 누르면 실시간 수집으로 리뷰 수·로켓 비중·진입 판정을 보여줍니다. 숨은 보석 필터를 켜면 판매자는 적은데 잘 팔리는 상품만 남습니다.' },
+                    { n: '4', title: '관심 키워드 저장', desc: '괜찮은 키워드는 ★을 눌러 저장하세요. 매일 새벽 자동으로 재수집되고, 관심 키워드 탭의 리포트에서 리뷰 증가 속도(≒판매 속도)를 확인할 수 있습니다.' },
+                    { n: '5', title: '소싱과 마진 확인', desc: '상품 카드의 [1688]로 중국 공급처를 이미지 검색하고, 마진 계산기로 판매가·원가·수수료를 넣어 수익성을 검증한 뒤 소싱을 결정합니다.' },
+                  ].map(s => (
+                    <div key={s.n} className="flex items-start gap-3 rounded-card border border-line bg-paper-2 p-3.5">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink text-[12px] font-semibold text-paper">{s.n}</span>
+                      <div>
+                        <p className="text-[13px] font-semibold text-ink">{s.title}</p>
+                        <p className="mt-0.5 text-[12px] leading-relaxed text-ink-2">{s.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-[11px] text-ink-3">
+                    이 안내는 상단의 [사용 방법] 버튼으로 언제든 다시 볼 수 있습니다. 소싱→입고→판매까지 1~2개월 — 항상 다음 달 팔릴 상품을 준비하세요.
+                  </p>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-line px-7 py-4">
+                  <button onClick={() => closeGuide('forever')}
+                    className="text-[12px] font-medium text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline">
+                    다시 열지 않기
+                  </button>
+                  <button onClick={() => closeGuide('today')}
+                    className="rounded-control bg-ink px-4 py-2 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90">
+                    오늘 하루 닫기
+                  </button>
                 </div>
               </motion.div>
             </>
