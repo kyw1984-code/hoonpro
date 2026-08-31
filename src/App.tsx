@@ -8,14 +8,16 @@ import { SourcingFinder } from './components/SourcingFinder';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { ProductNameGenerator } from './components/ProductName/ProductNameGenerator';
+import { RankTracker } from './components/RankTracker';
+import { ReviewAnalyzer } from './components/ReviewAnalyzer';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdminPanel } from './components/Admin/AdminPanel';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp } from 'lucide-react';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText } from 'lucide-react';
 import { getUser, removeToken, type AuthUser } from './lib/auth';
 
-type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'analyzer' | 'productname' | 'admin';
+type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'productname' | 'admin';
 
 type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
 
@@ -23,6 +25,8 @@ const TABS: TabDef[] = [
   { id: 'thumbnail', label: '썸네일 제작', icon: ImageIcon },
   { id: 'detail', label: '상세페이지 제작', icon: LayoutTemplate },
   { id: 'sourcing', label: '훈프로 소싱AI', icon: TrendingUp },
+  { id: 'ranktracker', label: '순위 추적', icon: ListOrdered },
+  { id: 'review', label: '리뷰 분석', icon: MessageSquareText },
   { id: 'analyzer', label: '광고 성과 분석', icon: BarChart3 },
   { id: 'productname', label: '상품명 제조기', icon: Tag },
 ];
@@ -121,6 +125,8 @@ export default function App() {
           {activeTab === 'thumbnail' && <ThumbnailGenerator />}
           {activeTab === 'detail' && <DetailPlanner />}
           {activeTab === 'sourcing' && <SourcingFinder />}
+          {activeTab === 'ranktracker' && <RankTracker />}
+          {activeTab === 'review' && <ReviewAnalyzer />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
           {activeTab === 'productname' && <ProductNameGenerator />}
           {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
