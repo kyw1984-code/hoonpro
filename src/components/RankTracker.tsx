@@ -17,9 +17,17 @@ const BADGE_BASE = 'inline-flex items-center rounded-control border px-2 py-0.5 
 export function RankTracker() {
   const [watches, setWatches] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [checking, setChecking] = useState<string | null>(null);
   const [kw, setKw] = useState('');
   const [product, setProduct] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
+
+  const notifyUsage = (remaining: any) => {
+    if (typeof remaining === 'number') {
+      window.dispatchEvent(new CustomEvent('usage-updated', { detail: { remaining } }));
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -38,18 +46,45 @@ export function RankTracker() {
   useEffect(() => { load(); }, []);
 
   const add = async () => {
-    if (!kw.trim() || !product.trim()) return;
+    if (!kw.trim() || !product.trim() || adding) return;
     setMsg(null);
+    setAdding(true);
     try {
       const params = new URLSearchParams({ type: 'rankwatch', action: 'add', keyword: kw.trim(), product: product.trim() });
       const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok || data.error) { setMsg(data.error || '등록 실패'); return; }
+      notifyUsage(data.remaining);
       setKw(''); setProduct('');
-      setMsg('등록 완료 — 매일 새벽 자동으로 순위가 기록됩니다.');
+      if (data.rankChecked) {
+        setMsg(data.currentRank ? `등록 완료 — 현재 ${data.currentRank}위입니다. 매일 새벽 자동으로 기록됩니다.` : '등록 완료 — 현재 60위(1페이지) 밖입니다. 매일 새벽 자동으로 기록됩니다.');
+      } else {
+        setMsg(`등록 완료 — ${data.error || '순위는 다음 자동 수집 때 기록됩니다.'}`);
+      }
       load();
     } catch (e: any) {
       setMsg(e.message);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  // 지금 확인: 캐시가 3시간 이내면 캐시로, 아니면 실시간 수집(사용 1회 차감)
+  const checkNow = async (keyword: string, productId: string) => {
+    const key = `${keyword}:${productId}`;
+    setChecking(key);
+    setMsg(null);
+    try {
+      const res = await fetch(`/api/sourcing?type=rankwatch&action=check&keyword=${encodeURIComponent(keyword)}&product=${encodeURIComponent(productId)}`,
+        { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || data.error) setMsg(data.error || '순위 확인 실패');
+      else notifyUsage(data.remaining);
+      load();
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setChecking(null);
     }
   };
 
@@ -77,9 +112,9 @@ export function RankTracker() {
           <input value={product} onChange={e => setProduct(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
             placeholder="상품 URL 또는 상품번호 (coupang.com/vp/products/...)"
             className="flex-[2] rounded-control border border-line bg-paper px-3 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-accent" />
-          <button onClick={add} disabled={!kw.trim() || !product.trim()}
-            className="rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
-            등록
+          <button onClick={add} disabled={!kw.trim() || !product.trim() || adding}
+            className="flex items-center justify-center gap-1.5 rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
+            {adding ? <><Loader2 className="h-4 w-4 animate-spin" />순위 확인 중...</> : '등록'}
           </button>
         </div>
         {msg && <p className={`mt-2.5 text-[12px] ${msg.includes('완료') ? 'text-positive' : 'text-critical'}`}>{msg}</p>}
@@ -107,15 +142,12 @@ export function RankTracker() {
           <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
             {watches.map((w: any) => {
               const trail = (w.history || []).slice(-10).map((o: any) => (o.rank === null ? '밖' : `${o.rank}`)).join(' → ');
+              const key = `${w.keyword}:${w.product_id}`;
               return (
-                <div key={`${w.keyword}:${w.product_id}`} className="rounded-card border border-line bg-paper-2 p-4">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[13px] font-semibold text-ink">"{w.keyword}"</span>
-                    <a href={`https://www.coupang.com/vp/products/${w.product_id}`} target="_blank" rel="noopener noreferrer"
-                      className="min-w-0 max-w-[45%] truncate text-[12px] text-ink-2 hover:text-accent">
-                      {w.product_name || `상품 ${w.product_id}`}
-                    </a>
-                    <div className="ml-auto flex items-center gap-2">
+                <div key={key} className="rounded-card border border-line bg-paper-2 p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 text-[13px] font-semibold text-ink">"{w.keyword}"</span>
+                    <div className="ml-auto flex shrink-0 items-center gap-2">
                       {w.latestRank !== undefined && w.latestRank !== null ? (
                         <span className="text-[16px] font-semibold tabular-nums text-ink">{w.latestRank}위</span>
                       ) : w.latestAt ? (
@@ -128,12 +160,21 @@ export function RankTracker() {
                           {w.delta > 0 ? `▲${w.delta}` : `▼${Math.abs(w.delta)}`}
                         </span>
                       )}
+                      <button onClick={() => checkNow(w.keyword, w.product_id)} disabled={checking !== null} title="지금 순위 즉시 확인 (최근 3시간 내 수집이 없으면 사용 1회 차감)"
+                        className="flex items-center gap-1 rounded-control border border-line px-2 py-1 text-[10px] font-semibold text-ink-2 hover:border-line-strong hover:text-ink disabled:opacity-50">
+                        <RefreshCw className={`h-3 w-3 ${checking === key ? 'animate-spin' : ''}`} />지금 확인
+                      </button>
                       <button onClick={() => remove(w.keyword, w.product_id)} title="추적 해제"
                         className="rounded-control p-1 text-ink-3 hover:bg-paper hover:text-critical">
                         <X className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
+                  <a href={`https://www.coupang.com/vp/products/${w.product_id}`} target="_blank" rel="noopener noreferrer"
+                    className="mt-1.5 block text-[12px] text-ink-2 hover:text-accent">
+                    <span className="mr-1.5 rounded-control bg-paper px-1.5 py-0.5 font-mono text-[10px] text-ink-3 ring-1 ring-line">#{w.product_id}</span>
+                    <span className="align-middle">{w.product_name || '상품명은 첫 수집 시 자동으로 채워집니다'}</span>
+                  </a>
                   {trail && <p className="mt-2 text-[11px] tabular-nums text-ink-3">순위 추이: {trail}위</p>}
                   {w.latestAt && (
                     <p className="mt-0.5 text-[10px] text-ink-3">

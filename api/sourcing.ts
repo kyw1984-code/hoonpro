@@ -882,7 +882,8 @@ async function recordRankObservations(keyword: string, parsed: ParsedProduct[]):
       .eq("keyword", keyword);
     if (!watches || watches.length === 0) return;
     const organic = parsed.filter(p => !p.isAd);
-    const rows = [...new Set(watches.map(w => String(w.product_id)))].map(pid => {
+    const pids = [...new Set(watches.map(w => String(w.product_id)))];
+    const rows = pids.map(pid => {
       const organicIdx = organic.findIndex(p => p.productId === pid);
       const found = parsed.find(p => p.productId === pid);
       return {
@@ -894,7 +895,63 @@ async function recordRankObservations(keyword: string, parsed: ParsedProduct[]):
       };
     });
     await supabase.from("sourcing_rank_obs").insert(rows);
+    // URL만으로 등록되어 상품명이 없는 항목은 수집 결과에서 이름을 채워준다
+    for (const pid of pids) {
+      const found = parsed.find(p => p.productId === pid);
+      if (found?.productName) {
+        await supabase.from("sourcing_rank_watch")
+          .update({ product_name: found.productName.slice(0, 200) })
+          .eq("product_id", pid)
+          .is("product_name", null);
+      }
+    }
   } catch { /* 순위 기록 실패는 무시 */ }
+}
+
+// 지금 즉시 순위 확인: 최근 캐시가 있으면 캐시로, 없으면 실시간 수집(사용 한도 포함) 후 기록
+async function checkRankNow(keyword: string, productId: string, decoded: any): Promise<{
+  rankChecked: boolean; currentRank?: number | null; error?: string; remaining?: number | null;
+}> {
+  const cacheKey = `cp:v5:${keyword.replace(/\s+/g, "")}`;
+  const cached = await cacheGet(cacheKey);
+  let products: ParsedProduct[] | null = null;
+  let remaining: number | null = null;
+
+  if (cached && cached.ageMs < 3 * 3600 * 1000) {
+    products = cached.payload?.products || null;
+  } else {
+    if (!BRIGHTDATA_API_TOKEN) return { rankChecked: false, error: "Bright Data 미설정" };
+    // 신규 수집은 쿠팡 분석과 동일하게 일일 한도에 포함
+    if (!decoded?.isAdmin && supabase) {
+      try {
+        const today = new Date().toISOString().split("T")[0];
+        const { data, error } = await supabase.rpc("increment_usage", {
+          p_user_id: decoded.userId, p_date: today, p_limit: DAILY_LIMIT,
+        });
+        if (!error && data?.exceeded) return { rankChecked: false, error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다. 내일 새벽 자동 수집 시 기록됩니다.` };
+        if (!error && typeof data?.remaining === "number") remaining = data.remaining;
+      } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
+    }
+    const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
+    const result = await fetchViaUnlocker(url);
+    if (result.ok) {
+      const p = parseCoupangSearch(result.html!);
+      if (p.products.length > 0) {
+        products = p.products;
+        if (p.products.length >= 5) await cacheSet(cacheKey, { products: p.products, totalCount: p.totalCount });
+        await recordObservations(keyword, p.products);
+      }
+    }
+    if (!products && cached) products = cached.payload?.products || null;
+  }
+
+  if (!products || products.length === 0) {
+    return { rankChecked: false, error: "검색 결과를 수집하지 못했습니다. 잠시 후 다시 시도해주세요.", remaining };
+  }
+  await recordRankObservations(keyword, products);
+  const organic = products.filter(p => !p.isAd);
+  const idx = organic.findIndex(p => p.productId === productId);
+  return { rankChecked: true, currentRank: idx >= 0 ? idx + 1 : null, remaining };
 }
 
 async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded: any) {
@@ -919,10 +976,19 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
       .from("sourcing_rank_watch")
       .upsert({ user_id: userId, keyword, product_id: productId, product_name: productName || null });
     if (error) return res.status(500).json({ error: "순위 추적 등록 실패 (Supabase에 sourcing_rank_watch 테이블을 생성했는지 확인해주세요)" });
-    // 이미 수집된 캐시가 있으면 현재 순위를 즉시 기록해준다
-    const cached = await cacheGet(`cp:v5:${keyword.replace(/\s+/g, "")}`);
-    if (cached?.payload?.products) await recordRankObservations(keyword, cached.payload.products);
-    return res.status(200).json({ ok: true, productId });
+    // 등록 즉시 현재 순위를 실시간으로 확인해 기록 (캐시 없으면 지금 수집)
+    const now = await checkRankNow(keyword, productId, decoded);
+    return res.status(200).json({ ok: true, productId, ...now });
+  }
+
+  // 지금 확인: 기존 추적 항목의 순위를 즉시 갱신
+  if (action === "check") {
+    const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
+    const productId = typeof req.query.product === "string" ? req.query.product.trim() : "";
+    if (!keyword || !productId) return res.status(400).json({ error: "keyword와 product가 필요합니다." });
+    const now = await checkRankNow(keyword, productId, decoded);
+    if (!now.rankChecked) return res.status(502).json({ error: now.error || "순위 확인 실패" });
+    return res.status(200).json(now);
   }
 
   if (action === "remove") {
