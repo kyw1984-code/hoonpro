@@ -14,10 +14,12 @@ import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdminPanel } from './components/Admin/AdminPanel';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText } from 'lucide-react';
+import { SubscriptionPage } from './components/Billing/SubscriptionPage';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, CreditCard, Lock } from 'lucide-react';
 import { getUser, removeToken, type AuthUser } from './lib/auth';
+import { fetchBillingStatus, type BillingStatus } from './lib/billing';
 
-type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'productname' | 'admin';
+type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'productname' | 'billing' | 'admin';
 
 type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
 
@@ -40,17 +42,43 @@ const getTabButtonClass = (active: boolean): string => (
   }`
 );
 
+// 토스 카드 등록에서 돌아온 리다이렉트는 구독 탭에서 이어서 처리한다
+const initialTab = (): Tab =>
+  window.location.search.includes('billingAuth') ? 'billing' : 'thumbnail';
+
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);
-  const [activeTab, setActiveTab] = useState<Tab>('thumbnail');
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [remainingCalls, setRemainingCalls] = useState<number | null>(null);
+
+  // 유료화 강제(billing_enforced) 시 구독 없는 계정의 기능 잠금
+  const [billingLocked, setBillingLocked] = useState(false);
+
+  const applyBillingStatus = (s: BillingStatus, u: AuthUser | null) => {
+    const subOk = s.subscription && ['trial', 'active', 'past_due'].includes(s.subscription.status);
+    setBillingLocked(Boolean(s.billingEnforced) && !subOk && !u?.isAdmin);
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    fetchBillingStatus()
+      .then(s => applyBillingStatus(s, user))
+      .catch(() => setBillingLocked(false));
+  }, [user]);
 
   useEffect(() => {
     const handler = (e: Event) => {
       setRemainingCalls((e as CustomEvent).detail.remaining);
     };
+    const billingHandler = (e: Event) => {
+      applyBillingStatus((e as CustomEvent).detail as BillingStatus, getUser());
+    };
     window.addEventListener('usage-updated', handler);
-    return () => window.removeEventListener('usage-updated', handler);
+    window.addEventListener('billing-updated', billingHandler);
+    return () => {
+      window.removeEventListener('usage-updated', handler);
+      window.removeEventListener('billing-updated', billingHandler);
+    };
   }, []);
 
   const handleLogout = () => {
@@ -108,11 +136,18 @@ export default function App() {
                   <tab.icon className="h-4 w-4 shrink-0" />{tab.label}
                 </button>
               ))}
+              <button
+                onClick={() => setActiveTab('billing')}
+                aria-current={activeTab === 'billing' ? 'page' : undefined}
+                className={`${getTabButtonClass(activeTab === 'billing')} ml-auto`}
+              >
+                <CreditCard className="h-4 w-4 shrink-0" />구독 관리
+              </button>
               {user.isAdmin && (
                 <button
                   onClick={() => setActiveTab('admin')}
                   aria-current={activeTab === 'admin' ? 'page' : undefined}
-                  className={`${getTabButtonClass(activeTab === 'admin')} ml-auto`}
+                  className={getTabButtonClass(activeTab === 'admin')}
                 >
                   <ShieldCheck className="h-4 w-4 shrink-0" />관리자
                 </button>
@@ -122,14 +157,30 @@ export default function App() {
         </header>
 
         <main className={`flex-grow ${activeTab === 'analyzer' || activeTab === 'sourcing' ? '' : 'py-8'}`}>
-          {activeTab === 'thumbnail' && <ThumbnailGenerator />}
-          {activeTab === 'detail' && <DetailPlanner />}
-          {activeTab === 'sourcing' && <SourcingFinder />}
-          {activeTab === 'ranktracker' && <RankTracker />}
-          {activeTab === 'review' && <ReviewAnalyzer />}
-          {activeTab === 'analyzer' && <AdAnalyzer />}
-          {activeTab === 'productname' && <ProductNameGenerator />}
-          {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
+          {billingLocked && activeTab !== 'billing' && activeTab !== 'admin' ? (
+            /* 유료화 이후 구독이 없으면 기능 대신 구독 시작 화면을 보여준다 (데이터는 보존됨) */
+            <div className="py-8">
+              <div className="mx-auto mb-5 flex w-full max-w-[720px] items-start gap-2.5 rounded-panel border border-line bg-paper px-6 py-4">
+                <Lock className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
+                <p className="text-[13px] leading-relaxed text-ink-2">
+                  훈프로가 구독제로 전환됐습니다. 구독을 시작하면 모든 기능과 기존 데이터(관심 키워드·순위 추적 이력)를 그대로 이용할 수 있습니다.
+                </p>
+              </div>
+              <SubscriptionPage />
+            </div>
+          ) : (
+            <>
+              {activeTab === 'thumbnail' && <ThumbnailGenerator />}
+              {activeTab === 'detail' && <DetailPlanner />}
+              {activeTab === 'sourcing' && <SourcingFinder />}
+              {activeTab === 'ranktracker' && <RankTracker />}
+              {activeTab === 'review' && <ReviewAnalyzer />}
+              {activeTab === 'analyzer' && <AdAnalyzer />}
+              {activeTab === 'productname' && <ProductNameGenerator />}
+              {activeTab === 'billing' && <SubscriptionPage />}
+              {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
+            </>
+          )}
         </main>
 
         <Footer />
