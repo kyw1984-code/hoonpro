@@ -235,18 +235,18 @@ const CATEGORY_VOCAB: Record<string, string[]> = {
 // 월별 시즌 시드 — "그 달에 잘 팔리는" 키워드 기준.
 // 소싱→입고→판매까지 1~2개월 걸리므로 UI는 기본으로 다음 달을 선택해 보여준다.
 const MONTH_SEEDS: Record<number, string[]> = {
-  1: ["방한용품", "다이어리", "홈트용품", "가습기", "설선물세트"],
-  2: ["발렌타인초콜릿", "졸업선물", "신학기가방", "새학기문구", "환절기영양제"],
-  3: ["신학기용품", "화이트데이선물", "봄원피스", "미세먼지마스크", "봄맞이청소용품"],
-  4: ["피크닉용품", "캠핑용품", "등산의류", "선크림", "봄자켓"],
-  5: ["어버이날선물", "어린이날선물", "캠핑의자", "선풍기", "여름원피스"],
-  6: ["선풍기", "쿨매트", "제습기", "래쉬가드", "장마우산"],
-  7: ["물놀이용품", "수영복", "휴가용품", "모기퇴치기", "아이스박스"],
-  8: ["신학기가방", "쿨링용품", "책상정리용품", "가을가디건", "환절기이불"],
-  9: ["추석선물세트", "가을가디건", "트렌치코트", "등산복", "환절기영양제"],
-  10: ["할로윈의상", "가을캠핑용품", "전기장판", "가을부츠", "무릎담요"],
-  11: ["김장용품", "패딩", "전기히터", "수능선물", "방한용품"],
-  12: ["크리스마스선물", "트리장식", "연말파티용품", "목도리", "핫팩"],
+  1: ["방한용품", "다이어리", "홈트용품", "가습기", "설선물세트", "핫팩", "기모바지", "전기요", "목도리", "수면잠옷"],
+  2: ["발렌타인초콜릿", "졸업선물", "신학기가방", "새학기문구", "환절기영양제", "꽃다발", "입학선물", "필통", "노트북가방", "텀블러"],
+  3: ["신학기용품", "화이트데이선물", "봄원피스", "미세먼지마스크", "봄맞이청소용품", "봄자켓", "공기청정기", "운동화", "도시락통", "트렌치코트"],
+  4: ["피크닉용품", "캠핑용품", "등산의류", "선크림", "봄자켓", "돗자리", "나들이가방", "캠핑테이블", "자외선차단모자", "원피스"],
+  5: ["어버이날선물", "어린이날선물", "캠핑의자", "선풍기", "여름원피스", "카네이션", "홍삼선물세트", "키즈장난감", "반팔티", "샌들"],
+  6: ["선풍기", "쿨매트", "제습기", "래쉬가드", "장마우산", "냉감이불", "서큘레이터", "여름슬리퍼", "모기장", "넥쿨러"],
+  7: ["물놀이용품", "수영복", "휴가용품", "모기퇴치기", "아이스박스", "캠핑선풍기", "튜브", "비치타올", "여행용파우치", "샌들"],
+  8: ["신학기가방", "쿨링용품", "책상정리용품", "가을가디건", "환절기이불", "학용품세트", "노트북받침대", "물통", "실내화", "백팩"],
+  9: ["추석선물세트", "가을가디건", "트렌치코트", "등산복", "환절기영양제", "니트", "가을이불", "캠핑난로", "가을운동화", "홍삼"],
+  10: ["할로윈의상", "가을캠핑용품", "전기장판", "가을부츠", "무릎담요", "니트원피스", "핫팩", "가습기", "히터", "등산스틱"],
+  11: ["김장용품", "패딩", "전기히터", "수능선물", "방한용품", "김치통", "기모레깅스", "목도리", "온수매트", "장갑"],
+  12: ["크리스마스선물", "트리장식", "연말파티용품", "목도리", "핫팩", "방한부츠", "새해달력", "무드등", "장식전구", "니트"],
 };
 
 // 월별 관련성 어휘 (CATEGORY_VOCAB과 같은 용도)
@@ -323,14 +323,31 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ...applyFilters(cached.payload), cached: true });
   }
 
-  const result = await callKeywordTool(hints);
-  if (!result.ok) {
-    if (cached) return res.status(200).json({ ...applyFilters(cached.payload), cached: true, stale: true });
-    return res.status(502).json({ error: result.error });
+  // 힌트는 호출당 최대 5개 — 초과분(월별 시즌 10개)은 나눠 호출해 병합
+  const chunks: string[][] = [];
+  for (let i = 0; i < hints.length; i += 5) chunks.push(hints.slice(i, i + 5));
+  const mergedList: any[] = [];
+  let callError = "";
+  for (const chunk of chunks) {
+    const r = await callKeywordTool(chunk);
+    if (r.ok) mergedList.push(...(r.list || []));
+    else callError = r.error || "네이버 검색광고 API 호출 실패";
   }
+  if (mergedList.length === 0) {
+    if (cached) return res.status(200).json({ ...applyFilters(cached.payload), cached: true, stale: true });
+    return res.status(502).json({ error: callError || "연관 키워드가 없습니다." });
+  }
+  // 여러 힌트에서 겹치는 연관 키워드 제거
+  const seenKw = new Set<string>();
+  const list = mergedList.filter(item => {
+    const k = String(item?.relKeyword || "");
+    if (!k || seenKw.has(k)) return false;
+    seenKw.add(k);
+    return true;
+  });
 
   const seedNorm = seed.replace(/\s+/g, "");
-  const scoredAll = (result.list || []).map(scoreKeyword).filter(k => k.keyword);
+  const scoredAll = list.map(scoreKeyword).filter(k => k.keyword);
   const seedStat = category || month ? null : scoredAll.find(k => k.keyword.replace(/\s+/g, "") === seedNorm) || null;
   const related = scoredAll
     .filter(k => category || month || k.keyword.replace(/\s+/g, "") !== seedNorm)
@@ -994,6 +1011,74 @@ async function handleFavorites(req: VercelRequest, res: VercelResponse, decoded:
     return res.status(200).json({ favorites: data || [] });
   }
 
+  // 크론이 축적한 데이터를 모아 보는 리포트: 키워드별 시장 요약 + 리뷰 증가 상위 상품
+  if (action === "report") {
+    const { data: favs, error } = await supabase
+      .from("sourcing_favorites")
+      .select("keyword, stat, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(30);
+    if (error) return res.status(500).json({ error: "관심 키워드 조회 실패" });
+    const kws = (favs || []).map(f => String(f.keyword));
+    if (kws.length === 0) return res.status(200).json({ report: [] });
+
+    const keyOf = (kw: string) => `cp:v5:${kw.replace(/\s+/g, "")}`;
+    const { data: cacheRows } = await supabase
+      .from("sourcing_cache")
+      .select("cache_key, payload, created_at")
+      .in("cache_key", kws.map(keyOf));
+    const cacheMap = new Map((cacheRows || []).map(r => [r.cache_key, r]));
+
+    // 키워드당 상위 10개 상품만 리뷰속도 조회 대상에 포함 (쿼리 1회로 처리)
+    const perKeywordProducts = new Map<string, ParsedProduct[]>();
+    const allIds: string[] = [];
+    for (const kw of kws) {
+      const row = cacheMap.get(keyOf(kw));
+      const prods: ParsedProduct[] = (row?.payload?.products || [])
+        .filter((p: any) => !p.isAd)
+        .slice(0, 10);
+      perKeywordProducts.set(kw, prods);
+      allIds.push(...prods.map((p: any) => String(p.productId)));
+    }
+    const velocity = await loadReviewVelocity([...new Set(allIds)]);
+
+    const report = (favs || []).map(f => {
+      const kw = String(f.keyword);
+      const row = cacheMap.get(keyOf(kw));
+      const prods = perKeywordProducts.get(kw) || [];
+      const reviews = prods.map(p => p.reviewCount).sort((a, b) => a - b);
+      const rocket = prods.filter(p => p.deliveryType === "rocket").length;
+      const movers = prods
+        .map(p => {
+          const v = velocity.get(String(p.productId));
+          return {
+            productId: p.productId,
+            productName: p.productName,
+            productPrice: p.productPrice,
+            productUrl: p.productUrl,
+            productImage: p.productImage,
+            reviewCount: p.reviewCount,
+            growthPerDay: v ? v.perDay : null,
+            obsDays: v ? v.days : null,
+          };
+        })
+        .filter(m => m.growthPerDay !== null && m.growthPerDay > 0)
+        .sort((a, b) => (b.growthPerDay || 0) - (a.growthPerDay || 0))
+        .slice(0, 3);
+      return {
+        keyword: kw,
+        stat: f.stat || null,
+        lastCrawledAt: row ? row.created_at : null,
+        totalOnPage: prods.length > 0 ? (cacheMap.get(keyOf(kw))?.payload?.products || []).length : 0,
+        medianReviews: reviews.length ? reviews[Math.floor(reviews.length / 2)] : null,
+        rocketRatio: prods.length ? Math.round((rocket / prods.length) * 100) : null,
+        movers,
+      };
+    });
+    return res.status(200).json({ report });
+  }
+
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
   if (!keyword) return res.status(400).json({ error: "keyword가 필요합니다." });
 
@@ -1027,16 +1112,34 @@ async function handleCron(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ok: false, reason: "supabase 또는 Bright Data 미설정" });
   }
 
+  // 저장 공간 정리 — 캐시 30일, 리뷰 관측 기록 90일 보존 (무한 성장 방지)
+  try {
+    await supabase.from("sourcing_cache").delete().lt("created_at", new Date(Date.now() - 30 * 86400000).toISOString());
+    await supabase.from("sourcing_product_obs").delete().lt("captured_at", new Date(Date.now() - 90 * 86400000).toISOString());
+  } catch { /* 정리 실패는 수집을 막지 않음 */ }
+
   const { data: favs } = await supabase.from("sourcing_favorites").select("keyword").limit(1000);
   const keywords = [...new Set((favs || []).map(f => String(f.keyword)))];
+
+  // 형평성: 캐시가 없거나 가장 오래된 키워드부터 수집 — 관심 키워드 전체가 순환된다
+  const keyOf = (kw: string) => `cp:v5:${kw.replace(/\s+/g, "")}`;
+  const ageMap = new Map<string, number>();
+  try {
+    const { data: cacheRows } = await supabase
+      .from("sourcing_cache")
+      .select("cache_key, created_at")
+      .in("cache_key", keywords.map(keyOf));
+    for (const r of cacheRows || []) ageMap.set(r.cache_key, new Date(r.created_at).getTime());
+  } catch { /* 정렬 실패 시 원래 순서 유지 */ }
+  keywords.sort((a, b) => (ageMap.get(keyOf(a)) ?? 0) - (ageMap.get(keyOf(b)) ?? 0));
 
   let crawled = 0;
   const results: string[] = [];
   for (const kw of keywords) {
     if (crawled >= 6) break; // maxDuration(60s) 내에서 안전한 상한
-    const cacheKey = `cp:v5:${kw.replace(/\s+/g, "")}`;
-    const cached = await cacheGet(cacheKey);
-    if (cached && cached.ageMs < 20 * 3600 * 1000) continue; // 오늘 이미 수집됨
+    const cacheKey = keyOf(kw);
+    const cachedAt = ageMap.get(cacheKey);
+    if (cachedAt && Date.now() - cachedAt < 20 * 3600 * 1000) continue; // 오늘 이미 수집됨
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(kw)}&channel=user&sorter=scoreDesc&listSize=60`;
     const result = await fetchViaUnlocker(url, 1);
     if (!result.ok) { results.push(`${kw}: 실패`); continue; }

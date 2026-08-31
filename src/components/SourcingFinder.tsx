@@ -127,6 +127,9 @@ export function SourcingFinder() {
   const [trendMap, setTrendMap] = useState<Record<string, any>>({});
   const [trendLoading, setTrendLoading] = useState<string | null>(null);
   const [openTrend, setOpenTrend] = useState<string | null>(null);
+  // 관심 키워드 리포트 (크론이 축적한 리뷰 증가 속도)
+  const [favReport, setFavReport] = useState<any[] | null>(null);
+  const [favReportLoading, setFavReportLoading] = useState(false);
 
   // 필터/정렬 (키워드)
   const [sortKey, setSortKey] = useState<'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('opportunityScore');
@@ -284,10 +287,8 @@ export function SourcingFinder() {
   };
 
   // ─── API: 데이터랩 월별 트렌드 (계절성) ─────────────────────────────────────
-  const fetchTrend = async (kw: string) => {
-    if (openTrend === kw) { setOpenTrend(null); return; }
-    if (trendMap[kw]) { setOpenTrend(kw); return; }
-    setTrendLoading(kw);
+  const ensureTrend = async (kw: string): Promise<void> => {
+    if (trendMap[kw]) return;
     try {
       const res = await fetch(`/api/sourcing?type=trend&keyword=${encodeURIComponent(kw)}`, { headers: authHeaders() });
       const data = await res.json();
@@ -297,18 +298,55 @@ export function SourcingFinder() {
         const t = (data.trends || []).find((x: any) => x.keyword === kw) || data.trends?.[0];
         setTrendMap(prev => ({ ...prev, [kw]: t || { keyword: kw, insufficient: true } }));
       }
-      setOpenTrend(kw);
     } catch (e: any) {
       setTrendMap(prev => ({ ...prev, [kw]: { keyword: kw, error: e.message } }));
-      setOpenTrend(kw);
-    } finally {
-      setTrendLoading(null);
     }
   };
+
+  const fetchTrend = async (kw: string) => {
+    if (openTrend === kw) { setOpenTrend(null); return; }
+    if (trendMap[kw]) { setOpenTrend(kw); return; }
+    setTrendLoading(kw);
+    await ensureTrend(kw);
+    setOpenTrend(kw);
+    setTrendLoading(null);
+  };
+
+  // 계절성 요약 (배지용): 피크 월 + 소싱 적기
+  const seasonalitySummary = (t: any): { label: string; prep?: string } | null => {
+    if (!t || t.error || t.insufficient || !Array.isArray(t.monthlyAvg) || t.monthlyAvg.length === 0) return null;
+    const peaks: number[] = Array.isArray(t.peakMonths) ? t.peakMonths : [];
+    const flat = peaks.length === 0 || peaks.length > 4 || (t.seasonality > 0 && t.seasonality < 1.4);
+    if (flat) return { label: '연중 고른 수요' };
+    const p = peaks[0];
+    const a = ((p - 3 + 12) % 12) + 1;
+    const b = ((p - 2 + 12) % 12) + 1;
+    return { label: `매년 ${peaks.join('·')}월 피크`, prep: `${a}~${b}월 소싱 적기` };
+  };
+
+  // ─── API: 관심 키워드 리포트 ────────────────────────────────────────────────
+  const fetchFavReport = async () => {
+    setFavReportLoading(true);
+    try {
+      const res = await fetch('/api/sourcing?type=favorites&action=report', { headers: authHeaders() });
+      const data = await res.json();
+      setFavReport(!res.ok || data.error ? [] : (data.report || []));
+    } catch {
+      setFavReport([]);
+    } finally {
+      setFavReportLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showFavorites && favReport === null && !favReportLoading) fetchFavReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showFavorites]);
 
   // ─── API: 쿠팡 상품 분석 ────────────────────────────────────────────────────
   const fetchProducts = async (kw: string, volume = 0) => {
     setActiveKeyword(kw);
+    void ensureTrend(kw); // 시장 분석 헤더의 계절성 배지용 (7일 캐시라 부담 없음)
     setProdLoading(true);
     setProdError(null);
     setTimeout(() => productsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
@@ -824,6 +862,61 @@ export function SourcingFinder() {
                 </table>
               </div>
             )}
+
+            {/* 관심 키워드 리포트 — 크론이 매일 축적한 리뷰 증가 속도(≒판매 속도) */}
+            {showFavorites && (
+              <div className="border-t border-line p-5">
+                <div className="mb-3 flex items-center gap-2 flex-wrap">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-accent" />
+                    관심 키워드 리포트 — 매일 새벽 자동 수집한 리뷰 증가 속도
+                  </p>
+                  <button onClick={fetchFavReport} disabled={favReportLoading}
+                    className="ml-auto flex items-center gap-1 rounded-control border border-line px-2.5 py-1 text-[11px] font-medium text-ink-2 hover:border-line-strong hover:text-ink disabled:opacity-50">
+                    <RefreshCw className={`w-3 h-3 ${favReportLoading ? 'animate-spin' : ''}`} />새로고침
+                  </button>
+                </div>
+                {favReportLoading && favReport === null ? (
+                  <p className="text-[12px] text-ink-3">리포트를 불러오는 중...</p>
+                ) : !favReport || favReport.length === 0 ? (
+                  <p className="text-[12px] text-ink-3">아직 리포트 데이터가 없습니다. ★로 저장한 키워드는 매일 새벽 자동 수집되며, 2일 이상 관측이 쌓이면 리뷰 증가 속도가 표시됩니다.</p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                    {favReport.map((r: any) => {
+                      const ageH = r.lastCrawledAt ? Math.round((Date.now() - new Date(r.lastCrawledAt).getTime()) / 3600000) : null;
+                      return (
+                        <div key={r.keyword} className="rounded-card border border-line bg-paper-2 p-4">
+                          <div className="mb-2 flex items-center gap-2 flex-wrap">
+                            <button onClick={() => fetchProducts(r.keyword, r.stat?.monthlyVolume || 0)} className="text-[13px] font-semibold text-ink hover:text-accent">
+                              {r.keyword}
+                            </button>
+                            {r.stat?.monthlyVolume > 0 && <span className="text-[11px] text-ink-3 tabular-nums">검색량 {Number(r.stat.monthlyVolume).toLocaleString()}</span>}
+                            {r.medianReviews !== null && <span className="text-[11px] text-ink-3 tabular-nums">리뷰 중앙값 {r.medianReviews.toLocaleString()}</span>}
+                            {r.rocketRatio !== null && <span className="text-[11px] text-ink-3 tabular-nums">로켓 {r.rocketRatio}%</span>}
+                            <span className="ml-auto text-[10px] text-ink-3">{ageH === null ? '수집 전' : ageH < 1 ? '방금 수집' : `${ageH}시간 전 수집`}</span>
+                          </div>
+                          {r.movers && r.movers.length > 0 ? (
+                            <div className="space-y-1.5">
+                              {r.movers.map((m: any) => (
+                                <a key={m.productId} href={m.productUrl} target="_blank" rel="noopener noreferrer"
+                                  className="flex items-center gap-2.5 rounded-control bg-paper p-2 ring-1 ring-line hover:ring-line-strong">
+                                  {m.productImage && <img src={m.productImage} alt="" className="h-9 w-9 shrink-0 rounded-control object-cover" />}
+                                  <span className="min-w-0 flex-1 truncate text-[12px] text-ink-2">{m.productName}</span>
+                                  <span className="shrink-0 text-[11px] tabular-nums text-ink-3">리뷰 {Number(m.reviewCount).toLocaleString()}</span>
+                                  <span className={`${BADGE_BASE} shrink-0 border-positive/35 bg-positive-soft text-positive`}>+{m.growthPerDay}/일</span>
+                                </a>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-ink-3">리뷰 증가 관측 대기 중 — 2일 이상 수집이 쌓이면 잘 팔리는 상품이 여기 표시됩니다.</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : !seedStat && !error && !activeKeyword && (
           <div className="flex flex-col items-center justify-center py-20 text-ink-3">
@@ -867,9 +960,20 @@ export function SourcingFinder() {
                           쿠팡에서 보기 <ExternalLink className="w-3 h-3" />
                         </a>
                       </h3>
-                      <span className={`text-xs font-semibold ${verdictText[market.entryVerdict].color}`}>
-                        {verdictText[market.entryVerdict].label} · {verdictText[market.entryVerdict].desc}
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {(() => {
+                          const s = seasonalitySummary(trendMap[activeKeyword || '']);
+                          if (!s) return null;
+                          return (
+                            <span className={`${BADGE_BASE} ${s.prep ? 'border-accent/35 bg-accent-soft text-accent' : 'border-line-strong bg-paper-2 text-ink-2'}`}>
+                              {s.label}{s.prep ? ` · ${s.prep}` : ''}
+                            </span>
+                          );
+                        })()}
+                        <span className={`text-xs font-semibold ${verdictText[market.entryVerdict].color}`}>
+                          {verdictText[market.entryVerdict].label} · {verdictText[market.entryVerdict].desc}
+                        </span>
+                      </div>
                     </div>
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                       <div className="bg-paper-2 rounded-card p-4 border border-line">
