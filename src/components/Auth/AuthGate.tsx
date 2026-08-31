@@ -256,6 +256,11 @@ export function AuthGate({ onSuccess }: Props) {
                 이름·연락처는 PASS 본인인증 결과로 자동 입력됩니다.<br />1인 1계정만 가입할 수 있습니다.
               </p>
             )}
+            <p className="text-center text-[11px] leading-relaxed text-ink-3">
+              가입하면{' '}
+              <a href="/terms.html" target="_blank" rel="noreferrer" className="underline hover:text-ink">이용약관</a>과{' '}
+              <a href="/privacy.html" target="_blank" rel="noreferrer" className="underline hover:text-ink">개인정보처리방침</a>에 동의하는 것으로 간주됩니다.
+            </p>
           </div>
         )}
 
