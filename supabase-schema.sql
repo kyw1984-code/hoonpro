@@ -154,16 +154,20 @@ alter table sourcing_rank_obs disable row level security;
 -- 11. pgvector 확장 (Supabase 대시보드 Extensions에서도 활성화 가능)
 create extension if not exists vector;
 
--- 12. 지식 문서 (강의 정리본 / 카톡 Q&A)
+-- 12. 지식 문서 (강의 정리본 / 카톡 Q&A) — content에 마스킹된 원문 보관 (수정 기능용)
 create table if not exists knowledge_docs (
   id uuid default gen_random_uuid() primary key,
   title text not null,
   source_type text not null default 'lecture' check (source_type in ('lecture', 'kakao')),
   chunk_count integer default 0,
   char_count integer default 0,
+  content text,
   created_by uuid,
   created_at timestamptz default now()
 );
+
+-- 기존 설치본 마이그레이션 (이미 컬럼이 있으면 무시됨)
+alter table knowledge_docs add column if not exists content text;
 
 alter table knowledge_docs disable row level security;
 

@@ -9,6 +9,8 @@ import jwt from 'jsonwebtoken';
 //  - action=status   (전체)   기능 공개 여부 조회 (탭 노출 판단용)
 //  - action=ingest   (관리자) 자료 업로드(청크 분할 + 임베딩 저장)
 //  - action=docs     (관리자) 자료 목록
+//  - action=doc      (관리자) 자료 원문 조회 (수정 화면용)
+//  - action=update   (관리자) 자료 수정 (원문 교체 + 재청크 + 재임베딩)
 //  - action=delete   (관리자) 자료 삭제
 //  - action=logs     (관리자) 질문/답변 로그
 //  - action=toggle   (관리자) 수강생 공개 ON/OFF
@@ -293,6 +295,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'docs':
         if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
         return await handleDocs(req, res);
+      case 'doc':
+        if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+        return await handleDoc(req, res);
+      case 'update':
+        if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+        return await handleUpdate(req, res);
       case 'delete':
         if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
         return await handleDelete(req, res);
@@ -482,18 +490,13 @@ async function handleFeedback(req: VercelRequest, res: VercelResponse, decoded: 
   return res.status(200).json({ ok: true });
 }
 
-// ── 관리자: 자료 업로드 (청크 분할 + 임베딩) ──
-async function handleIngest(req: VercelRequest, res: VercelResponse, decoded: any) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
-  const title = String(req.body?.title || '').trim();
-  const sourceType = req.body?.sourceType === 'kakao' ? 'kakao' : 'lecture';
-  let content = String(req.body?.content || '').trim();
-
-  if (!title) return res.status(400).json({ error: '자료 제목을 입력해주세요.' });
-  if (content.length < 50) return res.status(400).json({ error: '자료 내용이 너무 짧습니다. (최소 50자)' });
+// ── 자료 본문 검증 + 마스킹 + 청크 분할 + 임베딩 (업로드/수정 공용) ──
+async function prepareDocContent(rawContent: string, sourceType: string):
+  Promise<{ error?: string; content?: string; chunks?: string[]; embeddings?: number[][] }> {
+  let content = String(rawContent || '').trim();
+  if (content.length < 50) return { error: '자료 내용이 너무 짧습니다. (최소 50자)' };
   if (content.length > MAX_INGEST_CHARS) {
-    return res.status(400).json({ error: `자료가 너무 큽니다. ${MAX_INGEST_CHARS.toLocaleString()}자 이내로 나눠서 업로드해주세요.` });
+    return { error: `자료가 너무 큽니다. ${MAX_INGEST_CHARS.toLocaleString()}자 이내로 나눠서 업로드해주세요.` };
   }
 
   // 개인정보 마스킹 (카톡은 수강생 이름까지 마스킹)
@@ -501,9 +504,42 @@ async function handleIngest(req: VercelRequest, res: VercelResponse, decoded: an
   content = maskSensitiveInfo(content);
 
   const chunks = chunkText(content);
-  if (chunks.length === 0) return res.status(400).json({ error: '유효한 내용을 추출하지 못했습니다.' });
+  if (chunks.length === 0) return { error: '유효한 내용을 추출하지 못했습니다.' };
 
   const embeddings = await embedTexts(chunks);
+  return { content, chunks, embeddings };
+}
+
+async function insertChunkRows(docId: string, chunks: string[], embeddings: number[][]): Promise<boolean> {
+  const rows = chunks.map((c, i) => ({
+    doc_id: docId,
+    chunk_index: i,
+    content: c,
+    embedding: embeddings[i],
+  }));
+  // 대용량 insert를 나눠서 수행
+  const INSERT_BATCH = 50;
+  for (let i = 0; i < rows.length; i += INSERT_BATCH) {
+    const { error } = await supabase.from('knowledge_chunks').insert(rows.slice(i, i + INSERT_BATCH));
+    if (error) {
+      console.error('knowledge_chunks insert error:', error);
+      return false;
+    }
+  }
+  return true;
+}
+
+// ── 관리자: 자료 업로드 (청크 분할 + 임베딩) ──
+async function handleIngest(req: VercelRequest, res: VercelResponse, decoded: any) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const title = String(req.body?.title || '').trim();
+  const sourceType = req.body?.sourceType === 'kakao' ? 'kakao' : 'lecture';
+  if (!title) return res.status(400).json({ error: '자료 제목을 입력해주세요.' });
+
+  const prepared = await prepareDocContent(req.body?.content, sourceType);
+  if (prepared.error) return res.status(400).json({ error: prepared.error });
+  const { content, chunks, embeddings } = prepared as Required<typeof prepared>;
 
   const { data: doc, error: docError } = await supabase
     .from('knowledge_docs')
@@ -512,6 +548,7 @@ async function handleIngest(req: VercelRequest, res: VercelResponse, decoded: an
       source_type: sourceType,
       chunk_count: chunks.length,
       char_count: content.length,
+      content,
       created_by: decoded.userId,
     })
     .select('id')
@@ -521,21 +558,9 @@ async function handleIngest(req: VercelRequest, res: VercelResponse, decoded: an
     return res.status(500).json({ error: '문서 저장에 실패했습니다. (마이그레이션 실행 여부를 확인하세요)' });
   }
 
-  const rows = chunks.map((c, i) => ({
-    doc_id: doc.id,
-    chunk_index: i,
-    content: c,
-    embedding: embeddings[i],
-  }));
-  // 대용량 insert를 나눠서 수행
-  const INSERT_BATCH = 50;
-  for (let i = 0; i < rows.length; i += INSERT_BATCH) {
-    const { error: chunkError } = await supabase.from('knowledge_chunks').insert(rows.slice(i, i + INSERT_BATCH));
-    if (chunkError) {
-      console.error('knowledge_chunks insert error:', chunkError);
-      await supabase.from('knowledge_docs').delete().eq('id', doc.id); // 청크 저장 실패 시 롤백
-      return res.status(500).json({ error: '청크 저장에 실패했습니다.' });
-    }
+  if (!(await insertChunkRows(doc.id, chunks, embeddings))) {
+    await supabase.from('knowledge_docs').delete().eq('id', doc.id); // 청크 저장 실패 시 롤백
+    return res.status(500).json({ error: '청크 저장에 실패했습니다.' });
   }
 
   return res.status(200).json({
@@ -543,6 +568,70 @@ async function handleIngest(req: VercelRequest, res: VercelResponse, decoded: an
     docId: doc.id,
     chunkCount: chunks.length,
     message: `"${title}" 업로드 완료 (${chunks.length}개 청크)`,
+  });
+}
+
+// ── 관리자: 자료 원문 조회 (수정 화면용) ──
+async function handleDoc(req: VercelRequest, res: VercelResponse) {
+  const docId = String(req.query.docId || req.body?.docId || '');
+  if (!docId) return res.status(400).json({ error: 'docId가 필요합니다.' });
+
+  const { data, error } = await supabase
+    .from('knowledge_docs')
+    .select('id, title, source_type, content')
+    .eq('id', docId)
+    .maybeSingle();
+  if (error || !data) return res.status(404).json({ error: '자료를 찾을 수 없습니다.' });
+  if (!data.content) {
+    return res.status(400).json({ error: '원문이 저장되지 않은 예전 자료입니다. 삭제 후 다시 업로드해주세요. (이후 올린 자료부터 수정 가능)' });
+  }
+  return res.status(200).json({ doc: data });
+}
+
+// ── 관리자: 자료 수정 (원문 교체 → 기존 청크 삭제 → 재청크 + 재임베딩) ──
+async function handleUpdate(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const docId = String(req.body?.docId || '');
+  const title = String(req.body?.title || '').trim();
+  if (!docId) return res.status(400).json({ error: 'docId가 필요합니다.' });
+  if (!title) return res.status(400).json({ error: '자료 제목을 입력해주세요.' });
+
+  const { data: doc, error: docError } = await supabase
+    .from('knowledge_docs')
+    .select('id, source_type')
+    .eq('id', docId)
+    .maybeSingle();
+  if (docError || !doc) return res.status(404).json({ error: '자료를 찾을 수 없습니다.' });
+
+  const prepared = await prepareDocContent(req.body?.content, doc.source_type);
+  if (prepared.error) return res.status(400).json({ error: prepared.error });
+  const { content, chunks, embeddings } = prepared as Required<typeof prepared>;
+
+  // 임베딩 성공 후 기존 청크 삭제 → 새 청크 저장
+  const { error: delError } = await supabase.from('knowledge_chunks').delete().eq('doc_id', docId);
+  if (delError) {
+    console.error('knowledge_chunks delete error:', delError);
+    return res.status(500).json({ error: '기존 청크 삭제에 실패했습니다. 다시 시도해주세요.' });
+  }
+  if (!(await insertChunkRows(docId, chunks, embeddings))) {
+    return res.status(500).json({ error: '청크 저장에 실패했습니다. [수정 저장]을 다시 눌러주세요.' });
+  }
+
+  const { error: updError } = await supabase
+    .from('knowledge_docs')
+    .update({ title, content, chunk_count: chunks.length, char_count: content.length })
+    .eq('id', docId);
+  if (updError) {
+    console.error('knowledge_docs update error:', updError);
+    return res.status(500).json({ error: '문서 정보 갱신에 실패했습니다.' });
+  }
+
+  return res.status(200).json({
+    ok: true,
+    docId,
+    chunkCount: chunks.length,
+    message: `"${title}" 수정 완료 (${chunks.length}개 청크 재생성)`,
   });
 }
 

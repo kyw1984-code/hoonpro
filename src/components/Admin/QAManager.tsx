@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BookOpen, Upload, Trash2, Loader2, RefreshCw, MessageSquareText, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp } from 'lucide-react';
+import { BookOpen, Upload, Trash2, Loader2, RefreshCw, MessageSquareText, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp, Pencil, X, Save } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 
 interface DocRow {
@@ -129,6 +129,9 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
   const [content, setContent] = useState('');
   const [uploading, setUploading] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  // 수정 모드: 대상 자료 ID (null이면 신규 업로드)
+  const [editingDoc, setEditingDoc] = useState<{ id: string; title: string } | null>(null);
+  const [editLoading, setEditLoading] = useState<string | null>(null);
 
   const fetchDocs = async () => {
     setLoading(true);
@@ -164,22 +167,54 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
     if (content.trim().length < 50) return showToast('자료 내용이 너무 짧습니다. (최소 50자)');
     setUploading(true);
     try {
-      const res = await fetch('/api/qa?action=ingest', {
+      // 수정 모드면 원문 교체+재임베딩, 아니면 신규 업로드
+      const url = editingDoc ? '/api/qa?action=update' : '/api/qa?action=ingest';
+      const body = editingDoc
+        ? { docId: editingDoc.id, title: title.trim(), content }
+        : { title: title.trim(), sourceType, content };
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ title: title.trim(), sourceType, content }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (!res.ok) return showToast(data.error || '업로드에 실패했습니다.');
-      showToast(data.message || '업로드 완료');
+      if (!res.ok) return showToast(data.error || '저장에 실패했습니다.');
+      showToast(data.message || '저장 완료');
       setTitle('');
       setContent('');
+      setEditingDoc(null);
       await fetchDocs();
     } catch {
       showToast('네트워크 오류가 발생했습니다.');
     } finally {
       setUploading(false);
     }
+  };
+
+  const startEdit = async (doc: DocRow) => {
+    setEditLoading(doc.id);
+    try {
+      const res = await fetch(`/api/qa?action=doc&docId=${doc.id}`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.error || '원문을 불러오지 못했습니다.');
+      setEditingDoc({ id: doc.id, title: doc.title });
+      setTitle(data.doc.title);
+      setSourceType(data.doc.source_type === 'kakao' ? 'kakao' : 'lecture');
+      setContent(data.doc.content);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.');
+    } finally {
+      setEditLoading(null);
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingDoc(null);
+    setTitle('');
+    setContent('');
   };
 
   const handleDelete = async (doc: DocRow) => {
@@ -194,6 +229,7 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
       const data = await res.json();
       if (!res.ok) return showToast(data.error || '삭제에 실패했습니다.');
       showToast(data.message || '삭제됐습니다.');
+      if (editingDoc?.id === doc.id) cancelEdit(); // 수정 중이던 자료가 삭제되면 편집 상태 해제
       await fetchDocs();
     } finally {
       setDeleting(null);
@@ -204,9 +240,23 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
     <div className="space-y-6">
       {/* 업로드 폼 */}
       <div className="space-y-4 rounded-panel border border-line bg-paper p-6">
-        <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
-          <Upload className="h-4 w-4 text-accent" /> 자료 업로드
+        <h3 className="flex items-center justify-between gap-1.5 text-[13px] font-semibold text-ink">
+          <span className="flex items-center gap-1.5">
+            {editingDoc
+              ? <><Pencil className="h-4 w-4 text-accent" /> 자료 수정 — "{editingDoc.title}"</>
+              : <><Upload className="h-4 w-4 text-accent" /> 자료 업로드</>}
+          </span>
+          {editingDoc && (
+            <button onClick={cancelEdit} className="flex items-center gap-1 text-xs font-medium text-ink-3 transition-colors hover:text-ink">
+              <X className="h-3.5 w-3.5" /> 수정 취소
+            </button>
+          )}
         </h3>
+        {editingDoc && (
+          <p className="rounded-control border border-accent-line bg-accent-soft px-3 py-2 text-xs text-accent">
+            내용을 고친 뒤 [수정 저장]을 누르면 기존 청크를 지우고 새로 임베딩합니다. 제목도 함께 수정할 수 있습니다.
+          </p>
+        )}
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <input
             type="text"
@@ -218,7 +268,8 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setSourceType('lecture')}
-              className={`rounded-control border px-3 py-2.5 text-[13px] font-medium transition-colors ${
+              disabled={!!editingDoc}
+              className={`rounded-control border px-3 py-2.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                 sourceType === 'lecture' ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-2 hover:border-accent-line'
               }`}
             >
@@ -226,7 +277,8 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
             </button>
             <button
               onClick={() => setSourceType('kakao')}
-              className={`rounded-control border px-3 py-2.5 text-[13px] font-medium transition-colors ${
+              disabled={!!editingDoc}
+              className={`rounded-control border px-3 py-2.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                 sourceType === 'kakao' ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-2 hover:border-accent-line'
               }`}
             >
@@ -258,7 +310,11 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
               disabled={uploading}
               className="flex items-center gap-1.5 rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
             >
-              {uploading ? <><Loader2 className="h-4 w-4 animate-spin" /> 임베딩 중...</> : <><Upload className="h-4 w-4" /> 업로드</>}
+              {uploading
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> 임베딩 중...</>
+                : editingDoc
+                  ? <><Save className="h-4 w-4" /> 수정 저장</>
+                  : <><Upload className="h-4 w-4" /> 업로드</>}
             </button>
           </div>
         </div>
@@ -303,14 +359,24 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
                     <td className="px-4 py-3 text-ink-2 tabular">{(doc.char_count || 0).toLocaleString()}</td>
                     <td className="px-4 py-3 text-xs text-ink-3">{new Date(doc.created_at).toLocaleDateString('ko-KR')}</td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => handleDelete(doc)}
-                        disabled={deleting === doc.id}
-                        className="p-1.5 text-ink-3 transition-colors hover:text-critical disabled:opacity-40"
-                        title="자료 삭제"
-                      >
-                        {deleting === doc.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => startEdit(doc)}
+                          disabled={editLoading === doc.id}
+                          className="p-1.5 text-ink-3 transition-colors hover:text-accent disabled:opacity-40"
+                          title="내용 수정 (재업로드 없이 원문 편집)"
+                        >
+                          {editLoading === doc.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(doc)}
+                          disabled={deleting === doc.id}
+                          className="p-1.5 text-ink-3 transition-colors hover:text-critical disabled:opacity-40"
+                          title="자료 삭제"
+                        >
+                          {deleting === doc.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
