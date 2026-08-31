@@ -11,7 +11,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Search, DollarSign, ChevronRight, Loader2, ExternalLink, Sparkles,
   Download, X, ArrowUpDown, KeyRound, RefreshCw, Star, Calculator,
-  TrendingUp, Home, Rocket, Store, LayoutDashboard, Zap,
+  TrendingUp, Home, Rocket, Store, LayoutDashboard, Zap, BarChart3,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getToken } from '../lib/auth';
@@ -123,6 +123,10 @@ export function SourcingFinder() {
   const [seedTrail, setSeedTrail] = useState<string[]>([]);
   const [activeKwCategory, setActiveKwCategory] = useState<string | null>(null);
   const [activeMonth, setActiveMonth] = useState<number | null>(null);
+  // 데이터랩 월별 트렌드: keyword → { monthlyAvg, peakMonths, seasonality, insufficient }
+  const [trendMap, setTrendMap] = useState<Record<string, any>>({});
+  const [trendLoading, setTrendLoading] = useState<string | null>(null);
+  const [openTrend, setOpenTrend] = useState<string | null>(null);
 
   // 필터/정렬 (키워드)
   const [sortKey, setSortKey] = useState<'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('opportunityScore');
@@ -276,6 +280,29 @@ export function SourcingFinder() {
       setKeywords([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ─── API: 데이터랩 월별 트렌드 (계절성) ─────────────────────────────────────
+  const fetchTrend = async (kw: string) => {
+    if (openTrend === kw) { setOpenTrend(null); return; }
+    if (trendMap[kw]) { setOpenTrend(kw); return; }
+    setTrendLoading(kw);
+    try {
+      const res = await fetch(`/api/sourcing?type=trend&keyword=${encodeURIComponent(kw)}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setTrendMap(prev => ({ ...prev, [kw]: { keyword: kw, error: data.error || '트렌드 조회 실패' } }));
+      } else {
+        const t = (data.trends || []).find((x: any) => x.keyword === kw) || data.trends?.[0];
+        setTrendMap(prev => ({ ...prev, [kw]: t || { keyword: kw, insufficient: true } }));
+      }
+      setOpenTrend(kw);
+    } catch (e: any) {
+      setTrendMap(prev => ({ ...prev, [kw]: { keyword: kw, error: e.message } }));
+      setOpenTrend(kw);
+    } finally {
+      setTrendLoading(null);
     }
   };
 
@@ -671,8 +698,8 @@ export function SourcingFinder() {
                   </thead>
                   <tbody>
                     {displayKeywords.slice(0, 100).map(k => (
+                      <React.Fragment key={k.keyword}>
                       <tr
-                        key={k.keyword}
                         className={`group border-b border-line transition-colors last:border-b-0 ${
                           activeKeyword === k.keyword ? 'bg-accent-soft' : 'hover:bg-paper-2'
                         }`}
@@ -715,6 +742,15 @@ export function SourcingFinder() {
                               className="flex items-center gap-1 rounded-control border border-line px-2.5 py-1.5 text-[11px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
                               <TrendingUp className="h-3 w-3" />확장
                             </button>
+                            <button onClick={() => fetchTrend(k.keyword)}
+                              title="최근 3년 월별 검색 트렌드 (계절성)"
+                              className={`flex items-center gap-1 rounded-control border px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+                                openTrend === k.keyword
+                                  ? 'border-accent bg-accent-soft text-accent'
+                                  : 'border-line text-ink-2 hover:border-line-strong hover:text-ink'
+                              }`}>
+                              {trendLoading === k.keyword ? <Loader2 className="h-3 w-3 animate-spin" /> : <BarChart3 className="h-3 w-3" />}트렌드
+                            </button>
                             <a href={coupangSearchUrl(k.keyword)} target="_blank" rel="noopener noreferrer"
                               title="쿠팡에서 이 키워드 검색 결과 직접 확인"
                               className="rounded-control border border-line px-2.5 py-1.5 text-[11px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
@@ -728,6 +764,61 @@ export function SourcingFinder() {
                           </div>
                         </td>
                       </tr>
+                      {openTrend === k.keyword && (() => {
+                        const t = trendMap[k.keyword];
+                        if (!t) return null;
+                        const avg: number[] = Array.isArray(t.monthlyAvg) ? t.monthlyAvg : [];
+                        const maxAvg = Math.max(...avg, 1);
+                        const peaks: number[] = Array.isArray(t.peakMonths) ? t.peakMonths : [];
+                        const flatDemand = peaks.length === 0 || peaks.length > 4 || (t.seasonality > 0 && t.seasonality < 1.4);
+                        const firstPeak = peaks[0] || 0;
+                        const prepA = firstPeak ? ((firstPeak - 3 + 12) % 12) + 1 : 0;
+                        const prepB = firstPeak ? ((firstPeak - 2 + 12) % 12) + 1 : 0;
+                        return (
+                          <tr className="border-b border-line bg-paper-2/60 last:border-b-0">
+                            <td colSpan={8} className="px-5 py-4">
+                              {t.error ? (
+                                <p className="text-[12px] text-critical">{t.error}</p>
+                              ) : t.insufficient || avg.length === 0 ? (
+                                <p className="text-[12px] text-ink-3">검색량이 적어 데이터랩 트렌드 데이터가 없는 키워드입니다.</p>
+                              ) : (
+                                <div className="flex flex-col gap-3 md:flex-row md:items-end md:gap-6">
+                                  <div className="flex-1">
+                                    <div className="mb-2 flex items-center gap-2 flex-wrap">
+                                      <p className="text-[11px] font-semibold text-ink-2">최근 3년 월별 검색 트렌드 — 네이버 데이터랩</p>
+                                      {flatDemand ? (
+                                        <span className={`${BADGE_BASE} border-line-strong bg-paper text-ink-2`}>연중 고른 수요</span>
+                                      ) : (
+                                        <span className={`${BADGE_BASE} border-accent/35 bg-accent-soft text-accent`}>매년 {peaks.join('·')}월 피크</span>
+                                      )}
+                                      {t.seasonality >= 1.4 && (
+                                        <span className="text-[11px] text-ink-3">피크월 검색량이 바닥월의 {t.seasonality}배</span>
+                                      )}
+                                    </div>
+                                    <div className="flex h-16 items-end gap-1">
+                                      {avg.map((v, i) => (
+                                        <div key={i} className="flex flex-1 flex-col items-center gap-1" title={`${i + 1}월 평균 ${v}`}>
+                                          <div
+                                            className={`w-full rounded-t-[3px] ${!flatDemand && peaks.includes(i + 1) ? 'bg-accent' : 'bg-accent/30'}`}
+                                            style={{ height: `${Math.max(v / maxAvg * 52, v > 0 ? 3 : 1)}px` }}
+                                          />
+                                          <span className={`text-[9px] leading-none ${!flatDemand && peaks.includes(i + 1) ? 'font-semibold text-accent' : 'text-ink-3'}`}>{i + 1}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  {!flatDemand && firstPeak > 0 && (
+                                    <p className="shrink-0 rounded-control border border-accent-line bg-accent-soft px-3 py-2 text-[12px] font-medium text-accent">
+                                      {firstPeak}월 피크 → <b>{prepA}~{prepB}월에 소싱 시작</b> 추천
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })()}
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>

@@ -22,6 +22,8 @@ export const config = { maxDuration: 60 };
 
 // ─── 환경변수 ────────────────────────────────────────────────────────────────
 const NAVER_AD_API_KEY = (process.env.NAVER_AD_API_KEY || "").trim();
+const NAVER_DATALAB_CLIENT_ID = (process.env.NAVER_DATALAB_CLIENT_ID || "").trim();
+const NAVER_DATALAB_CLIENT_SECRET = (process.env.NAVER_DATALAB_CLIENT_SECRET || "").trim();
 const NAVER_AD_SECRET_KEY = (process.env.NAVER_AD_SECRET_KEY || "").trim();
 const NAVER_AD_CUSTOMER_ID = (process.env.NAVER_AD_CUSTOMER_ID || "").trim();
 const BRIGHTDATA_API_TOKEN = (process.env.BRIGHTDATA_API_TOKEN || "").trim();
@@ -274,6 +276,98 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
   const payload = { seed: month ? `${month}월 시즌` : category || seed, category: category || null, month: month || null, seedStat, keywords: related };
   await cacheSet(cacheKey, payload); // 캐시에는 원본 저장, 필터는 응답 시 적용
   return res.status(200).json(applyBrandFilter(payload));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 네이버 데이터랩 검색어 트렌드 — 월별 계절성 분석
+// ratio는 요청 구간 내 상대값(최고점=100)이므로 계절성(어느 달에 뜨는지) 판단 전용.
+// 절대 검색량은 검색광고 API 값을 그대로 쓴다.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function analyzeSeasonality(keyword: string, series: { period: string; ratio: number }[]) {
+  const byMonth: number[][] = Array.from({ length: 12 }, () => []);
+  series.forEach(({ period, ratio }) => {
+    const m = parseInt(String(period).slice(5, 7), 10);
+    if (m >= 1 && m <= 12) byMonth[m - 1].push(ratio);
+  });
+  const monthlyAvg = byMonth.map(list => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : 0));
+  const maxAvg = Math.max(...monthlyAvg);
+  const positives = monthlyAvg.filter(v => v > 0);
+  const minAvg = positives.length ? Math.min(...positives) : 0;
+  // 피크: 최고 월 평균의 85% 이상인 달들
+  const peakMonths = monthlyAvg
+    .map((v, i) => ({ m: i + 1, v }))
+    .filter(x => maxAvg > 0 && x.v >= maxAvg * 0.85)
+    .map(x => x.m);
+  // 계절성 강도: 피크월/바닥월 비율 (1.0 = 계절성 없음)
+  const seasonality = minAvg > 0 ? Math.round((maxAvg / minAvg) * 10) / 10 : 0;
+  return { keyword, series, monthlyAvg: monthlyAvg.map(v => Math.round(v * 10) / 10), peakMonths, seasonality };
+}
+
+async function handleTrend(req: VercelRequest, res: VercelResponse) {
+  const raw = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
+  if (!raw) return res.status(400).json({ error: "keyword가 필요합니다." });
+  if (!NAVER_DATALAB_CLIENT_ID || !NAVER_DATALAB_CLIENT_SECRET) {
+    return res.status(500).json({
+      error: "데이터랩 API 키가 설정되지 않았습니다. Vercel 환경변수에 NAVER_DATALAB_CLIENT_ID, NAVER_DATALAB_CLIENT_SECRET을 등록해주세요.",
+    });
+  }
+  const keywords = raw.split(",").map(k => k.trim()).filter(Boolean).slice(0, 5);
+
+  // 트렌드는 천천히 변하므로 7일 캐시로 일일 호출 한도를 아낀다
+  const TTL = 7 * 24 * 3600 * 1000;
+  const results: Record<string, any> = {};
+  const missing: string[] = [];
+  for (const kw of keywords) {
+    const cached = await cacheGet(`trend:${kw.replace(/\s+/g, "")}`);
+    if (cached && cached.ageMs < TTL) results[kw] = { ...cached.payload, cached: true };
+    else missing.push(kw);
+  }
+
+  if (missing.length > 0) {
+    // 지난달 말까지 만 3년치 월별 데이터
+    const now = new Date();
+    const end = new Date(now.getFullYear(), now.getMonth(), 0);
+    const start = new Date(end.getFullYear() - 3, end.getMonth() + 1, 1);
+    const fmtDate = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    const dlRes = await fetch("https://openapi.naver.com/v1/datalab/search", {
+      method: "POST",
+      headers: {
+        "X-Naver-Client-Id": NAVER_DATALAB_CLIENT_ID,
+        "X-Naver-Client-Secret": NAVER_DATALAB_CLIENT_SECRET,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        startDate: fmtDate(start),
+        endDate: fmtDate(end),
+        timeUnit: "month",
+        keywordGroups: missing.map(kw => ({ groupName: kw, keywords: [kw] })),
+      }),
+    });
+
+    if (!dlRes.ok) {
+      const text = await dlRes.text().catch(() => "");
+      if (Object.keys(results).length === 0) {
+        return res.status(502).json({ error: `데이터랩 API 오류 (${dlRes.status}): ${text.slice(0, 200)}` });
+      }
+    } else {
+      const data = await dlRes.json().catch(() => null);
+      for (const group of data?.results || []) {
+        const series = (group.data || []).map((d: any) => ({ period: String(d.period), ratio: Number(d.ratio) || 0 }));
+        const analyzed = analyzeSeasonality(String(group.title), series);
+        results[analyzed.keyword] = analyzed;
+        await cacheSet(`trend:${analyzed.keyword.replace(/\s+/g, "")}`, analyzed);
+      }
+      // 검색량이 너무 적으면 데이터랩 결과에서 아예 빠진다 — 데이터 부족으로 표기
+      for (const kw of missing) {
+        if (!results[kw]) results[kw] = { keyword: kw, series: [], monthlyAvg: [], peakMonths: [], seasonality: 0, insufficient: true };
+      }
+    }
+  }
+
+  return res.status(200).json({ trends: keywords.map(kw => results[kw]).filter(Boolean) });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -921,7 +1015,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (type === "keywords") return handleKeywords(req, res);
+  if (type === "trend") return handleTrend(req, res);
   if (type === "products") return handleProducts(req, res, decoded);
   if (type === "favorites") return handleFavorites(req, res, decoded);
-  return res.status(400).json({ error: "type=keywords | products | favorites 가 필요합니다." });
+  return res.status(400).json({ error: "type=keywords | trend | products | favorites 가 필요합니다." });
 }
