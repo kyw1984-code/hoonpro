@@ -647,12 +647,25 @@ async function refund(user: any, res: VercelResponse) {
     refundAmount = payment.amount;
     reason = '7일 이내 미사용 전액 환불';
   } else {
-    // 일할 기준: 월간 ÷30, 연간 ÷365
     const { data: subPlan } = await supabase.from('plans').select('interval').eq('id', sub.plan_id).maybeSingle();
-    const periodEnd = new Date(sub.current_period_end);
-    const remainingDays = Math.max(0, Math.floor((periodEnd.getTime() - Date.now()) / 86400000));
-    refundAmount = Math.floor((payment.amount / planBaseDays(subPlan ?? {})) * remainingDays);
-    reason = `잔여 ${remainingDays}일 일할 환불`;
+
+    if (subPlan?.interval === 'year') {
+      // 연간 해지: 할인 없는 월간 요금으로 사용 기간을 재정산한 뒤 차액 환불
+      // 환불액 = 연간 결제액 − (월간 요금 ÷ 30 × 사용일수, 사용일은 올림)
+      const { data: monthlyPlan } = await supabase
+        .from('plans').select('price').eq('interval', 'month').eq('active', true).maybeSingle();
+      const monthlyPrice = monthlyPlan?.price ?? 39800;
+      const usedDays = Math.max(1, Math.ceil((Date.now() - approvedAt.getTime()) / 86400000));
+      const usedCharge = Math.floor((monthlyPrice / 30) * usedDays);
+      refundAmount = Math.max(0, payment.amount - usedCharge);
+      reason = `연간 해지 재정산 (사용 ${usedDays}일 × 월간 요금 일할 ${won(usedCharge)} 차감)`;
+    } else {
+      // 월간 해지: 잔여 기간 일할 환불 (÷30)
+      const periodEnd = new Date(sub.current_period_end);
+      const remainingDays = Math.max(0, Math.floor((periodEnd.getTime() - Date.now()) / 86400000));
+      refundAmount = Math.floor((payment.amount / planBaseDays(subPlan ?? {})) * remainingDays);
+      reason = `잔여 ${remainingDays}일 일할 환불`;
+    }
   }
 
   if (refundAmount > 0) {

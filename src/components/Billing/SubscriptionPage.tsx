@@ -290,7 +290,8 @@ export function SubscriptionPage() {
           )}
           <p className="mt-3 text-center text-[11.5px] leading-relaxed text-ink-3">
             카드 정보는 토스페이먼츠에 안전하게 보관되며 서버에 저장되지 않습니다.<br />
-            결제 후 7일 이내 미사용 시 전액 환불, 이후에는 잔여 기간만큼 일할 환불됩니다.
+            결제 후 7일 이내 미사용 시 전액 환불 · 월간은 잔여 기간 일할 환불<br />
+            연간은 해지 시 사용 기간을 월간 요금으로 재정산한 차액을 환불합니다.
           </p>
         </div>
       ) : (
@@ -378,7 +379,10 @@ export function SubscriptionPage() {
               )}
               <button
                 onClick={() => {
-                  if (window.confirm('환불과 함께 즉시 해지됩니다. 결제 후 7일 이내 미사용 시 전액, 그 외에는 잔여 기간 일할 환불됩니다. 진행할까요?')) {
+                  const detail = plan?.interval === 'year'
+                    ? '그 외에는 사용 기간을 월간 요금(할인 미적용)으로 재정산한 차액이 환불됩니다.'
+                    : '그 외에는 잔여 기간 일할 환불됩니다.';
+                  if (window.confirm(`환불과 함께 즉시 해지됩니다. 결제 후 7일 이내 미사용 시 전액, ${detail} 진행할까요?`)) {
                     act(requestRefund, '환불 처리가 완료됐습니다.');
                   }
                 }}
