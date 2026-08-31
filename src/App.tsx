@@ -16,7 +16,7 @@ import { AuthGate } from './components/Auth/AuthGate';
 import { AdminPanel } from './components/Admin/AdminPanel';
 import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion } from 'lucide-react';
 import { AskHoonpro } from './components/QA/AskHoonpro';
-import { getUser, removeToken, type AuthUser } from './lib/auth';
+import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 
 type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'productname' | 'qa' | 'admin';
 
@@ -46,6 +46,27 @@ export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);
   const [activeTab, setActiveTab] = useState<Tab>('thumbnail');
   const [remainingCalls, setRemainingCalls] = useState<number | null>(null);
+  // '훈프로에게 질문' 수강생 공개 여부 — OFF면 수강생에게 탭 자체를 숨김 (관리자는 항상 표시)
+  const [qaVisible, setQaVisible] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    if (user.isAdmin) {
+      setQaVisible(true);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await fetch('/api/qa?action=status', {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        const data = await res.json();
+        setQaVisible(res.ok && data.canUse === true);
+      } catch {
+        setQaVisible(false);
+      }
+    })();
+  }, [user]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -100,7 +121,7 @@ export default function App() {
           {/* 아래 줄 — 탭 */}
           <div className="border-t border-line">
             <nav className="mx-auto flex max-w-[1240px] gap-1 overflow-x-auto px-6" aria-label="주요 기능">
-              {TABS.map(tab => (
+              {TABS.filter(tab => tab.id !== 'qa' || qaVisible).map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -131,7 +152,7 @@ export default function App() {
           {activeTab === 'review' && <ReviewAnalyzer />}
           {activeTab === 'analyzer' && <AdAnalyzer />}
           {activeTab === 'productname' && <ProductNameGenerator />}
-          {activeTab === 'qa' && <AskHoonpro />}
+          {activeTab === 'qa' && qaVisible && <AskHoonpro />}
           {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
         </main>
 

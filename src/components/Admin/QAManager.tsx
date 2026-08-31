@@ -25,6 +25,45 @@ interface LogRow {
 
 export function QAManager({ showToast }: { showToast: (msg: string) => void }) {
   const [section, setSection] = useState<'docs' | 'logs'>('docs');
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [toggling, setToggling] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/qa?action=status', {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        const data = await res.json();
+        if (res.ok) setEnabled(data.enabled === true);
+      } catch {
+        // 조회 실패 시 토글 비표시 유지
+      }
+    })();
+  }, []);
+
+  const handleToggle = async () => {
+    if (enabled === null || toggling) return;
+    const next = !enabled;
+    if (!next && !confirm('수강생의 "훈프로에게 질문" 사용을 중지하시겠습니까?\n수강생 화면에서 탭이 숨겨집니다. (관리자는 계속 사용 가능)')) return;
+    if (next && !confirm('수강생에게 "훈프로에게 질문" 탭을 공개하시겠습니까?')) return;
+    setToggling(true);
+    try {
+      const res = await fetch('/api/qa?action=toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ enabled: next }),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.error || '설정 저장에 실패했습니다.');
+      setEnabled(next);
+      showToast(data.message);
+    } catch {
+      showToast('네트워크 오류가 발생했습니다.');
+    } finally {
+      setToggling(false);
+    }
+  };
 
   return (
     <div>
@@ -36,6 +75,31 @@ export function QAManager({ showToast }: { showToast: (msg: string) => void }) {
         강의 정리본을 업로드하면 자동으로 청크 분할·임베딩되어 수강생 질문 답변의 근거 자료로 사용됩니다.
         연락처·이메일 등 개인정보는 업로드 시 자동 마스킹됩니다.
       </p>
+
+      {/* 수강생 공개 ON/OFF */}
+      {enabled !== null && (
+        <div className="mb-5 flex items-center justify-between gap-4 rounded-card border border-line bg-paper px-4 py-3">
+          <div>
+            <div className="text-[13px] font-semibold text-ink">
+              수강생 공개 {enabled
+                ? <span className="ml-1 rounded-full bg-positive-soft px-2 py-0.5 text-[11px] font-medium text-positive">ON</span>
+                : <span className="ml-1 rounded-full bg-caution-soft px-2 py-0.5 text-[11px] font-medium text-caution">OFF · 관리자만 사용 중</span>}
+            </div>
+            <p className="mt-1 text-xs text-ink-3">
+              OFF면 수강생 화면에서 탭이 숨겨지고 질문도 차단됩니다. 자료를 충분히 쌓은 뒤 공개하세요.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleToggle}
+            disabled={toggling}
+            className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50 ${enabled ? 'bg-positive' : 'bg-line-strong'}`}
+            aria-pressed={enabled}
+          >
+            <span className={`absolute left-0 top-1 h-5 w-5 rounded-full bg-paper shadow-raised transition-transform ${enabled ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
+      )}
 
       <div className="mb-5 flex gap-2">
         {(['docs', 'logs'] as const).map(s => (

@@ -6,10 +6,12 @@ import jwt from 'jsonwebtoken';
 // Vercel Hobby 함수 개수 제한(12개) 때문에 action 파라미터로 통합
 //  - action=ask      (수강생) 질문 → 지식 검색 → 훈프로 말투 답변
 //  - action=feedback (수강생) 답변 👍👎 피드백
+//  - action=status   (전체)   기능 공개 여부 조회 (탭 노출 판단용)
 //  - action=ingest   (관리자) 자료 업로드(청크 분할 + 임베딩 저장)
 //  - action=docs     (관리자) 자료 목록
 //  - action=delete   (관리자) 자료 삭제
 //  - action=logs     (관리자) 질문/답변 로그
+//  - action=toggle   (관리자) 수강생 공개 ON/OFF
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -44,6 +46,29 @@ function calcCostUsd(model: string, inputTokens: number, outputTokens: number): 
   const price = MODEL_PRICING[model];
   if (!price) return 0;
   return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
+}
+
+// ── 수강생 공개 여부 (app_config.qa_enabled, 기본 OFF — 자료가 쌓일 때까지 관리자 전용) ──
+const QA_CONFIG_TTL_MS = 30_000;
+let cachedQaEnabled: boolean | null = null;
+let qaConfigExpiresAt = 0;
+
+async function getQaEnabled(): Promise<boolean> {
+  const now = Date.now();
+  if (cachedQaEnabled !== null && now < qaConfigExpiresAt) return cachedQaEnabled;
+  try {
+    const { data, error } = await supabase
+      .from('app_config')
+      .select('value')
+      .eq('key', 'qa_enabled')
+      .maybeSingle();
+    if (error) throw error;
+    cachedQaEnabled = data?.value === 'true';
+    qaConfigExpiresAt = now + QA_CONFIG_TTL_MS;
+    return cachedQaEnabled;
+  } catch {
+    return cachedQaEnabled ?? false;
+  }
 }
 
 function verifyToken(req: VercelRequest): any | null {
@@ -245,6 +270,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return await handleAsk(req, res, decoded);
       case 'feedback':
         return await handleFeedback(req, res, decoded);
+      case 'status': {
+        const enabled = await getQaEnabled();
+        return res.status(200).json({ enabled, canUse: isAdmin || enabled });
+      }
+      case 'toggle': {
+        if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+        if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+        const enabled = req.body?.enabled === true;
+        const { error } = await supabase.from('app_config').upsert(
+          [{ key: 'qa_enabled', value: enabled ? 'true' : 'false', updated_at: new Date().toISOString() }],
+          { onConflict: 'key' }
+        );
+        if (error) return res.status(500).json({ error: '설정 저장에 실패했습니다.' });
+        cachedQaEnabled = enabled;
+        qaConfigExpiresAt = Date.now() + QA_CONFIG_TTL_MS;
+        return res.status(200).json({ enabled, message: enabled ? '수강생에게 공개됐습니다.' : '수강생 사용이 중지됐습니다. (관리자는 계속 사용 가능)' });
+      }
       case 'ingest':
         if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
         return await handleIngest(req, res, decoded);
@@ -269,6 +311,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // ── 수강생: 질문하기 ──
 async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // 수강생 공개 OFF일 때는 관리자만 사용 가능 (자료가 쌓일 때까지 잠금)
+  if (!decoded.isAdmin && !(await getQaEnabled())) {
+    return res.status(403).json({ error: '아직 준비 중인 기능입니다. 오픈 소식을 기다려주세요!' });
+  }
 
   const question = String(req.body?.question || '').trim();
   if (!question) return res.status(400).json({ error: '질문을 입력해주세요.' });
