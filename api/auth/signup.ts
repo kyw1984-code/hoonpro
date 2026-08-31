@@ -216,15 +216,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: '인증코드가 일치하지 않습니다.' });
     }
 
+    // 이메일 인증 통과 → 자동 승인. 이용 게이트는 구독이, 무료쿠폰 통제는
+    // 관리자가 발급한 쿠폰 코드 자체가 담당한다 (관리자 차단 기능은 유지)
     const { error } = await supabase.from('users').insert({
-      name, phone, email: normalizedEmail, phone_verified_at: null,
+      name, phone, email: normalizedEmail, status: 'approved',
     });
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: '이미 등록된 이메일입니다.' });
       return res.status(500).json({ error: `서버 오류: ${error.message} (code: ${error.code})` });
     }
     await supabase.from('email_verifications').delete().eq('email', normalizedEmail);
-    return res.status(201).json({ message: '가입 신청이 완료됐습니다. 관리자 승인 후 이용 가능합니다.' });
+    return res.status(201).json({ message: '가입이 완료됐습니다. 바로 로그인해주세요.' });
   }
 
   // ── 기존 플로우 (인증 미설정 — 관리자 수동 승인) ──

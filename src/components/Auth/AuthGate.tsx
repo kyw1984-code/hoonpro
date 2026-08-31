@@ -271,7 +271,9 @@ export function AuthGate({ onSuccess }: Props) {
         <p className="mt-6 text-center text-xs text-ink-3">
           {verificationRequired
             ? '본인인증 완료 즉시 가입되며, 구독 후 모든 기능을 이용할 수 있습니다.'
-            : '가입 신청 후 관리자 승인이 완료되면 이용하실 수 있습니다.'}
+            : emailCodeRequired
+              ? '이메일 인증 즉시 가입이 완료되며, 구독 후 모든 기능을 이용할 수 있습니다.'
+              : '가입 신청 후 관리자 승인이 완료되면 이용하실 수 있습니다.'}
         </p>
       </div>
     </div>
