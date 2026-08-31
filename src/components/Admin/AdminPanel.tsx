@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, BookOpen } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, BookOpen, ArrowUp, ArrowDown, ListOrdered } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
@@ -157,7 +157,12 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'stats' ? <UsageStats /> : tab === 'config' ? <ImageConfigTab showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : <UsersTab
+      {tab === 'stats' ? <UsageStats /> : tab === 'config' ? (
+        <div className="space-y-10">
+          <ImageConfigTab showToast={showToast} />
+          <TabOrderConfig showToast={showToast} />
+        </div>
+      ) : tab === 'qa' ? <QAManager showToast={showToast} /> : <UsersTab
         users={users}
         loading={loading}
         filter={filter}
@@ -339,6 +344,103 @@ const COST_TABLE: Record<string, Record<string, number>> = {
   'gemini-2.5-flash-image': { low: 0.02, medium: 0.039, high: 0.08 },
   'gemini-2.5-flash-image-preview': { low: 0.02, medium: 0.039, high: 0.08 },
 };
+
+// ─── 탭 순서 설정 — App.tsx TABS와 id·라벨이 일치해야 함 ─────────────────────
+const TAB_LABELS: { id: string; label: string }[] = [
+  { id: 'thumbnail', label: '썸네일 제작' },
+  { id: 'detail', label: '상세페이지 제작' },
+  { id: 'sourcing', label: '훈프로 소싱AI' },
+  { id: 'ranktracker', label: '순위 추적' },
+  { id: 'review', label: '리뷰 분석' },
+  { id: 'analyzer', label: '광고 성과 분석' },
+  { id: 'productname', label: '상품명 제조기' },
+  { id: 'qa', label: '훈프로에게 질문' },
+];
+
+function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
+  const defaultOrder = TAB_LABELS.map(t => t.id);
+  const [order, setOrder] = useState<string[]>(defaultOrder);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/config', { headers: { Authorization: `Bearer ${getToken()}` } });
+        const data = await res.json();
+        if (res.ok && Array.isArray(data.tabOrder) && data.tabOrder.length > 0) {
+          // 저장된 순서 + 이후 추가된 새 탭은 뒤에 이어붙임
+          const saved = data.tabOrder.filter((id: string) => defaultOrder.includes(id));
+          setOrder([...saved, ...defaultOrder.filter(id => !saved.includes(id))]);
+        }
+      } catch { /* 기본 순서 유지 */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const move = (idx: number, dir: -1 | 1) => {
+    const next = [...order];
+    const target = idx + dir;
+    if (target < 0 || target >= next.length) return;
+    [next[idx], next[target]] = [next[target], next[idx]];
+    setOrder(next);
+    setDirty(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/admin/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ tabOrder: order }),
+      });
+      const data = await res.json();
+      if (!res.ok) return showToast(data.error || '저장 실패');
+      localStorage.setItem('hoonpro_tab_order', JSON.stringify(order));
+      setDirty(false);
+      showToast('탭 순서가 저장됐습니다. 사용자는 새로고침 시 적용됩니다.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="max-w-2xl">
+      <div className="flex items-center gap-2 mb-2">
+        <ListOrdered className="w-5 h-5 text-accent" />
+        <h2 className="text-lg font-semibold text-ink">탭 순서 설정</h2>
+      </div>
+      <p className="text-sm text-ink-2 mb-5">
+        상단 탭이 <b>모든 사용자</b>에게 이 순서로 표시됩니다. '훈프로에게 질문'은 공개 OFF 상태면 수강생에게 숨겨진 채 순서만 유지됩니다.
+      </p>
+      <div className="bg-paper rounded-card border border-line overflow-hidden">
+        {order.map((id, idx) => {
+          const label = TAB_LABELS.find(t => t.id === id)?.label || id;
+          return (
+            <div key={id} className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
+              <span className="w-6 text-center font-mono text-[12px] text-ink-3 tabular-nums">{idx + 1}</span>
+              <span className="flex-1 text-sm font-medium text-ink">{label}</span>
+              <button onClick={() => move(idx, -1)} disabled={idx === 0}
+                className="rounded-control border border-line p-1.5 text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-30">
+                <ArrowUp className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={() => move(idx, 1)} disabled={idx === order.length - 1}
+                className="rounded-control border border-line p-1.5 text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-30">
+                <ArrowDown className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <button onClick={handleSave} disabled={saving || !dirty}
+        className="mt-4 flex items-center gap-2 rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+        순서 저장
+      </button>
+    </div>
+  );
+}
 
 function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
   const [imageModel, setImageModel] = useState('gpt-image-2');
