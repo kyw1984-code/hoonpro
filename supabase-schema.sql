@@ -151,17 +151,24 @@ alter table sourcing_rank_obs disable row level security;
 -- 11. 유료화(월 구독 자동결제) — plans / subscriptions / payments / coupons
 -- ─────────────────────────────────────────────────────────────
 
--- 플랜 (단일 플랜으로 시작 — 39,800원/월)
+-- 플랜 — 월간 39,800원 / 연간은 월 29,800원 기준 357,600원 일시 결제 (약 25% 할인)
 create table if not exists plans (
   id text primary key,
   name text not null,
-  price int not null,
+  price int not null,             -- 결제 1회 청구 금액
+  interval text not null default 'month', -- 'month' | 'year'
   active boolean default true,
   created_at timestamptz default now()
 );
 
-insert into plans (id, name, price) values ('standard', '훈프로 스탠다드', 39800)
+alter table plans add column if not exists interval text not null default 'month';
+
+insert into plans (id, name, price, interval) values
+  ('standard', '훈프로 월간', 39800, 'month'),
+  ('yearly', '훈프로 연간', 357600, 'year')
 on conflict (id) do nothing;
+
+update plans set name = '훈프로 월간' where id = 'standard' and name = '훈프로 스탠다드';
 
 -- 구독 (1인 1구독)
 create table if not exists subscriptions (

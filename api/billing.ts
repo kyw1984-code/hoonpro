@@ -20,10 +20,17 @@ const supabase = createClient(
 );
 
 const TOSS_API = 'https://api.tosspayments.com';
-const PLAN_ID = 'standard';
+const DEFAULT_PLAN_ID = 'yearly'; // 쿠폰 미리보기 기본값 — 연간 결제 유도
 const RETRY_SCHEDULE_DAYS = [1, 2]; // 실패 1회차 → D+1, 2회차 → 추가 2일(D+3)
 const MAX_FAIL = 3;
-const REFUND_BASE_DAYS = 30; // 일할 환불 기준: 월요금 ÷ 30
+
+// 청구 주기 — 월간 1개월 / 연간 12개월, 일할 환불 기준일도 주기에 따름
+function planMonths(plan: { interval?: string }): number {
+  return plan?.interval === 'year' ? 12 : 1;
+}
+function planBaseDays(plan: { interval?: string }): number {
+  return plan?.interval === 'year' ? 365 : 30;
+}
 
 // ── 공통 유틸 ─────────────────────────────────────────────
 
@@ -70,12 +77,12 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-// +1개월 (말일 보정: 1/31 → 2/28)
-function addMonth(dateStr: string): string {
+// +N개월 (말일 보정: 1/31 → 2/28)
+function addMonths(dateStr: string, months: number): string {
   const d = new Date(`${dateStr}T00:00:00Z`);
   const day = d.getUTCDate();
   d.setUTCDate(1);
-  d.setUTCMonth(d.getUTCMonth() + 1);
+  d.setUTCMonth(d.getUTCMonth() + months);
   const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
   d.setUTCDate(Math.min(day, lastDay));
   return d.toISOString().slice(0, 10);
@@ -244,7 +251,7 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
   }
   const { amount, discount } = couponPrice(coupon, plan.price);
   const orderId = newOrderId();
-  const orderName = `${plan.name} 월 구독`;
+  const orderName = `${plan.name} 구독`;
 
   const billingKey = decryptBillingKey(sub.billing_key_enc);
   const result = await tossCharge(billingKey, sub.customer_key, orderId, amount, orderName, user.email, user.name);
@@ -265,7 +272,7 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
 
   const today = kstToday();
   if (result.ok) {
-    const nextBilling = addMonth(today);
+    const nextBilling = addMonths(today, planMonths(plan));
     await supabase.from('subscriptions').update({
       status: 'active',
       fail_count: 0,
@@ -355,11 +362,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // ── 사용자 액션 ───────────────────────────────────────────
 
 async function getStatus(user: any, res: VercelResponse) {
-  const [{ data: sub }, { data: plan }, { data: cfg }] = await Promise.all([
+  const [{ data: sub }, { data: planRows }, { data: cfg }] = await Promise.all([
     supabase.from('subscriptions').select('*').eq('user_id', user.userId).maybeSingle(),
-    supabase.from('plans').select('*').eq('id', PLAN_ID).maybeSingle(),
+    supabase.from('plans').select('*').eq('active', true).order('price', { ascending: false }),
     supabase.from('app_config').select('value').eq('key', 'billing_enforced').maybeSingle(),
   ]);
+  const plans = (planRows ?? []).map(p => ({ id: p.id, name: p.name, price: p.price, interval: p.interval ?? 'month' }));
+  const plan = plans.find(p => p.id === sub?.plan_id) ?? null;
 
   let payments: any[] = [];
   if (sub) {
@@ -374,7 +383,8 @@ async function getStatus(user: any, res: VercelResponse) {
 
   return res.status(200).json({
     billingEnforced: cfg?.value === 'true',
-    plan: plan ? { id: plan.id, name: plan.name, price: plan.price } : null,
+    plans,
+    plan,
     subscription: sub ? {
       status: sub.status,
       cardSummary: sub.card_summary,
@@ -390,19 +400,21 @@ async function getStatus(user: any, res: VercelResponse) {
 async function couponValidate(user: any, req: VercelRequest, res: VercelResponse) {
   const code = String(req.body?.code || '').trim().toUpperCase();
   if (!code) return res.status(400).json({ error: '쿠폰 코드를 입력해주세요.' });
+  const planId = String(req.body?.planId || DEFAULT_PLAN_ID);
 
   const [{ data: coupon }, { data: userRow }, { data: plan }] = await Promise.all([
     supabase.from('coupons').select('*').eq('code', code).maybeSingle(),
     supabase.from('users').select('ci').eq('id', user.userId).maybeSingle(),
-    supabase.from('plans').select('price').eq('id', PLAN_ID).maybeSingle(),
+    supabase.from('plans').select('price, interval').eq('id', planId).eq('active', true).maybeSingle(),
   ]);
+  if (!plan) return res.status(400).json({ error: '플랜을 찾을 수 없습니다.' });
 
   const problem = await checkCoupon(coupon as CouponRow | null, user.userId, userRow?.ci ?? null);
   if (problem) return res.status(400).json({ error: problem });
 
   const c = coupon as CouponRow;
-  const price = plan?.price ?? 0;
-  const { amount, discount } = couponPrice(c, price);
+  const intervalLabel = plan.interval === 'year' ? '연' : '월';
+  const { amount, discount } = couponPrice(c, plan.price);
   return res.status(200).json({
     valid: true,
     type: c.type,
@@ -411,22 +423,23 @@ async function couponValidate(user: any, req: VercelRequest, res: VercelResponse
     firstAmount: c.type === 'free_period' ? 0 : amount,
     discount,
     description: c.type === 'free_period'
-      ? `${c.value}일 무료 이용 후 ${won(price)}/월 자동결제`
+      ? `${c.value}일 무료 이용 후 ${won(plan.price)}/${intervalLabel} 자동결제`
       : `첫 ${c.duration_cycles === null ? '매' : c.duration_cycles + '회'} 결제 ${won(amount)} (${won(discount)} 할인)`,
   });
 }
 
 async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
   const { authKey, customerKey, couponCode } = req.body ?? {};
+  const planId = String(req.body?.planId || DEFAULT_PLAN_ID);
   if (!authKey || !customerKey) return res.status(400).json({ error: '카드 등록 정보가 없습니다.' });
   if (!process.env.TOSS_SECRET_KEY) return res.status(500).json({ error: '결제 설정이 완료되지 않았습니다. 관리자에게 문의하세요.' });
 
   const [{ data: existing }, { data: userRow }, { data: plan }] = await Promise.all([
     supabase.from('subscriptions').select('*').eq('user_id', user.userId).maybeSingle(),
     supabase.from('users').select('ci, email, name').eq('id', user.userId).maybeSingle(),
-    supabase.from('plans').select('*').eq('id', PLAN_ID).maybeSingle(),
+    supabase.from('plans').select('*').eq('id', planId).eq('active', true).maybeSingle(),
   ]);
-  if (!plan) return res.status(500).json({ error: '플랜 정보를 찾을 수 없습니다.' });
+  if (!plan) return res.status(400).json({ error: '플랜 정보를 찾을 수 없습니다.' });
   if (existing && ['trial', 'active', 'past_due'].includes(existing.status)) {
     return res.status(409).json({ error: '이미 구독 중입니다. 카드 변경은 마이페이지에서 해주세요.' });
   }
@@ -446,12 +459,12 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
 
   const today = kstToday();
   const isTrial = coupon?.type === 'free_period';
-  const periodEnd = isTrial ? addDays(today, coupon!.value) : addMonth(today);
+  const periodEnd = isTrial ? addDays(today, coupon!.value) : addMonths(today, planMonths(plan));
   const { amount, discount } = couponPrice(coupon, plan.price);
 
   const subFields = {
     user_id: user.userId,
-    plan_id: PLAN_ID,
+    plan_id: plan.id,
     status: isTrial ? 'trial' : 'active',
     billing_key_enc: billingKeyEnc,
     customer_key: customerKey,
@@ -484,7 +497,7 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
   // 첫 결제 (무료 기간 쿠폰이면 0원 — 결제 없이 시작)
   if (!isTrial) {
     const orderId = newOrderId();
-    const orderName = `${plan.name} 월 구독`;
+    const orderName = `${plan.name} 구독`;
     const result = await tossCharge(billingKey, customerKey, orderId, amount, orderName, userRow?.email ?? user.email, userRow?.name ?? user.name);
 
     await supabase.from('payments').insert({
@@ -514,7 +527,7 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
   } else {
     await sendEmail(userRow?.email ?? user.email, `[훈프로] 무료 이용 시작 (${coupon!.value}일)`,
       `<p>${userRow?.name ?? user.name}님, 무료 이용이 시작됐습니다.</p>` +
-      `<p>무료 기간 종료일(${periodEnd})부터 ${won(plan.price)}/월이 등록하신 카드로 자동결제됩니다. 그 전에 언제든 해지할 수 있습니다.</p>`);
+      `<p>무료 기간 종료일(${periodEnd})부터 ${won(plan.price)}/${plan.interval === 'year' ? '연' : '월'}이 등록하신 카드로 자동결제됩니다. 그 전에 언제든 해지할 수 있습니다.</p>`);
   }
 
   // 쿠폰 사용 기록 (CI 기준 1인 1회 어뷰징 차단)
@@ -564,12 +577,12 @@ async function changeCard(user: any, req: VercelRequest, res: VercelResponse) {
   const { authKey, customerKey } = req.body ?? {};
   if (!authKey || !customerKey) return res.status(400).json({ error: '카드 등록 정보가 없습니다.' });
 
-  const [{ data: sub }, { data: userRow }, { data: plan }] = await Promise.all([
+  const [{ data: sub }, { data: userRow }] = await Promise.all([
     supabase.from('subscriptions').select('*').eq('user_id', user.userId).maybeSingle(),
     supabase.from('users').select('email, name').eq('id', user.userId).maybeSingle(),
-    supabase.from('plans').select('*').eq('id', PLAN_ID).maybeSingle(),
   ]);
   if (!sub || sub.status === 'canceled') return res.status(404).json({ error: '진행 중인 구독이 없습니다.' });
+  const { data: plan } = await supabase.from('plans').select('*').eq('id', sub.plan_id).maybeSingle();
 
   const { billingKey, cardSummary } = await tossIssueBillingKey(authKey, customerKey);
   await supabase.from('subscriptions').update({
@@ -634,9 +647,11 @@ async function refund(user: any, res: VercelResponse) {
     refundAmount = payment.amount;
     reason = '7일 이내 미사용 전액 환불';
   } else {
+    // 일할 기준: 월간 ÷30, 연간 ÷365
+    const { data: subPlan } = await supabase.from('plans').select('interval').eq('id', sub.plan_id).maybeSingle();
     const periodEnd = new Date(sub.current_period_end);
     const remainingDays = Math.max(0, Math.floor((periodEnd.getTime() - Date.now()) / 86400000));
-    refundAmount = Math.floor((payment.amount / REFUND_BASE_DAYS) * remainingDays);
+    refundAmount = Math.floor((payment.amount / planBaseDays(subPlan ?? {})) * remainingDays);
     reason = `잔여 ${remainingDays}일 일할 환불`;
   }
 
@@ -715,7 +730,7 @@ async function chargeDue(req: VercelRequest, res: VercelResponse) {
     const u = (sub as any).users, p = (sub as any).plans;
     if (!u?.email) continue;
     await sendEmail(u.email, `[훈프로] ${noticeDate} 정기결제 예정 안내`,
-      `<p>${u.name}님, ${noticeDate}에 ${p?.name ?? '훈프로'} 월 구독 요금이 등록하신 카드(${sub.card_summary ?? ''})로 자동결제될 예정입니다.</p>` +
+      `<p>${u.name}님, ${noticeDate}에 ${p?.name ?? '훈프로'} 구독 요금이 등록하신 카드(${sub.card_summary ?? ''})로 자동결제될 예정입니다.</p>` +
       `<p>결제를 원치 않으시면 그 전에 마이페이지에서 해지해주세요. 해지 시 남은 기간까지는 그대로 이용할 수 있습니다.</p>`);
     summary.notified++;
   }
@@ -723,7 +738,7 @@ async function chargeDue(req: VercelRequest, res: VercelResponse) {
   // 2) 오늘이 결제일인 구독 청구
   const { data: due } = await supabase
     .from('subscriptions')
-    .select('*, users(email, name), plans!inner(id, name, price)')
+    .select('*, users(email, name), plans!inner(id, name, price, interval)')
     .in('status', ['trial', 'active', 'past_due'])
     .lte('next_billing_at', today);
 
@@ -807,7 +822,7 @@ async function adminBillingConfig(req: VercelRequest, res: VercelResponse) {
 async function adminSubscriptions(res: VercelResponse) {
   const { data } = await supabase
     .from('subscriptions')
-    .select('id, status, card_summary, next_billing_at, current_period_end, cancel_at_period_end, fail_count, created_at, users(name, email), coupons(code)')
+    .select('id, status, card_summary, next_billing_at, current_period_end, cancel_at_period_end, fail_count, created_at, users(name, email), coupons(code), plans(name)')
     .order('created_at', { ascending: false })
     .limit(200);
   const { data: counts } = await supabase.from('subscriptions').select('status');

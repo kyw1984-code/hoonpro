@@ -38,6 +38,8 @@ export function SubscriptionPage() {
 
   const [couponCode, setCouponCode] = useState('');
   const [couponPreview, setCouponPreview] = useState<CouponPreview | null>(null);
+  // 연간 결제를 기본 선택으로 유도
+  const [selectedPlanId, setSelectedPlanId] = useState('yearly');
 
   const reload = async () => {
     try {
@@ -73,7 +75,7 @@ export function SubscriptionPage() {
       ? changeCard(ret.authKey, ret.customerKey).then(r => {
           setMessage({ text: r.reactivated ? '카드가 변경되고 구독이 복구됐습니다.' : '카드가 변경됐습니다.', type: 'success' });
         })
-      : subscribeWithCard(ret.authKey, ret.customerKey, ret.couponCode ?? undefined).then(r => {
+      : subscribeWithCard(ret.authKey, ret.customerKey, ret.planId ?? 'yearly', ret.couponCode ?? undefined).then(r => {
           setMessage({
             text: r.status === 'trial' ? '무료 이용이 시작됐습니다!' : '구독이 시작됐습니다!',
             type: 'success',
@@ -91,7 +93,7 @@ export function SubscriptionPage() {
     setBusy(true);
     setMessage(null);
     try {
-      setCouponPreview(await validateCoupon(code));
+      setCouponPreview(await validateCoupon(code, selectedPlanId));
     } catch (e: any) {
       setCouponPreview(null);
       setMessage({ text: e?.message ?? '쿠폰 확인에 실패했습니다.', type: 'error' });
@@ -104,7 +106,7 @@ export function SubscriptionPage() {
     setBusy(true);
     setMessage(null);
     try {
-      await startCardRegistration('subscribe', couponPreview ? couponCode.trim() : undefined);
+      await startCardRegistration('subscribe', selectedPlanId, couponPreview ? couponCode.trim() : undefined);
       // 성공 시 토스 페이지로 이동하므로 이후 코드는 실행되지 않음
     } catch (e: any) {
       setMessage({ text: e?.message ?? '카드 등록을 시작하지 못했습니다.', type: 'error' });
@@ -146,9 +148,27 @@ export function SubscriptionPage() {
     );
   }
 
-  const plan = status?.plan;
+  const plan = status?.plan; // 현재 구독 중인 플랜 (마이페이지용)
   const sub = status?.subscription;
   const hasActiveSub = sub && sub.status !== 'canceled';
+
+  // 플랜 목록 — 연간 우선. DB 마이그레이션 전에는 기본값으로 표시
+  const plans = status?.plans?.length ? status.plans : [
+    { id: 'yearly', name: '훈프로 연간', price: 357600, interval: 'year' as const },
+    { id: 'standard', name: '훈프로 월간', price: 39800, interval: 'month' as const },
+  ];
+  const yearlyPlan = plans.find(p => p.interval === 'year');
+  const monthlyPlan = plans.find(p => p.interval === 'month');
+  const selectedPlan = plans.find(p => p.id === selectedPlanId) ?? yearlyPlan ?? plans[0];
+  // 연간이 월간 대비 몇 % 저렴한지 (월 환산 기준)
+  const discountPct = yearlyPlan && monthlyPlan
+    ? Math.round((1 - yearlyPlan.price / 12 / monthlyPlan.price) * 100)
+    : 0;
+
+  const selectPlan = (id: string) => {
+    setSelectedPlanId(id);
+    setCouponPreview(null); // 쿠폰 금액은 플랜 기준으로 다시 검증
+  };
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-6">
@@ -171,17 +191,59 @@ export function SubscriptionPage() {
             {sub?.status === 'canceled' ? '다시 구독하면 기존 데이터(관심 키워드·순위 추적 이력)를 그대로 이어서 사용합니다.' : '모든 AI 자동화 기능을 제한 없이 사용할 수 있습니다.'}
           </p>
 
+          {/* 결제 주기 선택 — 연간이 먼저, 기본 선택 */}
+          <div className="mb-4 grid grid-cols-2 gap-1 rounded-card border border-line bg-paper-2 p-1">
+            {yearlyPlan && (
+              <button
+                onClick={() => selectPlan(yearlyPlan.id)}
+                className={`relative rounded-control py-2 text-[13px] font-semibold transition-colors ${
+                  selectedPlanId === yearlyPlan.id ? 'bg-ink text-paper' : 'text-ink-2 hover:text-ink'
+                }`}
+              >
+                연간 결제
+                {discountPct > 0 && (
+                  <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                    selectedPlanId === yearlyPlan.id ? 'bg-paper text-ink' : 'bg-positive-soft text-positive'
+                  }`}>
+                    {discountPct}% 할인
+                  </span>
+                )}
+              </button>
+            )}
+            {monthlyPlan && (
+              <button
+                onClick={() => selectPlan(monthlyPlan.id)}
+                className={`rounded-control py-2 text-[13px] font-semibold transition-colors ${
+                  selectedPlanId === monthlyPlan.id ? 'bg-ink text-paper' : 'text-ink-2 hover:text-ink'
+                }`}
+              >
+                월간 결제
+              </button>
+            )}
+          </div>
+
           <div className="mb-5 rounded-card border border-line bg-paper-2 p-5">
             <div className="flex items-baseline justify-between">
-              <span className="text-[14px] font-semibold text-ink">{plan?.name ?? '훈프로 스탠다드'}</span>
-              <span className="text-[22px] font-bold tracking-tight text-ink">
-                {(plan?.price ?? 39800).toLocaleString()}<span className="ml-0.5 text-[13px] font-medium text-ink-3">원/월</span>
+              <span className="text-[14px] font-semibold text-ink">{selectedPlan.name}</span>
+              <span className="text-right">
+                <span className="text-[22px] font-bold tracking-tight text-ink">
+                  {(selectedPlan.interval === 'year' ? Math.round(selectedPlan.price / 12) : selectedPlan.price).toLocaleString()}
+                  <span className="ml-0.5 text-[13px] font-medium text-ink-3">원/월</span>
+                </span>
+                {selectedPlan.interval === 'year' && (
+                  <span className="block text-[12px] text-ink-3">연 {selectedPlan.price.toLocaleString()}원 일시 결제</span>
+                )}
               </span>
             </div>
+            {selectedPlan.interval === 'year' && monthlyPlan && discountPct > 0 && (
+              <p className="mt-2 text-[12.5px] font-medium text-positive">
+                월간 결제({monthlyPlan.price.toLocaleString()}원/월) 대비 {discountPct}% 저렴합니다.
+              </p>
+            )}
             <ul className="mt-3 space-y-1 text-[12.5px] text-ink-2">
               <li>· 썸네일 · 상세페이지 · 상품명 AI 제작</li>
               <li>· 소싱AI · 순위 추적 · 리뷰 분석 · 광고 성과 분석</li>
-              <li>· 매월 자동결제, 언제든 해지 가능 (남은 기간까지 이용)</li>
+              <li>· {selectedPlan.interval === 'year' ? '매년' : '매월'} 자동결제, 언제든 해지 가능 (남은 기간까지 이용)</li>
             </ul>
           </div>
 
@@ -221,7 +283,7 @@ export function SubscriptionPage() {
           >
             {couponPreview?.type === 'free_period'
               ? `카드 등록하고 ${couponPreview.value}일 무료로 시작하기`
-              : `카드 등록하고 시작하기 — ${(couponPreview?.firstAmount ?? plan?.price ?? 39800).toLocaleString()}원`}
+              : `카드 등록하고 시작하기 — ${(couponPreview?.firstAmount ?? selectedPlan.price).toLocaleString()}원${selectedPlan.interval === 'year' ? ' (연 1회)' : '/월'}`}
           </button>
           {!tossConfigured() && (
             <p className="mt-2 text-center text-[12px] text-caution">결제 설정이 아직 완료되지 않았습니다. 관리자에게 문의하세요.</p>
@@ -245,7 +307,9 @@ export function SubscriptionPage() {
             <div className="grid grid-cols-1 gap-3 text-[13px] sm:grid-cols-2">
               <div className="rounded-card border border-line bg-paper-2 p-4">
                 <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-3">플랜</p>
-                <p className="font-medium text-ink">{plan?.name} · {(plan?.price ?? 0).toLocaleString()}원/월</p>
+                <p className="font-medium text-ink">
+                  {plan?.name ?? '-'} · {(plan?.price ?? 0).toLocaleString()}원/{plan?.interval === 'year' ? '연' : '월'}
+                </p>
               </div>
               <div className="rounded-card border border-line bg-paper-2 p-4">
                 <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-3">등록 카드</p>

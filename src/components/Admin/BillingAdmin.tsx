@@ -15,6 +15,7 @@ interface SubRow {
   created_at: string;
   users: { name: string; email: string } | null;
   coupons: { code: string } | null;
+  plans: { name: string } | null;
 }
 
 interface CouponRow {
@@ -334,7 +335,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
               <table className="w-full text-sm">
                 <thead className="border-b border-line bg-paper-2">
                   <tr>
-                    {['회원', '상태', '카드', '다음 결제일', '이용 기간', '쿠폰', '실패', '시작일'].map(h => (
+                    {['회원', '플랜', '상태', '카드', '다음 결제일', '이용 기간', '쿠폰', '실패', '시작일'].map(h => (
                       <th key={h} className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-2">{h}</th>
                     ))}
                   </tr>
@@ -346,6 +347,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
                         <div className="font-medium text-ink">{s.users?.name ?? '-'}</div>
                         <div className="text-[12px] text-ink-3">{s.users?.email ?? ''}</div>
                       </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-ink-2">{s.plans?.name ?? '-'}</td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${SUB_STATUS[s.status]?.cls ?? ''}`}>
                           {SUB_STATUS[s.status]?.text ?? s.status}

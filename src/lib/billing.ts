@@ -22,9 +22,17 @@ export interface PaymentRow {
   created_at: string;
 }
 
+export interface Plan {
+  id: string;
+  name: string;
+  price: number;       // 결제 1회 청구 금액 (연간은 12개월치)
+  interval: 'month' | 'year';
+}
+
 export interface BillingStatus {
   billingEnforced: boolean;
-  plan: { id: string; name: string; price: number } | null;
+  plans: Plan[];
+  plan: Plan | null;   // 현재 구독 중인 플랜
   subscription: SubscriptionInfo | null;
   payments: PaymentRow[];
 }
@@ -52,9 +60,9 @@ async function call<T>(action: string, body?: Record<string, unknown>): Promise<
 }
 
 export const fetchBillingStatus = () => call<BillingStatus>('status');
-export const validateCoupon = (code: string) => call<CouponPreview>('coupon-validate', { code });
-export const subscribeWithCard = (authKey: string, customerKey: string, couponCode?: string) =>
-  call<{ ok: boolean; status: string; nextBillingAt: string }>('subscribe', { authKey, customerKey, couponCode });
+export const validateCoupon = (code: string, planId: string) => call<CouponPreview>('coupon-validate', { code, planId });
+export const subscribeWithCard = (authKey: string, customerKey: string, planId: string, couponCode?: string) =>
+  call<{ ok: boolean; status: string; nextBillingAt: string }>('subscribe', { authKey, customerKey, planId, couponCode });
 export const cancelSubscription = () => call<{ ok: boolean; canceledNow: boolean; usableUntil?: string }>('cancel');
 export const resumeSubscription = () => call<{ ok: boolean }>('resume');
 export const changeCard = (authKey: string, customerKey: string) =>
@@ -96,14 +104,14 @@ export function tossConfigured(): boolean {
   return Boolean(import.meta.env.VITE_TOSS_CLIENT_KEY);
 }
 
-export async function startCardRegistration(mode: 'subscribe' | 'change-card', couponCode?: string): Promise<void> {
+export async function startCardRegistration(mode: 'subscribe' | 'change-card', planId?: string, couponCode?: string): Promise<void> {
   const clientKey = import.meta.env.VITE_TOSS_CLIENT_KEY;
   if (!clientKey) throw new Error('결제 설정이 완료되지 않았습니다. 관리자에게 문의하세요.');
 
   await loadTossSdk();
   const customerKey = crypto.randomUUID();
   try {
-    sessionStorage.setItem(PENDING_KEY, JSON.stringify({ mode, couponCode: couponCode || null }));
+    sessionStorage.setItem(PENDING_KEY, JSON.stringify({ mode, planId: planId || null, couponCode: couponCode || null }));
   } catch {
     // sessionStorage를 못 쓰는 환경이면 기본(subscribe, 쿠폰 없음)으로 처리됨
   }
@@ -122,6 +130,7 @@ export interface BillingReturn {
   customerKey?: string;
   errorMessage?: string;
   mode: 'subscribe' | 'change-card';
+  planId: string | null;
   couponCode: string | null;
 }
 
@@ -131,7 +140,8 @@ export function consumeBillingReturn(): BillingReturn | null {
   const result = params.get('billingAuth');
   if (result !== 'success' && result !== 'fail') return null;
 
-  let pending: { mode: 'subscribe' | 'change-card'; couponCode: string | null } = { mode: 'subscribe', couponCode: null };
+  let pending: { mode: 'subscribe' | 'change-card'; planId: string | null; couponCode: string | null } =
+    { mode: 'subscribe', planId: null, couponCode: null };
   try {
     const raw = sessionStorage.getItem(PENDING_KEY);
     if (raw) pending = { ...pending, ...JSON.parse(raw) };
@@ -146,6 +156,7 @@ export function consumeBillingReturn(): BillingReturn | null {
     customerKey: params.get('customerKey') ?? undefined,
     errorMessage: params.get('message') ?? undefined,
     mode: pending.mode,
+    planId: pending.planId,
     couponCode: pending.couponCode,
   };
 
