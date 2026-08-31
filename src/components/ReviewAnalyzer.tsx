@@ -1,6 +1,7 @@
 /**
- * 경쟁상품 리뷰 분석 — 쿠팡 상품의 실제 리뷰를 수집해
+ * 상품 리뷰 분석 — 쿠팡 상품의 실제 리뷰를 수집해
  * 만족/불만/숨은 니즈/공략 포인트를 훈프로AI가 요약한다.
+ * 경쟁 상품 벤치마킹은 물론 내 상품의 개선점 확인에도 쓴다.
  * 소싱AI의 상품 카드 [리뷰 분석] 모달과 결과 뷰(ReviewSummaryView)를 공유한다.
  */
 import { useState } from 'react';
@@ -10,6 +11,19 @@ import { getToken } from '../lib/auth';
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+// 서버리스 타임아웃 등으로 JSON이 아닌 응답이 와도 안전하게 처리
+export const safeJson = async (res: Response): Promise<any> => {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (res.status === 504 || /timeout|timed out/i.test(text)) {
+      return { error: '분석 시간이 초과되었습니다. 리뷰 수집이 오래 걸린 경우이니 잠시 후 다시 시도해주세요 — 재시도 시 이어서 더 빨리 처리됩니다.' };
+    }
+    return { error: `서버 응답 오류 (HTTP ${res.status}) — 잠시 후 다시 시도해주세요.` };
+  }
 };
 
 // 분석 결과 렌더링 (소싱AI 모달과 공용)
@@ -84,7 +98,7 @@ export function ReviewAnalyzer() {
       const params = new URLSearchParams({ type: 'reviews', product: target });
       if (name.trim()) params.set('name', name.trim().slice(0, 100));
       const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() });
-      const json = await res.json();
+      const json = await safeJson(res);
       setData(json);
       if (typeof json.remaining === 'number') {
         window.dispatchEvent(new CustomEvent('usage-updated', { detail: { remaining: json.remaining } }));
@@ -101,11 +115,12 @@ export function ReviewAnalyzer() {
       <div className="rounded-panel border border-line bg-paper p-6">
         <div className="mb-1 flex items-center gap-2">
           <MessageSquareText className="h-4 w-4 text-accent" />
-          <h2 className="text-base font-semibold text-ink">경쟁상품 리뷰 분석</h2>
+          <h2 className="text-base font-semibold text-ink">상품 리뷰 분석</h2>
         </div>
         <p className="mb-4 text-[12px] leading-relaxed text-ink-2">
-          쿠팡 상품 URL을 넣으면 실제 고객 리뷰를 수집해 <b>불만·숨은 니즈·내가 공략할 포인트</b>를 분석합니다.
-          경쟁사의 불만이 곧 내 상세페이지의 <b>핵심 차별점</b>이 됩니다. 훈프로 소싱AI의 상품 카드 [리뷰 분석]에서도 바로 실행할 수 있습니다.
+          쿠팡 상품 URL을 넣으면 실제 고객 리뷰를 수집해 <b>불만·숨은 니즈·공략 포인트</b>를 분석합니다.
+          경쟁 상품의 불만은 내 상세페이지의 <b>핵심 차별점</b>이 되고, <b>내 상품</b>을 넣으면 개선할 점이 보입니다.
+          훈프로 소싱AI의 상품 카드 [리뷰 분석]에서도 바로 실행할 수 있습니다.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyze()}
@@ -141,7 +156,7 @@ export function ReviewAnalyzer() {
         <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">
           <MessageSquareText className="mb-4 h-12 w-12 opacity-20" />
           <p className="text-sm font-semibold">분석할 상품의 쿠팡 URL을 입력하세요</p>
-          <p className="mt-1.5 text-[12px]">소싱 전 경쟁 상품 2~3개를 분석해 보면 시장의 불만과 기회가 보입니다</p>
+          <p className="mt-1.5 text-[12px]">소싱 전 경쟁 상품 2~3개, 판매 중이라면 내 상품 리뷰까지 분석해 보세요</p>
         </div>
       )}
     </div>

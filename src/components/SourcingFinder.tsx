@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getToken } from '../lib/auth';
-import { ReviewSummaryView } from './ReviewAnalyzer';
+import { ReviewSummaryView, safeJson } from './ReviewAnalyzer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface KeywordStat {
@@ -136,7 +136,7 @@ export function SourcingFinder() {
   const [showGuide, setShowGuide] = useState(false);
   // 주간 소싱 브리핑
   const [briefing, setBriefing] = useState<any | null>(null);
-  // 경쟁상품 리뷰 분석
+  // 상품 리뷰 분석
   const [reviewTarget, setReviewTarget] = useState<Product | null>(null);
   const [reviewData, setReviewData] = useState<any | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -400,7 +400,7 @@ export function SourcingFinder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ─── API: 경쟁상품 리뷰 분석 ────────────────────────────────────────────────
+  // ─── API: 상품 리뷰 분석 ────────────────────────────────────────────────
   const fetchReviewAnalysis = async (p: Product) => {
     setReviewTarget(p);
     setReviewData(null);
@@ -410,7 +410,7 @@ export function SourcingFinder() {
         `/api/sourcing?type=reviews&product=${encodeURIComponent(p.productId)}&name=${encodeURIComponent(p.productName.slice(0, 100))}`,
         { headers: authHeaders() },
       );
-      const data = await res.json();
+      const data = await safeJson(res);
       setReviewData(data);
       if (typeof data.remaining === 'number') {
         window.dispatchEvent(new CustomEvent('usage-updated', { detail: { remaining: data.remaining } }));
@@ -1334,7 +1334,7 @@ export function SourcingFinder() {
           )}
         </div>
 
-        {/* ══════════ 경쟁상품 리뷰 분석 모달 ══════════ */}
+        {/* ══════════ 상품 리뷰 분석 모달 ══════════ */}
         <AnimatePresence>
           {reviewTarget && (
             <>

@@ -1310,10 +1310,11 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   }
 
   // ① 리뷰 전용 엔드포인트 (HTML 프래그먼트) → ② 상품 페이지 폴백
+  // 함수 제한(60초) 안에 끝나도록 시도 횟수를 최소화한다: ①은 재시도 1회, ②는 재시도 없음
   let reviews: { rating: number; text: string }[] = [];
   let diag = "";
   const reviewUrl = `https://www.coupang.com/vp/product/reviews?productId=${productId}&page=1&size=30&sortBy=ORDER_SCORE_ASC&ratingSummary=true`;
-  const r1 = await fetchViaUnlocker(reviewUrl, 2, 2000);
+  const r1 = await fetchViaUnlocker(reviewUrl, 1, 500);
   if (r1.ok) {
     reviews = parseReviews(r1.html!);
     if (reviews.length < 3) diag = `리뷰엔드포인트: htmlLen=${r1.html!.length}, 파싱=${reviews.length}개`;
@@ -1321,7 +1322,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     diag = `리뷰엔드포인트 실패: ${r1.error}`;
   }
   if (reviews.length < 3) {
-    const r2 = await fetchViaUnlocker(`https://www.coupang.com/vp/products/${productId}`, 1);
+    const r2 = await fetchViaUnlocker(`https://www.coupang.com/vp/products/${productId}`, 0);
     if (r2.ok) {
       const more = parseReviews(r2.html!);
       if (more.length > reviews.length) reviews = more;
