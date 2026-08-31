@@ -7,7 +7,6 @@ import { DetailPlanner } from './components/Detail/DetailPlanner';
 import { SourcingFinder } from './components/SourcingFinder';
 import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
-import { ProductNameGenerator } from './components/ProductName/ProductNameGenerator';
 import { RankTracker } from './components/RankTracker';
 import { ReviewAnalyzer } from './components/ReviewAnalyzer';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
@@ -16,11 +15,11 @@ import { AuthGate } from './components/Auth/AuthGate';
 import { AdminPanel } from './components/Admin/AdminPanel';
 import { SubscriptionPage } from './components/Billing/SubscriptionPage';
 import { AskHoonpro } from './components/QA/AskHoonpro';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock } from 'lucide-react';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock } from 'lucide-react';
 import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 import { fetchBillingStatus, type BillingStatus } from './lib/billing';
 
-type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'productname' | 'qa' | 'billing' | 'admin';
+type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'qa' | 'billing' | 'admin';
 
 type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
 
@@ -31,7 +30,6 @@ const TABS: TabDef[] = [
   { id: 'ranktracker', label: '순위 추적', icon: ListOrdered },
   { id: 'review', label: '리뷰 분석', icon: MessageSquareText },
   { id: 'analyzer', label: '광고 성과 분석', icon: BarChart3 },
-  { id: 'productname', label: '상품명 제조기', icon: Tag },
   { id: 'qa', label: '훈프로에게 질문', icon: MessageCircleQuestion },
 ];
 
@@ -205,7 +203,6 @@ export default function App() {
               {activeTab === 'ranktracker' && <RankTracker />}
               {activeTab === 'review' && <ReviewAnalyzer />}
               {activeTab === 'analyzer' && <AdAnalyzer />}
-              {activeTab === 'productname' && <ProductNameGenerator />}
               {activeTab === 'qa' && qaVisible && <AskHoonpro />}
               {activeTab === 'billing' && <SubscriptionPage />}
               {activeTab === 'admin' && user.isAdmin && <AdminPanel />}

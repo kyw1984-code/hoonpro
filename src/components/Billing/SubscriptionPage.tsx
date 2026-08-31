@@ -241,7 +241,7 @@ export function SubscriptionPage() {
               </p>
             )}
             <ul className="mt-3 space-y-1 text-[12.5px] text-ink-2">
-              <li>· 썸네일 · 상세페이지 · 상품명 AI 제작</li>
+              <li>· 썸네일 · 상세페이지 AI 제작</li>
               <li>· 소싱AI · 순위 추적 · 리뷰 분석 · 광고 성과 분석</li>
               <li>· {selectedPlan.interval === 'year' ? '매년' : '매월'} 자동결제, 언제든 해지 가능 (남은 기간까지 이용)</li>
             </ul>
