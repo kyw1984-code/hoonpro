@@ -31,7 +31,7 @@ const STATUS_COLOR: Record<string, string> = {
 const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'billing' | 'stats' | 'config' | 'qa'>('users');
+  const [tab, setTab] = useState<'users' | 'billing' | 'stats' | 'config' | 'taborder' | 'qa'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -157,6 +157,14 @@ export function AdminPanel() {
           <ImageIcon className="w-4 h-4" /> 이미지 설정
         </button>
         <button
+          onClick={() => setTab('taborder')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'taborder' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <ListOrdered className="w-4 h-4" /> 탭 순서
+        </button>
+        <button
           onClick={() => setTab('qa')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             tab === 'qa' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
@@ -167,10 +175,9 @@ export function AdminPanel() {
       </div>
 
       {tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
-        <div className="space-y-10">
-          <ImageConfigTab showToast={showToast} />
-          <TabOrderConfig showToast={showToast} />
-        </div>
+        <ImageConfigTab showToast={showToast} />
+      ) : tab === 'taborder' ? (
+        <TabOrderConfig showToast={showToast} />
       ) : <UsersTab
         users={users}
         loading={loading}
