@@ -29,15 +29,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (!verifyAdmin(req)) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
 
+  const isAdmin = verifyAdmin(req);
   const action = String(req.query.action || '');
 
   try {
+    // config 조회는 탭 순서(tab_order)를 모든 사용자 화면에서 쓰므로 비관리자에게도 그 값만 공개
+    if (action === 'config') return await handleConfig(req, res, isAdmin);
+
+    if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
     if (action === 'users') return await handleUsers(req, res);
     if (action === 'user-action') return await handleUserAction(req, res);
     if (action === 'stats') return await handleStats(req, res);
-    if (action === 'config') return await handleConfig(req, res);
     return res.status(400).json({ error: '알 수 없는 action입니다.' });
   } catch (e) {
     console.error('[admin]', action, e);
@@ -269,50 +272,81 @@ const ALLOWED_MODELS = [
 ];
 const ALLOWED_QUALITY = ['low', 'medium', 'high'];
 const DEFAULTS = { imageModel: 'gpt-image-2', imageQuality: 'high', aiIntegratedTextEnabled: false };
+// 탭 순서 설정에 허용되는 탭 id (App.tsx TABS와 일치해야 함)
+const TAB_IDS = ['thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'qa'];
 
 // app_config 테이블 미존재 오류 판별
 function isMissingTable(error: any): boolean {
   return error?.code === '42P01' || /app_config/.test(error?.message || '');
 }
 
-async function handleConfig(req: VercelRequest, res: VercelResponse) {
+async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: boolean) {
+  // 현재 설정 조회 — 탭 순서(tab_order)는 민감 정보가 아니고 모든 사용자 화면에
+  // 필요하므로 비관리자에게도 그 값만 공개한다. 나머지는 관리자 전용.
   if (req.method === 'GET') {
     const { data, error } = await supabase
       .from('app_config')
       .select('key, value')
-      .in('key', ['image_model', 'image_quality', 'ai_integrated_text_enabled']);
+      .in('key', ['image_model', 'image_quality', 'ai_integrated_text_enabled', 'tab_order']);
 
     if (error) {
       if (isMissingTable(error)) {
-        return res.status(200).json({ ...DEFAULTS, migrated: false });
+        return res.status(200).json(isAdmin ? { ...DEFAULTS, tabOrder: null, migrated: false } : { tabOrder: null });
       }
       return res.status(500).json({ error: '서버 오류' });
     }
 
     const map = Object.fromEntries((data || []).map((r) => [r.key, r.value]));
+    let tabOrder: string[] | null = null;
+    try {
+      const parsed = JSON.parse(map.tab_order || 'null');
+      if (Array.isArray(parsed)) tabOrder = parsed.filter((t) => TAB_IDS.includes(t));
+    } catch { /* 잘못 저장된 값은 기본 순서로 */ }
+
+    if (!isAdmin) return res.status(200).json({ tabOrder });
+
     return res.status(200).json({
       imageModel: ALLOWED_MODELS.includes(map.image_model) ? map.image_model : DEFAULTS.imageModel,
       imageQuality: ALLOWED_QUALITY.includes(map.image_quality) ? map.image_quality : DEFAULTS.imageQuality,
       aiIntegratedTextEnabled: map.ai_integrated_text_enabled === 'true',
+      tabOrder,
       migrated: true,
     });
   }
 
-  if (req.method === 'POST') {
-    const { imageModel, imageQuality, aiIntegratedTextEnabled } = req.body ?? {};
-    if (!ALLOWED_MODELS.includes(imageModel) || !ALLOWED_QUALITY.includes(imageQuality)) {
-      return res.status(400).json({ error: '허용되지 않은 모델 또는 품질입니다.' });
-    }
+  if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
 
+  // 설정 변경 — 이미지 설정과 탭 순서를 각각 부분 저장할 수 있다
+  if (req.method === 'POST') {
+    const { imageModel, imageQuality, aiIntegratedTextEnabled, tabOrder } = req.body ?? {};
     const now = new Date().toISOString();
-    const { error } = await supabase.from('app_config').upsert(
-      [
+    const rows: { key: string; value: string; updated_at: string }[] = [];
+
+    if (imageModel !== undefined || imageQuality !== undefined) {
+      if (!ALLOWED_MODELS.includes(imageModel) || !ALLOWED_QUALITY.includes(imageQuality)) {
+        return res.status(400).json({ error: '허용되지 않은 모델 또는 품질입니다.' });
+      }
+      rows.push(
         { key: 'image_model', value: imageModel, updated_at: now },
         { key: 'image_quality', value: imageQuality, updated_at: now },
         { key: 'ai_integrated_text_enabled', value: aiIntegratedTextEnabled === true ? 'true' : 'false', updated_at: now },
-      ],
-      { onConflict: 'key' }
-    );
+      );
+    }
+
+    if (tabOrder !== undefined) {
+      if (
+        !Array.isArray(tabOrder) ||
+        tabOrder.some((t) => !TAB_IDS.includes(t)) ||
+        new Set(tabOrder).size !== tabOrder.length
+      ) {
+        return res.status(400).json({ error: '올바르지 않은 탭 순서입니다.' });
+      }
+      rows.push({ key: 'tab_order', value: JSON.stringify(tabOrder), updated_at: now });
+    }
+
+    if (rows.length === 0) return res.status(400).json({ error: '변경할 설정이 없습니다.' });
+
+    const { error } = await supabase.from('app_config').upsert(rows, { onConflict: 'key' });
 
     if (error) {
       if (isMissingTable(error)) {
@@ -321,7 +355,7 @@ async function handleConfig(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: '서버 오류' });
     }
 
-    return res.status(200).json({ imageModel, imageQuality, aiIntegratedTextEnabled: aiIntegratedTextEnabled === true, message: '저장됐습니다.' });
+    return res.status(200).json({ message: '저장됐습니다.' });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

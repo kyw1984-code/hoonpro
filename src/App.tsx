@@ -33,6 +33,29 @@ const TABS: TabDef[] = [
   { id: 'qa', label: '훈프로에게 질문', icon: MessageCircleQuestion },
 ];
 
+// 관리자가 저장한 탭 순서 (app_config.tab_order). 로컬 캐시로 첫 화면 깜빡임을 막는다.
+const TAB_ORDER_KEY = 'hoonpro_tab_order';
+
+const loadCachedTabOrder = (): string[] | null => {
+  try {
+    const v = JSON.parse(localStorage.getItem(TAB_ORDER_KEY) || 'null');
+    return Array.isArray(v) ? v : null;
+  } catch {
+    return null;
+  }
+};
+
+const applyTabOrder = (order: string[] | null): TabDef[] => {
+  if (!order || order.length === 0) return TABS;
+  const pos = new Map(order.map((id, i) => [id, i]));
+  // 저장 이후 추가된 새 탭은 기본 순서를 유지하며 뒤쪽에 배치
+  return [...TABS].sort((a, b) => {
+    const ai = pos.has(a.id) ? pos.get(a.id)! : 100 + TABS.findIndex(t => t.id === a.id);
+    const bi = pos.has(b.id) ? pos.get(b.id)! : 100 + TABS.findIndex(t => t.id === b.id);
+    return ai - bi;
+  });
+};
+
 // 밑줄형 탭 — 개수가 늘어도 줄바꿈으로 무너지지 않고 헤더 높이가 일정하게 유지된다.
 const getTabButtonClass = (active: boolean): string => (
   `relative flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-[13px] transition-colors -mb-px ${
@@ -52,6 +75,20 @@ export default function App() {
   const [remainingCalls, setRemainingCalls] = useState<number | null>(null);
   // '훈프로에게 질문' 수강생 공개 여부 — OFF면 수강생에게 탭 자체를 숨김 (관리자는 항상 표시)
   const [qaVisible, setQaVisible] = useState(false);
+  const [tabOrder, setTabOrder] = useState<string[] | null>(loadCachedTabOrder);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/admin?action=config'); // 비관리자에게는 tabOrder만 공개
+        const data = await res.json();
+        if (res.ok && Array.isArray(data.tabOrder)) {
+          setTabOrder(data.tabOrder);
+          localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(data.tabOrder));
+        }
+      } catch { /* 실패 시 기본 순서 유지 */ }
+    })();
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -153,7 +190,7 @@ export default function App() {
           {/* 아래 줄 — 탭 */}
           <div className="border-t border-line">
             <nav className="mx-auto flex max-w-[1240px] gap-1 overflow-x-auto px-6" aria-label="주요 기능">
-              {TABS.filter(tab => tab.id !== 'qa' || qaVisible).map(tab => (
+              {applyTabOrder(tabOrder).filter(tab => tab.id !== 'qa' || qaVisible).map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
