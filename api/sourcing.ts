@@ -1008,17 +1008,19 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
   if (error) return res.status(500).json({ error: "순위 추적 목록 조회 실패 (sourcing_rank_watch 테이블 생성 필요)" });
   if (!watches || watches.length === 0) return res.status(200).json({ watches: [] });
 
+  // 최신순으로 읽어야 이력이 쌓여 2,000행을 넘어도 최근 기록이 잘리지 않는다
   const { data: obs } = await supabase
     .from("sourcing_rank_obs")
     .select("keyword, product_id, rank, rank_with_ads, price, captured_at")
     .in("product_id", watches.map(w => w.product_id))
-    .order("captured_at", { ascending: true })
+    .order("captured_at", { ascending: false })
     .limit(2000);
 
   const result = watches.map(w => {
     const history = (obs || [])
       .filter(o => o.keyword === w.keyword && o.product_id === w.product_id)
-      .slice(-30);
+      .slice(0, 30)
+      .reverse(); // 화면 표시는 과거→최신 순
     const latest = history[history.length - 1] || null;
     const prev = history.length >= 2 ? history[history.length - 2] : null;
     return {
