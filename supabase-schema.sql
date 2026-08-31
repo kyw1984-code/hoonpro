@@ -120,3 +120,29 @@ create table if not exists sourcing_favorites (
 );
 
 alter table sourcing_favorites disable row level security;
+
+-- 10. 내 상품 순위 추적 — 등록 상품이 키워드 검색 결과 몇 위인지 수집 시마다 기록
+create table if not exists sourcing_rank_watch (
+  user_id uuid not null,
+  keyword text not null,
+  product_id text not null,
+  product_name text,
+  created_at timestamptz default now(),
+  primary key (user_id, keyword, product_id)
+);
+
+alter table sourcing_rank_watch disable row level security;
+
+create table if not exists sourcing_rank_obs (
+  id bigserial primary key,
+  keyword text not null,
+  product_id text not null,
+  rank int,            -- 광고 제외(오가닉) 순위, null = 1페이지(60위) 밖
+  rank_with_ads int,   -- 광고 포함 노출 순서
+  price int,
+  captured_at timestamptz default now()
+);
+
+create index if not exists idx_sro on sourcing_rank_obs(keyword, product_id, captured_at);
+
+alter table sourcing_rank_obs disable row level security;

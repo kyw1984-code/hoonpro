@@ -133,6 +133,19 @@ export function SourcingFinder() {
   const [favReportLoading, setFavReportLoading] = useState(false);
   // 사용 방법 안내 팝업
   const [showGuide, setShowGuide] = useState(false);
+  // 주간 소싱 브리핑
+  const [briefing, setBriefing] = useState<any | null>(null);
+  // 경쟁상품 리뷰 분석
+  const [reviewTarget, setReviewTarget] = useState<Product | null>(null);
+  const [reviewData, setReviewData] = useState<any | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  // 내 상품 순위 추적
+  const [rankWatches, setRankWatches] = useState<any[] | null>(null);
+  const [rankLoading, setRankLoading] = useState(false);
+  const [rwKeyword, setRwKeyword] = useState('');
+  const [rwProduct, setRwProduct] = useState('');
+  const [rwMsg, setRwMsg] = useState<string | null>(null);
+  const [rankAdded, setRankAdded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     try {
@@ -362,6 +375,82 @@ export function SourcingFinder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showFavorites]);
 
+  // ─── API: 주간 소싱 브리핑 ──────────────────────────────────────────────────
+  const fetchBriefing = async () => {
+    try {
+      const res = await fetch('/api/sourcing?type=briefing', { headers: authHeaders() });
+      const data = await res.json();
+      if (res.ok && !data.error) setBriefing(data);
+    } catch { /* 브리핑 실패는 조용히 무시 */ }
+  };
+
+  // ─── API: 내 상품 순위 추적 ─────────────────────────────────────────────────
+  const fetchRankWatches = async () => {
+    setRankLoading(true);
+    try {
+      const res = await fetch('/api/sourcing?type=rankwatch&action=list', { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || data.error) { setRankWatches([]); setRwMsg(data.error || null); }
+      else setRankWatches(data.watches || []);
+    } catch {
+      setRankWatches([]);
+    } finally {
+      setRankLoading(false);
+    }
+  };
+
+  const addRankWatch = async (keyword: string, product: string, name = ''): Promise<boolean> => {
+    setRwMsg(null);
+    const params = new URLSearchParams({ type: 'rankwatch', action: 'add', keyword: keyword.trim(), product: product.trim() });
+    if (name) params.set('name', name.slice(0, 150));
+    try {
+      const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok || data.error) { setRwMsg(data.error || '등록 실패'); return false; }
+      setRwKeyword(''); setRwProduct('');
+      setRwMsg('등록 완료 — 매일 새벽 자동으로 순위가 기록됩니다.');
+      fetchRankWatches();
+      return true;
+    } catch (e: any) {
+      setRwMsg(e.message);
+      return false;
+    }
+  };
+
+  const removeRankWatch = async (keyword: string, productId: string) => {
+    await fetch(`/api/sourcing?type=rankwatch&action=remove&keyword=${encodeURIComponent(keyword)}&product=${encodeURIComponent(productId)}`,
+      { headers: authHeaders() }).catch(() => {});
+    fetchRankWatches();
+  };
+
+  useEffect(() => {
+    fetchBriefing();
+    fetchRankWatches();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── API: 경쟁상품 리뷰 분석 ────────────────────────────────────────────────
+  const fetchReviewAnalysis = async (p: Product) => {
+    setReviewTarget(p);
+    setReviewData(null);
+    setReviewLoading(true);
+    try {
+      const res = await fetch(
+        `/api/sourcing?type=reviews&product=${encodeURIComponent(p.productId)}&name=${encodeURIComponent(p.productName.slice(0, 100))}`,
+        { headers: authHeaders() },
+      );
+      const data = await res.json();
+      setReviewData(data);
+      if (typeof data.remaining === 'number') {
+        window.dispatchEvent(new CustomEvent('usage-updated', { detail: { remaining: data.remaining } }));
+      }
+    } catch (e: any) {
+      setReviewData({ error: e.message });
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
   // ─── API: 쿠팡 상품 분석 ────────────────────────────────────────────────────
   const fetchProducts = async (kw: string, volume = 0) => {
     setActiveKeyword(kw);
@@ -549,6 +638,31 @@ export function SourcingFinder() {
             </button>
           </div>
         </div>
+
+        {/* 주간 소싱 브리핑 — 다음 달 시즌 키워드 중 기회점수 상위 */}
+        {briefing?.items?.length > 0 && (
+          <div className="rounded-panel border border-accent-line bg-accent-soft p-5">
+            <p className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-widest text-accent">
+              <Zap className="h-3.5 w-3.5" />
+              이번 주 추천 소싱 키워드 TOP {briefing.items.length}
+            </p>
+            <p className="mb-3 text-[12px] text-ink-2">
+              <b className="text-ink">{briefing.month}월 판매</b>를 준비할 키워드 중 검색량·경쟁·계절성 기준 상위입니다. 누르면 바로 쿠팡 분석이 실행됩니다.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              {briefing.items.map((it: any) => (
+                <button key={it.keyword} onClick={() => fetchProducts(it.keyword, it.monthlyVolume)}
+                  className="group flex items-center gap-2 rounded-control border border-line bg-paper px-3 py-2 text-left transition-colors hover:border-accent">
+                  <span className="text-[13px] font-semibold text-ink group-hover:text-accent">{it.keyword}</span>
+                  <span className="text-[11px] tabular-nums text-ink-3">{Number(it.monthlyVolume).toLocaleString()}</span>
+                  {Array.isArray(it.peakMonths) && it.peakMonths.length > 0 && it.peakMonths.length <= 4 && (
+                    <span className="rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-accent">{it.peakMonths.join('·')}월 피크</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 월별 시즌 키워드 — 소싱은 판매 1~2개월 전에 시작해야 함 */}
         {(() => {
@@ -1204,6 +1318,24 @@ export function SourcingFinder() {
                             </div>
                             <div className="flex flex-col gap-2 mt-auto">
                               <div className="flex gap-2">
+                                <button onClick={() => fetchReviewAnalysis(product)}
+                                  title="실제 리뷰를 수집해 불만·니즈·공략 포인트를 AI로 분석"
+                                  className="flex-1 rounded-card border border-line py-2 text-[11px] font-semibold text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
+                                  리뷰 분석
+                                </button>
+                                <button
+                                  onClick={async () => {
+                                    if (!activeKeyword) return;
+                                    const ok = await addRankWatch(activeKeyword, product.productId, product.productName);
+                                    if (ok) setRankAdded(prev => ({ ...prev, [product.productId]: true }));
+                                  }}
+                                  disabled={!activeKeyword || rankAdded[product.productId]}
+                                  title={`"${activeKeyword}" 검색 결과에서 이 상품의 순위를 매일 자동 기록`}
+                                  className="flex-1 rounded-card border border-line py-2 text-[11px] font-semibold text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60">
+                                  {rankAdded[product.productId] ? '✓ 순위 추적 중' : '순위 추적'}
+                                </button>
+                              </div>
+                              <div className="flex gap-2">
                                 <button onClick={() => handle1688Click(product)}
                                   title="상품 이미지로 1688 소싱처 검색"
                                   className="flex-1 py-3 bg-accent-soft rounded-card text-[11px] font-semibold text-accent flex items-center justify-center gap-2 hover:bg-accent-soft transition-colors">
@@ -1230,6 +1362,155 @@ export function SourcingFinder() {
             </div>
           )}
         </div>
+
+        {/* ══════════ 내 상품 순위 추적 ══════════ */}
+        <div className="bg-paper rounded-panel p-6 border border-line">
+          <div className="mb-1 flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-accent" />
+            <h3 className="text-base font-semibold text-ink">내 상품 순위 추적</h3>
+          </div>
+          <p className="mb-4 text-[12px] text-ink-2">
+            내 상품(또는 경쟁 상품)이 키워드 검색 결과 몇 위인지 매일 새벽 자동으로 기록합니다. 상품 카드의 [순위 추적] 버튼으로도 등록할 수 있습니다. (최대 20개, 1페이지 60위까지 추적)
+          </p>
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row">
+            <input value={rwKeyword} onChange={e => setRwKeyword(e.target.value)} placeholder="추적 키워드 (예: 캠핑의자)"
+              className="flex-1 rounded-control border border-line bg-paper px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-accent" />
+            <input value={rwProduct} onChange={e => setRwProduct(e.target.value)} placeholder="상품 URL 또는 상품번호 (coupang.com/vp/products/...)"
+              className="flex-[2] rounded-control border border-line bg-paper px-3 py-2 text-[13px] outline-none focus:ring-2 focus:ring-accent" />
+            <button onClick={() => { if (rwKeyword.trim() && rwProduct.trim()) addRankWatch(rwKeyword, rwProduct); }}
+              disabled={!rwKeyword.trim() || !rwProduct.trim()}
+              className="rounded-control bg-ink px-5 py-2 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
+              등록
+            </button>
+          </div>
+          {rwMsg && <p className={`mb-3 text-[12px] ${rwMsg.includes('완료') ? 'text-positive' : 'text-critical'}`}>{rwMsg}</p>}
+          {rankLoading && rankWatches === null ? (
+            <p className="text-[12px] text-ink-3">불러오는 중...</p>
+          ) : !rankWatches || rankWatches.length === 0 ? (
+            <p className="text-[12px] text-ink-3">추적 중인 상품이 없습니다. 쿠팡 분석에서 상품을 고른 뒤 [순위 추적]을 누르거나, 위에 직접 등록하세요.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+              {rankWatches.map((w: any) => {
+                const hist = (w.history || []).filter((o: any) => o.rank !== null);
+                const trail = (w.history || []).slice(-8).map((o: any) => (o.rank === null ? '밖' : `${o.rank}`)).join(' → ');
+                return (
+                  <div key={`${w.keyword}:${w.product_id}`} className="rounded-card border border-line bg-paper-2 p-3.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[13px] font-semibold text-ink">"{w.keyword}"</span>
+                      <a href={`https://www.coupang.com/vp/products/${w.product_id}`} target="_blank" rel="noopener noreferrer"
+                        className="min-w-0 max-w-[45%] truncate text-[12px] text-ink-2 hover:text-accent">
+                        {w.product_name || `상품 ${w.product_id}`}
+                      </a>
+                      <div className="ml-auto flex items-center gap-2">
+                        {w.latestRank !== undefined && w.latestRank !== null ? (
+                          <span className="text-[15px] font-semibold tabular-nums text-ink">{w.latestRank}위</span>
+                        ) : w.latestAt ? (
+                          <span className="text-[12px] font-semibold text-ink-3">60위 밖</span>
+                        ) : (
+                          <span className="text-[12px] text-ink-3">첫 기록 대기</span>
+                        )}
+                        {typeof w.delta === 'number' && w.delta !== 0 && (
+                          <span className={`${BADGE_BASE} ${w.delta > 0 ? 'border-positive/35 bg-positive-soft text-positive' : 'border-critical/35 bg-critical-soft text-critical'}`}>
+                            {w.delta > 0 ? `▲${w.delta}` : `▼${Math.abs(w.delta)}`}
+                          </span>
+                        )}
+                        <button onClick={() => removeRankWatch(w.keyword, w.product_id)} title="추적 해제"
+                          className="rounded-control p-1 text-ink-3 hover:bg-paper hover:text-critical">
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                    {trail && (
+                      <p className="mt-1.5 text-[11px] tabular-nums text-ink-3">
+                        순위 추이: {trail}{hist.length === 0 ? '' : '위'}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ══════════ 경쟁상품 리뷰 분석 모달 ══════════ */}
+        <AnimatePresence>
+          {reviewTarget && (
+            <>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => { if (!reviewLoading) setReviewTarget(null); }}
+                className="fixed inset-0 z-[80] bg-ink/50 backdrop-blur-sm" />
+              <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                className="fixed inset-0 m-auto z-[90] w-[92%] max-w-[620px] h-fit max-h-[88vh] bg-paper rounded-panel border border-line shadow-overlay overflow-y-auto">
+                <div className="flex items-start justify-between gap-4 px-7 pt-6 pb-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-widest text-accent">Review Intelligence</p>
+                    <h3 className="mt-1 truncate text-lg font-semibold text-ink">{reviewTarget.productName}</h3>
+                  </div>
+                  <button onClick={() => setReviewTarget(null)} className="rounded-full p-1.5 text-ink-3 transition-all hover:bg-paper-2 hover:text-ink-2">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="px-7 pb-6 pt-2">
+                  {reviewLoading ? (
+                    <div className="flex flex-col items-center gap-3 py-10 text-ink-3">
+                      <Loader2 className="h-8 w-8 animate-spin text-accent" />
+                      <p className="text-sm font-semibold">실제 리뷰를 수집해 훈프로AI가 분석하는 중... (10~30초)</p>
+                    </div>
+                  ) : reviewData?.error ? (
+                    <div className="rounded-card border border-critical/30 bg-critical-soft p-4 text-[13px] text-critical">
+                      {reviewData.error}
+                      {reviewData.diagnostics && <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px] opacity-80">{reviewData.diagnostics}</pre>}
+                    </div>
+                  ) : reviewData?.summary ? (
+                    <div className="flex flex-col gap-3">
+                      {reviewData.summary.error ? (
+                        <p className="text-[13px] text-critical">{reviewData.summary.error}</p>
+                      ) : (
+                        <>
+                          {reviewData.summary.oneLine && (
+                            <p className="rounded-card border border-accent-line bg-accent-soft px-4 py-3 text-[13px] font-semibold text-ink">
+                              {reviewData.summary.oneLine}
+                            </p>
+                          )}
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            {([
+                              ['👍 고객 만족 포인트', reviewData.summary.positives, 'text-positive'],
+                              ['⚠️ 고객 불만 포인트', reviewData.summary.complaints, 'text-critical'],
+                              ['🔍 숨은 니즈', reviewData.summary.needs, 'text-ink'],
+                              ['🎯 내가 공략할 포인트', reviewData.summary.attackPoints, 'text-accent'],
+                            ] as const).map(([title, items, cls]) => (
+                              Array.isArray(items) && items.length > 0 ? (
+                                <div key={title} className="rounded-card border border-line bg-paper-2 p-3.5">
+                                  <p className={`mb-1.5 text-[12px] font-semibold ${cls}`}>{title}</p>
+                                  <ul className="list-disc list-inside space-y-0.5 text-[12px] leading-relaxed text-ink-2">
+                                    {items.map((s: string, i: number) => <li key={i}>{s}</li>)}
+                                  </ul>
+                                </div>
+                              ) : null
+                            ))}
+                          </div>
+                          {Array.isArray(reviewData.samples) && reviewData.samples.length > 0 && (
+                            <div className="rounded-card border border-line p-3.5">
+                              <p className="mb-1.5 text-[11px] font-semibold text-ink-3">실제 리뷰 샘플 (수집 {reviewData.reviewCount}개 중)</p>
+                              {reviewData.samples.slice(0, 3).map((s: any, i: number) => (
+                                <p key={i} className="mt-1 text-[11px] leading-relaxed text-ink-3">
+                                  {s.rating > 0 && <b>[{s.rating}점] </b>}{s.text.slice(0, 160)}{s.text.length > 160 ? '…' : ''}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          <p className="text-[11px] text-ink-3">
+                            공략 포인트는 상세페이지 제작 탭의 기획안에 그대로 활용하세요. 결과는 7일간 캐시됩니다.
+                          </p>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
 
         {/* ══════════ 마진 계산기 드로어 ══════════ */}
         <AnimatePresence>
