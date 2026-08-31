@@ -146,3 +146,116 @@ create table if not exists sourcing_rank_obs (
 create index if not exists idx_sro on sourcing_rank_obs(keyword, product_id, captured_at);
 
 alter table sourcing_rank_obs disable row level security;
+
+-- ─────────────────────────────────────────────────────────────
+-- 11. 유료화(월 구독 자동결제) — plans / subscriptions / payments / coupons
+-- ─────────────────────────────────────────────────────────────
+
+-- 플랜 (단일 플랜으로 시작 — 39,800원/월)
+create table if not exists plans (
+  id text primary key,
+  name text not null,
+  price int not null,
+  active boolean default true,
+  created_at timestamptz default now()
+);
+
+insert into plans (id, name, price) values ('standard', '훈프로 스탠다드', 39800)
+on conflict (id) do nothing;
+
+-- 구독 (1인 1구독)
+create table if not exists subscriptions (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  plan_id text not null references plans(id),
+  -- trial: 무료 기간 쿠폰 이용 중 / active: 정상 / past_due: 결제 실패 재시도 중
+  -- paused: 3회 실패로 정지(데이터 보존) / canceled: 종료
+  status text not null default 'active'
+    check (status in ('trial', 'active', 'past_due', 'paused', 'canceled')),
+  billing_key_enc text,          -- 토스 빌링키 (AES-256-GCM 암호화, 카드번호는 저장하지 않음)
+  customer_key text not null,    -- 토스 customerKey
+  card_summary text,             -- 표시용 (예: '신한 **** 1234')
+  coupon_id uuid,
+  coupon_remaining_cycles int,   -- 남은 할인 적용 회차 (null = 계속 적용)
+  current_period_start timestamptz,
+  current_period_end timestamptz,
+  next_billing_at date,          -- 크론이 이 날짜에 청구 (실패 시 D+1, D+3로 갱신)
+  fail_count int default 0,
+  cancel_at_period_end boolean default false,
+  canceled_at timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create unique index if not exists idx_sub_user on subscriptions(user_id);
+create index if not exists idx_sub_next_billing on subscriptions(next_billing_at)
+  where status in ('trial', 'active', 'past_due');
+
+alter table subscriptions disable row level security;
+
+-- 결제 이력
+create table if not exists payments (
+  id uuid default gen_random_uuid() primary key,
+  subscription_id uuid references subscriptions(id) on delete set null,
+  user_id uuid references users(id) on delete set null,
+  order_id text unique not null,
+  order_name text,
+  amount int not null,           -- 실제 청구 금액 (할인 반영)
+  discount int default 0,        -- 쿠폰 할인액
+  status text not null
+    check (status in ('paid', 'failed', 'canceled', 'partial_refund', 'refunded')),
+  payment_key text,              -- 토스 paymentKey
+  fail_reason text,
+  receipt_url text,
+  approved_at timestamptz,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_payments_user on payments(user_id, created_at);
+
+alter table payments disable row level security;
+
+-- 쿠폰
+create table if not exists coupons (
+  id uuid default gen_random_uuid() primary key,
+  code text unique not null,
+  -- free_period: value=무료 일수 / percent: value=% / amount: value=원
+  type text not null check (type in ('free_period', 'percent', 'amount')),
+  value int not null,
+  duration_cycles int default 1, -- 할인형만: 적용 회차 수 (null = 계속)
+  max_redemptions int,           -- null = 무제한
+  redeemed_count int default 0,
+  expires_at timestamptz,
+  active boolean default true,
+  note text,
+  created_at timestamptz default now()
+);
+
+alter table coupons disable row level security;
+
+-- 쿠폰 사용 기록 — CI(본인인증 고유값) 기준 1인 1회로 재가입 어뷰징 차단
+create table if not exists coupon_redemptions (
+  id uuid default gen_random_uuid() primary key,
+  coupon_id uuid not null references coupons(id) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  ci text,
+  subscription_id uuid,
+  created_at timestamptz default now(),
+  unique (coupon_id, user_id)
+);
+
+create unique index if not exists idx_redemption_ci
+  on coupon_redemptions(coupon_id, ci) where ci is not null;
+
+alter table coupon_redemptions disable row level security;
+
+-- users 확장 — 본인인증(PASS) 결과
+alter table users add column if not exists ci text;
+alter table users add column if not exists phone_verified_at timestamptz;
+alter table users add column if not exists birth_date date;
+
+create unique index if not exists idx_users_ci on users(ci) where ci is not null;
+
+-- 유료화 강제 스위치 — 'true'가 되면 구독 없는 계정의 기능 사용이 차단됨 (소프트 오픈 때 켜기)
+insert into app_config (key, value) values ('billing_enforced', 'false')
+on conflict (key) do nothing;
