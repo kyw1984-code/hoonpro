@@ -1,19 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { MessageCircleQuestion, Send, Loader2, ThumbsUp, ThumbsDown, BookOpen, Sparkles, AlertCircle } from 'lucide-react';
+import { MessageCircleQuestion, Send, Loader2, ThumbsUp, ThumbsDown, Sparkles, AlertCircle } from 'lucide-react';
 import { getToken } from '../../lib/auth';
-
-interface Source {
-  docId: string;
-  title: string;
-  sourceType: 'lecture' | 'kakao';
-  similarity: number;
-}
 
 interface QAItem {
   id: number;
   question: string;
   answer: string;
-  sources: Source[];
   matched: boolean;
   logId: string | null;
   feedback: 1 | -1 | null;
@@ -59,7 +51,6 @@ export const AskHoonpro: React.FC = () => {
           id: nextId.current++,
           question: trimmed,
           answer: data.answer,
-          sources: Array.isArray(data.sources) ? data.sources : [],
           matched: data.matched !== false,
           logId: data.logId ?? null,
           feedback: null,
@@ -176,22 +167,6 @@ export const AskHoonpro: React.FC = () => {
             <div className="px-6 py-5">
               <div className="mb-2 text-[11px] font-semibold text-accent">훈프로 답변</div>
               <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink-2">{item.answer}</div>
-
-              {/* 출처 */}
-              {item.sources.length > 0 && (
-                <div className="mt-4 flex flex-wrap items-center gap-1.5">
-                  <BookOpen className="h-3.5 w-3.5 text-ink-3" />
-                  {item.sources.map(s => (
-                    <span
-                      key={s.docId}
-                      className="rounded-full border border-accent-line bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent"
-                      title={`유사도 ${(s.similarity * 100).toFixed(0)}%`}
-                    >
-                      {s.sourceType === 'kakao' ? '💬' : '📚'} {s.title}
-                    </span>
-                  ))}
-                </div>
-              )}
 
               {/* 피드백 */}
               {item.logId && (

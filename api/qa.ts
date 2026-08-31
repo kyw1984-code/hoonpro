@@ -79,47 +79,99 @@ function maskKakaoNames(text: string): string {
   });
 }
 
-// ── 청크 분할: 문단 단위로 이어붙이고 넘치면 자름 (앞 청크 꼬리 일부 중첩) ──
+// ── 청크 분할 ──
+// 빈 줄(문단) 경계를 우선하되, 강의 정리본처럼 빈 줄 없이 한 줄씩 이어지는
+// 자료는 줄 경계에서 자른다. 주제 중간이 뚝 잘리지 않도록 앞 청크 꼬리를 중첩.
 function chunkText(text: string): string[] {
-  const paragraphs = text
-    .split(/\n{2,}/)
-    .map(p => p.trim())
-    .filter(Boolean);
-
-  const chunks: string[] = [];
-  let current = '';
-
-  const push = () => {
-    const trimmed = current.trim();
-    if (trimmed.length > 20) chunks.push(trimmed);
-    current = '';
-  };
-
-  for (const para of paragraphs) {
-    if (para.length > CHUNK_SIZE) {
-      push();
-      // 너무 긴 문단은 문장 경계 근처에서 강제 분할
-      let rest = para;
-      while (rest.length > CHUNK_SIZE) {
-        let cut = rest.lastIndexOf('. ', CHUNK_SIZE);
-        if (cut < CHUNK_SIZE * 0.5) cut = rest.lastIndexOf(' ', CHUNK_SIZE);
-        if (cut < CHUNK_SIZE * 0.5) cut = CHUNK_SIZE;
-        chunks.push(rest.slice(0, cut).trim());
-        rest = rest.slice(Math.max(0, cut - CHUNK_OVERLAP)).trim();
-      }
-      current = rest;
+  // 1) 빈 줄 기준 블록 → 긴 블록은 줄 단위로 재분할해 "단위" 목록을 만든다
+  const units: string[] = [];
+  for (const block of text.split(/\n{2,}/)) {
+    const trimmed = block.trim();
+    if (!trimmed) continue;
+    if (trimmed.length <= CHUNK_SIZE) {
+      units.push(trimmed);
       continue;
     }
-    if (current.length + para.length + 2 > CHUNK_SIZE) {
-      const tail = current.slice(-CHUNK_OVERLAP);
-      push();
-      current = tail + '\n\n' + para;
+    let current = '';
+    for (let line of trimmed.split('\n')) {
+      line = line.trim();
+      if (!line) continue;
+      // 한 줄 자체가 청크보다 길면 문장/공백 경계에서 강제 분할
+      while (line.length > CHUNK_SIZE) {
+        let cut = line.lastIndexOf('. ', CHUNK_SIZE);
+        if (cut < CHUNK_SIZE * 0.5) cut = line.lastIndexOf(' ', CHUNK_SIZE);
+        if (cut < CHUNK_SIZE * 0.5) cut = CHUNK_SIZE;
+        if (current) { units.push(current.trim()); current = ''; }
+        units.push(line.slice(0, cut).trim());
+        line = line.slice(Math.max(0, cut - CHUNK_OVERLAP)).trim();
+      }
+      if (current && current.length + line.length + 1 > CHUNK_SIZE) {
+        units.push(current.trim());
+        current = current.slice(-CHUNK_OVERLAP) + '\n' + line;
+      } else {
+        current = current ? current + '\n' + line : line;
+      }
+    }
+    if (current.trim()) units.push(current.trim());
+  }
+
+  // 2) 작은 단위들을 청크 크기 근처까지 이어붙인다 (경계에는 꼬리 중첩)
+  const chunks: string[] = [];
+  let current = '';
+  for (const unit of units) {
+    if (current && current.length + unit.length + 2 > CHUNK_SIZE) {
+      chunks.push(current.trim());
+      current = current.slice(-CHUNK_OVERLAP) + '\n\n' + unit;
     } else {
-      current = current ? current + '\n\n' + para : para;
+      current = current ? current + '\n\n' + unit : unit;
     }
   }
-  push();
-  return chunks;
+  if (current.trim().length > 20) chunks.push(current.trim());
+  return chunks.filter(c => c.length > 20);
+}
+
+// ── 질문에서 핵심 단어 추출 (키워드 보조 검색용) ──
+const QUESTION_STOPWORDS = new Set([
+  '어떻게', '어떤', '어떻', '무엇', '뭐', '뭔가요', '왜', '언제', '어디', '얼마',
+  '하나요', '인가요', '있나요', '없나요', '되나요', '할까요', '좋나요', '해야',
+  '해요', '합니다', '주세요', '알려주세요', '궁금합니다', '궁금해요', '방법',
+  '대해', '대해서', '관련', '제가', '저는', '혹시', '그리고', '그런데', '쿠팡',
+]);
+
+function extractKeywords(question: string): string[] {
+  const words = question
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/)
+    .map(w => w.replace(/(은|는|이|가|을|를|의|에|로|으로|에서|도|만|이란|란|랑|과|와)$/u, ''))
+    .filter(w => w.length >= 2 && !QUESTION_STOPWORDS.has(w));
+  return [...new Set(words)].slice(0, 5);
+}
+
+// ── 키워드 보조 검색: 질문의 핵심 단어가 그대로 들어간 청크를 찾는다 ──
+// (벡터 검색이 놓치는 "상품명" 같은 정확 일치 자료를 보강)
+async function keywordSearch(keywords: string[], limit: number): Promise<any[]> {
+  if (keywords.length === 0) return [];
+  const orExpr = keywords.map(k => `content.ilike.%${k}%`).join(',');
+  const { data, error } = await supabase
+    .from('knowledge_chunks')
+    .select('id, doc_id, content, knowledge_docs(title, source_type)')
+    .or(orExpr)
+    .limit(40);
+  if (error || !data) return [];
+
+  // 포함된 키워드 수가 많은 청크 우선
+  return data
+    .map((row: any) => ({
+      chunk_id: row.id,
+      doc_id: row.doc_id,
+      doc_title: row.knowledge_docs?.title || '',
+      source_type: row.knowledge_docs?.source_type || 'lecture',
+      content: row.content,
+      similarity: null,
+      _hits: keywords.filter(k => row.content.includes(k)).length,
+    }))
+    .sort((a: any, b: any) => b._hits - a._hits)
+    .slice(0, limit);
 }
 
 // ── OpenAI 임베딩 (배치) ──
@@ -165,11 +217,12 @@ const SYSTEM_PROMPT = `당신은 쿠팡 셀러 강의를 운영하는 강사 '�
 - 적절한 곳에 이모지 1~2개 정도만 가볍게 사용.
 
 [답변 규칙 — 반드시 지킬 것]
-1. 아래 [강의 자료]에 있는 내용만 근거로 답변합니다. 자료에 없는 내용은 절대 지어내지 않습니다.
-2. 자료에 질문과 관련된 내용이 부족하면, 아는 부분까지만 답하고 나머지는 "이 부분은 강의에서 자세히 다루지 않았으니 커뮤니티에 질문 남겨주세요"라고 안내합니다.
-3. 환불, 계정 정지, 세무 관련 질문은 답변하지 말고 관리자에게 직접 문의하도록 안내합니다.
-4. 답변은 한국어로, 핵심 위주로 간결하게 (필요하면 번호/불릿 사용).
-5. 답변 마지막 줄에 참고한 자료 제목을 "📚 참고: 제목1, 제목2" 형식으로 표시합니다.`;
+1. 아래 [강의 자료]에 있는 내용만 근거로 답변합니다. 자료에 없는 내용은 일반 상식으로도 절대 채워 넣지 않습니다.
+2. 질문과 직접 관련된 내용이 자료에 있으면 그 자료의 구체적인 수치·순서·예시를 그대로 살려서 답합니다. (예: 자료에 6단 구성이 있으면 6단을 다 언급)
+3. 자료에 질문과 관련된 내용이 전혀 없으면 일반론을 늘어놓지 말고 "이 부분은 강의에서 자세히 다루지 않았으니 커뮤니티에 질문 남겨주세요"라고만 안내합니다.
+4. 환불, 계정 정지, 세무 관련 질문은 답변하지 말고 관리자에게 직접 문의하도록 안내합니다.
+5. 답변은 한국어로, 핵심 위주로 간결하게 (필요하면 번호/불릿 사용).
+6. 자료 제목, 강의 회차, 출처는 답변에 표시하지 않습니다.`;
 
 // ─────────────────────────────────────────────────────────────
 
@@ -250,19 +303,27 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
     (req as any)._remaining = usage.remaining;
   }
 
-  // 1) 질문 임베딩 → 2) 유사 청크 검색
+  // 1) 하이브리드 검색: 벡터 유사도 + 키워드 정확 일치를 병행해 합친다
+  //    (벡터만 쓰면 "상품명"처럼 핵심 단어가 든 청크를 놓치는 경우가 있음)
   const [queryEmbedding] = await embedTexts([question]);
-  const { data: matches, error: matchError } = await supabase.rpc('match_knowledge_chunks', {
-    query_embedding: queryEmbedding,
-    match_count: MATCH_COUNT,
-    min_similarity: MIN_SIMILARITY,
-  });
-  if (matchError) {
-    console.error('match_knowledge_chunks error:', matchError);
+  const [vectorResult, keywordChunks] = await Promise.all([
+    supabase.rpc('match_knowledge_chunks', {
+      query_embedding: queryEmbedding,
+      match_count: MATCH_COUNT,
+      min_similarity: MIN_SIMILARITY,
+    }),
+    keywordSearch(extractKeywords(question), 4),
+  ]);
+  if (vectorResult.error) {
+    console.error('match_knowledge_chunks error:', vectorResult.error);
     return res.status(500).json({ error: '지식 검색 중 오류가 발생했습니다. (마이그레이션 실행 여부를 확인하세요)' });
   }
 
-  const chunks: any[] = matches || [];
+  // 키워드 일치 청크를 앞에 두고, 벡터 결과를 뒤에 합친 뒤 중복 제거
+  const seenChunks = new Set<string>();
+  const chunks: any[] = [...keywordChunks, ...(vectorResult.data || [])]
+    .filter((c: any) => (seenChunks.has(c.chunk_id) ? false : (seenChunks.add(c.chunk_id), true)))
+    .slice(0, MATCH_COUNT + 2);
   if (chunks.length === 0) {
     const { data: log } = await supabase
       .from('qa_logs')
@@ -305,10 +366,13 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
     return res.status(openaiRes.status === 429 ? 429 : 502).json({ error: detail });
   }
 
-  const answer = data?.choices?.[0]?.message?.content?.trim();
+  // 모델이 규칙을 어기고 출처 줄을 붙여도 제거
+  const answer = data?.choices?.[0]?.message?.content
+    ?.replace(/\n?\s*(📚|참고\s*:)[^\n]*/g, '')
+    .trim();
   if (!answer) return res.status(502).json({ error: '답변이 비어 있습니다. 다시 시도해주세요.' });
 
-  // 출처 목록 (문서 단위 중복 제거, 유사도 높은 순)
+  // 출처 목록 — 답변에는 노출하지 않고 관리자 로그(qa_logs)에만 기록
   const seen = new Set<string>();
   const sources = chunks
     .filter(c => (seen.has(c.doc_id) ? false : (seen.add(c.doc_id), true)))
@@ -316,7 +380,7 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
       docId: c.doc_id,
       title: c.doc_title,
       sourceType: c.source_type,
-      similarity: Math.round(Number(c.similarity) * 100) / 100,
+      similarity: c.similarity == null ? null : Math.round(Number(c.similarity) * 100) / 100,
     }));
 
   const inputTokens = Math.max(0, Number(data?.usage?.prompt_tokens) || 0);
@@ -345,7 +409,6 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
 
   return res.status(200).json({
     answer,
-    sources,
     matched: true,
     logId,
     remaining: (req as any)._remaining,
