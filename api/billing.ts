@@ -335,6 +335,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (action === 'admin-coupon-create') return await adminCouponCreate(req, res);
       if (action === 'admin-coupon-update') return await adminCouponUpdate(req, res);
       if (action === 'admin-subscriptions') return await adminSubscriptions(res);
+      if (action === 'admin-config') return await adminBillingConfig(req, res);
     }
 
     return res.status(400).json({ error: '잘못된 요청입니다.' });
@@ -780,6 +781,20 @@ async function adminCouponUpdate(req: VercelRequest, res: VercelResponse) {
   const { error } = await supabase.from('coupons').update({ active }).eq('id', id);
   if (error) return res.status(500).json({ error: '쿠폰 수정에 실패했습니다.' });
   return res.status(200).json({ ok: true });
+}
+
+// 유료화 강제 스위치 — 소프트 오픈 시점에 켠다 (켜면 구독 없는 계정의 기능 사용이 차단됨)
+async function adminBillingConfig(req: VercelRequest, res: VercelResponse) {
+  const { enforce } = req.body ?? {};
+  if (typeof enforce === 'boolean') {
+    await supabase.from('app_config').upsert({
+      key: 'billing_enforced',
+      value: enforce ? 'true' : 'false',
+      updated_at: new Date().toISOString(),
+    });
+  }
+  const { data } = await supabase.from('app_config').select('value').eq('key', 'billing_enforced').maybeSingle();
+  return res.status(200).json({ billingEnforced: data?.value === 'true' });
 }
 
 async function adminSubscriptions(res: VercelResponse) {

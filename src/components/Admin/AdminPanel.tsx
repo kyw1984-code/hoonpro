@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
+import { BillingAdmin } from './BillingAdmin';
 
 interface UserRow {
   id: string;
@@ -29,7 +30,7 @@ const STATUS_COLOR: Record<string, string> = {
 const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'stats' | 'config'>('users');
+  const [tab, setTab] = useState<'users' | 'billing' | 'stats' | 'config'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -131,6 +132,14 @@ export function AdminPanel() {
           <Users className="w-4 h-4" /> 회원 관리
         </button>
         <button
+          onClick={() => setTab('billing')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'billing' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <CreditCard className="w-4 h-4" /> 구독·쿠폰
+        </button>
+        <button
           onClick={() => setTab('stats')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             tab === 'stats' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
@@ -148,7 +157,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'stats' ? <UsageStats /> : tab === 'config' ? <ImageConfigTab showToast={showToast} /> : <UsersTab
+      {tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'config' ? <ImageConfigTab showToast={showToast} /> : <UsersTab
         users={users}
         loading={loading}
         filter={filter}
