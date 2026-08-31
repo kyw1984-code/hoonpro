@@ -211,6 +211,27 @@ const CATEGORY_SEEDS: Record<string, string[]> = {
   "반려동물": ["강아지장난감", "고양이용품", "펫방석", "강아지옷", "강아지급식기"],
 };
 
+// 카테고리별 관련성 어휘 — 네이버 키워드도구는 힌트와 무관한 인기 광고 키워드
+// (예: 여성패션 시드에 블루투스이어폰)를 섞어 주므로, 결과 키워드가 시드 또는
+// 아래 어휘 중 하나를 포함할 때만 통과시킨다.
+const CATEGORY_VOCAB: Record<string, string[]> = {
+  "여성패션": ["원피스", "블라우스", "가디건", "스커트", "치마", "슬랙스", "팬츠", "바지", "니트", "티셔츠", "셔츠", "자켓", "재킷", "코트", "패딩", "후드", "맨투맨", "조끼", "레깅스", "나시", "여성", "여자", "빅사이즈"],
+  "남성패션": ["남자", "남성", "맨투맨", "셔츠", "슬랙스", "반팔", "긴팔", "티셔츠", "후드", "자켓", "코트", "패딩", "바지", "청바지", "조끼", "니트", "반바지", "정장", "넥타이", "벨트"],
+  "뷰티": ["크림", "세럼", "에센스", "로션", "토너", "스킨", "클렌징", "폼", "팩", "선크림", "립", "틴트", "쿠션", "파운데이션", "섀도", "마스카라", "향수", "헤어", "바디", "미스트", "앰플", "필링", "밤"],
+  "출산/유아": ["아기", "유아", "신생아", "젖병", "기저귀", "분유", "이유식", "아동", "키즈", "출산", "임산부", "유모차", "카시트", "턱받이", "쪽쪽이", "장난감", "물티슈"],
+  "식품": ["견과", "젤리", "누룽지", "커피", "간편식", "즉석", "곤약", "쌀", "라면", "과자", "스낵", "음료", "두유", "고기", "닭", "소고기", "돼지", "과일", "김치", "반찬", "밀키트", "시리얼", "꿀", "잼", "빵", "떡"],
+  "주방용품": ["프라이팬", "팬", "냄비", "밀폐용기", "용기", "수납", "조리", "주방", "텀블러", "컵", "그릇", "접시", "수저", "젓가락", "칼", "도마", "믹서", "주전자", "보온", "보냉", "식기", "수세미", "행주"],
+  "생활용품": ["욕실", "세탁", "제습", "옷걸이", "슬리퍼", "수건", "타월", "휴지", "청소", "세제", "방향제", "탈취", "정리함", "바구니", "매트", "커버", "빨래", "건조대", "우산", "면봉", "화장지", "위생"],
+  "홈인테리어": ["무드등", "조명", "커튼", "러그", "카페트", "수납장", "선반", "액자", "쿠션", "이불", "베개", "침구", "매트리스", "토퍼", "블라인드", "스탠드", "화분", "인테리어", "거울", "시계", "디퓨저", "캔들"],
+  "가전디지털": ["이어폰", "헤드폰", "충전기", "보조배터리", "가습기", "청소기", "케이블", "거치대", "스피커", "키보드", "마우스", "모니터", "선풍기", "히터", "공기청정기", "드라이기", "면도기", "전기", "무선", "워치", "태블릿", "노트북", "카메라"],
+  "스포츠/레저": ["요가", "매트", "캠핑", "등산", "자전거", "낚시", "헬스", "운동", "골프", "수영", "배드민턴", "테니스", "축구", "농구", "러닝", "트레킹", "텐트", "타프", "침낭", "스포츠", "레저"],
+  "자동차용품": ["차량", "자동차", "차량용", "세차", "블랙박스", "네비", "타이어", "와이퍼", "주차", "트렁크", "핸들", "시트", "카"],
+  "완구/취미": ["보드게임", "퍼즐", "프라모델", "인형", "물감", "장난감", "레고", "블록", "피규어", "색칠", "뜨개", "자수", "미니어처", "드론", "게임", "취미"],
+  "문구/오피스": ["다이어리", "볼펜", "펜", "노트", "파일", "스티커", "데스크", "오피스", "문구", "형광펜", "샤프", "지우개", "메모", "포스트잇", "클립", "가위", "테이프", "달력", "플래너", "북"],
+  "헬스/건강": ["폼롤러", "마사지", "보호대", "닭가슴살", "단백질", "프로틴", "쉐이크", "홍삼", "비타민", "영양제", "유산균", "오메가", "루테인", "콜라겐", "다이어트", "헬스", "찜질", "파스", "안마", "건강"],
+  "반려동물": ["강아지", "고양이", "펫", "반려", "애견", "캣", "사료", "배변", "하네스", "목줄", "스크래처", "캣타워", "급식기", "급수기", "동물"],
+};
+
 // 월별 시즌 시드 — "그 달에 잘 팔리는" 키워드 기준.
 // 소싱→입고→판매까지 1~2개월 걸리므로 UI는 기본으로 다음 달을 선택해 보여준다.
 const MONTH_SEEDS: Record<number, string[]> = {
@@ -226,6 +247,31 @@ const MONTH_SEEDS: Record<number, string[]> = {
   10: ["할로윈의상", "가을캠핑용품", "전기장판", "가을부츠", "무릎담요"],
   11: ["김장용품", "패딩", "전기히터", "수능선물", "방한용품"],
   12: ["크리스마스선물", "트리장식", "연말파티용품", "목도리", "핫팩"],
+};
+
+// 월별 관련성 어휘 (CATEGORY_VOCAB과 같은 용도)
+const MONTH_VOCAB: Record<number, string[]> = {
+  1: ["방한", "다이어리", "홈트", "가습기", "설", "선물세트", "핫팩", "히터", "장갑", "목도리", "내복", "수면", "기모"],
+  2: ["발렌타인", "초콜릿", "졸업", "신학기", "새학기", "문구", "책가방", "환절기", "입학", "꽃다발"],
+  3: ["신학기", "입학", "화이트데이", "봄", "미세먼지", "마스크", "청소", "원피스", "황사", "사탕"],
+  4: ["피크닉", "캠핑", "등산", "선크림", "봄", "자외선", "나들이", "돗자리", "자켓"],
+  5: ["어버이날", "어린이날", "카네이션", "선물", "캠핑", "선풍기", "여름", "원피스", "스승"],
+  6: ["선풍기", "쿨", "냉감", "제습", "래쉬가드", "장마", "우산", "여름", "아이스", "모기"],
+  7: ["물놀이", "수영", "휴가", "모기", "아이스", "쿨", "여름", "캠핑", "튜브", "비치", "샌들"],
+  8: ["신학기", "새학기", "가을", "쿨", "책상", "정리", "이불", "환절기", "가디건", "책가방"],
+  9: ["추석", "선물세트", "가을", "가디건", "트렌치", "등산", "환절기", "긴팔", "니트"],
+  10: ["할로윈", "가을", "캠핑", "전기장판", "부츠", "담요", "단풍", "등산", "니트", "기모"],
+  11: ["김장", "패딩", "히터", "수능", "방한", "장갑", "전기", "난방", "내복", "목도리", "기모"],
+  12: ["크리스마스", "트리", "연말", "파티", "목도리", "핫팩", "선물", "장갑", "방한", "새해", "달력"],
+};
+
+// 결과 키워드가 시드/어휘 중 하나를 포함하는지 (공백·대소문자 무시)
+const buildRelevanceCheck = (tokens: string[]) => {
+  const norm = tokens.map(t => t.toLowerCase().replace(/\s+/g, "")).filter(Boolean);
+  return (kw: string) => {
+    const k = kw.toLowerCase().replace(/\s+/g, "");
+    return norm.some(t => k.includes(t));
+  };
 };
 
 async function handleKeywords(req: VercelRequest, res: VercelResponse) {
@@ -250,18 +296,36 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
       keywords: (payload.keywords || []).filter((k: any) => !isBrandKeyword(k.keyword)),
     };
 
+  // 카테고리/월별 모드: 키워드도구가 섞어 주는 무관한 인기 키워드 제거
+  // (캐시에는 원본을 두고 응답 시 필터 — 어휘를 고쳐도 캐시 무효화가 필요 없다)
+  const relevanceTokens = month
+    ? [...MONTH_SEEDS[month], ...(MONTH_VOCAB[month] || [])]
+    : category
+      ? [...CATEGORY_SEEDS[category], ...(CATEGORY_VOCAB[category] || [])]
+      : null;
+  const applyFilters = (payload: any) => {
+    let out = applyBrandFilter(payload);
+    if (relevanceTokens) {
+      const isRelevant = buildRelevanceCheck(relevanceTokens);
+      const filtered = (out.keywords || []).filter((k: any) => isRelevant(k.keyword));
+      // 과필터로 결과가 너무 줄면 원본 유지 (없는 것보단 낫다)
+      if (filtered.length >= 15) out = { ...out, keywords: filtered };
+    }
+    return out;
+  };
+
   const hints = month ? MONTH_SEEDS[month] : category ? CATEGORY_SEEDS[category] : [seed];
   const cacheKey = month ? `kwmon:${month}` : category ? `kwcat:${category}` : `kw:${seed.replace(/\s+/g, "")}`;
   const ttlMs = (category || month ? 24 : 12) * 3600 * 1000;
 
   const cached = await cacheGet(cacheKey);
   if (cached && cached.ageMs < ttlMs) {
-    return res.status(200).json({ ...applyBrandFilter(cached.payload), cached: true });
+    return res.status(200).json({ ...applyFilters(cached.payload), cached: true });
   }
 
   const result = await callKeywordTool(hints);
   if (!result.ok) {
-    if (cached) return res.status(200).json({ ...applyBrandFilter(cached.payload), cached: true, stale: true });
+    if (cached) return res.status(200).json({ ...applyFilters(cached.payload), cached: true, stale: true });
     return res.status(502).json({ error: result.error });
   }
 
@@ -275,7 +339,7 @@ async function handleKeywords(req: VercelRequest, res: VercelResponse) {
 
   const payload = { seed: month ? `${month}월 시즌` : category || seed, category: category || null, month: month || null, seedStat, keywords: related };
   await cacheSet(cacheKey, payload); // 캐시에는 원본 저장, 필터는 응답 시 적용
-  return res.status(200).json(applyBrandFilter(payload));
+  return res.status(200).json(applyFilters(payload));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
