@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, BookOpen, ArrowUp, ArrowDown, ListOrdered } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
+import { BillingAdmin } from './BillingAdmin';
 import { QAManager } from './QAManager';
 
 interface UserRow {
@@ -30,7 +31,7 @@ const STATUS_COLOR: Record<string, string> = {
 const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'stats' | 'config' | 'qa'>('users');
+  const [tab, setTab] = useState<'users' | 'billing' | 'stats' | 'config' | 'qa'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -40,7 +41,7 @@ export function AdminPanel() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin?action=users', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await res.json();
@@ -60,7 +61,7 @@ export function AdminPanel() {
   const handleAction = async (userId: string, action: 'approve' | 'reject') => {
     setActionLoading(userId + action);
     try {
-      const res = await fetch('/api/admin/user-action', {
+      const res = await fetch('/api/admin?action=user-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ userId, action }),
@@ -79,7 +80,7 @@ export function AdminPanel() {
     if (!confirm(`승인 대기 중인 ${counts.pending}명을 일괄 승인하시겠습니까?`)) return;
     setActionLoading('bulk-approve');
     try {
-      const res = await fetch('/api/admin/user-action', {
+      const res = await fetch('/api/admin?action=user-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ action: 'bulk-approve' }),
@@ -97,7 +98,7 @@ export function AdminPanel() {
     if (!confirm(`${userName}님의 오늘 사용 횟수를 리셋하시겠습니까?`)) return;
     setActionLoading(userId + 'reset');
     try {
-      const res = await fetch('/api/admin/user-action', {
+      const res = await fetch('/api/admin?action=user-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ action: 'reset', userId }),
@@ -132,6 +133,14 @@ export function AdminPanel() {
           <Users className="w-4 h-4" /> 회원 관리
         </button>
         <button
+          onClick={() => setTab('billing')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'billing' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <CreditCard className="w-4 h-4" /> 구독·쿠폰
+        </button>
+        <button
           onClick={() => setTab('stats')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             tab === 'stats' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
@@ -157,12 +166,12 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'stats' ? <UsageStats /> : tab === 'config' ? (
+      {tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <div className="space-y-10">
           <ImageConfigTab showToast={showToast} />
           <TabOrderConfig showToast={showToast} />
         </div>
-      ) : tab === 'qa' ? <QAManager showToast={showToast} /> : <UsersTab
+      ) : <UsersTab
         users={users}
         loading={loading}
         filter={filter}
@@ -353,7 +362,6 @@ const TAB_LABELS: { id: string; label: string }[] = [
   { id: 'ranktracker', label: '순위 추적' },
   { id: 'review', label: '리뷰 분석' },
   { id: 'analyzer', label: '광고 성과 분석' },
-  { id: 'productname', label: '상품명 제조기' },
   { id: 'qa', label: '훈프로에게 질문' },
 ];
 
@@ -366,7 +374,7 @@ function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/admin/config', { headers: { Authorization: `Bearer ${getToken()}` } });
+        const res = await fetch('/api/admin?action=config', { headers: { Authorization: `Bearer ${getToken()}` } });
         const data = await res.json();
         if (res.ok && Array.isArray(data.tabOrder) && data.tabOrder.length > 0) {
           // 저장된 순서 + 이후 추가된 새 탭은 뒤에 이어붙임
@@ -390,7 +398,7 @@ function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/config', {
+      const res = await fetch('/api/admin?action=config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ tabOrder: order }),
@@ -453,7 +461,7 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/admin/config', { headers: { Authorization: `Bearer ${getToken()}` } });
+        const res = await fetch('/api/admin?action=config', { headers: { Authorization: `Bearer ${getToken()}` } });
         const data = await res.json();
         if (res.ok) {
           setImageModel(data.imageModel);
@@ -472,7 +480,7 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/config', {
+      const res = await fetch('/api/admin?action=config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ imageModel, imageQuality, aiIntegratedTextEnabled }),

@@ -96,6 +96,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ remaining: 999 });
   }
 
+  // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 기능 사용 불가
+  // (JWT가 아닌 DB를 매번 확인해 해지·정지가 즉시 반영되게 한다)
+  const { data: enforcedCfg } = await supabase
+    .from('app_config')
+    .select('value')
+    .eq('key', 'billing_enforced')
+    .maybeSingle();
+
+  if (enforcedCfg?.value === 'true') {
+    const { data: sub } = await supabase
+      .from('subscriptions')
+      .select('status')
+      .eq('user_id', decoded.userId)
+      .maybeSingle();
+    // past_due(재시도 중)까지는 이용 허용, paused/canceled/미구독은 차단
+    if (!sub || !['trial', 'active', 'past_due'].includes(sub.status)) {
+      return res.status(402).json({
+        error: '구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.',
+        subscriptionRequired: true,
+      });
+    }
+  }
+
   const today = new Date().toISOString().split('T')[0];
 
   const { data, error } = await supabase.rpc('increment_usage', {

@@ -343,6 +343,28 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
     return res.status(200).json({ answer, sources: [], matched: false, logId: log?.id ?? null });
   }
 
+  // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 사용 불가 (api/usage.ts와 동일 기준)
+  if (!decoded.isAdmin) {
+    const { data: enforcedCfg } = await supabase
+      .from('app_config')
+      .select('value')
+      .eq('key', 'billing_enforced')
+      .maybeSingle();
+    if (enforcedCfg?.value === 'true') {
+      const { data: sub } = await supabase
+        .from('subscriptions')
+        .select('status')
+        .eq('user_id', decoded.userId)
+        .maybeSingle();
+      if (!sub || !['trial', 'active', 'past_due'].includes(sub.status)) {
+        return res.status(402).json({
+          error: '구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.',
+          subscriptionRequired: true,
+        });
+      }
+    }
+  }
+
   // 일일 사용량 제한 (관리자 무제한) — 기존 increment_usage RPC 재사용
   if (!decoded.isAdmin) {
     const today = new Date().toISOString().split('T')[0];

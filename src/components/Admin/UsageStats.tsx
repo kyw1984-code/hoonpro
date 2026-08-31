@@ -44,7 +44,7 @@ export function UsageStats() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/stats?period=${period}`, {
+      const res = await fetch(`/api/admin?action=stats&period=${period}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await res.json();
