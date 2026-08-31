@@ -142,21 +142,28 @@ async function checkCoupon(coupon: CouponRow | null, userId: string, ci: string 
     return '쿠폰 사용 한도가 모두 소진됐습니다.';
   }
   // 1인 1회: 같은 계정 또는 같은 CI(본인인증)로 이미 사용했으면 거부
-  let query = supabase.from('coupon_redemptions').select('id').eq('coupon_id', coupon.id);
-  query = ci ? query.or(`user_id.eq.${userId},ci.eq.${ci}`) : query.eq('user_id', userId);
-  const { data } = await query.limit(1);
-  if (data && data.length > 0) return '이미 사용한 쿠폰입니다.';
+  const { data: byUser } = await supabase
+    .from('coupon_redemptions').select('id').eq('coupon_id', coupon.id).eq('user_id', userId).limit(1);
+  if (byUser && byUser.length > 0) return '이미 사용한 쿠폰입니다.';
+  if (ci) {
+    const { data: byCi } = await supabase
+      .from('coupon_redemptions').select('id').eq('coupon_id', coupon.id).eq('ci', ci).limit(1);
+    if (byCi && byCi.length > 0) return '이미 사용한 쿠폰입니다.';
+  }
   return null;
 }
 
 function couponPrice(coupon: CouponRow | null, price: number): { amount: number; discount: number } {
   if (!coupon) return { amount: price, discount: 0 };
+  // 토스 최소 결제 금액(100원) 밑으로 내려가지 않게 할인 상한을 둔다
+  // (0원 시작은 할인 쿠폰이 아니라 무료 기간 쿠폰으로 발급)
+  const maxDiscount = Math.max(0, price - 100);
   if (coupon.type === 'percent') {
-    const discount = Math.floor((price * coupon.value) / 100);
+    const discount = Math.min(maxDiscount, Math.floor((price * coupon.value) / 100));
     return { amount: price - discount, discount };
   }
   if (coupon.type === 'amount') {
-    const discount = Math.min(price, coupon.value);
+    const discount = Math.min(maxDiscount, coupon.value);
     return { amount: price - discount, discount };
   }
   return { amount: price, discount: 0 }; // free_period는 결제 없이 무료 기간 부여

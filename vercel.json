@@ -1,5 +1,6 @@
 {
   "crons": [
-    { "path": "/api/sourcing?type=cron", "schedule": "0 18 * * *" }
+    { "path": "/api/sourcing?type=cron", "schedule": "0 18 * * *" },
+    { "path": "/api/billing?action=charge-due", "schedule": "0 19 * * *" }
   ]
 }
