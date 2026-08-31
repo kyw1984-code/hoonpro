@@ -15,11 +15,12 @@ import { Footer } from './components/Layout/Footer';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdminPanel } from './components/Admin/AdminPanel';
 import { SubscriptionPage } from './components/Billing/SubscriptionPage';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, CreditCard, Lock } from 'lucide-react';
-import { getUser, removeToken, type AuthUser } from './lib/auth';
+import { AskHoonpro } from './components/QA/AskHoonpro';
+import { LayoutTemplate, Image as ImageIcon, BarChart3, Tag, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock } from 'lucide-react';
+import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 import { fetchBillingStatus, type BillingStatus } from './lib/billing';
 
-type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'productname' | 'billing' | 'admin';
+type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'productname' | 'qa' | 'billing' | 'admin';
 
 type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
 
@@ -31,6 +32,7 @@ const TABS: TabDef[] = [
   { id: 'review', label: '리뷰 분석', icon: MessageSquareText },
   { id: 'analyzer', label: '광고 성과 분석', icon: BarChart3 },
   { id: 'productname', label: '상품명 제조기', icon: Tag },
+  { id: 'qa', label: '훈프로에게 질문', icon: MessageCircleQuestion },
 ];
 
 // 밑줄형 탭 — 개수가 늘어도 줄바꿈으로 무너지지 않고 헤더 높이가 일정하게 유지된다.
@@ -50,6 +52,27 @@ export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [remainingCalls, setRemainingCalls] = useState<number | null>(null);
+  // '훈프로에게 질문' 수강생 공개 여부 — OFF면 수강생에게 탭 자체를 숨김 (관리자는 항상 표시)
+  const [qaVisible, setQaVisible] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    if (user.isAdmin) {
+      setQaVisible(true);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await fetch('/api/qa?action=status', {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        const data = await res.json();
+        setQaVisible(res.ok && data.canUse === true);
+      } catch {
+        setQaVisible(false);
+      }
+    })();
+  }, [user]);
 
   // 유료화 강제(billing_enforced) 시 구독 없는 계정의 기능 잠금
   const [billingLocked, setBillingLocked] = useState(false);
@@ -132,7 +155,7 @@ export default function App() {
           {/* 아래 줄 — 탭 */}
           <div className="border-t border-line">
             <nav className="mx-auto flex max-w-[1240px] gap-1 overflow-x-auto px-6" aria-label="주요 기능">
-              {TABS.map(tab => (
+              {TABS.filter(tab => tab.id !== 'qa' || qaVisible).map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -183,6 +206,7 @@ export default function App() {
               {activeTab === 'review' && <ReviewAnalyzer />}
               {activeTab === 'analyzer' && <AdAnalyzer />}
               {activeTab === 'productname' && <ProductNameGenerator />}
+              {activeTab === 'qa' && qaVisible && <AskHoonpro />}
               {activeTab === 'billing' && <SubscriptionPage />}
               {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
             </>
