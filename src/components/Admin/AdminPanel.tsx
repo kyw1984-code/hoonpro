@@ -41,7 +41,7 @@ export function AdminPanel() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin?action=users', {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await res.json();
@@ -61,7 +61,7 @@ export function AdminPanel() {
   const handleAction = async (userId: string, action: 'approve' | 'reject') => {
     setActionLoading(userId + action);
     try {
-      const res = await fetch('/api/admin/user-action', {
+      const res = await fetch('/api/admin?action=user-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ userId, action }),
@@ -80,7 +80,7 @@ export function AdminPanel() {
     if (!confirm(`승인 대기 중인 ${counts.pending}명을 일괄 승인하시겠습니까?`)) return;
     setActionLoading('bulk-approve');
     try {
-      const res = await fetch('/api/admin/user-action', {
+      const res = await fetch('/api/admin?action=user-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ action: 'bulk-approve' }),
@@ -98,7 +98,7 @@ export function AdminPanel() {
     if (!confirm(`${userName}님의 오늘 사용 횟수를 리셋하시겠습니까?`)) return;
     setActionLoading(userId + 'reset');
     try {
-      const res = await fetch('/api/admin/user-action', {
+      const res = await fetch('/api/admin?action=user-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ action: 'reset', userId }),
@@ -360,7 +360,7 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/admin/config', { headers: { Authorization: `Bearer ${getToken()}` } });
+        const res = await fetch('/api/admin?action=config', { headers: { Authorization: `Bearer ${getToken()}` } });
         const data = await res.json();
         if (res.ok) {
           setImageModel(data.imageModel);
@@ -379,7 +379,7 @@ function ImageConfigTab({ showToast }: { showToast: (msg: string) => void }) {
   const handleSave = async () => {
     setSaving(true);
     try {
-      const res = await fetch('/api/admin/config', {
+      const res = await fetch('/api/admin?action=config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify({ imageModel, imageQuality, aiIntegratedTextEnabled }),
