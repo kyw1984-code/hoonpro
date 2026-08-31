@@ -91,7 +91,7 @@ export const AskHoonpro: React.FC = () => {
           <h2 className="text-xl font-semibold text-ink">훈프로에게 질문</h2>
         </div>
         <p className="mb-6 text-[13px] text-ink-2">
-          쿠팡 판매 관련 궁금한 점을 물어보세요. <span className="font-semibold text-ink">훈프로의 강의 자료와 노하우</span>에 근거해 답변합니다.
+          쿠팡 판매 관련 궁금한 점을 물어보세요. <span className="font-semibold text-ink">훈프로의 생각을 학습한 AI</span>에 의해 답변합니다.
         </p>
 
         {/* 질문 입력 */}
@@ -142,7 +142,7 @@ export const AskHoonpro: React.FC = () => {
         {loading && (
           <div className="mt-5 flex items-center gap-2 text-[13px] text-ink-2">
             <Loader2 className="h-4 w-4 animate-spin text-accent" />
-            훈프로가 강의 자료를 확인하고 있습니다...
+            훈프로가 확인하고 있습니다...
           </div>
         )}
       </div>
