@@ -19,14 +19,44 @@ export function AuthGate({ onSuccess }: Props) {
   const [signupPhone, setSignupPhone] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
 
-  // 서버에 포트원 키가 설정되어 있으면 본인인증 가입 플로우로 전환
+  // 서버 설정에 따라 가입 방식 전환: PASS 본인인증 / 이메일 인증코드 / 기본
   const [verificationRequired, setVerificationRequired] = useState(false);
+  const [emailCodeRequired, setEmailCodeRequired] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [signupCode, setSignupCode] = useState('');
+  const [ageChecked, setAgeChecked] = useState(false);
+
   useEffect(() => {
-    fetch('/api/auth/signup?action=config', { method: 'POST' })
+    fetch('/api/auth/signup?action=config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
       .then(res => res.json())
-      .then(data => setVerificationRequired(Boolean(data.verificationRequired) && certificationAvailable()))
-      .catch(() => setVerificationRequired(false));
+      .then(data => {
+        setVerificationRequired(Boolean(data.verificationRequired) && certificationAvailable());
+        setEmailCodeRequired(Boolean(data.emailCodeRequired));
+      })
+      .catch(() => { setVerificationRequired(false); setEmailCodeRequired(false); });
   }, []);
+
+  const handleSendCode = async () => {
+    if (!signupEmail.trim()) return setMessage({ text: '이메일을 먼저 입력해주세요.', type: 'error' });
+    setSendingCode(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/auth/signup?action=send-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: signupEmail.trim().toLowerCase() }),
+      });
+      const data = await res.json();
+      if (!res.ok) return setMessage({ text: data.error, type: 'error' });
+      setCodeSent(true);
+      setMessage({ text: data.message, type: 'success' });
+    } catch {
+      setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
+    } finally {
+      setSendingCode(false);
+    }
+  };
 
   const handleLogin = async () => {
     if (!loginEmail.trim()) return setMessage({ text: '이메일을 입력해주세요.', type: 'error' });
@@ -55,6 +85,10 @@ export function AuthGate({ onSuccess }: Props) {
     } else if (!signupName.trim() || !signupPhone.trim() || !signupEmail.trim()) {
       return setMessage({ text: '모든 항목을 입력해주세요.', type: 'error' });
     }
+    if (emailCodeRequired && !verificationRequired) {
+      if (!/^\d{6}$/.test(signupCode.trim())) return setMessage({ text: '이메일로 받은 6자리 인증코드를 입력해주세요.', type: 'error' });
+      if (!ageChecked) return setMessage({ text: '만 14세 이상 확인에 동의해주세요.', type: 'error' });
+    }
     setLoading(true);
     setMessage(null);
     try {
@@ -75,12 +109,15 @@ export function AuthGate({ onSuccess }: Props) {
           phone: signupPhone.trim(),
           email: signupEmail.trim().toLowerCase(),
           impUid,
+          code: signupCode.trim() || undefined,
+          ageConfirmed: ageChecked || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) return setMessage({ text: data.error, type: 'error' });
       setMessage({ text: data.message, type: 'success' });
       setSignupName(''); setSignupPhone(''); setSignupEmail('');
+      setSignupCode(''); setAgeChecked(false); setCodeSent(false);
     } catch {
       setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
     } finally {
@@ -161,15 +198,49 @@ export function AuthGate({ onSuccess }: Props) {
                 />
               </>
             )}
-            <input
-              type="email"
-              value={signupEmail}
-              onChange={e => setSignupEmail(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSignup()}
-              placeholder="이메일 주소"
-              className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
-              autoFocus={verificationRequired}
-            />
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={signupEmail}
+                onChange={e => { setSignupEmail(e.target.value); setCodeSent(false); setSignupCode(''); }}
+                onKeyDown={e => e.key === 'Enter' && (emailCodeRequired ? handleSendCode() : handleSignup())}
+                placeholder="이메일 주소"
+                className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
+                autoFocus={verificationRequired}
+              />
+              {emailCodeRequired && !verificationRequired && (
+                <button
+                  onClick={handleSendCode}
+                  disabled={sendingCode || !signupEmail.trim()}
+                  className="shrink-0 whitespace-nowrap rounded-control border border-line px-3 py-2.5 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-2 disabled:opacity-40"
+                >
+                  {sendingCode ? '발송 중...' : codeSent ? '재발송' : '인증코드 받기'}
+                </button>
+              )}
+            </div>
+            {emailCodeRequired && !verificationRequired && codeSent && (
+              <>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={signupCode}
+                  onChange={e => setSignupCode(e.target.value.replace(/\D/g, ''))}
+                  onKeyDown={e => e.key === 'Enter' && handleSignup()}
+                  placeholder="인증코드 6자리"
+                  className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-center text-[15px] tracking-[0.4em] outline-none transition-colors placeholder:text-ink-3 placeholder:tracking-normal focus:border-accent focus:bg-paper"
+                />
+                <label className="flex cursor-pointer items-center gap-2 px-1 text-[12.5px] text-ink-2">
+                  <input
+                    type="checkbox"
+                    checked={ageChecked}
+                    onChange={e => setAgeChecked(e.target.checked)}
+                    className="h-3.5 w-3.5 accent-current"
+                  />
+                  만 14세 이상입니다.
+                </label>
+              </>
+            )}
             <button
               onClick={handleSignup}
               disabled={loading}

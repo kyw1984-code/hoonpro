@@ -259,3 +259,14 @@ create unique index if not exists idx_users_ci on users(ci) where ci is not null
 -- 유료화 강제 스위치 — 'true'가 되면 구독 없는 계정의 기능 사용이 차단됨 (소프트 오픈 때 켜기)
 insert into app_config (key, value) values ('billing_enforced', 'false')
 on conflict (key) do nothing;
+
+-- 가입 이메일 인증코드 (6자리, 10분 유효 — 메일함 소유 확인용)
+create table if not exists email_verifications (
+  email text primary key,
+  code_hash text not null,
+  attempts int default 0,
+  expires_at timestamptz not null,
+  created_at timestamptz default now()
+);
+
+alter table email_verifications disable row level security;

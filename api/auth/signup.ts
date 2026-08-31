@@ -1,15 +1,48 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'node:crypto';
 
-// 가입 API — 포트원(PASS) 본인인증 기반 1인 1계정
-//   PORTONE_API_KEY/SECRET가 설정되면: imp_uid를 서버에서 재조회해 CI 추출,
-//   중복 CI 차단 + 만 14세 미만 차단 + 인증 통과 시 자동 승인
-//   미설정(개발/전환 전): 기존 수동 승인 플로우 그대로 동작
+// 가입 API — 이메일 인증코드 + 관리자 승인 (기본 운영 방식)
+//   RESEND_API_KEY가 설정되면: 6자리 인증코드로 메일함 소유 확인 + 만 14세 확인
+//   → 가입 신청(pending) → 관리자 승인 후 이용. 어뷰징 차단은 승인 단계가 담당.
+//   PORTONE_API_KEY/SECRET가 설정되면(선택): PASS 본인인증으로 CI 기반 1인 1계정 + 자동 승인
+//   둘 다 미설정(개발): 기존 수동 승인 플로우 그대로 동작
 
 const PORTONE_API = 'https://api.iamport.kr';
+const CODE_TTL_MS = 10 * 60 * 1000;   // 인증코드 유효 10분
+const RESEND_COOLDOWN_MS = 60 * 1000; // 재발송 최소 간격 60초
+const MAX_ATTEMPTS = 5;
 
 function portoneEnabled(): boolean {
   return Boolean(process.env.PORTONE_API_KEY && process.env.PORTONE_API_SECRET);
+}
+
+function emailCodeEnabled(): boolean {
+  return Boolean(process.env.RESEND_API_KEY) && !portoneEnabled();
+}
+
+function hashCode(email: string, code: string): string {
+  return crypto.createHash('sha256').update(`${email}:${code}:${process.env.JWT_SECRET}`).digest('hex');
+}
+
+async function sendCodeEmail(to: string, code: string): Promise<boolean> {
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM || 'no-reply@hoonpro.app',
+        to: [to],
+        subject: `[훈프로] 가입 인증코드: ${code}`,
+        html: `<p>훈프로 가입 인증코드입니다.</p>` +
+          `<p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p>` +
+          `<p>10분 안에 입력해주세요. 본인이 요청하지 않았다면 이 메일을 무시하세요.</p>`,
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 interface Certification {
@@ -73,17 +106,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  // 프론트가 본인인증 필요 여부를 알 수 있게 설정 조회 제공
+  // 프론트가 가입 방식(PASS/이메일 코드/기본)을 알 수 있게 설정 조회 제공
   if (req.query.action === 'config') {
-    return res.status(200).json({ verificationRequired: portoneEnabled() });
+    return res.status(200).json({
+      verificationRequired: portoneEnabled(),
+      emailCodeRequired: emailCodeEnabled(),
+    });
   }
 
-  const { name, phone, email, impUid } = req.body ?? {};
+  const { name, phone, email, impUid, code, ageConfirmed } = req.body ?? {};
   if (!email) return res.status(400).json({ error: '이메일을 입력해주세요.' });
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(email)) {
     return res.status(400).json({ error: '올바른 이메일 형식이 아닙니다.' });
+  }
+  const normalizedEmail = String(email).trim().toLowerCase();
+
+  // ── 인증코드 발송 ──
+  if (req.query.action === 'send-code') {
+    if (!emailCodeEnabled()) return res.status(400).json({ error: '이메일 인증이 비활성화되어 있습니다.' });
+
+    const { data: existingUser } = await supabase.from('users').select('id').eq('email', normalizedEmail).maybeSingle();
+    if (existingUser) return res.status(409).json({ error: '이미 등록된 이메일입니다. 로그인해주세요.' });
+
+    const { data: prev } = await supabase.from('email_verifications').select('created_at').eq('email', normalizedEmail).maybeSingle();
+    if (prev && Date.now() - new Date(prev.created_at).getTime() < RESEND_COOLDOWN_MS) {
+      return res.status(429).json({ error: '잠시 후 다시 요청해주세요. (재발송은 1분 간격)' });
+    }
+
+    const newCode = String(crypto.randomInt(100000, 1000000));
+    const { error: upsertError } = await supabase.from('email_verifications').upsert({
+      email: normalizedEmail,
+      code_hash: hashCode(normalizedEmail, newCode),
+      attempts: 0,
+      expires_at: new Date(Date.now() + CODE_TTL_MS).toISOString(),
+      created_at: new Date().toISOString(),
+    });
+    if (upsertError) return res.status(500).json({ error: '인증코드 저장에 실패했습니다. (DB 마이그레이션 확인)' });
+
+    const sent = await sendCodeEmail(normalizedEmail, newCode);
+    if (!sent) return res.status(502).json({ error: '인증코드 메일 발송에 실패했습니다. 이메일 주소를 확인해주세요.' });
+    return res.status(200).json({ message: '인증코드를 보냈습니다. 메일함(스팸함 포함)을 확인해주세요.' });
   }
 
   // ── 본인인증 모드 ──
@@ -127,7 +191,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(201).json({ message: '가입이 완료됐습니다. 바로 로그인해주세요.', verified: true });
   }
 
-  // ── 기존 플로우 (본인인증 미설정 — 관리자 수동 승인) ──
+  // ── 이메일 인증코드 모드 (기본 운영) — 코드 확인 후 가입 신청, 관리자 승인은 그대로 유지 ──
+  if (emailCodeEnabled()) {
+    if (!name || !phone) {
+      return res.status(400).json({ error: '이름, 연락처, 이메일을 모두 입력해주세요.' });
+    }
+    if (ageConfirmed !== true) {
+      return res.status(400).json({ error: '만 14세 이상 확인에 동의해주세요.' });
+    }
+    if (!code || !/^\d{6}$/.test(String(code))) {
+      return res.status(400).json({ error: '이메일로 받은 6자리 인증코드를 입력해주세요.' });
+    }
+
+    const { data: v } = await supabase.from('email_verifications').select('*').eq('email', normalizedEmail).maybeSingle();
+    if (!v) return res.status(400).json({ error: '인증코드를 먼저 요청해주세요.' });
+    if (new Date(v.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ error: '인증코드가 만료됐습니다. 다시 요청해주세요.' });
+    }
+    if (v.attempts >= MAX_ATTEMPTS) {
+      return res.status(429).json({ error: '시도 횟수를 초과했습니다. 인증코드를 다시 요청해주세요.' });
+    }
+    if (v.code_hash !== hashCode(normalizedEmail, String(code))) {
+      await supabase.from('email_verifications').update({ attempts: v.attempts + 1 }).eq('email', normalizedEmail);
+      return res.status(400).json({ error: '인증코드가 일치하지 않습니다.' });
+    }
+
+    const { error } = await supabase.from('users').insert({
+      name, phone, email: normalizedEmail, phone_verified_at: null,
+    });
+    if (error) {
+      if (error.code === '23505') return res.status(409).json({ error: '이미 등록된 이메일입니다.' });
+      return res.status(500).json({ error: `서버 오류: ${error.message} (code: ${error.code})` });
+    }
+    await supabase.from('email_verifications').delete().eq('email', normalizedEmail);
+    return res.status(201).json({ message: '가입 신청이 완료됐습니다. 관리자 승인 후 이용 가능합니다.' });
+  }
+
+  // ── 기존 플로우 (인증 미설정 — 관리자 수동 승인) ──
   if (!name || !phone) {
     return res.status(400).json({ error: '이름, 연락처, 이메일을 모두 입력해주세요.' });
   }
