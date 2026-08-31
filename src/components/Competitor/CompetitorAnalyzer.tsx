@@ -182,20 +182,20 @@ ${myInfo}
   return (
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-slate-800">🔍 경쟁사 분석기</h2>
-        <p className="text-slate-500 mt-1">경쟁사 상품명만 입력하면 AI가 시장 데이터를 추정하고 전략을 분석해드려요.</p>
+        <h2 className="text-[20px] font-semibold text-ink">🔍 경쟁사 분석기</h2>
+        <p className="text-ink-2 mt-1">경쟁사 상품명만 입력하면 AI가 시장 데이터를 추정하고 전략을 분석해드려요.</p>
       </div>
 
       {/* 경쟁사 입력 */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 space-y-4">
+      <div className="bg-paper rounded-card border border-line p-8 space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-bold text-slate-700">1. 경쟁사 상품명 입력</h3>
-            <p className="text-sm text-slate-400 mt-0.5">쿠팡에서 경쟁사 상품명을 복사해서 붙여넣으세요.</p>
+            <h3 className="text-lg font-semibold text-ink">1. 경쟁사 상품명 입력</h3>
+            <p className="text-sm text-ink-3 mt-0.5">쿠팡에서 경쟁사 상품명을 복사해서 붙여넣으세요.</p>
           </div>
           <button
             onClick={estimateAll}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-2 bg-accent hover:bg-accent-hover text-paper text-sm font-medium px-4 py-2 rounded-control transition-colors"
           >
             <Sparkles className="w-4 h-4" />
             전체 AI 추정
@@ -206,8 +206,8 @@ ${myInfo}
           {competitors.map((c, i) => (
             <div key={c.id} className="space-y-2">
               <div className="flex gap-2">
-                <div className="flex items-center gap-2 flex-1 border border-slate-300 rounded-xl px-3 focus-within:ring-2 focus-within:ring-blue-500">
-                  <span className="text-xs font-bold text-blue-500 shrink-0">{i + 1}</span>
+                <div className="flex items-center gap-2 flex-1 border border-line-strong rounded-card px-3 focus-within:ring-2 focus-within:ring-accent">
+                  <span className="text-xs font-semibold text-accent shrink-0">{i + 1}</span>
                   <input
                     type="text"
                     value={c.productName}
@@ -216,17 +216,17 @@ ${myInfo}
                     placeholder="쿠팡 경쟁사 상품명 입력 후 엔터"
                     className="flex-1 py-3 outline-none text-sm"
                   />
-                  {c.loading && <Loader2 className="w-4 h-4 animate-spin text-blue-500 shrink-0" />}
+                  {c.loading && <Loader2 className="w-4 h-4 animate-spin text-accent shrink-0" />}
                 </div>
                 <button
                   onClick={() => estimateCompetitor(c.id)}
                   disabled={c.loading || !c.productName.trim()}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-xl text-sm font-medium text-slate-700 transition-colors shrink-0"
+                  className="px-4 py-2 bg-paper-2 hover:bg-line disabled:opacity-40 rounded-card text-sm font-medium text-ink transition-colors shrink-0"
                 >
                   AI 추정
                 </button>
                 {competitors.length > 1 && (
-                  <button onClick={() => removeCompetitor(c.id)} className="p-2 text-red-400 hover:text-red-600 transition-colors">
+                  <button onClick={() => removeCompetitor(c.id)} className="p-2 text-critical hover:text-critical transition-colors">
                     <Trash2 className="w-4 h-4" />
                   </button>
                 )}
@@ -234,34 +234,34 @@ ${myInfo}
 
               {/* AI 추정 결과 */}
               {c.estimated && c.price > 0 && (
-                <div className="ml-2 border border-blue-100 bg-blue-50/50 rounded-xl p-4">
+                <div className="ml-2 border border-accent-line bg-accent-soft/50 rounded-card p-4">
                   <div className="flex items-center gap-1 mb-3">
-                    <Sparkles className="w-3.5 h-3.5 text-blue-500" />
-                    <span className="text-xs text-blue-500 font-medium">AI 추정 데이터</span>
+                    <Sparkles className="w-3.5 h-3.5 text-accent" />
+                    <span className="text-xs text-accent font-medium">AI 추정 데이터</span>
                     {(c as any).priceRange && (
-                      <span className="text-xs text-slate-400 ml-2">시장 가격대: {(c as any).priceRange}</span>
+                      <span className="text-xs text-ink-3 ml-2">시장 가격대: {(c as any).priceRange}</span>
                     )}
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
-                    <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
-                      <p className="text-xs text-slate-400">추정 판매가</p>
-                      <p className="font-bold text-slate-700 text-sm">{c.price.toLocaleString()}원</p>
+                    <div className="bg-paper rounded-control p-2 text-center border border-line">
+                      <p className="text-xs text-ink-3">추정 판매가</p>
+                      <p className="font-semibold text-ink text-sm">{c.price.toLocaleString()}원</p>
                     </div>
-                    <div className="bg-white rounded-lg p-2 text-center border border-slate-100">
-                      <p className="text-xs text-slate-400">추정 리뷰/평점</p>
-                      <p className="font-bold text-slate-700 text-sm">{c.reviewCount.toLocaleString()}개 / {c.rating}점</p>
+                    <div className="bg-paper rounded-control p-2 text-center border border-line">
+                      <p className="text-xs text-ink-3">추정 리뷰/평점</p>
+                      <p className="font-semibold text-ink text-sm">{c.reviewCount.toLocaleString()}개 / {c.rating}점</p>
                     </div>
-                    <div className="bg-blue-50 rounded-lg p-2 text-center border border-blue-100">
-                      <p className="text-xs text-blue-400">추정 판매수량</p>
-                      <p className="font-bold text-blue-700 text-sm">{c.estimatedSales.toLocaleString()}개</p>
+                    <div className="bg-accent-soft rounded-control p-2 text-center border border-accent-line">
+                      <p className="text-xs text-accent">추정 판매수량</p>
+                      <p className="font-semibold text-accent text-sm">{c.estimatedSales.toLocaleString()}개</p>
                     </div>
-                    <div className="bg-green-50 rounded-lg p-2 text-center border border-green-100">
-                      <p className="text-xs text-green-400">추정 매출</p>
-                      <p className="font-bold text-green-700 text-sm">{formatNumber(c.estimatedRevenue)}</p>
+                    <div className="bg-positive-soft rounded-control p-2 text-center border border-positive/20">
+                      <p className="text-xs text-positive">추정 매출</p>
+                      <p className="font-semibold text-positive text-sm">{formatNumber(c.estimatedRevenue)}</p>
                     </div>
                   </div>
                   {(c as any).marketComment && (
-                    <p className="text-xs text-slate-500 mt-1">💡 {(c as any).marketComment}</p>
+                    <p className="text-xs text-ink-2 mt-1">💡 {(c as any).marketComment}</p>
                   )}
                 </div>
               )}
@@ -271,29 +271,29 @@ ${myInfo}
 
         <button
           onClick={addCompetitor}
-          className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium"
+          className="flex items-center gap-1 text-sm text-accent hover:text-accent font-medium"
         >
           <Plus className="w-4 h-4" /> 경쟁사 추가
         </button>
       </div>
 
       {/* 내 상품 정보 */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
-        <h3 className="text-lg font-bold text-slate-700 mb-1">2. 내 상품 정보 <span className="text-slate-400 text-sm font-normal">(선택)</span></h3>
-        <p className="text-sm text-slate-400 mb-4">입력하면 더 정확한 차별화 전략을 제안해드려요.</p>
+      <div className="bg-paper rounded-card border border-line p-8">
+        <h3 className="text-lg font-semibold text-ink mb-1">2. 내 상품 정보 <span className="text-ink-3 text-sm font-normal">(선택)</span></h3>
+        <p className="text-sm text-ink-3 mb-4">입력하면 더 정확한 차별화 전략을 제안해드려요.</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <input type="text" value={myProduct.name} onChange={e => setMyProduct({ ...myProduct, name: e.target.value })} placeholder="내 상품명" className="p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
-          <input type="text" value={myProduct.price} onChange={e => setMyProduct({ ...myProduct, price: e.target.value })} placeholder="판매 희망가 (원)" className="p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
-          <input type="text" value={myProduct.features} onChange={e => setMyProduct({ ...myProduct, features: e.target.value })} placeholder="내 상품 특징/강점" className="p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+          <input type="text" value={myProduct.name} onChange={e => setMyProduct({ ...myProduct, name: e.target.value })} placeholder="내 상품명" className="p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none text-sm" />
+          <input type="text" value={myProduct.price} onChange={e => setMyProduct({ ...myProduct, price: e.target.value })} placeholder="판매 희망가 (원)" className="p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none text-sm" />
+          <input type="text" value={myProduct.features} onChange={e => setMyProduct({ ...myProduct, features: e.target.value })} placeholder="내 상품 특징/강점" className="p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none text-sm" />
         </div>
       </div>
 
-      {globalError && <p className="text-red-500 text-sm bg-red-50 p-3 rounded-xl">{globalError}</p>}
+      {globalError && <p className="text-critical text-sm bg-critical-soft p-3 rounded-card">{globalError}</p>}
 
       <button
         onClick={handleAnalyze}
         disabled={analyzing}
-        className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 text-white font-medium py-4 rounded-xl flex items-center justify-center gap-2 transition-colors text-lg"
+        className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-line-strong text-paper font-medium py-4 rounded-card flex items-center justify-center gap-2 transition-colors text-lg"
       >
         {analyzing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wand2 className="w-5 h-5" />}
         {analyzing ? 'AI 분석 중...' : 'AI 차별화 전략 분석 시작'}
@@ -301,19 +301,19 @@ ${myInfo}
 
       {/* AI 분석 결과 */}
       {analysis && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+        <div className="bg-paper rounded-card border border-line p-8">
           <div className="flex items-center gap-2 mb-6">
             <BarChart2 className="w-5 h-5 text-purple-600" />
-            <h3 className="text-lg font-bold text-slate-700">AI 차별화 전략 분석 결과</h3>
+            <h3 className="text-lg font-semibold text-ink">AI 차별화 전략 분석 결과</h3>
           </div>
           <div className="space-y-2">
             {analysis.split('\n').map((line, i) => {
               if (!line.trim()) return <div key={i} className="h-2" />;
-              if (line.match(/^#{1,3}\s/)) return <h3 key={i} className="text-lg font-bold text-slate-800 mt-4 mb-1">{line.replace(/^#+\s*/, '')}</h3>;
-              if (line.match(/^\d+\.\s/)) return <p key={i} className="font-bold text-slate-700 mt-4 text-base">{line}</p>;
-              if (line.startsWith('- ')) return <p key={i} className="text-slate-600 ml-4 text-sm">• {line.slice(2)}</p>;
-              if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-semibold text-slate-700">{line.replace(/\*\*/g, '')}</p>;
-              return <p key={i} className="text-slate-600 text-sm leading-relaxed">{line}</p>;
+              if (line.match(/^#{1,3}\s/)) return <h3 key={i} className="text-lg font-semibold text-ink mt-4 mb-1">{line.replace(/^#+\s*/, '')}</h3>;
+              if (line.match(/^\d+\.\s/)) return <p key={i} className="font-semibold text-ink mt-4 text-base">{line}</p>;
+              if (line.startsWith('- ')) return <p key={i} className="text-ink-2 ml-4 text-sm">• {line.slice(2)}</p>;
+              if (line.startsWith('**') && line.endsWith('**')) return <p key={i} className="font-semibold text-ink">{line.replace(/\*\*/g, '')}</p>;
+              return <p key={i} className="text-ink-2 text-sm leading-relaxed">{line}</p>;
             })}
           </div>
         </div>

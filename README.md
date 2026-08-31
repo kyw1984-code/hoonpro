@@ -19,7 +19,7 @@ View your app in AI Studio: https://ai.studio/apps/a17ce62f-04f4-4186-982d-2862e
 3. Run the app:
    `npm run dev`
 
-## 소싱 파인더 설정
+## 훈프로 소싱AI (소싱 파인더) 설정
 
 네이버 검색광고 API 기반 니치 키워드 발굴 도구. 필요한 환경변수 3개:
 

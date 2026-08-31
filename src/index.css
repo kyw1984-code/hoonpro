@@ -1,1 +1,99 @@
 @import "tailwindcss";
+
+/* ──────────────────────────────────────────────────────────────
+   훈프로 디자인 토큰
+   업무 도구다운 절제된 시스템: 강조색 하나 + 상태색 셋,
+   그림자 대신 1px 경계선, 굵기 대신 크기·색으로 위계.
+   ────────────────────────────────────────────────────────────── */
+@theme {
+  /* 서체 — Pretendard (index.html에서 로드) */
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+    system-ui, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+
+  /* 중성색 — 차가운 slate 대신 살짝 따뜻한 회색 (종이 느낌) */
+  --color-ground: #f6f5f3;
+  --color-paper: #ffffff;
+  --color-paper-2: #fbfaf9;
+  --color-line: #e3e1dd;
+  --color-line-strong: #cfccc6;
+  --color-ink: #14161a;
+  --color-ink-2: #4b5159;
+  --color-ink-3: #8a9099;
+
+  /* 강조 — 활성 상태·링크·데이터 강조 전용 (기본 버튼은 ink) */
+  --color-accent: #2b59d9;
+  --color-accent-hover: #2449b4;
+  --color-accent-soft: #eaeffc;
+  --color-accent-line: #c3d2f5;
+
+  /* 상태 — 강조색과 분리, Tailwind 기본값보다 한 단계 깊게 */
+  --color-positive: #0e7b5b;
+  --color-positive-soft: #e7f4ef;
+  --color-caution: #a76a00;
+  --color-caution-soft: #fbf2e2;
+  --color-critical: #b4342b;
+  --color-critical-soft: #fbecea;
+
+  /* 모서리 — 3단계로 고정 */
+  --radius-control: 8px; /* 입력·칩·작은 버튼 */
+  --radius-card: 14px;   /* 카드·버튼 */
+  --radius-panel: 20px;  /* 패널·모달·드로어 */
+
+  /* 그림자 — 실제로 떠 있는 레이어에만 */
+  --shadow-raised: 0 1px 2px rgba(20, 22, 26, 0.06);
+  --shadow-overlay: 0 8px 28px -12px rgba(20, 22, 26, 0.28);
+}
+
+html {
+  background: var(--color-ground);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 숫자가 세로로 정렬되도록 — 검색량·리뷰수·가격 표에서 특히 중요 */
+table,
+input[type="number"],
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 키보드 접근성 — 포커스 링을 강조색으로 통일 */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* 스크롤바 — 도구 화면에서 얇고 조용하게 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -11,10 +11,10 @@ type LayoutPreset = 'hero' | 'problem' | 'solution' | 'proof' | 'detail' | 'life
 type ProductColorLock = 'black' | 'white' | 'none';
 type ModelGenderLock = 'male' | 'female' | 'none';
 type ProductVisualGenderLock = 'male' | 'female' | 'unisex' | 'none';
-type TextRenderMode = 'canvas' | 'integrated';
+type TextRenderMode = 'canvas';
 type ImageFilter = 'all' | 'warning' | 'failed' | 'done';
 type ProductSurfaceLock = 'printed' | 'plain' | 'unknown';
-type ShotType = 'model' | 'product' | 'detail' | 'texture' | 'lifestyle' | 'package' | 'cta';
+type ShotType = 'model' | 'product' | 'detail' | 'texture' | 'lifestyle' | 'cta';
 type BundleRequirement = 'both-items' | 'single-focus' | 'before-no-current-product';
 
 interface ProductVisualLock {
@@ -141,8 +141,6 @@ const getDesignerSetGuide = (shotType: ShotType): string => {
             return 'Designer set direction: macro product detail on textured surface, angled commercial lighting, shallow depth of field, background layers, premium material mood, not a flat isolated product photo.';
         case 'texture':
             return 'Designer set direction: macro print/material story with fabric folds, tactile texture, directional side light, premium shadow, close crop, and designed negative space, not a blank white product cutout.';
-        case 'package':
-            return 'Designer set direction: trust-building package/components scene with arranged composition, pedestal, soft reflections, background depth, premium studio styling, not a plain catalog layout.';
         case 'cta':
             return 'Designer set direction: final purchase hero with premium pedestal, atmospheric depth, confident product scale, refined props, decisive lighting, not a plain white background.';
         case 'lifestyle':
@@ -159,7 +157,6 @@ const SHOT_TYPE_LABEL: Record<ShotType, string> = {
     detail: '디테일',
     texture: '소재/프린팅',
     lifestyle: '사용장면',
-    package: '패키지/구성',
     cta: 'CTA 제품컷',
 };
 
@@ -199,7 +196,6 @@ const resolveShotType = (sectionType: string, role: string, layoutPreset: Layout
     const source = `${sectionType} ${role}`.toLowerCase();
     if (index === total - 1 || layoutPreset === 'cta' || source.includes('cta')) return 'cta';
     if (source.includes('texture') || source.includes('소재') || source.includes('프린팅') || source.includes('로고') || source.includes('패턴')) return 'texture';
-    if (source.includes('package') || source.includes('구성') || source.includes('패키지')) return 'package';
     if (layoutPreset === 'problem' || layoutPreset === 'lifestyle') return 'lifestyle';
     if (layoutPreset === 'proof' || layoutPreset === 'detail') return index % 2 === 0 ? 'detail' : 'texture';
     if (layoutPreset === 'solution') return 'product';
@@ -227,8 +223,6 @@ const getShotTypeGuide = (shotType: ShotType, genderLock: ProductVisualGenderLoc
             return 'SHOT TYPE: PRODUCT DETAIL CLOSE-UP. No model, no person, product only. Show seams, cut, fit detail, finish, hardware, logo/print placement, and functional parts in an extreme close-up. Product-only does not mean plain white catalog; use designed set styling.';
         case 'texture':
             return 'SHOT TYPE: TEXTURE / PRINT CLOSE-UP. No model, no person, product only. Show fabric/material texture, print/graphic/logo/pattern/embroidery placement, scale, and colors clearly. Use premium macro styling, not a white background cutout.';
-        case 'package':
-            return 'SHOT TYPE: PACKAGE / COMPONENTS / TRUST. No model, no person, product only. Show package, components, finishing, material evidence, construction, or trust-building product details in a designed commercial arrangement.';
         case 'cta':
             return 'SHOT TYPE: CTA PRODUCT HERO. No model, no person, product only. Use a purchase-confidence closing composition focused on the exact product with premium set design and depth.';
         case 'product':
@@ -239,12 +233,6 @@ const getShotTypeGuide = (shotType: ShotType, genderLock: ProductVisualGenderLoc
 
 const TEXT_RENDER_MODE_LABEL: Record<TextRenderMode, string> = {
     canvas: '안전 모드',
-    integrated: 'AI 통합 텍스트',
-};
-
-const isIntegratedTextEligible = (copy: string): boolean => {
-    const normalized = normalizeOverlayCopy(copy);
-    return !!normalized && !normalized.includes('\n') && Array.from(normalized).length <= 12;
 };
 
 const compactCopyLine = (value: string, maxLength: number): string => {
@@ -309,7 +297,6 @@ const formatMainCopy = (value: string): string => {
 const tidyImageCopy = (img: GenImage): Partial<GenImage> => ({
     mainCopy: formatMainCopy(img.mainCopy),
     subCopy: compactCopyLine(img.subCopy, 24),
-    points: (img.points || []).slice(0, 3).map(point => compactCopyLine(point, 12)).filter(Boolean),
 });
 
 const detectProductColorLock = (value: string): ProductColorLock => {
@@ -477,14 +464,13 @@ const inspectImageQuality = (
     const mainLines = normalizedMain.split('\n').filter(Boolean);
     if (!normalizedMain) warnings.push('메인 카피가 비어 있습니다.');
     FORBIDDEN_COPY_REPLACEMENTS.forEach(({ pattern, label }) => {
-        if (new RegExp(pattern.source).test(`${img.mainCopy} ${img.subCopy} ${(img.points || []).join(' ')}`)) {
+        if (new RegExp(pattern.source).test(`${img.mainCopy} ${img.subCopy}`)) {
             warnings.push(`${label}이 포함되어 있습니다.`);
         }
     });
     if (mainLines.length > 4) warnings.push('메인 카피가 길어 폰트가 작아질 수 있습니다.');
     if (mainLines.some(line => Array.from(line).length > 14)) warnings.push('메인 카피 한 줄이 14자를 넘습니다.');
     if (Array.from(normalizeOverlayCopy(img.subCopy)).length > 24) warnings.push('서브 카피가 24자를 넘습니다.');
-    if ((img.points || []).some(point => Array.from(normalizeOverlayCopy(point)).length > 12)) warnings.push('보조 포인트는 12자 이내가 안정적입니다.');
     if (!normalizeOverlayCopy(img.visualPrompt)) warnings.push('이미지 프롬프트가 비어 있습니다.');
     if (allMainCopies.filter(copy => copy === normalizedMain).length > 1) warnings.push('다른 이미지와 메인 카피가 중복됩니다.');
     if (index === 0 && img.layoutPreset !== 'hero') warnings.push('첫 이미지는 Hook/Hero 역할이 권장됩니다.');
@@ -504,25 +490,17 @@ const inspectImageQuality = (
     if (total >= 8 && expected && index !== 4 && img.layoutPreset !== expected.preset) {
         warnings.push(`${index + 1}번은 ${expected.label} 흐름이 더 자연스럽습니다.`);
     }
-    if (img.textRenderMode === 'integrated') {
-        if (isIntegratedTextEligible(img.mainCopy)) {
-            warnings.push('AI 통합 텍스트 모드: 이미지 속 한글 오타·뭉개짐을 직접 확인해주세요.');
-        } else {
-            warnings.push('메인 카피가 길어 AI 통합 텍스트 대신 안전 합성으로 처리됩니다.');
-        }
-    }
     return warnings;
 };
 
-const isFeatureBenefitImage = (img: Pick<GenImage, 'role' | 'stage' | 'sectionType' | 'mainCopy' | 'subCopy' | 'points'>): boolean => {
-    const source = `${img.role} ${img.stage} ${img.sectionType} ${img.mainCopy} ${img.subCopy} ${(img.points || []).join(' ')}`.toLowerCase();
+const isFeatureBenefitImage = (img: Pick<GenImage, 'role' | 'stage' | 'sectionType' | 'mainCopy' | 'subCopy'>): boolean => {
+    const source = `${img.role} ${img.stage} ${img.sectionType} ${img.mainCopy} ${img.subCopy}`.toLowerCase();
     return /특장점|핵심\s*장점|셀링|benefit|feature|advantage|usp|차별점/.test(source);
 };
 
 const getImageQaTags = (img: Omit<GenImage, 'qaTags'>): string[] => {
     const tags: string[] = [];
     if (img.status === 'failed') tags.push('실패 이미지');
-    if (img.textRenderMode === 'integrated') tags.push('텍스트 확인 필요');
     if (img.bundleRequirement === 'both-items') {
         tags.push('조합 제품 모두 보임');
         tags.push('색상/구성 유지');
@@ -566,23 +544,15 @@ const buildImagePrompt = (
         ? `Brand colors — primary ${colors.primary}, accent ${colors.accent || colors.primary}, text ${colors.text || '#1a1a1a'}, background ${colors.background || '#ffffff'}.`
         : '';
     const posKo = img.textPosition === 'top' ? '상단' : img.textPosition === 'middle' ? '중앙' : '하단';
-    const integratedTextEnabled = textRenderMode === 'integrated' && isIntegratedTextEligible(img.mainCopy);
     const exactMainCopy = normalizeOverlayCopy(img.mainCopy);
     const problemContrast = isProblemContrastSection(img);
-    const textInstruction = integratedTextEnabled
-        ? [
-            `- Render exactly this Korean headline text in the ${posKo} region: "${exactMainCopy}".`,
-            '- The headline must be crisp, readable, correctly spelled, and not distorted. Do not add any other text, numbers, captions, labels, badges, watermarks, or extra letters.',
-            '- Use premium Korean commercial typography that follows the image perspective naturally while keeping the text flat enough to read clearly.',
-            '- Leave enough contrast and empty space around the headline. The product/model must not overlap the letters.',
-        ].join('\n')
-        : [
+    const textInstruction = [
             '- SAFE CANVAS TEXT MODE: the app will overlay all Korean copy later in browser canvas.',
             '- Generate a clean visual background only. DO NOT render any new text inside the image.',
             '- NO Korean text, NO English text, NO letters, NO numbers, NO captions, NO headline, NO slogan, NO price, NO sale badge, NO labels, NO stickers, NO watermark, NO UI text, NO poster text, NO signage, NO book/newspaper/magazine text, NO package label text added by the model.',
             '- Leave the copy-safe area blank and clean for later canvas typography.',
             '- Exception: preserve only the exact logo/print/lettering that already exists on the uploaded reference product itself. Do not invent, rewrite, translate, simplify, or add new product lettering.',
-        ].join('\n');
+    ].join('\n');
     const combinationCount = getCombinationCount(combinationType);
     const isBundle = combinationCount >= 2;
     const isBundleTogetherSection = isBundle
@@ -655,25 +625,30 @@ const buildImagePrompt = (
         ? `\nAPPROVED MASTER REFERENCE: Follow the ${masterReferenceType === 'hook-model' ? 'Hook model master' : 'product detail master'} for product continuity, but create a fresh section image matching this section role.`
         : '';
 
-    return `Create ONE polished Korean e-commerce detail-page background image (vertical 860x1000 / 4:5 layout) for the product "${productName}".
-This must look like a TOP 1% Korean smartstore/Coupang detail page section background: photorealistic real product photography with a clean composition and premium visual merchandising.
+    return `Create ONE polished Korean e-commerce detail-page image (vertical 860x1000 / 4:5 layout) for the product "${productName}".
+photorealistic, commercial product photography, premium ecommerce detail page, natural lighting, ultra realistic texture, high-end advertising, clean layout, professional typography area, Korean ecommerce style, smartstore optimized, 860px width composition, high conversion design, premium visual merchandising, realistic shadows, luxury branding.
+This must look like a TOP 1% Korean smartstore/Coupang detail page section: a real photo studio shoot art-directed by a professional commercial photographer — not an AI collage, not a stock photo, not a marketplace listing thumbnail.
 
 SECTION ROLE: ${img.role}${img.stage ? ` (구매 심리 단계: ${img.stage})` : ''}.
 ${masterGuide}
 
 DESIGN DIRECTION:
-- 톤: ${tone}. 깔끔하고 현대적인 프리미엄 레이아웃, 넉넉한 여백, high conversion design, premium visual hierarchy. ${colorHint}
-- IMPORTANT: leave a clean copy-safe negative-space area in the ${posKo} region. ${buildCopySafeInstruction(img.textPosition)} ${integratedTextEnabled ? 'Use this area for the exact headline only.' : 'The app will overlay Korean typography later.'}
+- 톤: ${tone}. 잡지 화보처럼 정돈된 미니멀 프리미엄 레이아웃. ONE clear focal subject, generous calm negative space (roughly 30-40% of the frame), no visual clutter, high conversion design, premium visual hierarchy. ${colorHint}
+- IMPORTANT: leave a clean copy-safe negative-space area in the ${posKo} region. ${buildCopySafeInstruction(img.textPosition)} The app will overlay Korean typography later.
 - Keep all important product details, model faces, hands, logos, prints, and functional parts OUTSIDE the copy-safe text zone.
 - Do NOT create a separate white header/footer band, frame, box, panel, or split-screen. Keep one continuous premium background.
 - Do NOT use props or backgrounds that naturally introduce readable text, such as posters, signs, price tags, books, magazines, newspapers, labels, menus, UI screens, or packages with new readable writing.
-- Korean smartstore optimized, photorealistic commercial product photography, natural lighting, ultra realistic texture, realistic shadows, premium visual merchandising, information-rich layout.
+- Korean smartstore optimized, photorealistic commercial product photography, high-end advertising, natural lighting, ultra realistic texture, realistic shadows, premium visual merchandising, luxury branding, magazine-grade editorial quality.
 - Layout preset: ${img.layoutPreset || 'detail'}. ${getLayoutVisualGuide(img.layoutPreset)}
 - ${shotGuide}
 - ${designerSetGuide}
 - Avoid plain white background, isolated catalog cutout, blank studio sweep, centered product-only listing photo, or ecommerce marketplace basic product image unless the user explicitly asks for that.
 - Use a complete designer-made detail-page section: layered composition, background texture/color, product scale hierarchy, realistic shadow, premium lighting, and tasteful category-relevant styling.
 - Visual diversity rule: make this section clearly different from adjacent sections in camera angle, background depth, pose, crop, and product emphasis. Avoid repeating the same model pose, same room, same close-up type, or same centered product composition.
+- Minimal-clutter rule: at most 1-2 tasteful category-relevant props, one background concept, one dominant subject. The scene must feel calm, airy, and expensive — never busy, cramped, cluttered, or collage-like. When in doubt, remove elements instead of adding them.
+- PHOTOGRAPHIC REALISM (critical for quality): shoot-like depth of field with a natural focus falloff, soft directional key light with a gentle fill, true-to-life color grading, accurate contact shadows where objects meet surfaces, subtle surface imperfections and real material grain. Skin, fabric weave, metal, glass, and plastic must each read as their real material.
+- Composition craft: intentional framing using the rule of thirds or a clean centered hero, believable perspective and eye level, consistent single light direction across the whole frame, and a background that recedes naturally behind the subject.
+- FORBIDDEN (these make it look cheap/AI-made): plastic-looking oversmoothed skin, waxy or melted product edges, warped/duplicated hands or fingers, floating objects without shadows, mismatched light directions, over-saturated HDR glow, heavy vignettes, fake bokeh circles, visible collage seams, repeated pattern artifacts, or a subject pasted onto an unrelated background.
 
 ${problemContrast || img.bundleRequirement === 'before-no-current-product' ? problemContrastGuide : identityInstruction}
 ${bundle}
@@ -809,20 +784,20 @@ const buildHeadlineLayout = (
     copy: string,
     position: 'top' | 'middle' | 'bottom'
 ) => {
-    const maxWidth = TARGET_WIDTH - 112;
-    const maxLines = 8;
-    let fontSize = position === 'middle' ? 54 : 58;
-    const minFontSize = 20;
+    const maxWidth = TARGET_WIDTH - 130;
+    const maxLines = 3; // 문구 최소화 — 헤드라인은 최대 3줄까지만
+    let fontSize = position === 'middle' ? 46 : 50;
+    const minFontSize = 22;
     let lines: string[] = [];
     let lineHeight = 0;
 
     while (fontSize >= minFontSize) {
-        ctx.font = `900 ${fontSize}px ${DETAIL_FONT_FAMILY}`;
+        ctx.font = `800 ${fontSize}px ${DETAIL_FONT_FAMILY}`;
         lines = wrapText(ctx, copy, maxWidth, maxLines);
-        lineHeight = Math.round(fontSize * 1.24);
+        lineHeight = Math.round(fontSize * 1.3);
         const widest = Math.max(0, ...lines.map(line => ctx.measureText(line).width));
         const totalHeight = lines.length * lineHeight;
-        if (widest <= maxWidth && totalHeight <= 360) break;
+        if (widest <= maxWidth && totalHeight <= 210) break;
         fontSize -= 2;
     }
 
@@ -860,34 +835,176 @@ const drawBackdrop = (
     ctx.fillRect(0, top, TARGET_WIDTH, bottom - top);
 };
 
-const drawTextPlate = (
+// 텍스트가 놓일 영역의 실제 픽셀 밝기와 편차를 측정 (글자색 자동 선택용)
+const sampleRegionBrightness = (
     ctx: CanvasRenderingContext2D,
-    centerY: number,
-    blockHeight: number,
-    accentColor: string,
-    textColor: string
+    top: number,
+    height: number
+): { luminance: number; variance: number } => {
+    const y0 = Math.max(0, Math.floor(top - 10));
+    const y1 = Math.min(TARGET_HEIGHT, Math.ceil(top + height + 10));
+    const h = Math.max(1, y1 - y0);
+    try {
+        const data = ctx.getImageData(0, y0, TARGET_WIDTH, h).data;
+        let sum = 0;
+        let sumSq = 0;
+        let count = 0;
+        // 4px 간격 샘플링 (전 픽셀 순회는 불필요하게 느림)
+        for (let i = 0; i < data.length; i += 4 * 4) {
+            const l = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 255;
+            sum += l;
+            sumSq += l * l;
+            count += 1;
+        }
+        if (count === 0) return { luminance: 1, variance: 0 };
+        const mean = sum / count;
+        return { luminance: mean, variance: Math.max(0, sumSq / count - mean * mean) };
+    } catch {
+        // 캔버스 오염(cross-origin) 등으로 읽기 실패 시 밝은 배경으로 간주
+        return { luminance: 1, variance: 0 };
+    }
+};
+
+// 디자인 시스템 텍스트 컬러가 너무 밝으면 가독성을 위해 진한 색으로 대체
+const resolveDarkTextColor = (design?: { colors?: Record<string, string> }): string => {
+    const color = getTextColor(design);
+    return getColorLuminance(color) > 0.5 ? '#111827' : color;
+};
+
+// 배경이 복잡할 때만 사용하는 아주 옅은 스크림 (판때기처럼 보이지 않게)
+const drawSoftScrim = (
+    ctx: CanvasRenderingContext2D,
+    top: number,
+    height: number,
+    lightText: boolean
 ) => {
-    const textIsLight = getColorLuminance(textColor) > 0.68;
-    const plateWidth = TARGET_WIDTH - 170;
-    const plateHeight = Math.min(460, blockHeight + 56);
-    const x = (TARGET_WIDTH - plateWidth) / 2;
-    const y = centerY - plateHeight / 2;
+    const pad = 46;
+    const y0 = Math.max(0, top - pad);
+    const y1 = Math.min(TARGET_HEIGHT, top + height + pad);
+    const gradient = ctx.createLinearGradient(0, y0, 0, y1);
+    const solid = lightText ? 'rgba(10, 12, 16, 0.34)' : 'rgba(255, 255, 255, 0.38)';
+    const clear = lightText ? 'rgba(10, 12, 16, 0)' : 'rgba(255, 255, 255, 0)';
+    gradient.addColorStop(0, clear);
+    gradient.addColorStop(0.5, solid);
+    gradient.addColorStop(1, clear);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, y0, TARGET_WIDTH, y1 - y0);
+};
+
+// 판/칩 없는 미니멀 타이포그래피: 헤드라인 위 얇은 악센트 라인만 사용
+const drawAccentLine = (
+    ctx: CanvasRenderingContext2D,
+    topY: number,
+    accentColor: string
+) => {
     ctx.save();
-    ctx.fillStyle = textIsLight ? 'rgba(15, 23, 42, 0.26)' : 'rgba(255, 255, 255, 0.26)';
-    ctx.strokeStyle = textIsLight ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.48)';
-    ctx.lineWidth = 1;
-    ctx.shadowColor = 'rgba(15, 23, 42, 0.14)';
-    ctx.shadowBlur = 24;
-    ctx.shadowOffsetY = 12;
+    ctx.fillStyle = withAlpha(accentColor, 0.92);
     ctx.beginPath();
-    ctx.roundRect(x, y, plateWidth, plateHeight, 30);
+    ctx.roundRect(TARGET_WIDTH / 2 - 30, topY, 60, 4, 999);
     ctx.fill();
-    ctx.stroke();
+    ctx.restore();
+};
+
+// 경쟁 대비 섹션 전용: AI 이미지에 한글 표를 맡기면 글자가 깨지므로
+// 비교표를 캔버스로 직접 그린다 (기획안의 competitorComparison 데이터 사용)
+const drawComparisonTable = (
+    ctx: CanvasRenderingContext2D,
+    rows: { item: string; competitor: string; ours: string }[],
+    design?: { colors?: Record<string, string> }
+) => {
+    const cardX = 64;
+    const cardW = TARGET_WIDTH - cardX * 2;
+    const padX = 24;
+    const colGap = 14;
+    const colItemW = 150;
+    const colW = (cardW - padX * 2 - colItemW - colGap * 2) / 2;
+    const rawAccent = getAccentColor(design);
+    const accent = getColorLuminance(rawAccent) > 0.62 ? '#2563eb' : rawAccent;
+
+    // 셀 텍스트 줄바꿈을 먼저 계산해 전체 높이를 확정
+    const cellFont = `500 18px ${DETAIL_FONT_FAMILY}`;
+    const itemFont = `700 18px ${DETAIL_FONT_FAMILY}`;
+    const lineH = 25;
+    const measured = rows.map((row) => {
+        ctx.font = itemFont;
+        const itemLines = wrapText(ctx, row.item, colItemW, 2);
+        ctx.font = cellFont;
+        const compLines = wrapText(ctx, row.competitor, colW, 2);
+        const oursLines = wrapText(ctx, row.ours, colW, 2);
+        const maxLines = Math.max(itemLines.length, compLines.length, oursLines.length, 1);
+        return { itemLines, compLines, oursLines, height: maxLines * lineH + 22 };
+    });
+    const headerH = 50;
+    const tableH = 18 + headerH + measured.reduce((s, r) => s + r.height, 0) + 16;
+    const cardY = Math.max(240, Math.min(TARGET_HEIGHT - 56 - tableH, 620 - tableH / 2));
+
+    ctx.save();
+
+    // 카드 (흰 배경 + 부드러운 그림자)
+    ctx.shadowColor = 'rgba(15, 23, 42, 0.18)';
+    ctx.shadowBlur = 28;
+    ctx.shadowOffsetY = 10;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.97)';
+    ctx.beginPath();
+    ctx.roundRect(cardX, cardY, cardW, tableH, 18);
+    ctx.fill();
+    ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
-    ctx.fillStyle = withAlpha(accentColor, 0.9);
+    ctx.shadowOffsetY = 0;
+    ctx.strokeStyle = 'rgba(17, 24, 39, 0.08)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    const innerX = cardX + padX;
+    const compX = innerX + colItemW + colGap;
+    const oursX = compX + colW + colGap;
+    const contentTop = cardY + 18;
+
+    // '이 제품' 열 하이라이트
+    ctx.fillStyle = withAlpha(accent, 0.07);
     ctx.beginPath();
-    ctx.roundRect(TARGET_WIDTH / 2 - 38, y + 18, 76, 4, 999);
+    ctx.roundRect(oursX - 10, contentTop, colW + 20, tableH - 34, 12);
     ctx.fill();
+
+    // 헤더
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const headerY = contentTop + headerH / 2 - 4;
+    ctx.font = `700 17px ${DETAIL_FONT_FAMILY}`;
+    ctx.fillStyle = 'rgba(17, 24, 39, 0.45)';
+    ctx.fillText('비교 항목', innerX, headerY);
+    ctx.fillText('일반 제품', compX, headerY);
+    ctx.fillStyle = accent;
+    ctx.fillText('이 제품', oursX, headerY);
+    ctx.strokeStyle = 'rgba(17, 24, 39, 0.12)';
+    ctx.beginPath();
+    ctx.moveTo(innerX, contentTop + headerH - 6);
+    ctx.lineTo(cardX + cardW - padX, contentTop + headerH - 6);
+    ctx.stroke();
+
+    // 데이터 행
+    let rowY = contentTop + headerH;
+    measured.forEach((row, i) => {
+        const textTop = rowY + 11 + lineH / 2;
+        ctx.font = itemFont;
+        ctx.fillStyle = '#111827';
+        row.itemLines.forEach((line, li) => ctx.fillText(line, innerX, textTop + li * lineH));
+        ctx.font = cellFont;
+        ctx.fillStyle = '#6b7280';
+        row.compLines.forEach((line, li) => ctx.fillText(line, compX, textTop + li * lineH));
+        ctx.font = `600 18px ${DETAIL_FONT_FAMILY}`;
+        ctx.fillStyle = '#111827';
+        row.oursLines.forEach((line, li) => ctx.fillText(line, oursX, textTop + li * lineH));
+        rowY += row.height;
+        if (i < measured.length - 1) {
+            ctx.strokeStyle = 'rgba(17, 24, 39, 0.07)';
+            ctx.beginPath();
+            ctx.moveTo(innerX, rowY);
+            ctx.lineTo(cardX + cardW - padX, rowY);
+            ctx.stroke();
+        }
+    });
+
     ctx.restore();
 };
 
@@ -923,97 +1040,73 @@ const overlayTextOnImage = async (
             }
             ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_WIDTH, TARGET_HEIGHT);
 
-            const headline = buildHeadlineLayout(ctx, formatMainCopy(seg.mainCopy), seg.textPosition);
+            // 경쟁 대비 섹션은 캔버스 비교표가 본문이므로 카피를 상단에 고정
+            const hasComparisonTable = !!(seg.comparisonRows && seg.comparisonRows.length > 0);
+            const effectivePosition = hasComparisonTable ? 'top' : seg.textPosition;
+
+            // 미니멀 타이포그래피: 판·칩·필 없이 악센트 라인 + 텍스트만 (문구 최소화)
+            const headline = buildHeadlineLayout(ctx, formatMainCopy(seg.mainCopy), effectivePosition);
             const subCopy = normalizeOverlayCopy(seg.subCopy);
-            const points = (seg.points || []).map(normalizeOverlayCopy).filter(Boolean).slice(0, 3);
-            const subFont = 28;
-            const pointFont = 23;
-            const subHeight = subCopy ? 42 : 0;
-            ctx.font = `800 ${pointFont}px ${DETAIL_FONT_FAMILY}`;
-            const pointLabels = points.map(p => `• ${p}`);
-            const pointGap = 12;
-            const maxPointRowWidth = TARGET_WIDTH - 120;
-            const pointRows = pointLabels.reduce<Array<Array<{ label: string; width: number }>>>((rows, label) => {
-                const item = { label, width: Math.min(ctx.measureText(label).width + 24, maxPointRowWidth) };
-                const current = rows[rows.length - 1];
-                const currentWidth = current?.reduce((sum, rowItem) => sum + rowItem.width, 0) || 0;
-                const nextWidth = current ? currentWidth + pointGap * current.length + item.width : item.width;
-                if (!current || nextWidth > maxPointRowWidth) rows.push([item]);
-                else current.push(item);
-                return rows;
-            }, []).slice(0, 2);
-            const pointHeight = pointRows.length > 0 ? pointRows.length * 44 : 0;
+            const subFont = 25;
+            const subHeight = subCopy ? 38 : 0;
+            const accentHeight = 20;
             const headlineHeight = headline.lines.length * headline.lineHeight;
-            const blockHeight = headlineHeight + subHeight + pointHeight + 20;
-            const centerY = seg.textPosition === 'top'
-                ? Math.max(118, blockHeight / 2 + 44)
-                : seg.textPosition === 'middle'
+            const blockHeight = accentHeight + headlineHeight + subHeight + 8;
+
+            // 안전 여백 안에서만 배치되도록 클램프 (글자 잘림 방지)
+            const SAFE_MARGIN = 56;
+            const minCenter = SAFE_MARGIN + blockHeight / 2;
+            const maxCenter = TARGET_HEIGHT - SAFE_MARGIN - blockHeight / 2;
+            const desiredCenter = effectivePosition === 'top'
+                ? blockHeight / 2 + 64
+                : effectivePosition === 'middle'
                     ? TARGET_HEIGHT / 2
-                    : Math.min(TARGET_HEIGHT - 118, TARGET_HEIGHT - blockHeight / 2 - 54);
-            let y = centerY - blockHeight / 2 + headline.lineHeight / 2;
-            const textColor = getTextColor(design);
-            const accentColor = getAccentColor(design);
+                    : TARGET_HEIGHT - blockHeight / 2 - 72;
+            const centerY = maxCenter < minCenter
+                ? TARGET_HEIGHT / 2
+                : Math.min(maxCenter, Math.max(minCenter, desiredCenter));
 
-            drawBackdrop(ctx, seg.textPosition, centerY, blockHeight, textColor);
-            drawTextPlate(ctx, centerY, blockHeight, accentColor, textColor);
+            // 배경 밝기를 실제로 측정해 글자색을 자동 선택 (어두운 배경엔 흰 글씨)
+            const blockTop = centerY - blockHeight / 2;
+            const bg = sampleRegionBrightness(ctx, blockTop, blockHeight);
+            const useLightText = bg.luminance < 0.55;
+            const textColor = useLightText ? '#ffffff' : resolveDarkTextColor(design);
+            const accentColor = useLightText ? '#ffffff' : getAccentColor(design);
 
+            // 배경이 밝기 편차가 큰(복잡한) 구간이면 아주 옅은 스크림만 깔아 가독성 확보
+            if (bg.variance > 0.055) {
+                drawSoftScrim(ctx, blockTop, blockHeight, useLightText);
+            }
+
+            drawAccentLine(ctx, blockTop, accentColor);
+
+            let y = blockTop + accentHeight + headline.lineHeight / 2;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.lineJoin = 'round';
-            ctx.miterLimit = 2;
-            ctx.shadowColor = getContrastStroke(textColor);
-            ctx.shadowBlur = Math.max(6, headline.fontSize * 0.12);
-            ctx.shadowOffsetY = 2;
-            ctx.font = `900 ${headline.fontSize}px ${DETAIL_FONT_FAMILY}`;
+            ctx.shadowColor = useLightText ? 'rgba(0, 0, 0, 0.35)' : 'rgba(255, 255, 255, 0.45)';
+            ctx.shadowBlur = 8;
+            ctx.shadowOffsetY = 0;
+            ctx.font = `800 ${headline.fontSize}px ${DETAIL_FONT_FAMILY}`;
             headline.lines.forEach((line) => {
-                ctx.lineWidth = Math.max(1, headline.fontSize * 0.026);
-                ctx.strokeStyle = getContrastStroke(textColor);
-                ctx.strokeText(line, TARGET_WIDTH / 2, y);
                 ctx.fillStyle = textColor;
                 ctx.fillText(line, TARGET_WIDTH / 2, y);
                 y += headline.lineHeight;
             });
 
             if (subCopy) {
-                y += 8;
-                ctx.font = `700 ${subFont}px ${DETAIL_FONT_FAMILY}`;
-                const subLines = wrapText(ctx, subCopy, TARGET_WIDTH - 180, 1);
-                const subLine = subLines[0] || '';
-                const subWidth = Math.min(TARGET_WIDTH - 150, ctx.measureText(subLine).width + 42);
-                ctx.shadowBlur = 0;
-                ctx.fillStyle = getColorLuminance(textColor) > 0.68 ? 'rgba(15, 23, 42, 0.46)' : 'rgba(255, 255, 255, 0.72)';
-                ctx.beginPath();
-                ctx.roundRect(TARGET_WIDTH / 2 - subWidth / 2, y - 21, subWidth, 42, 21);
-                ctx.fill();
+                y += 4;
+                ctx.font = `500 ${subFont}px ${DETAIL_FONT_FAMILY}`;
+                ctx.globalAlpha = 0.92;
                 ctx.fillStyle = textColor;
-                subLines.forEach((line) => {
+                wrapText(ctx, subCopy, TARGET_WIDTH - 180, 1).forEach((line) => {
                     ctx.fillText(line, TARGET_WIDTH / 2, y);
                 });
-                y += subHeight;
+                ctx.globalAlpha = 1;
             }
+            ctx.shadowBlur = 0;
 
-            if (points.length > 0) {
-                ctx.shadowBlur = 0;
-                ctx.font = `800 ${pointFont}px ${DETAIL_FONT_FAMILY}`;
-                pointRows.forEach((row) => {
-                    const totalWidth = row.reduce((sum, item) => sum + item.width, 0) + pointGap * (row.length - 1);
-                    let x = (TARGET_WIDTH - totalWidth) / 2;
-                    row.forEach((item) => {
-                        ctx.fillStyle = getColorLuminance(textColor) > 0.68 ? 'rgba(15, 23, 42, 0.54)' : 'rgba(255, 255, 255, 0.86)';
-                        ctx.beginPath();
-                        ctx.roundRect(x, y - 18, item.width, 38, 19);
-                        ctx.fill();
-                        ctx.strokeStyle = withAlpha(accentColor, 0.28);
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                        ctx.fillStyle = getColorLuminance(textColor) > 0.68 ? '#ffffff' : accentColor;
-                        wrapText(ctx, item.label, item.width - 18, 1).forEach((line) => {
-                            ctx.fillText(line, x + item.width / 2, y + 1);
-                        });
-                        x += item.width + pointGap;
-                    });
-                    y += 44;
-                });
+            if (hasComparisonTable) {
+                drawComparisonTable(ctx, seg.comparisonRows!, design);
             }
 
             resolve(canvas.toDataURL('image/png'));
@@ -1033,8 +1126,12 @@ interface GenImage {
     shotType?: ShotType;
     mainCopy: string;
     subCopy: string;
-    points: string[];
+    purpose?: string;
     trustElement: string;
+    designLayout?: string;
+    heightPx?: number;
+    // 경쟁 대비 섹션: AI가 아닌 캔버스로 직접 그리는 비교표 데이터 (한글 깨짐 방지)
+    comparisonRows?: { item: string; competitor: string; ours: string }[];
     trigger: string;
     textPosition: 'top' | 'middle' | 'bottom';
     visualPrompt: string;
@@ -1059,8 +1156,6 @@ interface GenImage {
     bundleRequirement?: BundleRequirement;
     regenerationHint?: string;
     previousImageUrl?: string;
-    candidateImageUrl?: string;
-    candidateRawImageUrl?: string;
     provider?: 'openai' | 'gemini';
     model?: string;
 }
@@ -1114,7 +1209,6 @@ const createGenImagesFromPlan = (result: DetailPlan, combinationType: Combinatio
         const shotType = resolveShotType(img.sectionType, img.role, layoutPreset, i, total, img.shotType);
         const main = sanitizeCopy(formatMainCopy(img.mainCopy));
         const sub = sanitizeCopy(img.subCopy);
-        const points = (img.points || []).slice(0, 3).map(point => sanitizeCopy(point));
         const textPosition = img.textPosition || getDefaultTextPosition(layoutPreset, i);
 
         return {
@@ -1126,8 +1220,13 @@ const createGenImagesFromPlan = (result: DetailPlan, combinationType: Combinatio
             shotType,
             mainCopy: formatMainCopy(main.text),
             subCopy: sub.text,
-            points: points.map(point => point.text),
+            purpose: img.purpose,
             trustElement: img.trustElement,
+            designLayout: img.designLayout,
+            heightPx: img.heightPx,
+            comparisonRows: /경쟁/.test(img.role) && result.competitorComparison?.length > 0
+                ? result.competitorComparison.slice(0, 4)
+                : undefined,
             trigger: img.trigger,
             textPosition,
             visualPrompt: img.visualPrompt,
@@ -1139,7 +1238,7 @@ const createGenImagesFromPlan = (result: DetailPlan, combinationType: Combinatio
             layoutPreset,
             textRenderMode: 'canvas',
             qaTags: [],
-            qualityWarnings: [...main.warnings, ...sub.warnings, ...points.flatMap(point => point.warnings)],
+            qualityWarnings: [...main.warnings, ...sub.warnings],
             priority: 0,
             bundleRequirement: resolveBundleRequirement({ number: img.number, role: img.role, layoutPreset, sectionType: img.sectionType, shotType }, combinationType),
         };
@@ -1166,12 +1265,12 @@ const STATUS_LABEL: Record<ImageStatus, string> = {
 };
 
 const STATUS_CLASS: Record<ImageStatus, string> = {
-    idle: 'bg-slate-100 text-slate-500',
-    queued: 'bg-sky-50 text-sky-600',
-    generating: 'bg-blue-50 text-blue-600',
-    done: 'bg-emerald-50 text-emerald-600',
-    failed: 'bg-red-50 text-red-600',
-    retrying: 'bg-amber-50 text-amber-600',
+    idle: 'border-line bg-paper-2 text-ink-3',
+    queued: 'border-line bg-paper-2 text-ink-2',
+    generating: 'border-accent/35 bg-accent-soft text-accent',
+    done: 'border-positive/35 bg-positive-soft text-positive',
+    failed: 'border-critical/35 bg-critical-soft text-critical',
+    retrying: 'border-caution/35 bg-caution-soft text-caution',
 };
 
 const getImageGenerationPriority = (img: GenImage): number => {
@@ -1180,7 +1279,7 @@ const getImageGenerationPriority = (img: GenImage): number => {
     if (role.includes('특장점') || role.includes('proof') || role.includes('solution')) return 9;
     if (img.layoutPreset === 'cta' || role.includes('cta')) return 8;
     if (img.shotType === 'detail' || img.shotType === 'texture') return 7;
-    if (img.shotType === 'product' || img.shotType === 'package') return 6;
+    if (img.shotType === 'product') return 6;
     if (img.shotType === 'lifestyle') return 4;
     return 5;
 };
@@ -1220,8 +1319,7 @@ export const DetailPlanner: React.FC = () => {
     const [plan, setPlan] = useState<DetailPlan | null>(null);
     const [images, setImages] = useState<GenImage[]>([]);
     const [expandedPrompt, setExpandedPrompt] = useState<string | null>(null);
-    const [textRenderMode, setTextRenderMode] = useState<TextRenderMode>('canvas');
-    const [aiIntegratedTextUnlocked, setAiIntegratedTextUnlocked] = useState(false);
+    const textRenderMode: TextRenderMode = 'canvas';
     const [imageFilter, setImageFilter] = useState<ImageFilter>('all');
     const [productBrief, setProductBrief] = useState<ProductBrief | null>(null);
     const [briefText, setBriefText] = useState('');
@@ -1341,47 +1439,7 @@ export const DetailPlanner: React.FC = () => {
         });
     };
 
-    useEffect(() => {
-        let alive = true;
-        (async () => {
-            try {
-                const res = await fetch('/api/usage?action=config', {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${getToken()}` },
-                });
-                const data = await res.json();
-                if (!alive) return;
-                const unlocked = data?.aiIntegratedTextEnabled === true;
-                setAiIntegratedTextUnlocked(unlocked);
-                if (!unlocked) {
-                    setTextRenderMode('canvas');
-                    setImages(prev => prev.map(img => ({ ...img, textRenderMode: 'canvas' })));
-                }
-            } catch {
-                if (!alive) return;
-                setAiIntegratedTextUnlocked(false);
-                setTextRenderMode('canvas');
-                setImages(prev => prev.map(img => ({ ...img, textRenderMode: 'canvas' })));
-            }
-        })();
-        return () => { alive = false; };
-    }, []);
 
-    const handleTextRenderModeChange = (mode: TextRenderMode) => {
-        const nextMode = mode === 'integrated' && !aiIntegratedTextUnlocked ? 'canvas' : mode;
-        setTextRenderMode(nextMode);
-        setImages(prev => {
-            const patched = prev.map(img => ({ ...img, textRenderMode: nextMode }));
-            const mainCopies = patched.map(img => normalizeOverlayCopy(img.mainCopy));
-            return patched.map((img, index) => {
-                const next = {
-                    ...img,
-                    qualityWarnings: inspectImageQuality(img, mainCopies, index, patched.length),
-                };
-                return { ...next, qaTags: getImageQaTags(next) };
-            });
-        });
-    };
 
     const handleTidyCopy = (id?: string) => {
         setImages(prev => {
@@ -1581,8 +1639,7 @@ export const DetailPlanner: React.FC = () => {
         retry = false,
         runtimeMasters = masterReferences,
         runtimeLock = getActiveVisualLock(),
-        bulkGenerate = false,
-        asCandidate = false
+        bulkGenerate = false
     ) => {
         const requestedTextMode = textRenderMode;
         updateImage(seg.id, {
@@ -1608,7 +1665,6 @@ export const DetailPlanner: React.FC = () => {
             ].join(' ');
             const colorLock = runtimeLock.colorLock || detectProductColorLock(productLockSource);
             const genderLock = runtimeLock.genderLock || detectModelGenderLock(productLockSource);
-            const canUseIntegratedText = requestedTextMode === 'integrated' && isIntegratedTextEligible(latest.mainCopy);
             const problemContrast = latest.bundleRequirement === 'before-no-current-product' || isProblemContrastSection(latest);
             const hasMatchingMaster = problemContrast ? false : (latest.shotType === 'model' ? !!runtimeMasters.hookModel : !!runtimeMasters.productDetail);
             const masterReferenceType = hasMatchingMaster
@@ -1619,10 +1675,9 @@ export const DetailPlanner: React.FC = () => {
                 : latest;
             const prompt = buildImagePrompt(promptSource, info.combinationType, info.name, colorLock, genderLock, requestedTextMode, runtimeLock, masterReferenceType, plan?.designSystem, referenceImages.length);
             const { refs, roles } = buildReferencePayload(latest, runtimeMasters);
-            const wantsCandidatePair = !asCandidate && shouldRunVisionQa(latest) && (latest.number === 1 || latest.layoutPreset === 'cta' || isFeatureBenefitImage(latest));
             const result = await generateImage(prompt, refs, '9:16', bulkGenerate ? 'medium' : undefined, {
                 inputFidelity: 'high',
-                variantCount: wantsCandidatePair ? 2 : 1,
+                variantCount: 1, // 섹션당 이미지 1장만 생성
                 referenceRoles: roles,
                 pacingMode: 'auto',
                 priority: latest.priority ?? getImageGenerationPriority(latest),
@@ -1630,46 +1685,25 @@ export const DetailPlanner: React.FC = () => {
             const raw = result?.image;
             if (!raw) {
                 updateImage(seg.id, {
-                    imageUrl: asCandidate ? latest.imageUrl : '',
-                    rawImageUrl: asCandidate ? latest.rawImageUrl : '',
+                    imageUrl: '',
+                    rawImageUrl: '',
                     isGenerating: false,
-                    status: asCandidate && latest.imageUrl ? 'done' : 'failed',
+                    status: 'failed',
                     errorMessage: getImageFailureMessage('empty'),
                 });
                 return;
             }
-            const imageUrl = canUseIntegratedText
-                ? raw
-                : await overlayTextOnImage(raw, { ...latest, textRenderMode: 'canvas' }, plan?.designSystem);
-            const secondRaw = result?.images?.find(candidate => candidate && candidate !== raw);
-            const secondImageUrl = secondRaw
-                ? (canUseIntegratedText ? secondRaw : await overlayTextOnImage(secondRaw, { ...latest, textRenderMode: 'canvas' }, plan?.designSystem))
-                : '';
-            if (asCandidate && latest.imageUrl) {
-                updateImage(seg.id, {
-                    candidateImageUrl: imageUrl,
-                    candidateRawImageUrl: raw,
-                    previousImageUrl: latest.imageUrl,
-                    isGenerating: false,
-                    status: 'done',
-                    errorMessage: '',
-                    provider: result?.provider,
-                    model: result?.model,
-                });
-                return;
-            }
+            const imageUrl = await overlayTextOnImage(raw, { ...latest, textRenderMode: 'canvas' }, plan?.designSystem);
             const nextPatch: Partial<GenImage> = {
                 imageUrl,
                 rawImageUrl: raw,
                 isGenerating: false,
                 status: 'done',
                 errorMessage: '',
-                textRenderMode: canUseIntegratedText ? 'integrated' : 'canvas',
+                textRenderMode: 'canvas',
                 provider: result?.provider,
                 model: result?.model,
-                variantUrls: result?.images || [],
-                candidateImageUrl: secondImageUrl,
-                candidateRawImageUrl: secondRaw || '',
+                variantUrls: [],
                 previousImageUrl: '',
                 regenerationHint: '',
                 visionWarnings: [],
@@ -1698,7 +1732,7 @@ export const DetailPlanner: React.FC = () => {
         updateImage(seg.id, { imageUrl, isGenerating: false, status: 'done', textRenderMode: 'canvas' });
     };
 
-    const applyTextPatch = async (seg: GenImage, patch: Partial<Pick<GenImage, 'mainCopy' | 'subCopy' | 'points'>>) => {
+    const applyTextPatch = async (seg: GenImage, patch: Partial<Pick<GenImage, 'mainCopy' | 'subCopy'>>) => {
         const latest = {
             ...(images.find(img => img.id === seg.id) || seg),
             ...patch,
@@ -1719,7 +1753,7 @@ export const DetailPlanner: React.FC = () => {
         seg.bundleRequirement === 'both-items' ||
         seg.bundleRequirement === 'before-no-current-product' ||
         isFeatureBenefitImage(seg) ||
-        ['product', 'detail', 'texture', 'cta', 'package'].includes(seg.shotType || '')
+        ['product', 'detail', 'texture', 'cta'].includes(seg.shotType || '')
     );
 
     const runVisionQaForImage = async (seg: GenImage, imageUrl: string, rawImageUrl?: string) => {
@@ -1733,7 +1767,7 @@ export const DetailPlanner: React.FC = () => {
             shotType: seg.shotType,
             combinationCount: getCombinationCount(info.combinationType),
             genderLock: getVisualLockWithReferenceProfiles(getActiveVisualLock()).genderLock,
-            expectedNoText: seg.textRenderMode !== 'integrated',
+            expectedNoText: true,
             expectedProductOnly: !!seg.shotType && !isModelShot(seg.shotType),
             expectedProblemScene: seg.bundleRequirement === 'before-no-current-product' || isProblemContrastSection(seg),
         });
@@ -1792,34 +1826,8 @@ export const DetailPlanner: React.FC = () => {
 
     const regenerateWithPreset = async (seg: GenImage, hint: string) => {
         const latest = { ...(images.find(img => img.id === seg.id) || seg), regenerationHint: hint };
-        updateImage(seg.id, {
-            previousImageUrl: latest.imageUrl,
-            candidateImageUrl: '',
-            candidateRawImageUrl: '',
-            regenerationHint: hint,
-        });
-        await generateOne(latest, seg.status === 'failed', masterReferences, getActiveVisualLock(), false, !!latest.imageUrl);
-    };
-
-    const acceptCandidateImage = (seg: GenImage) => {
-        if (!seg.candidateImageUrl) return;
-        updateImage(seg.id, {
-            imageUrl: seg.candidateImageUrl,
-            rawImageUrl: seg.candidateRawImageUrl || seg.candidateImageUrl,
-            candidateImageUrl: '',
-            candidateRawImageUrl: '',
-            previousImageUrl: '',
-            regenerationHint: '',
-        });
-    };
-
-    const keepPreviousImage = (seg: GenImage) => {
-        updateImage(seg.id, {
-            candidateImageUrl: '',
-            candidateRawImageUrl: '',
-            previousImageUrl: '',
-            regenerationHint: '',
-        });
+        updateImage(seg.id, { regenerationHint: hint });
+        await generateOne(latest, seg.status === 'failed', masterReferences, getActiveVisualLock(), false);
     };
 
     // ── STEP 2 → 전체 이미지 생성 ──
@@ -1889,15 +1897,26 @@ export const DetailPlanner: React.FC = () => {
         });
     };
 
+    const handleDownloadOne = (seg: GenImage) => {
+        if (!seg.imageUrl) return;
+        const idx = images.findIndex(img => img.id === seg.id);
+        const order = idx >= 0 ? idx + 1 : seg.number;
+        const safeRole = (seg.role || '섹션').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '');
+        const a = document.createElement('a');
+        a.href = seg.imageUrl;
+        a.download = `detail_${String(order).padStart(2, '0')}_${safeRole}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+
     const generatedCount = images.filter(i => i.status === 'done' && i.imageUrl).length;
     const generatingCount = images.filter(i => i.status === 'queued' || i.status === 'generating' || i.status === 'retrying').length;
     const failedCount = images.filter(i => i.status === 'failed').length;
-    const integratedTextCount = images.filter(i => i.textRenderMode === 'integrated' && i.status === 'done').length;
     const modelShotCount = images.filter(i => isModelShot(i.shotType)).length;
     const maxRecommendedModelShots = images.length >= 8 ? 3 : Math.max(1, Math.ceil(images.length * 0.4));
     const qualityWarningCount = images.reduce((sum, img) => sum + (img.qualityWarnings?.length || 0), 0);
     const visionWarningCount = images.reduce((sum, img) => sum + (img.visionWarnings?.length || 0), 0);
-    const qaCheckedCount = images.filter(i => i.qaChecked).length;
     const warningImageCount = images.filter(i => (i.qualityWarnings?.length || 0) > 0 || (i.qaTags?.length || 0) > 0 || (i.visionWarnings?.length || 0) > 0).length;
     const missingCount = images.filter(i => !i.imageUrl).length;
     const filteredImages = images.filter(img => {
@@ -1912,116 +1931,118 @@ export const DetailPlanner: React.FC = () => {
         ...(qualityWarningCount > 0 ? [`카피/기획 QA 경고 ${qualityWarningCount}건이 있습니다.`] : []),
         ...(visionWarningCount > 0 ? [`비전 QA 경고 ${visionWarningCount}건이 있습니다.`] : []),
         ...(!images.some(isFeatureBenefitImage) ? ['상품 특장점 전용 이미지가 없습니다. 기획안을 다시 생성하거나 한 장을 특장점 섹션으로 수정하세요.'] : []),
-        ...(integratedTextCount > 0 ? [`AI 통합 텍스트 이미지 ${integratedTextCount}장은 한글 오타·뭉개짐을 눈으로 확인해주세요.`] : []),
         ...(modelShotCount > maxRecommendedModelShots ? [`모델컷이 ${modelShotCount}장입니다. 권장 최대 ${maxRecommendedModelShots}장보다 많습니다.`] : []),
     ];
     const visualLockSummary = productVisualLock || buildProductVisualLock(info, productBrief, briefText, productVisualLock);
 
     // ────────────────────────────── 렌더 ──────────────────────────────
     return (
-        <div className="max-w-7xl mx-auto px-6 py-8">
-            <div className="mb-7 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="mx-auto max-w-[1240px] px-6 py-8">
+            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
-                        <Sparkles className="h-3.5 w-3.5" />
-                        DETAIL PAGE STUDIO
-                    </div>
-                    <h2 className="mt-3 text-3xl font-black tracking-tight text-slate-950">상세페이지 제작</h2>
-                    <p className="mt-2 text-sm text-slate-500">전환 흐름 기획부터 이미지 생성, 카피 합성까지 한 번에 제작합니다.</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-3">상세페이지 제작</p>
+                    <h2 className="mt-1.5 text-[26px] font-semibold tracking-tight text-ink">전환 흐름부터 이미지까지</h2>
+                    <p className="mt-1.5 text-[13px] text-ink-2">기획, 이미지 생성, 카피 합성을 한 번에 진행합니다.</p>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="flex flex-wrap gap-2">
                     {[
                         ['구성', getCombinationLabel(info.combinationType)],
                         ['길이', length === 'auto' ? 'Auto' : `${length}장`],
-                        ['텍스트', TEXT_RENDER_MODE_LABEL[textRenderMode]],
                     ].map(([label, value]) => (
-                        <div key={label} className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                            <p className="font-bold text-slate-400">{label}</p>
-                            <p className="mt-1 font-black text-slate-900">{value}</p>
+                        <div key={label} className="rounded-control border border-line bg-paper px-3 py-2">
+                            <span className="text-[11px] text-ink-3">{label}</span>
+                            <span className="ml-2 text-[13px] font-semibold text-ink">{value}</span>
                         </div>
                     ))}
                 </div>
             </div>
 
-            {/* Stepper */}
-            <div className="mb-8 grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-3">
-                {[1, 2, 3].map((s) => (
-                    <div
-                        key={s}
-                        onClick={() => { if (s < step) setStep(s as 1 | 2 | 3); }}
-                        className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all ${
-                            step >= s ? 'bg-slate-950 text-white shadow-sm' : 'bg-slate-50 text-slate-500'
-                        } ${s < step ? 'cursor-pointer hover:bg-slate-800' : 'cursor-default'}`}
-                    >
-                        <div
-                            className={`flex h-9 w-9 items-center justify-center rounded-lg font-black ${
-                                step >= s ? 'bg-white text-slate-950' : 'bg-white text-slate-400'
-                            }`}
+            {/* 단계 표시 — 완료한 단계로만 되돌아갈 수 있다 */}
+            <div className="mb-7 flex items-stretch overflow-hidden rounded-card border border-line bg-paper">
+                {[1, 2, 3].map((s, i) => {
+                    const active = step === s;
+                    const done = step > s;
+                    return (
+                        <button
+                            key={s}
+                            type="button"
+                            disabled={!done}
+                            onClick={() => { if (done) setStep(s as 1 | 2 | 3); }}
+                            aria-current={active ? 'step' : undefined}
+                            className={`flex flex-1 items-center gap-2.5 px-4 py-3 text-left transition-colors ${
+                                i > 0 ? 'border-l border-line' : ''
+                            } ${done ? 'cursor-pointer hover:bg-paper-2' : 'cursor-default'} ${active ? 'bg-paper-2' : ''}`}
                         >
-                            {s}
-                        </div>
-                        <div>
-                            <p className="text-sm font-black">
-                                {s === 1 ? '정보 입력' : s === 2 ? '기획안 확인' : '이미지 생성'}
-                            </p>
-                            <p className={`mt-0.5 text-xs ${step >= s ? 'text-slate-300' : 'text-slate-400'}`}>
-                                {s === 1 ? '상품·사진' : s === 2 ? '전략·카피' : '생성·다운로드'}
-                            </p>
-                        </div>
-                    </div>
-                ))}
+                            <span
+                                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold ${
+                                    active ? 'bg-ink text-paper' : done ? 'bg-positive-soft text-positive' : 'bg-line text-ink-3'
+                                }`}
+                            >
+                                {done ? '✓' : s}
+                            </span>
+                            <span className="min-w-0">
+                                <span className={`block truncate text-[13px] ${active || done ? 'font-semibold text-ink' : 'font-medium text-ink-3'}`}>
+                                    {s === 1 ? '정보 입력' : s === 2 ? '기획안 확인' : '이미지 생성'}
+                                </span>
+                                <span className="mt-0.5 hidden truncate text-[11px] text-ink-3 sm:block">
+                                    {s === 1 ? '상품·사진' : s === 2 ? '전략·카피' : '생성·다운로드'}
+                                </span>
+                            </span>
+                        </button>
+                    );
+                })}
             </div>
 
             {/* ───── STEP 1: 정보 입력 ───── */}
             {step === 1 && (
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-                    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-                        <div className="border-b border-slate-100 px-6 py-5">
+                    <div className="rounded-card border border-line bg-paper">
+                        <div className="border-b border-line px-6 py-5">
                             <div className="flex items-center gap-2">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-paper">
                                     <FileText className="h-4.5 w-4.5" />
                                 </div>
                                 <div>
-                                    <h3 className="font-black text-slate-900">상품 정보</h3>
-                                    <p className="text-xs text-slate-500">기획에 필요한 기본 정보를 입력하세요.</p>
+                                    <h3 className="font-semibold text-ink">상품 정보</h3>
+                                    <p className="text-xs text-ink-2">기획에 필요한 기본 정보를 입력하세요.</p>
                                 </div>
                             </div>
                         </div>
                         <div className="grid grid-cols-1 gap-5 p-6 md:grid-cols-2">
                             <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">상품명 *</label>
-                            <input type="text" value={info.name} onChange={e => setInfo({ ...info, name: e.target.value })} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 무중력 메모리폼 베개" />
+                            <label className="block text-sm font-medium text-ink mb-1">상품명 *</label>
+                            <input type="text" value={info.name} onChange={e => setInfo({ ...info, name: e.target.value })} className="w-full p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none" placeholder="예: 무중력 메모리폼 베개" />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">카테고리 <span className="text-slate-400 font-normal">(선택 - 비워두면 자동 추정)</span></label>
-                            <input type="text" value={info.category} onChange={e => setInfo({ ...info, category: e.target.value })} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 리빙/침구" />
+                            <label className="block text-sm font-medium text-ink mb-1">카테고리 <span className="text-ink-3 font-normal">(선택 - 비워두면 자동 추정)</span></label>
+                            <input type="text" value={info.category} onChange={e => setInfo({ ...info, category: e.target.value })} className="w-full p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none" placeholder="예: 리빙/침구" />
                         </div>
                         <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-slate-700 mb-1">상품 설명 <span className="text-slate-400 font-normal">(선택 - 상품 소개/상세 내용 붙여넣기)</span></label>
-                            <textarea value={info.description} onChange={e => setInfo({ ...info, description: e.target.value })} rows={3} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="상품 URL의 설명이나 제품 소개글을 붙여넣으면 기획에 반영됩니다." />
+                            <label className="block text-sm font-medium text-ink mb-1">상품 설명 <span className="text-ink-3 font-normal">(선택 - 상품 소개/상세 내용 붙여넣기)</span></label>
+                            <textarea value={info.description} onChange={e => setInfo({ ...info, description: e.target.value })} rows={3} className="w-full p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none" placeholder="상품 URL의 설명이나 제품 소개글을 붙여넣으면 기획에 반영됩니다." />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">타겟 고객 <span className="text-slate-400 font-normal">(선택)</span></label>
-                            <input type="text" value={info.target} onChange={e => setInfo({ ...info, target: e.target.value })} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none" placeholder="예: 20-30대 직장인 여성" />
+                            <label className="block text-sm font-medium text-ink mb-1">타겟 고객 <span className="text-ink-3 font-normal">(선택)</span></label>
+                            <input type="text" value={info.target} onChange={e => setInfo({ ...info, target: e.target.value })} className="w-full p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none" placeholder="예: 20-30대 직장인 여성" />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-700 mb-1">디자인 톤</label>
-                            <select value={info.designTone} onChange={e => setInfo({ ...info, designTone: e.target.value as ToneKey })} className="w-full p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white">
+                            <label className="block text-sm font-medium text-ink mb-1">디자인 톤</label>
+                            <select value={info.designTone} onChange={e => setInfo({ ...info, designTone: e.target.value as ToneKey })} className="w-full p-3 border border-line-strong rounded-card focus:ring-2 focus:ring-accent outline-none bg-paper">
                                 {TONE_OPTIONS.map(t => <option key={t} value={t}>{t === 'auto' ? '자동 선택' : t}</option>)}
                             </select>
                         </div>
                         </div>
-                        <div className="border-t border-slate-100 p-6">
+                        <div className="border-t border-line p-6">
                             <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div>
-                                    <h3 className="font-black text-slate-900">핵심특징 브리프</h3>
-                                    <p className="mt-1 text-xs text-slate-500">기획안 생성 전에 AI가 제품의 USP와 보존 요소를 먼저 정리합니다.</p>
+                                    <h3 className="font-semibold text-ink">핵심특징 브리프</h3>
+                                    <p className="mt-1 text-xs text-ink-2">기획안 생성 전에 AI가 제품의 USP와 보존 요소를 먼저 정리합니다.</p>
                                 </div>
                                 <button
                                     type="button"
                                     onClick={handleGenerateBrief}
                                     disabled={loading || !info.name.trim()}
-                                    className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-300"
+                                    className="inline-flex items-center justify-center rounded-card border border-line bg-paper px-4 py-2.5 text-sm font-semibold text-ink transition-colors hover:border-line-strong hover:bg-paper-2 disabled:bg-paper-2 disabled:text-ink-3"
                                 >
                                     {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                                     핵심특징 먼저 생성
@@ -2031,19 +2052,19 @@ export const DetailPlanner: React.FC = () => {
                                 value={briefText}
                                 onChange={e => setBriefText(e.target.value)}
                                 rows={9}
-                                className="w-full rounded-xl border border-slate-300 p-3 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-blue-500"
+                                className="w-full rounded-card border border-line-strong p-3 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-accent"
                                 placeholder={'비워두면 기획안 생성 시 자동으로 생성됩니다.\n\n[핵심특징]\n제품의 핵심 장점\n\n[제품정체성]\n보존해야 할 제품 정체성\n\n[보존요소]\n색상/프린팅/로고/핏 유지\n\n[타겟무드]\n프리미엄 커머스 무드\n\n[Hook방향]\n첫 장 모델컷 방향'}
                             />
-                            <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                            <p className="mt-2 text-xs leading-relaxed text-ink-2">
                                 수정한 내용은 그대로 기획안에 반영됩니다. 특히 색상, 프린팅, 로고, 남성/여성 타겟 단서를 넣으면 이미지 생성 정확도가 올라갑니다.
                             </p>
-                            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                            <div className="mt-4 rounded-card border border-line bg-paper-2 p-4">
                                 <div className="mb-3 flex items-center justify-between gap-3">
                                     <div>
-                                        <p className="text-sm font-black text-slate-900">Hook 모델 성별</p>
-                                        <p className="mt-0.5 text-xs text-slate-500">상품명, 설명, 제품 형태 단서를 기준으로 자동 판정합니다.</p>
+                                        <p className="text-sm font-semibold text-ink">Hook 모델 성별</p>
+                                        <p className="mt-0.5 text-xs text-ink-2">상품명, 설명, 제품 형태 단서를 기준으로 자동 판정합니다.</p>
                                     </div>
-                                    <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-600 ring-1 ring-slate-200">
+                                    <span className="rounded-full bg-paper px-3 py-1 text-xs font-semibold text-ink-2 ring-1 ring-line">
                                         현재: {getGenderLabel(visualLockSummary.genderLock)}
                                     </span>
                                 </div>
@@ -2058,92 +2079,57 @@ export const DetailPlanner: React.FC = () => {
                                             key={opt.value}
                                             type="button"
                                             onClick={() => setProductVisualLock({ ...visualLockSummary, genderLock: opt.value, inferredGenderReason: opt.value === 'none' ? '사용자가 자동 판정으로 설정했습니다.' : `사용자가 ${opt.label} 모델 기준으로 설정했습니다.` })}
-                                            className={`rounded-lg border px-3 py-2 text-xs font-black transition-colors ${visualLockSummary.genderLock === opt.value ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
+                                            className={`rounded-control border px-3 py-2 text-xs font-semibold transition-colors ${visualLockSummary.genderLock === opt.value ? 'border-ink bg-ink text-paper' : 'border-line bg-paper text-ink-2 hover:border-line-strong'}`}
                                         >
                                             {opt.label}
                                         </button>
                                     ))}
                                 </div>
-                                <p className="mt-2 text-xs leading-relaxed text-slate-500">{visualLockSummary.inferredGenderReason}</p>
+                                <p className="mt-2 text-xs leading-relaxed text-ink-2">{visualLockSummary.inferredGenderReason}</p>
                             </div>
                         </div>
                     </div>
 
                     <div className="space-y-6">
-                        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                        <div className="rounded-card border border-line bg-paper p-6">
                             <div className="mb-4 flex items-center gap-2">
-                                <Layers3 className="h-5 w-5 text-slate-900" />
-                                <h3 className="font-black text-slate-900">제작 옵션</h3>
+                                <Layers3 className="h-5 w-5 text-ink" />
+                                <h3 className="font-semibold text-ink">제작 옵션</h3>
                             </div>
-                            <label className="mb-2 block text-sm font-medium text-slate-700">상품 구성</label>
-                            <div className="grid grid-cols-2 gap-1.5 rounded-xl bg-slate-100 p-1.5">
+                            <label className="mb-2 block text-sm font-medium text-ink">상품 구성</label>
+                            <div className="grid grid-cols-2 gap-1.5 rounded-card bg-paper-2 p-1.5">
                                 {COMBINATION_OPTIONS.map(opt => {
                                     const selected = info.combinationType === opt.value;
                                     return (
                                         <button key={opt.value} type="button" onClick={() => setInfo({ ...info, combinationType: opt.value })}
-                                            className={`h-10 rounded-lg text-xs font-bold transition-all sm:text-sm ${selected ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-slate-950'}`}>
+                                            className={`h-10 rounded-control text-xs font-semibold transition-all sm:text-sm ${selected ? 'bg-ink text-paper ' : 'text-ink-2 hover:bg-paper hover:text-ink'}`}>
                                             {opt.label}
                                         </button>
                                     );
                                 })}
                             </div>
 
-                            <label className="mb-2 mt-5 block text-sm font-medium text-slate-700">상세페이지 길이</label>
-                            <div className="grid grid-cols-4 gap-1.5 rounded-xl bg-slate-100 p-1.5">
+                            <label className="mb-2 mt-5 block text-sm font-medium text-ink">상세페이지 길이</label>
+                            <div className="grid grid-cols-4 gap-1.5 rounded-card bg-paper-2 p-1.5">
                                 {LENGTH_OPTIONS.map(opt => (
-                                    <button key={String(opt.val)} type="button" onClick={() => setLength(opt.val)} className={`h-10 rounded-lg text-sm font-bold transition-all ${length === opt.val ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-slate-950'}`}>
+                                    <button key={String(opt.val)} type="button" onClick={() => setLength(opt.val)} className={`h-10 rounded-control text-sm font-semibold transition-all ${length === opt.val ? 'bg-ink text-paper ' : 'text-ink-2 hover:bg-paper hover:text-ink'}`}>
                                         {opt.label}
                                     </button>
                                 ))}
                             </div>
 
-                            <label className="mb-2 mt-5 block text-sm font-medium text-slate-700">텍스트 렌더링</label>
-                            <div className="grid grid-cols-1 gap-2">
-                                {([
-                                    { value: 'canvas' as const, label: '안전 모드', desc: '한글 카피를 선명하게 별도 합성합니다' },
-                                    { value: 'integrated' as const, label: 'AI 통합 텍스트 실험', desc: '짧은 메인 카피만 이미지 생성에 함께 넣습니다' },
-                                ]).map(opt => {
-                                    const selected = textRenderMode === opt.value;
-                                    const locked = opt.value === 'integrated' && !aiIntegratedTextUnlocked;
-                                    return (
-                                        <button
-                                            key={opt.value}
-                                            type="button"
-                                            disabled={locked}
-                                            onClick={() => handleTextRenderModeChange(opt.value)}
-                                            className={`p-3 rounded-xl border text-left transition-all ${locked ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-70' : selected ? 'border-slate-950 bg-slate-950 text-white shadow-sm' : 'border-slate-200 hover:border-slate-400 hover:bg-slate-50'}`}
-                                        >
-                                            <div className={`mb-1 flex items-center gap-1.5 font-bold ${locked ? 'text-slate-400' : selected ? 'text-white' : 'text-slate-800'}`}>
-                                                {locked && <Lock className="h-3.5 w-3.5" />}
-                                                {opt.label}
-                                            </div>
-                                            <div className={`text-xs ${selected ? 'text-slate-300' : 'text-slate-500'}`}>{opt.desc}</div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            {!aiIntegratedTextUnlocked && (
-                                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
-                                    AI 통합 텍스트 실험은 관리자 설정에서 허용된 경우에만 사용할 수 있습니다.
-                                </div>
-                            )}
-                            {textRenderMode === 'integrated' && (
-                                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-800">
-                                    AI 통합 텍스트는 오타나 글자 뭉개짐이 생길 수 있어 결과 확인이 필요합니다. 긴 문구는 자동으로 안전 모드로 처리됩니다.
-                                </div>
-                            )}
                         </div>
 
-                        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                        <div className="rounded-card border border-line bg-paper p-6">
                             <div className="mb-4 flex items-center gap-2">
-                                <ImageIcon className="h-5 w-5 text-slate-900" />
-                                <h3 className="font-black text-slate-900">레퍼런스 이미지</h3>
+                                <ImageIcon className="h-5 w-5 text-ink" />
+                                <h3 className="font-semibold text-ink">레퍼런스 이미지</h3>
                             </div>
                             <div onClick={() => fileInputRef.current?.click()} onDrop={onDrop} onDragOver={e => e.preventDefault()}
-                                className="border-2 border-dashed border-slate-300 rounded-xl bg-slate-50/70 p-8 text-center cursor-pointer transition-colors hover:border-slate-900 hover:bg-white">
-                                <Upload className="w-8 h-8 mx-auto text-slate-400 mb-2" />
-                                <p className="font-medium text-slate-700">클릭 또는 드래그하여 제품 사진 업로드</p>
-                                <p className="text-xs text-slate-400 mt-1">여러 각도(앞/뒤/옆) 사진을 넣으면 더 정확합니다</p>
+                                className="cursor-pointer rounded-card border border-dashed border-line-strong bg-paper-2 p-8 text-center transition-colors hover:border-ink hover:bg-paper">
+                                <Upload className="w-8 h-8 mx-auto text-ink-3 mb-2" />
+                                <p className="font-medium text-ink">클릭 또는 드래그하여 제품 사진 업로드</p>
+                                <p className="text-xs text-ink-3 mt-1">여러 각도(앞/뒤/옆) 사진을 넣으면 더 정확합니다</p>
                             </div>
                             <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleFiles(e.target.files)} />
                             {referenceImages.length > 0 && (
@@ -2151,24 +2137,24 @@ export const DetailPlanner: React.FC = () => {
                                 <div className="flex flex-wrap gap-3">
                                     {referenceImages.map((img, idx) => (
                                         <div key={idx} className="relative w-20 h-20">
-                                            <img src={img} alt="" className="w-full h-full object-cover rounded-lg border border-slate-200" />
+                                            <img src={img} alt="" className="w-full h-full object-cover rounded-control border border-line" />
                                             {referenceProfiles[idx] && (
-                                                <span className="absolute bottom-1 left-1 rounded-full bg-emerald-500 px-1.5 py-0.5 text-[9px] font-black text-white">QA</span>
+                                                <span className="absolute bottom-1 left-1 rounded-full bg-positive px-1.5 py-0.5 text-[9px] font-semibold text-paper">QA</span>
                                             )}
-                                            <button onClick={() => removeImage(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5">
+                                            <button onClick={() => removeImage(idx)} className="absolute -top-2 -right-2 bg-critical text-paper rounded-full p-0.5">
                                                 <X className="w-3.5 h-3.5" />
                                             </button>
                                         </div>
                                     ))}
                                 </div>
                                 {referenceAnalyzing && (
-                                    <div className="flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
+                                    <div className="flex items-center gap-2 rounded-card border border-accent-line bg-accent-soft px-3 py-2 text-xs font-semibold text-accent">
                                         <Loader2 className="h-3.5 w-3.5 animate-spin" /> 레퍼런스 제품 보존 요소 분석 중...
                                     </div>
                                 )}
                                 {referenceProfiles.length > 0 && (
-                                    <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-800">
-                                        <p className="mb-1 font-black">레퍼런스 분석 반영됨</p>
+                                    <div className="rounded-card border border-positive/20 bg-positive-soft p-3 text-xs text-positive">
+                                        <p className="mb-1 font-semibold">레퍼런스 분석 반영됨</p>
                                         {referenceProfiles.slice(0, 3).map(profile => (
                                             <p key={profile.index} className="line-clamp-2">• {profile.summary || profile.preserveProfile}</p>
                                         ))}
@@ -2178,9 +2164,9 @@ export const DetailPlanner: React.FC = () => {
                             )}
                         </div>
 
-                        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="rounded-card border border-line bg-paper p-4">
                         <button onClick={handleGeneratePlan} disabled={loading || referenceImages.length < 1}
-                            className="w-full bg-slate-950 hover:bg-slate-800 disabled:bg-slate-300 text-white font-black py-3.5 px-8 rounded-xl flex items-center justify-center transition-colors">
+                            className="flex w-full items-center justify-center rounded-control bg-ink px-8 py-3 text-[14px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
                             {loading ? <><Loader2 className="w-5 h-5 mr-2 animate-spin" /> {referenceAnalyzing ? '레퍼런스 분석 중...' : '기획안 생성 중...'}</> : <><Wand2 className="w-5 h-5 mr-2" /> 기획안 생성</>}
                         </button>
                         </div>
@@ -2192,73 +2178,132 @@ export const DetailPlanner: React.FC = () => {
             {step === 2 && plan && (
                 <div className="space-y-6">
                     {/* 전략 분석 */}
-                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="rounded-card border border-line bg-paper p-6">
                         <div className="mb-5 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-paper">
                                     <Palette className="h-4.5 w-4.5" />
                                 </div>
                                 <div>
-                                    <h2 className="text-xl font-black text-slate-900">상품·전환 전략 분석</h2>
-                                    <p className="text-xs text-slate-500">AI가 도출한 구매 설득 구조입니다.</p>
+                                    <h2 className="text-[17px] font-semibold tracking-tight text-ink">상품·전환 전략 분석</h2>
+                                    <p className="text-xs text-ink-2">AI가 도출한 구매 설득 구조입니다.</p>
                                 </div>
                             </div>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                            <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                                <p className="font-bold text-slate-700 mb-1">제품 정의</p>
-                                <p className="text-slate-600 leading-relaxed">{plan.productDefinition}</p>
+                            <div className="rounded-card border border-line bg-paper-2 p-4">
+                                <p className="font-semibold text-ink mb-1">제품 정의</p>
+                                <p className="text-ink-2 leading-relaxed">{plan.productDefinition}</p>
+                                {plan.productReason && (
+                                    <p className="mt-2 text-ink-2"><span className="text-ink-3">왜 존재하는가:</span> {plan.productReason}</p>
+                                )}
+                                {plan.productProblem && (
+                                    <p className="mt-1 text-ink-2"><span className="text-ink-3">해결하는 문제:</span> {plan.productProblem}</p>
+                                )}
                             </div>
-                            <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                                <p className="font-bold text-slate-700 mb-1">고객 분석</p>
-                                <p className="text-slate-600"><span className="text-slate-400">타겟:</span> {plan.customer?.target}</p>
-                                <p className="text-slate-600"><span className="text-slate-400">표면 니즈:</span> {plan.customer?.surfaceNeed}</p>
-                                <p className="text-slate-600"><span className="text-slate-400">실제 니즈:</span> {plan.customer?.realNeed}</p>
+                            <div className="rounded-card border border-line bg-paper-2 p-4">
+                                <p className="font-semibold text-ink mb-1">고객 분석</p>
+                                <p className="text-ink-2"><span className="text-ink-3">타겟:</span> {plan.customer?.target}</p>
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                    {([
+                                        ['연령', plan.customer?.age],
+                                        ['성별', plan.customer?.gender],
+                                        ['직업', plan.customer?.job],
+                                    ] as const).filter(([, v]) => !!v).map(([k, v]) => (
+                                        <span key={k} className="rounded-control bg-paper px-2 py-0.5 text-[11px] font-semibold text-ink-2 ring-1 ring-line">
+                                            {k} {v}
+                                        </span>
+                                    ))}
+                                </div>
+                                {plan.customer?.lifestyle && (
+                                    <p className="mt-1.5 text-ink-2"><span className="text-ink-3">라이프스타일:</span> {plan.customer.lifestyle}</p>
+                                )}
+                                {plan.customer?.purchaseSituation && (
+                                    <p className="text-ink-2"><span className="text-ink-3">구매 상황:</span> {plan.customer.purchaseSituation}</p>
+                                )}
+                                <p className="mt-1.5 text-ink-2"><span className="text-ink-3">표면 니즈:</span> {plan.customer?.surfaceNeed}</p>
+                                <p className="text-ink-2"><span className="text-accent font-semibold">실제 니즈:</span> {plan.customer?.realNeed}</p>
                             </div>
-                            <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                                <p className="font-bold text-slate-700 mb-1">경쟁 대비 차별점</p>
-                                <ul className="list-disc list-inside text-slate-600 space-y-0.5">
+                            <div className="rounded-card border border-line bg-paper-2 p-4">
+                                <p className="font-semibold text-ink mb-1">경쟁 대비 차별점</p>
+                                <ul className="list-disc list-inside text-ink-2 space-y-0.5">
                                     {plan.differentiators?.map((d, i) => <li key={i}>{d}</li>)}
                                 </ul>
                             </div>
-                            <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                                <p className="font-bold text-slate-700 mb-1">구매 저항 요소 (해소 대상)</p>
-                                <ul className="list-disc list-inside text-slate-600 space-y-0.5">
+                            <div className="rounded-card border border-line bg-paper-2 p-4">
+                                <p className="font-semibold text-ink mb-1">구매 저항 요소 (해소 대상)</p>
+                                <ul className="list-disc list-inside text-ink-2 space-y-0.5">
                                     {plan.purchaseResistances?.map((d, i) => <li key={i}>{d}</li>)}
                                 </ul>
                             </div>
+                            {plan.detailInfoItems && plan.detailInfoItems.length > 0 && (
+                                <div className="rounded-card border border-line bg-paper-2 p-4 md:col-span-2">
+                                    <div className="mb-1.5 flex items-center gap-2">
+                                        <p className="font-semibold text-ink">카테고리별 상세 정보</p>
+                                        {plan.productCategory && (
+                                            <span className="rounded-control bg-paper px-2 py-0.5 text-[11px] font-semibold text-ink-2 ring-1 ring-line">{plan.productCategory}</span>
+                                        )}
+                                    </div>
+                                    <ul className="grid grid-cols-1 gap-x-6 gap-y-0.5 text-ink-2 md:grid-cols-2">
+                                        {plan.detailInfoItems.map((d, i) => <li key={i} className="list-disc list-inside">{d}</li>)}
+                                    </ul>
+                                    <p className="mt-1.5 text-[11px] text-ink-3">"상품 등록 정보 확인 필요" 항목은 실제 값으로 채워서 상세페이지 텍스트 영역에 사용하세요.</p>
+                                </div>
+                            )}
                         </div>
+                        {plan.competitorComparison?.length > 0 && (
+                            <div className="mt-4 overflow-hidden rounded-card border border-line">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="bg-paper-2 text-[11px] font-semibold uppercase tracking-wider text-ink-2">
+                                            <th className="px-4 py-2 text-left">비교 항목</th>
+                                            <th className="px-4 py-2 text-left">경쟁상품</th>
+                                            <th className="px-4 py-2 text-left text-accent">본 제품</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {plan.competitorComparison.map((row, i) => (
+                                            <tr key={i} className="border-t border-line">
+                                                <td className="px-4 py-2 font-semibold text-ink">{row.item}</td>
+                                                <td className="px-4 py-2 text-ink-2">{row.competitor}</td>
+                                                <td className="px-4 py-2 font-medium text-accent">{row.ours}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
                         {productBrief && (
-                            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm">
+                            <div className="mt-4 rounded-card border border-accent-line bg-accent-soft p-4 text-sm">
                                 <div className="mb-3 flex items-center gap-2">
-                                    <Sparkles className="h-4 w-4 text-blue-700" />
-                                    <p className="font-black text-blue-900">핵심특징 브리프 반영</p>
+                                    <Sparkles className="h-4 w-4 text-accent" />
+                                    <p className="font-semibold text-accent">핵심특징 브리프 반영</p>
                                 </div>
                                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                                     <div>
-                                        <p className="text-xs font-bold text-blue-700">핵심특징</p>
-                                        <p className="mt-1 text-slate-700">{productBrief.coreFeatures.join(' · ')}</p>
+                                        <p className="text-xs font-semibold text-accent">핵심특징</p>
+                                        <p className="mt-1 text-ink">{productBrief.coreFeatures.join(' · ')}</p>
                                     </div>
                                     <div>
-                                        <p className="text-xs font-bold text-blue-700">제품정체성</p>
-                                        <p className="mt-1 text-slate-700">{productBrief.productIdentity}</p>
+                                        <p className="text-xs font-semibold text-accent">제품정체성</p>
+                                        <p className="mt-1 text-ink">{productBrief.productIdentity}</p>
                                     </div>
                                     <div>
-                                        <p className="text-xs font-bold text-blue-700">보존요소</p>
-                                        <p className="mt-1 text-slate-700">{productBrief.visualMustKeep.join(' · ')}</p>
+                                        <p className="text-xs font-semibold text-accent">보존요소</p>
+                                        <p className="mt-1 text-ink">{productBrief.visualMustKeep.join(' · ')}</p>
                                     </div>
                                     <div>
-                                        <p className="text-xs font-bold text-blue-700">Hook 방향</p>
-                                        <p className="mt-1 text-slate-700">{productBrief.heroDirection}</p>
+                                        <p className="text-xs font-semibold text-accent">Hook 방향</p>
+                                        <p className="mt-1 text-ink">{productBrief.heroDirection}</p>
                                     </div>
                                 </div>
                             </div>
                         )}
-                        <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm">
+                        <div className="mt-4 rounded-card border border-line bg-paper p-4 text-sm">
                             <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                                 <div>
-                                    <p className="font-black text-slate-900">제품 락팩</p>
-                                    <p className="mt-1 text-xs text-slate-500">색상, 프린팅, Hook 모델 성별을 모든 이미지 생성에 공통 적용합니다.</p>
+                                    <p className="font-semibold text-ink">제품 락팩</p>
+                                    <p className="mt-1 text-xs text-ink-2">색상, 프린팅, Hook 모델 성별을 모든 이미지 생성에 공통 적용합니다.</p>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                     {(['none', 'male', 'female', 'unisex'] as ProductVisualGenderLock[]).map(value => (
@@ -2266,7 +2311,7 @@ export const DetailPlanner: React.FC = () => {
                                             key={value}
                                             type="button"
                                             onClick={() => setProductVisualLock({ ...visualLockSummary, genderLock: value, inferredGenderReason: value === 'none' ? '사용자가 자동 판정으로 설정했습니다.' : `사용자가 ${getGenderLabel(value)} 모델 기준으로 설정했습니다.` })}
-                                            className={`rounded-lg px-3 py-1.5 text-xs font-black ${visualLockSummary.genderLock === value ? 'bg-slate-950 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                                            className={`rounded-control px-3 py-1.5 text-xs font-semibold ${visualLockSummary.genderLock === value ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-line'}`}
                                         >
                                             {getGenderLabel(value)}
                                         </button>
@@ -2274,34 +2319,50 @@ export const DetailPlanner: React.FC = () => {
                                 </div>
                             </div>
                             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                                <div className="rounded-lg bg-slate-50 p-3">
-                                    <p className="text-xs font-bold text-slate-500">Hook 성별</p>
-                                    <p className="mt-1 font-black text-slate-900">{getGenderLabel(visualLockSummary.genderLock)}</p>
-                                    <p className="mt-1 text-xs text-slate-500">{visualLockSummary.inferredGenderReason}</p>
+                                <div className="rounded-control bg-paper-2 p-3">
+                                    <p className="text-xs font-semibold text-ink-2">Hook 성별</p>
+                                    <p className="mt-1 font-semibold text-ink">{getGenderLabel(visualLockSummary.genderLock)}</p>
+                                    <p className="mt-1 text-xs text-ink-2">{visualLockSummary.inferredGenderReason}</p>
                                 </div>
-                                <div className="rounded-lg bg-slate-50 p-3">
-                                    <p className="text-xs font-bold text-slate-500">색상/표면</p>
-                                    <p className="mt-1 font-black text-slate-900">{visualLockSummary.colorLock} · {visualLockSummary.surfaceLock}</p>
+                                <div className="rounded-control bg-paper-2 p-3">
+                                    <p className="text-xs font-semibold text-ink-2">색상/표면</p>
+                                    <p className="mt-1 font-semibold text-ink">{visualLockSummary.colorLock} · {visualLockSummary.surfaceLock}</p>
                                 </div>
-                                <div className="rounded-lg bg-slate-50 p-3">
-                                    <p className="text-xs font-bold text-slate-500">보존 요소</p>
-                                    <p className="mt-1 text-slate-700">{visualLockSummary.mustPreserve.slice(0, 3).join(' · ')}</p>
+                                <div className="rounded-control bg-paper-2 p-3">
+                                    <p className="text-xs font-semibold text-ink-2">보존 요소</p>
+                                    <p className="mt-1 text-ink">{visualLockSummary.mustPreserve.slice(0, 3).join(' · ')}</p>
                                 </div>
                             </div>
                         </div>
                         {plan.designSystem && (
-                            <div className="flex items-center gap-3 mt-4 flex-wrap">
-                                <span className="text-sm font-bold text-slate-700">디자인 톤: {plan.designSystem.tone}</span>
-                                {plan.designSystem.colors && Object.entries(plan.designSystem.colors).map(([k, v]) => (
-                                    <span key={k} className="flex items-center gap-1.5 text-xs text-slate-500">
-                                        <span className="w-5 h-5 rounded border border-slate-200" style={{ background: v as string }} />{k}
-                                    </span>
-                                ))}
+                            <div className="mt-4 rounded-card border border-line bg-paper-2 p-4">
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <span className="text-sm font-semibold text-ink">디자인 톤: {plan.designSystem.tone}</span>
+                                    {plan.designSystem.colors && Object.entries(plan.designSystem.colors).map(([k, v]) => (
+                                        <span key={k} className="flex items-center gap-1.5 text-xs text-ink-2">
+                                            <span className="w-5 h-5 rounded border border-line" style={{ background: v as string }} />{k}
+                                        </span>
+                                    ))}
+                                </div>
+                                {plan.designSystem.fonts && (
+                                    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line pt-3">
+                                        {([
+                                            ['헤드라인', plan.designSystem.fonts.headline],
+                                            ['본문', plan.designSystem.fonts.body],
+                                            ['강조', plan.designSystem.fonts.emphasis],
+                                            ['CTA', plan.designSystem.fonts.cta],
+                                        ] as const).map(([k, v]) => (
+                                            <span key={k} className="rounded-control bg-paper px-2 py-1 text-[11px] text-ink-2 ring-1 ring-line">
+                                                <span className="font-semibold text-ink-3">{k}</span> {v}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
                         {plan.isFallback && (
-                            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-                                <div className="flex items-center gap-2 font-bold">
+                            <div className="mt-4 rounded-card border border-caution/30 bg-caution-soft p-4 text-sm text-caution">
+                                <div className="flex items-center gap-2 font-semibold">
                                     <AlertTriangle className="h-4 w-4" />
                                     기본 기획안으로 자동 복구했습니다
                                 </div>
@@ -2313,38 +2374,36 @@ export const DetailPlanner: React.FC = () => {
                     </div>
 
                     {/* 이미지별 기획 */}
-                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="rounded-card border border-line bg-paper p-6">
                         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div>
-                                <h2 className="text-xl font-black text-slate-900">이미지별 기획안 <span className="text-slate-400">({images.length}장)</span></h2>
-                                <p className="mt-1 text-sm text-slate-500">
-                                    {textRenderMode === 'integrated'
-                                        ? '짧은 메인 카피는 이미지 생성에 함께 넣고, 실패 시 안전 합성으로 복구할 수 있습니다.'
-                                        : '카피는 생성된 배경 이미지 위에 선명하게 합성됩니다.'}
+                                <h2 className="text-[17px] font-semibold tracking-tight text-ink">이미지별 기획안 <span className="font-medium text-ink-3">({images.length}장)</span></h2>
+                                <p className="mt-1 text-sm text-ink-2">
+                                    카피는 생성된 배경 이미지 위에 선명하게 합성됩니다.
                                 </p>
                             </div>
                             <div className="flex flex-wrap gap-2">
                                 <button
                                     type="button"
                                     onClick={() => setUseHybridReferences(prev => !prev)}
-                                    className={`rounded-xl px-4 py-3 text-sm font-black transition-colors ${
+                                    className={`rounded-card px-4 py-3 text-sm font-semibold transition-colors ${
                                         useHybridReferences
-                                            ? 'bg-blue-600 text-white hover:bg-blue-700'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                            ? 'bg-accent text-paper hover:bg-accent-hover'
+                                            : 'bg-paper-2 text-ink-2 hover:bg-line'
                                     }`}
                                 >
                                     {useHybridReferences ? '기준컷 사용 중' : '빠른 생성 모드'}
                                 </button>
-                                <button onClick={() => handleTidyCopy()} className="bg-blue-50 hover:bg-blue-100 text-blue-700 font-black py-3 px-5 rounded-xl flex items-center justify-center">
+                                <button onClick={() => handleTidyCopy()} className="flex items-center justify-center rounded-control border border-line px-5 py-2.5 text-[13px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
                                     <Sparkles className="w-5 h-5 mr-2" /> 카피 정리
                                 </button>
-                                <button onClick={handleGenerateAll} className="bg-slate-950 hover:bg-slate-800 text-white font-black py-3 px-5 rounded-xl flex items-center justify-center shadow-sm">
+                                <button onClick={handleGenerateAll} className="flex items-center justify-center rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90">
                                     <Wand2 className="w-5 h-5 mr-2" /> 이미지 생성 시작
                                 </button>
                             </div>
                         </div>
-                        <div className={`mb-5 rounded-xl border p-4 text-sm ${qualityWarningCount > 0 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-                            <div className="flex items-center gap-2 font-bold">
+                        <div className={`mb-5 rounded-card border p-4 text-sm ${qualityWarningCount > 0 ? 'border-caution/30 bg-caution-soft text-caution' : 'border-positive/30 bg-positive-soft text-positive'}`}>
+                            <div className="flex items-center gap-2 font-semibold">
                                 {qualityWarningCount > 0 ? <AlertTriangle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
                                 {qualityWarningCount > 0 ? `기획 QA 경고 ${qualityWarningCount}건` : '기획 QA 통과'}
                             </div>
@@ -2354,59 +2413,60 @@ export const DetailPlanner: React.FC = () => {
                         </div>
                         <div className="space-y-4">
                             {images.map((img) => (
-                                <div key={img.id} className="rounded-xl border border-slate-200 p-4 transition-colors hover:border-slate-300 hover:bg-slate-50/50">
+                                <div key={img.id} className="rounded-card border border-line p-4 transition-colors hover:border-line-strong hover:bg-paper-2/50">
                                     <div className="flex items-center gap-2 mb-3 flex-wrap">
-                                        <span className="bg-slate-950 text-white text-xs font-bold rounded-full w-7 h-7 flex items-center justify-center shrink-0">{img.number}</span>
-                                        <span className="font-bold text-slate-800">{img.role}</span>
-                                        {img.layoutPreset && <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{img.layoutPreset}</span>}
-                                        {img.shotType && <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full">{SHOT_TYPE_LABEL[img.shotType]}</span>}
-                                        {img.stage && <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">{img.stage}</span>}
-                                        {img.trigger && <span className="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full">트리거: {img.trigger}</span>}
+                                        <span className="bg-ink text-paper text-xs font-semibold rounded-full w-7 h-7 flex items-center justify-center shrink-0">{img.number}</span>
+                                        <span className="font-semibold text-ink">{img.role}</span>
+                                        {img.layoutPreset && <span className="text-xs bg-accent-soft text-accent px-2 py-0.5 rounded-full">{img.layoutPreset}</span>}
+                                        {img.shotType && <span className="text-xs bg-positive-soft text-positive px-2 py-0.5 rounded-full">{SHOT_TYPE_LABEL[img.shotType]}</span>}
+                                        {img.stage && <span className="text-xs bg-paper-2 text-ink-2 px-2 py-0.5 rounded-full">{img.stage}</span>}
+                                        {img.trigger && <span className="text-xs bg-caution-soft text-caution px-2 py-0.5 rounded-full">트리거: {img.trigger}</span>}
                                     </div>
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-xs font-medium text-slate-500 mb-1">메인 카피</label>
+                                            <label className="block text-xs font-medium text-ink-2 mb-1">메인 카피</label>
                                             <textarea value={img.mainCopy} onChange={e => updateImage(img.id, { mainCopy: e.target.value })} rows={4}
-                                                className="w-full p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
-                                            <label className="block text-xs font-medium text-slate-500 mb-1 mt-2">서브 카피</label>
+                                                className="w-full p-2 border border-line-strong rounded-control text-sm focus:ring-2 focus:ring-accent outline-none" />
+                                            <label className="block text-xs font-medium text-ink-2 mb-1 mt-2">서브 카피</label>
                                             <input value={img.subCopy} onChange={e => updateImage(img.id, { subCopy: e.target.value })}
-                                                className="w-full p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                                                className="w-full p-2 border border-line-strong rounded-control text-sm focus:ring-2 focus:ring-accent outline-none" />
                                             <div className="mt-2">
-                                                <span className="text-xs text-slate-400 mr-2">텍스트 위치</span>
-                                                <select value={img.textPosition} onChange={e => updateImage(img.id, { textPosition: e.target.value as any })} className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white">
+                                                <span className="text-xs text-ink-3 mr-2">텍스트 위치</span>
+                                                <select value={img.textPosition} onChange={e => updateImage(img.id, { textPosition: e.target.value as any })} className="text-xs border border-line rounded-control px-2 py-1 bg-paper">
                                                     <option value="top">상단</option>
                                                     <option value="middle">중앙</option>
                                                     <option value="bottom">하단</option>
                                                 </select>
-                                                <button onClick={() => handleTidyCopy(img.id)} className="ml-2 rounded-lg bg-blue-50 px-2 py-1 text-xs font-bold text-blue-600 hover:bg-blue-100">
+                                                <button onClick={() => handleTidyCopy(img.id)} className="ml-2 rounded-control bg-accent-soft px-2 py-1 text-xs font-semibold text-accent hover:bg-accent-soft">
                                                     정리
                                                 </button>
                                             </div>
                                             <div className="mt-2">
-                                                <span className="text-xs text-slate-400 mr-2">촬영 타입</span>
-                                                <select value={img.shotType || 'product'} onChange={e => updateImage(img.id, { shotType: e.target.value as ShotType })} className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-white">
+                                                <span className="text-xs text-ink-3 mr-2">촬영 타입</span>
+                                                <select value={img.shotType || 'product'} onChange={e => updateImage(img.id, { shotType: e.target.value as ShotType })} className="text-xs border border-line rounded-control px-2 py-1 bg-paper">
                                                     {(Object.keys(SHOT_TYPE_LABEL) as ShotType[]).map(type => (
                                                         <option key={type} value={type}>{SHOT_TYPE_LABEL[type]}</option>
                                                     ))}
                                                 </select>
                                             </div>
                                         </div>
-                                        <div className="text-sm text-slate-600 space-y-1">
-                                            {img.points?.length > 0 && (
-                                                <ul className="list-disc list-inside text-xs text-slate-500">
-                                                    {img.points.map((p, i) => <li key={i}>{p}</li>)}
-                                                </ul>
+                                        <div className="text-sm text-ink-2 space-y-1">
+                                            {img.purpose && <p className="text-xs text-ink-2"><span className="text-ink-3">목적:</span> {img.purpose}</p>}
+                                            {img.designLayout && <p className="text-xs text-ink-2"><span className="text-ink-3">레이아웃:</span> {img.designLayout}</p>}
+                                            {img.heightPx ? <p className="text-xs text-ink-2"><span className="text-ink-3">추천 높이:</span> {img.heightPx}px</p> : null}
+                                            {img.comparisonRows && img.comparisonRows.length > 0 && (
+                                                <p className="text-xs font-medium text-accent">경쟁 비교표는 기획안 데이터로 캔버스에 선명하게 합성됩니다 (글자 깨짐 없음)</p>
                                             )}
-                                            {img.trustElement && <p className="text-xs text-slate-500"><span className="text-slate-400">신뢰:</span> {img.trustElement}</p>}
+                                            {img.trustElement && <p className="text-xs text-ink-2"><span className="text-ink-3">신뢰:</span> {img.trustElement}</p>}
                                             {img.qualityWarnings && img.qualityWarnings.length > 0 && (
-                                                <div className="rounded-lg border border-amber-100 bg-amber-50 p-2 text-[11px] text-amber-700">
+                                                <div className="rounded-control border border-caution/20 bg-caution-soft p-2 text-[11px] text-caution">
                                                     {img.qualityWarnings.map((warning, i) => <p key={i}>• {warning}</p>)}
                                                 </div>
                                             )}
-                                            <button onClick={() => setExpandedPrompt(expandedPrompt === img.id ? null : img.id)} className="text-xs text-blue-500 flex items-center gap-0.5">
+                                            <button onClick={() => setExpandedPrompt(expandedPrompt === img.id ? null : img.id)} className="text-xs text-accent flex items-center gap-0.5">
                                                 <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expandedPrompt === img.id ? 'rotate-180' : ''}`} /> 이미지 프롬프트
                                             </button>
-                                            {expandedPrompt === img.id && <p className="text-[11px] text-slate-400 bg-slate-50 p-2 rounded-lg leading-relaxed">{img.visualPrompt}</p>}
+                                            {expandedPrompt === img.id && <p className="text-[11px] text-ink-3 bg-paper-2 p-2 rounded-control leading-relaxed">{img.visualPrompt}</p>}
                                         </div>
                                     </div>
                                 </div>
@@ -2415,8 +2475,8 @@ export const DetailPlanner: React.FC = () => {
                     </div>
 
                     <div className="flex justify-between">
-                        <button onClick={() => setStep(1)} className="text-slate-600 hover:text-slate-900 font-medium py-3 px-6">← 정보 수정</button>
-                        <button onClick={handleGenerateAll} className="bg-slate-950 hover:bg-slate-800 text-white font-black py-3 px-8 rounded-xl flex items-center shadow-sm">
+                        <button onClick={() => setStep(1)} className="rounded-control px-5 py-2.5 text-[13px] font-medium text-ink-2 transition-colors hover:text-ink">← 정보 수정</button>
+                        <button onClick={handleGenerateAll} className="flex items-center rounded-control bg-ink px-6 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90">
                             <Wand2 className="w-5 h-5 mr-2" /> 이미지 생성 시작 ({images.length}장)
                         </button>
                     </div>
@@ -2426,10 +2486,10 @@ export const DetailPlanner: React.FC = () => {
             {/* ───── STEP 3: 이미지 생성 ───── */}
             {step === 3 && (
                 <div className="space-y-6">
-                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-wrap items-center justify-between gap-3">
+                    <div className="bg-paper rounded-card border border-line p-6 flex flex-wrap items-center justify-between gap-3">
                         <div>
-                            <h2 className="text-xl font-black text-slate-900">이미지 생성</h2>
-                            <p className="text-sm text-slate-500 mt-1">
+                            <h2 className="text-[17px] font-semibold tracking-tight text-ink">이미지 생성</h2>
+                            <p className="text-sm text-ink-2 mt-1">
                                 {masterGenerating
                                     ? '제품 보존용 마스터 기준컷을 먼저 생성 중입니다...'
                                     : generatingCount > 0
@@ -2438,27 +2498,27 @@ export const DetailPlanner: React.FC = () => {
                             </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
-                            <button onClick={() => setStep(2)} className="text-slate-600 hover:text-slate-900 font-medium py-2.5 px-5 rounded-xl border border-slate-200">← 기획안</button>
-                            <button onClick={handleRetryFailed} disabled={failedCount === 0 || generatingCount > 0} className="text-amber-700 hover:text-amber-800 disabled:text-slate-300 font-bold py-2.5 px-5 rounded-xl border border-amber-200 disabled:border-slate-200 flex items-center gap-1">
+                            <button onClick={() => setStep(2)} className="rounded-control border border-line px-5 py-2.5 text-[13px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">← 기획안</button>
+                            <button onClick={handleRetryFailed} disabled={failedCount === 0 || generatingCount > 0} className="flex items-center gap-1 rounded-control border border-caution/35 px-5 py-2.5 text-[13px] font-medium text-caution transition-colors disabled:border-line disabled:text-ink-3">
                                 <RefreshCw className="w-4 h-4" /> 실패분 재시도 ({failedCount})
                             </button>
-                            <button onClick={handleRetryVisionWarnings} disabled={visionWarningCount === 0 || generatingCount > 0} className="text-blue-700 hover:text-blue-800 disabled:text-slate-300 font-bold py-2.5 px-5 rounded-xl border border-blue-200 disabled:border-slate-200 flex items-center gap-1">
+                            <button onClick={handleRetryVisionWarnings} disabled={visionWarningCount === 0 || generatingCount > 0} className="flex items-center gap-1 rounded-control border border-accent/35 px-5 py-2.5 text-[13px] font-medium text-accent transition-colors disabled:border-line disabled:text-ink-3">
                                 <RefreshCw className="w-4 h-4" /> QA 경고 재생성 ({visionWarningCount})
                             </button>
-                            <button onClick={handleDownloadAll} disabled={generatedCount === 0} className="bg-slate-950 hover:bg-slate-800 disabled:bg-slate-300 text-white font-black py-2.5 px-5 rounded-xl flex items-center shadow-sm">
+                            <button onClick={handleDownloadAll} disabled={generatedCount === 0} className="flex items-center rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
                                 <Download className="w-5 h-5 mr-2" /> 전체 다운로드
                             </button>
                         </div>
                     </div>
 
                     {useHybridReferences && (
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5 shadow-sm">
+                    <div className="rounded-card border border-accent-line bg-accent-soft p-5">
                         <div className="mb-3 flex items-center justify-between gap-3">
                             <div>
-                                <h3 className="font-black text-blue-950">2단계 하이브리드 기준컷</h3>
-                                <p className="mt-1 text-xs text-blue-700">원본 제품 사진과 이 기준컷을 함께 참조해 제품 정확도를 우선합니다.</p>
+                                <h3 className="font-semibold text-accent">2단계 하이브리드 기준컷</h3>
+                                <p className="mt-1 text-xs text-accent">원본 제품 사진과 이 기준컷을 함께 참조해 제품 정확도를 우선합니다.</p>
                             </div>
-                            <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-blue-700 ring-1 ring-blue-100">
+                            <span className="rounded-full bg-paper px-3 py-1 text-xs font-semibold text-accent ring-1 ring-accent-line">
                                 {masterGenerating ? '생성 중' : masterReferences.hookModel || masterReferences.productDetail ? '준비됨' : '대기'}
                             </span>
                         </div>
@@ -2467,62 +2527,21 @@ export const DetailPlanner: React.FC = () => {
                                 { label: 'Hook 모델 기준컷', url: masterReferences.hookModel },
                                 { label: '제품 디테일 기준컷', url: masterReferences.productDetail },
                             ].map(item => (
-                                <div key={item.label} className="overflow-hidden rounded-xl border border-blue-100 bg-white">
-                                    <div className="flex aspect-[860/1000] items-center justify-center bg-slate-100 text-xs font-bold text-slate-400">
+                                <div key={item.label} className="overflow-hidden rounded-card border border-accent-line bg-paper">
+                                    <div className="flex aspect-[860/1000] items-center justify-center bg-paper-2 text-xs font-semibold text-ink-3">
                                         {item.url ? <img src={item.url} alt={item.label} className="h-full w-full object-cover" /> : item.label}
                                     </div>
-                                    <div className="px-3 py-2 text-xs font-black text-slate-700">{item.label}</div>
+                                    <div className="px-3 py-2 text-xs font-semibold text-ink">{item.label}</div>
                                 </div>
                             ))}
                         </div>
                     </div>
                     )}
 
-                    <div className={`rounded-2xl border p-5 shadow-sm ${qaWarnings.length > 0 ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
-                        <div className="mb-3 flex items-center gap-2">
-                            {qaWarnings.length > 0 ? <AlertTriangle className="h-5 w-5 text-amber-600" /> : <CheckCircle2 className="h-5 w-5 text-emerald-600" />}
-                            <h3 className={`font-black ${qaWarnings.length > 0 ? 'text-amber-900' : 'text-emerald-800'}`}>최종 상세페이지 QA</h3>
-                        </div>
-                        {qaWarnings.length > 0 ? (
-                            <div className="space-y-1 text-sm text-amber-800">
-                                {qaWarnings.map((warning, idx) => <p key={idx}>• {warning}</p>)}
-                            </div>
-                        ) : (
-                            <p className="text-sm text-emerald-700">누락, 실패, 카피 경고 없이 모든 이미지가 준비됐습니다.</p>
-                        )}
-                        <div className="mt-4 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
-                            {[
-                                { label: '이미지 생성 완료', ok: generatedCount === images.length && images.length > 0 },
-                                { label: '실패 이미지 없음', ok: failedCount === 0 },
-                                { label: '카피/기획 경고 확인', ok: qualityWarningCount === 0 },
-                                { label: `비전 QA ${qaCheckedCount}장 검사`, ok: visionWarningCount === 0 },
-                                { label: `컷별 QA 태그 ${warningImageCount}장`, ok: images.length > 0 },
-                                { label: `모델컷 ${modelShotCount}/${maxRecommendedModelShots}장`, ok: modelShotCount <= maxRecommendedModelShots },
-                                { label: 'AI 통합 텍스트 확인', ok: integratedTextCount === 0 },
-                            ].map(item => (
-                                <div key={item.label} className={`rounded-xl border px-3 py-2 font-bold ${item.ok ? 'border-emerald-200 bg-white/70 text-emerald-700' : 'border-amber-200 bg-white/70 text-amber-800'}`}>
-                                    {item.ok ? '✓' : '!'} {item.label}
-                                </div>
-                            ))}
-                        </div>
-                        {images.some(img => (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0 || (img.visionWarnings?.length || 0) > 0) && (
-                            <div className="mt-4 flex flex-wrap gap-2">
-                                {images
-                                    .filter(img => (img.qualityWarnings?.length || 0) > 0 || (img.qaTags?.length || 0) > 0 || (img.visionWarnings?.length || 0) > 0)
-                                    .slice(0, 8)
-                                    .map(img => (
-                                        <button key={img.id} onClick={() => scrollToImage(img.id)} className="rounded-full bg-white/80 px-3 py-1 text-xs font-bold text-amber-800 ring-1 ring-amber-200 hover:bg-white">
-                                            {img.number}번 이미지 이동
-                                        </button>
-                                    ))}
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-paper p-4">
                         <div>
-                            <p className="text-sm font-black text-slate-900">이미지 필터</p>
-                            <p className="text-xs text-slate-500">완료/실패/경고 이미지를 빠르게 확인합니다.</p>
+                            <p className="text-sm font-semibold text-ink">이미지 필터</p>
+                            <p className="text-xs text-ink-2">완료/실패/경고 이미지를 빠르게 확인합니다.</p>
                         </div>
                         <div className="flex flex-wrap gap-2">
                             {([
@@ -2534,10 +2553,10 @@ export const DetailPlanner: React.FC = () => {
                                 <button
                                     key={filter.value}
                                     onClick={() => setImageFilter(filter.value)}
-                                    className={`rounded-xl px-3 py-2 text-xs font-black transition-colors ${
+                                    className={`rounded-card px-3 py-2 text-xs font-semibold transition-colors ${
                                         imageFilter === filter.value
-                                            ? 'bg-slate-950 text-white'
-                                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                            ? 'bg-ink text-paper'
+                                            : 'bg-paper-2 text-ink-2 hover:bg-line'
                                     }`}
                                 >
                                     {filter.label}
@@ -2548,123 +2567,79 @@ export const DetailPlanner: React.FC = () => {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
                         {filteredImages.map((seg) => (
-                            <div key={seg.id} id={`detail-image-${seg.id}`} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden scroll-mt-6">
-                                <div className="relative bg-slate-100" style={{ aspectRatio: '860 / 1000' }}>
+                            <div key={seg.id} id={`detail-image-${seg.id}`} className="bg-paper rounded-card border border-line overflow-hidden scroll-mt-6">
+                                <div className="relative bg-paper-2" style={{ aspectRatio: '860 / 1000' }}>
                                     {seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' ? (
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-ink-3">
                                             <Loader2 className="w-8 h-8 animate-spin mb-2" />
                                             <span className="text-xs">{STATUS_LABEL[seg.status]}...</span>
                                         </div>
                                     ) : seg.imageUrl ? (
                                         <img src={seg.imageUrl} alt={seg.role} className="w-full h-full object-cover" />
                                     ) : (
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 gap-2">
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-ink-3 gap-2">
                                             <span className="text-xs">{seg.errorMessage || '아직 생성된 이미지가 없습니다.'}</span>
-                                            <button onClick={() => generateOne(seg, seg.status === 'failed')} className="text-xs text-blue-500 flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> 다시 생성</button>
+                                            <button onClick={() => generateOne(seg, seg.status === 'failed')} className="text-xs text-accent flex items-center gap-1"><RefreshCw className="w-3.5 h-3.5" /> 다시 생성</button>
                                         </div>
                                     )}
-                                    <span className="absolute top-2 left-2 bg-black/70 text-white text-xs font-bold rounded-full px-2 py-0.5 backdrop-blur">{seg.number}. {seg.role}</span>
-                                    <span className={`absolute top-2 right-2 rounded-full px-2 py-0.5 text-xs font-bold ${STATUS_CLASS[seg.status]}`}>{STATUS_LABEL[seg.status]}</span>
-                                    {seg.textRenderMode === 'integrated' && seg.status === 'done' && (
-                                        <span className="absolute bottom-2 left-2 rounded-full bg-amber-500/90 px-2 py-0.5 text-xs font-bold text-white backdrop-blur">텍스트 확인 필요</span>
+                                    <span className="absolute left-2 top-2 rounded-control bg-ink/80 px-2 py-0.5 text-[11px] font-medium text-paper backdrop-blur">{seg.number}. {seg.role}</span>
+                                    <span className={`absolute right-2 top-2 rounded-control border px-2 py-0.5 text-[11px] font-semibold backdrop-blur ${STATUS_CLASS[seg.status]}`}>{STATUS_LABEL[seg.status]}</span>
+                                    {seg.imageUrl && seg.status === 'done' && (
+                                        <button
+                                            onClick={() => handleDownloadOne(seg)}
+                                            title="이 이미지만 다운로드"
+                                            className="absolute bottom-2 right-2 flex items-center gap-1 rounded-control bg-ink/80 px-2.5 py-1.5 text-[11px] font-semibold text-paper backdrop-blur transition-opacity hover:bg-ink"
+                                        >
+                                            <Download className="h-3.5 w-3.5" /> 저장
+                                        </button>
                                     )}
                                 </div>
                                 {seg.imageUrl && (
                                     <div className="p-3 space-y-2">
-                                        <div className={`rounded-lg border p-2 text-[11px] ${
-                                            seg.textRenderMode === 'integrated'
-                                                ? 'border-amber-200 bg-amber-50 text-amber-800'
-                                                : 'border-emerald-100 bg-emerald-50 text-emerald-700'
-                                        }`}>
-                                            {seg.textRenderMode === 'integrated'
-                                                ? 'AI가 이미지 안에 메인 카피를 직접 넣었습니다. 오타, 뭉개짐, 잘림이 보이면 안전 모드로 다시 적용하세요.'
-                                                : '한글 카피를 별도 합성해 선명도와 오타 위험을 줄인 안전 모드입니다.'}
+                                        <div className="rounded-control border border-positive/20 bg-positive-soft p-2 text-[11px] text-positive">
+                                            한글 카피를 별도 합성해 선명도와 오타 위험을 줄인 안전 모드입니다.
                                         </div>
                                         <textarea value={seg.mainCopy} onChange={e => updateImage(seg.id, { mainCopy: e.target.value })} rows={4}
-                                            className="w-full p-2 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none" placeholder="메인 카피" />
-                                        <div className="rounded-lg border border-slate-100 p-2">
+                                            className="w-full p-2 border border-line rounded-control text-xs focus:ring-2 focus:ring-accent outline-none" placeholder="메인 카피" />
+                                        <div className="rounded-control border border-line p-2">
                                             <div className="mb-1.5 flex items-center justify-between gap-2">
-                                                <p className="text-[11px] font-black text-slate-600">서브/포인트 문구 편집</p>
+                                                <p className="text-[11px] font-semibold text-ink-2">서브 카피 편집</p>
                                                 <div className="flex gap-1">
                                                     <button
-                                                        onClick={() => applyTextPatch(seg, { subCopy: seg.subCopy, points: (seg.points || []).map(point => point.trim()).filter(Boolean) })}
+                                                        onClick={() => applyTextPatch(seg, { subCopy: seg.subCopy })}
                                                         disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
-                                                        className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-600 hover:bg-blue-100 disabled:opacity-40"
+                                                        className="rounded-full bg-accent-soft px-2 py-1 text-[10px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40"
                                                     >
                                                         적용
                                                     </button>
                                                     <button
-                                                        onClick={() => applyTextPatch(seg, { subCopy: '', points: [] })}
-                                                        disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || (!seg.subCopy && (!seg.points || seg.points.length === 0))}
-                                                        className="rounded-full bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-600 hover:bg-rose-100 disabled:opacity-40"
+                                                        onClick={() => applyTextPatch(seg, { subCopy: '' })}
+                                                        disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || !seg.subCopy}
+                                                        className="rounded-full bg-critical-soft px-2 py-1 text-[10px] font-semibold text-critical hover:bg-critical-soft disabled:opacity-40"
                                                     >
-                                                        서브/포인트 전체 제거
+                                                        서브 제거
                                                     </button>
                                                 </div>
                                             </div>
                                             <input
                                                 value={seg.subCopy}
                                                 onChange={e => updateImage(seg.id, { subCopy: e.target.value })}
-                                                className="mb-1.5 w-full rounded-lg border border-slate-200 p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                                                placeholder="서브 카피"
+                                                className="w-full rounded-control border border-line p-2 text-xs outline-none focus:ring-2 focus:ring-accent"
+                                                placeholder="서브 카피 (비워두면 메인 카피만 표시)"
                                             />
-                                            <div className="mb-1.5 space-y-1">
-                                                {(seg.points || []).map((point, index) => (
-                                                    <div key={index} className="flex gap-1">
-                                                        <input
-                                                            value={point}
-                                                            onChange={e => updateImage(seg.id, {
-                                                                points: (seg.points || []).map((item, pointIndex) => pointIndex === index ? e.target.value : item),
-                                                            })}
-                                                            className="min-w-0 flex-1 rounded-lg border border-slate-200 p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
-                                                            placeholder={`포인트 ${index + 1}`}
-                                                        />
-                                                        <button
-                                                            onClick={() => applyTextPatch(seg, { points: (seg.points || []).filter((_, pointIndex) => pointIndex !== index) })}
-                                                            disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
-                                                            className="rounded-lg bg-slate-100 px-2 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                                                        >
-                                                            삭제
-                                                        </button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <div className="flex flex-wrap gap-1.5">
-                                                <button
-                                                    onClick={() => updateImage(seg.id, { points: [...(seg.points || []), ''] })}
-                                                    disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || (seg.points || []).length >= 3}
-                                                    className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40"
-                                                >
-                                                    포인트 추가
-                                                </button>
-                                                <button
-                                                    onClick={() => applyTextPatch(seg, { subCopy: '' })}
-                                                    disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || !seg.subCopy}
-                                                    className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                                                >
-                                                    서브 제거
-                                                </button>
-                                                <button
-                                                    onClick={() => applyTextPatch(seg, { points: [] })}
-                                                    disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying' || !seg.points || seg.points.length === 0}
-                                                    className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-40"
-                                                >
-                                                    포인트 제거
-                                                </button>
-                                            </div>
                                         </div>
                                         <div>
-                                            <p className="mb-1 text-[11px] font-bold text-slate-500">텍스트 위치</p>
+                                            <p className="mb-1 text-[11px] font-semibold text-ink-2">텍스트 위치</p>
                                             <div className="grid grid-cols-3 gap-1.5">
                                                 {(['top', 'middle', 'bottom'] as const).map(position => (
                                                     <button
                                                         key={position}
                                                         onClick={() => changeTextPosition(seg, position)}
                                                         disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
-                                                        className={`rounded-lg border px-2 py-1.5 text-xs font-bold transition-colors ${
+                                                        className={`rounded-control border px-2 py-1.5 text-xs font-semibold transition-colors ${
                                                             seg.textPosition === position
-                                                                ? 'border-slate-950 bg-slate-950 text-white'
-                                                                : 'border-slate-200 bg-white text-slate-500 hover:border-slate-400'
+                                                                ? 'border-ink bg-ink text-paper'
+                                                                : 'border-line bg-paper text-ink-2 hover:border-line-strong'
                                                         }`}
                                                     >
                                                         {position === 'top' ? '상단' : position === 'middle' ? '중간' : '하단'}
@@ -2673,13 +2648,13 @@ export const DetailPlanner: React.FC = () => {
                                             </div>
                                         </div>
                                         {seg.qualityWarnings && seg.qualityWarnings.length > 0 && (
-                                            <div className="rounded-lg bg-amber-50 p-2 text-[11px] text-amber-700">
+                                            <div className="rounded-control bg-caution-soft p-2 text-[11px] text-caution">
                                                 {seg.qualityWarnings.slice(0, 2).map((warning, i) => <p key={i}>• {warning}</p>)}
                                             </div>
                                         )}
                                         {seg.qaChecked && (
-                                            <div className={`rounded-lg border p-2 text-[11px] ${seg.visionWarnings?.length ? 'border-rose-100 bg-rose-50 text-rose-700' : 'border-emerald-100 bg-emerald-50 text-emerald-700'}`}>
-                                                <p className="mb-1 font-black">{seg.visionWarnings?.length ? '비전 QA 경고' : '비전 QA 통과'}</p>
+                                            <div className={`rounded-control border p-2 text-[11px] ${seg.visionWarnings?.length ? 'border-critical/20 bg-critical-soft text-critical' : 'border-positive/20 bg-positive-soft text-positive'}`}>
+                                                <p className="mb-1 font-semibold">{seg.visionWarnings?.length ? '비전 QA 경고' : '비전 QA 통과'}</p>
                                                 {seg.visionWarnings?.length
                                                     ? seg.visionWarnings.slice(0, 4).map((warning, i) => <p key={i}>• {warning}</p>)
                                                     : <p>{seg.visionSummary || '제품 보존 기준을 통과했습니다.'}</p>}
@@ -2687,7 +2662,7 @@ export const DetailPlanner: React.FC = () => {
                                                     <button
                                                         onClick={() => regenerateWithPreset(seg, seg.visionRegenerationHint || 'Fix the detected QA problems while preserving exact reference product identity.')}
                                                         disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
-                                                        className="mt-2 rounded-full bg-white px-2 py-1 text-[10px] font-black text-rose-700 ring-1 ring-rose-100 hover:bg-rose-100 disabled:opacity-50"
+                                                        className="mt-2 rounded-full bg-paper px-2 py-1 text-[10px] font-semibold text-critical ring-1 ring-critical/20 hover:bg-critical-soft disabled:opacity-50"
                                                     >
                                                         QA 기준으로 재생성
                                                     </button>
@@ -2695,60 +2670,37 @@ export const DetailPlanner: React.FC = () => {
                                             </div>
                                         )}
                                         {seg.qaTags && seg.qaTags.length > 0 && (
-                                            <div className="rounded-lg border border-slate-100 bg-slate-50 p-2">
-                                                <p className="mb-1 text-[11px] font-black text-slate-600">QA 체크</p>
+                                            <div className="rounded-control border border-line bg-paper-2 p-2">
+                                                <p className="mb-1 text-[11px] font-semibold text-ink-2">QA 체크</p>
                                                 <div className="flex flex-wrap gap-1">
                                                 {seg.qaTags.slice(0, 5).map(tag => (
-                                                    <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">{tag}</span>
+                                                    <span key={tag} className="rounded-full bg-paper-2 px-2 py-0.5 text-[10px] font-semibold text-ink-2">{tag}</span>
                                                 ))}
                                                 </div>
                                             </div>
                                         )}
-                                        <div className="rounded-lg border border-slate-100 p-2">
-                                            <p className="mb-1.5 text-[11px] font-black text-slate-600">빠른 재생성</p>
+                                        <div className="rounded-control border border-line p-2">
+                                            <p className="mb-1.5 text-[11px] font-semibold text-ink-2">빠른 재생성</p>
                                             <div className="flex flex-wrap gap-1">
                                                 {getRegenerationPresets(seg).map(preset => (
                                                     <button
                                                         key={preset.label}
                                                         onClick={() => regenerateWithPreset(seg, preset.hint)}
                                                         disabled={seg.status === 'queued' || seg.status === 'generating' || seg.status === 'retrying'}
-                                                        className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-50"
+                                                        className="rounded-full bg-paper-2 px-2 py-1 text-[10px] font-semibold text-ink-2 hover:bg-line disabled:opacity-50"
                                                     >
                                                         {preset.label}
                                                     </button>
                                                 ))}
                                             </div>
                                         </div>
-                                        {seg.candidateImageUrl && (
-                                            <div className="rounded-lg border border-blue-100 bg-blue-50 p-2">
-                                                <p className="mb-2 text-[11px] font-black text-blue-700">새 후보 이미지</p>
-                                                <div className="grid grid-cols-2 gap-2">
-                                                    <div>
-                                                        <p className="mb-1 text-[10px] font-bold text-slate-500">현재</p>
-                                                        <img src={seg.previousImageUrl || seg.imageUrl} alt="현재 이미지" className="aspect-[860/1000] w-full rounded-md object-cover" />
-                                                    </div>
-                                                    <div>
-                                                        <p className="mb-1 text-[10px] font-bold text-blue-600">새 후보</p>
-                                                        <img src={seg.candidateImageUrl} alt="새 후보 이미지" className="aspect-[860/1000] w-full rounded-md object-cover" />
-                                                    </div>
-                                                </div>
-                                                <div className="mt-2 grid grid-cols-2 gap-1.5">
-                                                    <button onClick={() => keepPreviousImage(seg)} className="rounded-md bg-white px-2 py-1.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">현재 유지</button>
-                                                    <button onClick={() => acceptCandidateImage(seg)} className="rounded-md bg-blue-600 px-2 py-1.5 text-xs font-bold text-white hover:bg-blue-700">새 후보 적용</button>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {seg.textRenderMode === 'integrated' && (
-                                            <button onClick={() => applyTextOnly(seg)} className="w-full text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 rounded py-1.5 flex items-center justify-center gap-1">
-                                                <RefreshCw className="w-3 h-3" /> 안전 모드로 다시 적용
-                                            </button>
-                                        )}
-                                        {seg.textRenderMode !== 'integrated' && (
-                                            <button onClick={() => applyTextOnly(seg)} className="w-full text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded py-1.5 flex items-center justify-center gap-1">
-                                                <RefreshCw className="w-3 h-3" /> 문구만 다시 적용
-                                            </button>
-                                        )}
-                                        <button onClick={() => regenerateWithPreset(seg, 'Regenerate this section with a fresh premium ecommerce detail-page composition while preserving the section role and product requirements.')} className="w-full text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 rounded py-1.5 flex items-center justify-center gap-1">
+                                        <button onClick={() => handleDownloadOne(seg)} className="w-full text-xs bg-ink hover:opacity-90 text-paper rounded py-1.5 flex items-center justify-center gap-1 font-semibold">
+                                            <Download className="w-3 h-3" /> 이 이미지 다운로드
+                                        </button>
+                                        <button onClick={() => applyTextOnly(seg)} className="w-full text-xs bg-accent-soft hover:bg-accent-soft text-accent rounded py-1.5 flex items-center justify-center gap-1">
+                                            <RefreshCw className="w-3 h-3" /> 문구만 다시 적용
+                                        </button>
+                                        <button onClick={() => regenerateWithPreset(seg, 'Regenerate this section with a fresh premium ecommerce detail-page composition while preserving the section role and product requirements.')} className="w-full text-xs bg-paper-2 hover:bg-paper-2 text-ink-2 rounded py-1.5 flex items-center justify-center gap-1">
                                             <RefreshCw className="w-3 h-3" /> 배경까지 재생성
                                         </button>
                                     </div>
@@ -2757,29 +2709,29 @@ export const DetailPlanner: React.FC = () => {
                         ))}
                     </div>
 
-                    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <div className="rounded-card border border-line bg-paper p-6">
                         <div className="mb-5 flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2">
-                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-950 text-white">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-card bg-ink text-paper">
                                     <Eye className="h-4.5 w-4.5" />
                                 </div>
                                 <div>
-                                    <h3 className="font-black text-slate-900">최종 세로 미리보기</h3>
-                                    <p className="text-xs text-slate-500">완성 이미지를 실제 상세페이지 순서대로 이어서 확인합니다.</p>
+                                    <h3 className="font-semibold text-ink">최종 세로 미리보기</h3>
+                                    <p className="text-xs text-ink-2">완성 이미지를 실제 상세페이지 순서대로 이어서 확인합니다.</p>
                                 </div>
                             </div>
-                            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
+                            <span className="rounded-full bg-paper-2 px-3 py-1 text-xs font-semibold text-ink-2">
                                 {generatedCount}/{images.length} 완료
                             </span>
                         </div>
-                        <div className="mx-auto max-w-[430px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-100">
+                        <div className="mx-auto max-w-[430px] overflow-hidden rounded-card border border-line bg-paper-2">
                             {images.map((seg) => (
                                 seg.imageUrl ? (
                                     <img key={seg.id} src={seg.imageUrl} alt={`${seg.number}. ${seg.role}`} className="block w-full" />
                                 ) : (
-                                    <div key={seg.id} className="flex aspect-[860/1000] w-full flex-col items-center justify-center border-b border-slate-200 bg-slate-50 text-slate-400">
+                                    <div key={seg.id} className="flex aspect-[860/1000] w-full flex-col items-center justify-center border-b border-line bg-paper-2 text-ink-3">
                                         <ImageIcon className="mb-2 h-8 w-8" />
-                                        <p className="text-xs font-bold">{seg.number}. {seg.role}</p>
+                                        <p className="text-xs font-semibold">{seg.number}. {seg.role}</p>
                                         <p className="mt-1 text-[11px]">{STATUS_LABEL[seg.status]}</p>
                                     </div>
                                 )

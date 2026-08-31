@@ -108,10 +108,18 @@ export function AnalyzerDashboard() {
     const colQty = qtyTargets.find((c) => c in sampleRow);
     if (!colQty) return { error: "판매수량 컬럼을 찾을 수 없습니다." };
 
+    // 실제 전환매출액 컬럼 자동 감지 — 있으면 '판매수량 × 입력 판매가' 추정 대신 실측 사용
+    const revenueTargets = ["총 전환매출액(14일)", "총 전환매출액(1일)", "총 전환매출액", "전환매출액"];
+    const colRevenue = revenueTargets.find((c) => c in sampleRow) || null;
+    const colRevenue1d = colRevenue === "총 전환매출액(14일)" && "총 전환매출액(1일)" in sampleRow ? "총 전환매출액(1일)" : null;
+    const colIndirectRev = colRevenue === "총 전환매출액(14일)" && "간접 전환매출액(14일)" in sampleRow
+      ? "간접 전환매출액(14일)"
+      : "간접 전환매출액(1일)" in sampleRow ? "간접 전환매출액(1일)" : null;
+
     const parseNum = (val: any) => {
       if (typeof val === "number") return val;
       if (!val) return 0;
-      const num = parseFloat(String(val).replace(/,/g, "").replace(/-/g, "0"));
+      const num = parseFloat(String(val).replace(/,/g, "").replace(/%/g, "").replace(/^-$/, "0"));
       return isNaN(num) ? 0 : num;
     };
 
@@ -121,41 +129,133 @@ export function AnalyzerDashboard() {
       클릭수: parseNum(row["클릭수"]),
       광고비: parseNum(row["광고비"]),
       [colQty]: parseNum(row[colQty]),
+      실측매출: colRevenue ? parseNum(row[colRevenue]) : 0,
+      매출1일: colRevenue1d ? parseNum(row[colRevenue1d]) : 0,
+      간접매출: colIndirectRev ? parseNum(row[colIndirectRev]) : 0,
     }));
+
+    // 매출 산정 모드: 실측 컬럼이 있으면 실측, 없으면 판매수량 × 입력 판매가
+    const revenueMode: "actual" | "estimated" = colRevenue ? "actual" : "estimated";
+    const rowRevenue = (row: any) => (revenueMode === "actual" ? row.실측매출 : (row[colQty] || 0) * unitPrice);
+    // 순이익: 실측 모드에서는 마진율(개당마진 ÷ 판매가)을 실측 매출에 적용해 옵션별 단가 차이를 흡수
+    const netMarginRate = unitPrice > 0 ? netUnitMargin / unitPrice : 0;
+    // 마진 미입력(판매가 0 등) 시: 순이익은 계산 불가로 표시하고,
+    // 판정은 쿠팡 셀러 통상 기준선(손익분기 ROAS 300%)으로 폴백해 어긋난 판정을 막는다
+    const marginProvided = breakEvenROAS > 0;
+    const effectiveBE = marginProvided ? breakEvenROAS : 300;
+    const rowProfit = (row: any) =>
+      revenueMode === "actual"
+        ? rowRevenue(row) * netMarginRate - (row.광고비 || 0)
+        : (row[colQty] || 0) * netUnitMargin - (row.광고비 || 0);
 
     // ── 지면별 집계 ──
     const placementMap = new Map<string, any>();
     cleanedData.forEach((row) => {
       const p = row["광고 노출 지면"] || "미확인";
-      if (!placementMap.has(p)) placementMap.set(p, { 지면: p, 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0 });
+      if (!placementMap.has(p)) placementMap.set(p, { 지면: p, 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0 });
       const acc = placementMap.get(p);
       acc.노출수 += row["노출수"] || 0;
       acc.클릭수 += row["클릭수"] || 0;
       acc.광고비 += row["광고비"] || 0;
       acc.판매수량 += row[colQty] || 0;
+      acc.매출 += rowRevenue(row);
     });
 
     const placementSummary = Array.from(placementMap.values()).map((p) => {
-      const 실제매출액 = p.판매수량 * unitPrice;
+      const 실제매출액 = p.매출;
       const 실제ROAS = p.광고비 > 0 ? 실제매출액 / p.광고비 : 0;
       const 클릭률 = p.노출수 > 0 ? p.클릭수 / p.노출수 : 0;
       const 구매전환율 = p.클릭수 > 0 ? p.판매수량 / p.클릭수 : 0;
       const CPC = p.클릭수 > 0 ? p.광고비 / p.클릭수 : 0;
-      const 실질순이익 = p.판매수량 * netUnitMargin - p.광고비;
+      const 실질순이익 = revenueMode === "actual" ? 실제매출액 * netMarginRate - p.광고비 : p.판매수량 * netUnitMargin - p.광고비;
       return { ...p, 실제매출액, 실제ROAS, 클릭률, 구매전환율, CPC, 실질순이익 };
     });
 
     // ── 전체 합계 ──
     const tot = placementSummary.reduce(
-      (acc, curr) => { acc.노출수 += curr.노출수; acc.클릭수 += curr.클릭수; acc.광고비 += curr.광고비; acc.판매수량 += curr.판매수량; return acc; },
-      { 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0 }
+      (acc, curr) => { acc.노출수 += curr.노출수; acc.클릭수 += curr.클릭수; acc.광고비 += curr.광고비; acc.판매수량 += curr.판매수량; acc.매출 += curr.실제매출액; return acc; },
+      { 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0 }
     );
-    const totalRevenue = tot.판매수량 * unitPrice;
+    const totalRevenue = tot.매출;
     const totalRealRoas = tot.광고비 > 0 ? totalRevenue / tot.광고비 : 0;
-    const totalProfit = tot.판매수량 * netUnitMargin - tot.광고비;
+    const totalProfit = revenueMode === "actual" ? totalRevenue * netMarginRate - tot.광고비 : tot.판매수량 * netUnitMargin - tot.광고비;
     const totalCtr = tot.노출수 > 0 ? tot.클릭수 / tot.노출수 : 0;
     const totalCvr = tot.클릭수 > 0 ? tot.판매수량 / tot.클릭수 : 0;
     const avgCPC = tot.클릭수 > 0 ? tot.광고비 / tot.클릭수 : 0;
+
+    // ── 캠페인별 집계 + 개별 판정 ──
+    // 8개 캠페인이 하나로 합산되면 좋은 캠페인이 나쁜 캠페인을 가린다. 캠페인 단위로 잘라서 각각 판정한다.
+    let campaignSummary: any[] | null = null;
+    if ("캠페인명" in sampleRow) {
+      const campMap = new Map<string, any>();
+      cleanedData.forEach((row) => {
+        const c = row["캠페인명"] || "미확인";
+        if (!campMap.has(c)) campMap.set(c, { 캠페인: c, 광고유형: row["광고유형"] || "", 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0, 검색광고비: 0, 검색매출: 0, 검색클릭: 0, 비검색광고비: 0, 비검색매출: 0, 비검색클릭: 0 });
+        const acc = campMap.get(c);
+        acc.노출수 += row["노출수"] || 0; acc.클릭수 += row["클릭수"] || 0;
+        acc.광고비 += row["광고비"] || 0; acc.판매수량 += row[colQty] || 0;
+        acc.매출 += rowRevenue(row);
+        // 목표수익률 레버 판단용: 캠페인 내 검색/비검색 분해
+        const area = row["광고 노출 지면"] || "";
+        if (isSearchPlatform(area)) { acc.검색광고비 += row["광고비"] || 0; acc.검색매출 += rowRevenue(row); acc.검색클릭 += row["클릭수"] || 0; }
+        else if (isNonSearchPlatform(area)) { acc.비검색광고비 += row["광고비"] || 0; acc.비검색매출 += rowRevenue(row); acc.비검색클릭 += row["클릭수"] || 0; }
+      });
+      campaignSummary = Array.from(campMap.values()).map((c) => {
+        const roasPct = c.광고비 > 0 ? (c.매출 / c.광고비) * 100 : 0;
+        const ctr = c.노출수 > 0 ? c.클릭수 / c.노출수 : 0;
+        const cvr = c.클릭수 > 0 ? c.판매수량 / c.클릭수 : 0;
+        const cpc = c.클릭수 > 0 ? c.광고비 / c.클릭수 : 0;
+        const 순이익 = revenueMode === "actual" ? c.매출 * netMarginRate - c.광고비 : c.판매수량 * netUnitMargin - c.광고비;
+        const 검색ROAS = c.검색광고비 > 0 ? (c.검색매출 / c.검색광고비) * 100 : 0;
+        const 비검색ROAS = c.비검색광고비 > 0 ? (c.비검색매출 / c.비검색광고비) * 100 : 0;
+        const 검색비중 = c.광고비 > 0 ? (c.검색광고비 / c.광고비) * 100 : 0;
+        // 판정: 데이터가 부족한 캠페인을 성급하게 '중단'으로 몰지 않는다
+        let verdict: "scale" | "keep" | "fix" | "stop" | "watch";
+        if (roasPct >= effectiveBE * 1.3 && c.판매수량 >= 2) verdict = "scale";
+        else if (roasPct >= effectiveBE) verdict = "keep";
+        else if (c.판매수량 === 0 && c.클릭수 >= 30) verdict = "stop";
+        else if (c.클릭수 >= 20) verdict = "fix";
+        else verdict = "watch";
+        // 추천 세팅: 매출 최적화 캠페인의 실제 레버는 예산·목표수익률 둘뿐.
+        // 목표수익률↓ → 입찰 공격적 → 검색 순위·클릭↑(CPC↑) / 목표수익률↑ → 검색 순위↓ → 소진이 비검색으로 이동
+        const 검색표본 = c.검색클릭 >= 10;
+        const 비검색표본 = c.비검색클릭 >= 10;
+        // 목표수익률 % 코칭: 사이드바의 '현재 목표수익률' 입력값을 기준으로 구체적인 숫자를 제안한다.
+        // 쿠팡 세팅 단위에 맞춰 50%p 단위로 반올림하고, 손익분기 아래로는 내리지 않는다.
+        const cur = targetROAS > 0 ? targetROAS : 0;
+        const beFloor = Math.ceil((effectiveBE * 1.1) / 50) * 50;
+        const coachDown = (factor: number): string | null => {
+          if (cur > 0) {
+            const sug = Math.max(Math.floor((cur * factor) / 50) * 50, beFloor);
+            return sug < cur ? `${fmt(cur)}%→${fmt(sug)}%` : null; // 이미 손익분기 근처 → 더 내리면 위험
+          }
+          return `${fmt(beFloor)}%로`;
+        };
+        const coachUp = (factor: number): string => {
+          if (cur > 0) return `${fmt(cur)}%→${fmt(Math.max(Math.ceil((cur * factor) / 50) * 50, cur + 50))}%`;
+          return `${fmt(Math.ceil(Math.max(effectiveBE * 1.5, 400) / 50) * 50)}%로`;
+        };
+        let lever = "";
+        if (verdict === "watch") lever = "현 세팅 유지 · 데이터 축적";
+        else if (verdict === "stop") lever = "예산 축소/일시중지 → 가격·리뷰·상세 점검";
+        else {
+          const searchGood = 검색ROAS >= effectiveBE;
+          const nonSearchGood = 비검색ROAS >= effectiveBE;
+          if (searchGood && nonSearchGood) lever = verdict === "scale" ? "예산 ↑ · 목표수익률 유지" : "세팅 유지";
+          else if (searchGood && 비검색표본 && !nonSearchGood) {
+            const d = coachDown(0.85);
+            lever = d ? `목표수익률 ↓ ${d} → 소진을 검색으로 (검색이 팔림)` : "목표수익률 유지 (손익분기 여유 없음) · 검색이 팔리는 중";
+          } else if (!searchGood && 검색표본 && nonSearchGood) lever = `목표수익률 ↑ ${coachUp(1.2)} → 소진을 비검색으로 (비검색이 팔림)`;
+          else if (searchGood) {
+            const d = coachDown(0.9);
+            const move = d ? `목표수익률 ↓ ${d} (검색 확대)` : "목표수익률 유지 (손익분기 여유 없음)";
+            lever = verdict === "scale" ? `예산 ↑ · ${move}` : move;
+          } else if (nonSearchGood) lever = `목표수익률 ↑ ${coachUp(1.2)} (저단가 비검색 확대)`;
+          else lever = `목표수익률 ↑ ${coachUp(1.3)} (CPC 절감) + 제외키워드 정리`;
+        }
+        return { ...c, roasPct, ctr, cvr, cpc, 순이익, verdict, 검색ROAS, 비검색ROAS, 검색비중, lever };
+      }).sort((a, b) => b.광고비 - a.광고비);
+    }
 
     // ── 옵션별 집계 ──
     let productSummary = null;
@@ -163,30 +263,68 @@ export function AnalyzerDashboard() {
       const prodMap = new Map<string, any>();
       cleanedData.forEach((row) => {
         const prod = row["광고집행 상품명"] || "미확인";
-        if (!prodMap.has(prod)) prodMap.set(prod, { 상품명: prod, 광고비: 0, 판매수량: 0, 노출수: 0, 클릭수: 0 });
+        if (!prodMap.has(prod)) prodMap.set(prod, { 상품명: prod, 광고비: 0, 판매수량: 0, 노출수: 0, 클릭수: 0, 매출: 0 });
         const acc = prodMap.get(prod);
         acc.광고비 += row["광고비"] || 0; acc.판매수량 += row[colQty] || 0;
         acc.노출수 += row["노출수"] || 0; acc.클릭수 += row["클릭수"] || 0;
+        acc.매출 += rowRevenue(row);
       });
-      productSummary = Array.from(prodMap.values()).map((p) => ({ ...p, 실질순이익: p.판매수량 * netUnitMargin - p.광고비 }));
+      productSummary = Array.from(prodMap.values()).map((p) => ({
+        ...p,
+        실질순이익: revenueMode === "actual" ? p.매출 * netMarginRate - p.광고비 : p.판매수량 * netUnitMargin - p.광고비,
+      }));
     }
 
-    // ── 돈만 먹는 키워드 ──
+    // ── 키워드 정밀 분류 (검색 영역) ──
+    // 기존 '판매0 & 광고비>0' 단일 필터는 클릭 1개짜리까지 제외 추천하는 성급함이 있었다.
+    // 4분류: 스타(확장) / 효율(유지) / 저효율(입찰 하향) / 제외 후보(충분한 클릭에도 전환 0) / 관찰(데이터 부족)
     let badKeywords = null;
+    let keywordDiag: any = null;
     if ("키워드" in sampleRow) {
       const kwMap = new Map<string, any>();
       cleanedData.forEach((row) => {
         const kw = row["키워드"];
         const platform = row["광고 노출 지면"] || "";
         if (!kw || kw === "-" || !isSearchPlatform(platform)) return;
-        if (!kwMap.has(kw)) kwMap.set(kw, { 키워드: kw, 광고비: 0, 클릭수: 0, 판매수량: 0 });
+        if (!kwMap.has(kw)) kwMap.set(kw, { 키워드: kw, 광고비: 0, 클릭수: 0, 노출수: 0, 판매수량: 0, 매출: 0 });
         const acc = kwMap.get(kw);
-        acc.광고비 += row["광고비"] || 0; acc.클릭수 += row["클릭수"] || 0; acc.판매수량 += row[colQty] || 0;
+        acc.광고비 += row["광고비"] || 0; acc.클릭수 += row["클릭수"] || 0;
+        acc.노출수 += row["노출수"] || 0; acc.판매수량 += row[colQty] || 0;
+        acc.매출 += rowRevenue(row);
       });
-      badKeywords = Array.from(kwMap.values())
-        .filter((k) => k.판매수량 === 0 && k.광고비 > 0)
-        .sort((a: any, b: any) => b.광고비 - a.광고비);
+      const allKw = Array.from(kwMap.values()).map((k) => ({
+        ...k,
+        roasPct: k.광고비 > 0 ? (k.매출 / k.광고비) * 100 : 0,
+        cpc: k.클릭수 > 0 ? k.광고비 / k.클릭수 : 0,
+      }));
+      // 제외 판단 기준: 평균 CVR로 '이 정도 클릭이면 1건은 나왔어야 할' 클릭수 (최소 6, 최대 15)
+      const expectClicks = totalCvr > 0 ? Math.min(15, Math.max(6, Math.ceil(1.5 / totalCvr))) : 10;
+      // 광고비 기준: 한 개 팔았을 때의 마진만큼 쓰고도 0건이면, 팔렸어도 적자였던 키워드
+      const drainCostFloor = netUnitMargin > 0 ? Math.max(2000, netUnitMargin) : Math.max(3000, avgCPC * expectClicks);
+      const star = allKw.filter((k) => k.매출 > 0 && k.roasPct >= effectiveBE * 1.2).sort((a, b) => b.매출 - a.매출);
+      const ok = allKw.filter((k) => k.매출 > 0 && k.roasPct >= effectiveBE && k.roasPct < effectiveBE * 1.2);
+      const lowRoas = allKw.filter((k) => k.매출 > 0 && k.roasPct < effectiveBE).sort((a, b) => b.광고비 - a.광고비);
+      const drain = allKw.filter((k) => k.판매수량 === 0 && k.광고비 > 0 && (k.클릭수 >= expectClicks || k.광고비 >= drainCostFloor)).sort((a, b) => b.광고비 - a.광고비);
+      const drainSet = new Set(drain.map((k) => k.키워드));
+      const watch = allKw.filter((k) => k.판매수량 === 0 && k.광고비 > 0 && !drainSet.has(k.키워드)).sort((a, b) => b.광고비 - a.광고비);
+      keywordDiag = {
+        total: allKw.length, expectClicks,
+        star, ok, lowRoas, drain, watch,
+        drainCost: drain.reduce((s, k) => s + k.광고비, 0),
+        watchCost: watch.reduce((s, k) => s + k.광고비, 0),
+        starRevenue: star.reduce((s, k) => s + k.매출, 0),
+      };
+      badKeywords = drain; // 기존 '제외 키워드 제안' UI와 호환
     }
+
+    // ── 간접 전환 · 어트리뷰션 ──
+    const totalIndirect = colIndirectRev ? cleanedData.reduce((s, r) => s + (r.간접매출 || 0), 0) : 0;
+    const indirectShare = totalRevenue > 0 && colIndirectRev ? (totalIndirect / totalRevenue) * 100 : null;
+    const totalRev1d = colRevenue1d ? cleanedData.reduce((s, r) => s + (r.매출1일 || 0), 0) : null;
+    const attributionLag = totalRev1d !== null && totalRev1d > 0 && totalRevenue > totalRev1d * 1.2
+      ? ((totalRevenue - totalRev1d) / totalRevenue) * 100
+      : null;
+    const adTypes = "광고유형" in sampleRow ? Array.from(new Set(cleanedData.map((r) => r["광고유형"]).filter(Boolean))) : [];
 
     // ── 정밀 분석 ──
     const ctrResult = getCTRLevel(totalCtr);
@@ -301,20 +439,74 @@ export function AnalyzerDashboard() {
       recommendations.push(`✅ [CVR 우수] 전환율 ${pct(cvrPct)}%로 높습니다. 상세페이지 설득력이 우수하니 트래픽 확대에 집중하세요.`);
     }
 
-    // 7. 키워드 낭비
-    if (badKeywords && badKeywords.length > 0) {
-      const wastedCost = badKeywords.reduce((sum: number, k: any) => sum + k.광고비, 0);
-      const wasteRatio = tot.광고비 > 0 ? (wastedCost / tot.광고비) * 100 : 0;
+    // 7. 키워드 낭비 (충분한 클릭에도 전환 0인 '제외 후보'만 집계 — 데이터 부족 키워드는 별도 관찰)
+    if (keywordDiag && keywordDiag.drain.length > 0) {
+      const wasteRatio = tot.광고비 > 0 ? (keywordDiag.drainCost / tot.광고비) * 100 : 0;
       if (wasteRatio >= 30) {
-        recommendations.push(`🔴 [키워드 정리 긴급] 판매 0건 키워드에 ₩${fmt(wastedCost)}(전체 광고비의 ${pct(wasteRatio)}%)가 낭비 중입니다. ${badKeywords.length}개 키워드를 제외 등록하면 월 ₩${fmt(Math.round(wastedCost * 30))} 절감 가능합니다.`);
+        recommendations.push(`🔴 [키워드 정리 긴급] 클릭 ${keywordDiag.expectClicks}회 이상에도 판매 0건인 키워드 ${keywordDiag.drain.length}개에 ₩${fmt(keywordDiag.drainCost)}(전체 광고비의 ${pct(wasteRatio)}%)가 낭비 중입니다. 제외 등록 시 월 환산 약 ₩${fmt(Math.round(keywordDiag.drainCost * 30))} 절감됩니다.`);
       } else if (wasteRatio >= 10) {
-        recommendations.push(`⚠️ [키워드 정리 권장] 판매 0건 키워드 ${badKeywords.length}개에 ₩${fmt(wastedCost)}(${pct(wasteRatio)}%)가 소진 중입니다. 아래 '돈만 먹는 키워드' 목록을 복사하여 제외 키워드로 등록하세요.`);
+        recommendations.push(`⚠️ [키워드 정리 권장] 제외 후보 키워드 ${keywordDiag.drain.length}개에 ₩${fmt(keywordDiag.drainCost)}(${pct(wasteRatio)}%)가 소진 중입니다. 아래 '키워드 정밀 진단'의 제외 후보 목록을 복사해 등록하세요.`);
       }
+    }
+
+    // 8. 스타 키워드 확장
+    if (keywordDiag && keywordDiag.star.length > 0) {
+      const top = keywordDiag.star.slice(0, 3).map((k: any) => `'${k.키워드}'(ROAS ${fmt(k.roasPct)}%)`).join(", ");
+      recommendations.push(`🌟 [스타 키워드 확장] ${top} 등 ${keywordDiag.star.length}개 키워드가 손익분기를 크게 웃돕니다. 매출 최적화(자동) 캠페인은 키워드별 입찰 조절이 불가하므로, ① 이 키워드들만 수동 캠페인으로 분리해 공격적으로 입찰하거나 ② 자동 캠페인의 목표수익률을 낮춰 검색 노출 자체를 키우는 방식으로 확대하세요.`);
+    }
+
+    // 9. 저효율 키워드 입찰 하향
+    if (keywordDiag && keywordDiag.lowRoas.length > 0) {
+      const top = keywordDiag.lowRoas.slice(0, 3).map((k: any) => `'${k.키워드}'(ROAS ${fmt(k.roasPct)}%, CPC ₩${fmt(k.cpc)})`).join(", ");
+      recommendations.push(`🟡 [저효율 키워드] ${top} — 판매는 있지만 손익분기(${fmt(breakEvenROASPct)}%) 미만입니다. 수동 캠페인이라면 입찰가를 20~30% 낮추고, 매출 최적화(자동) 캠페인이라면 키워드별 입찰 조절이 불가하므로 목표수익률을 한 단계(+50%p) 올려 CPC를 줄이거나, 그래도 적자가 지속되면 제외 등록하세요.`);
+    }
+
+    // 10. 관찰 키워드 — 성급한 제외 방지
+    if (keywordDiag && keywordDiag.watch.length > 0 && keywordDiag.watchCost > 0) {
+      recommendations.push(`👀 [판단 보류 키워드] 전환은 없지만 클릭이 ${keywordDiag.expectClicks}회 미만인 키워드 ${keywordDiag.watch.length}개(₩${fmt(keywordDiag.watchCost)})는 아직 데이터가 부족합니다. 지금 제외하면 잠재 키워드를 놓칠 수 있으니 3~7일 더 지켜본 뒤 판단하세요.`);
+    }
+
+    // 11. 캠페인별 액션
+    if (campaignSummary && campaignSummary.length > 1) {
+      const stopList = campaignSummary.filter((c) => c.verdict === "stop");
+      const scaleList = campaignSummary.filter((c) => c.verdict === "scale");
+      const fixList = campaignSummary.filter((c) => c.verdict === "fix");
+      if (stopList.length > 0) {
+        recommendations.push(`🛑 [캠페인 중단 검토] ${stopList.map((c) => `'${c.캠페인}'(광고비 ₩${fmt(c.광고비)}, 클릭 ${fmt(c.클릭수)}회, 판매 0)`).join(", ")} — 충분한 클릭에도 전환이 없습니다. 일시중지 후 가격·리뷰·상세페이지를 점검하고 재개하세요.`);
+      }
+      if (scaleList.length > 0) {
+        recommendations.push(`🚀 [예산 확대 대상] ${scaleList.map((c) => `'${c.캠페인}'(ROAS ${fmt(c.roasPct)}%, 순이익 ₩${fmt(c.순이익)})`).join(", ")} — 손익분기를 여유 있게 넘겼습니다. 일예산을 20~30% 늘려 이익 규모를 키우세요.`);
+      }
+      if (fixList.length > 0) {
+        recommendations.push(`🔧 [효율 개선 대상] ${fixList.map((c) => `'${c.캠페인}'(ROAS ${fmt(c.roasPct)}%)`).join(", ")} — 손익분기 미달입니다. 키워드 정리와 목표수익률 상향으로 CPC부터 낮추세요.`);
+      }
+    }
+
+    // 12. 간접 전환 시너지
+    if (indirectShare !== null && indirectShare >= 25) {
+      recommendations.push(`🔗 [간접 전환 시너지] 전환매출의 ${pct(indirectShare)}%가 광고 상품이 아닌 다른 옵션/상품에서 발생했습니다. 광고가 스토어 전체 유입을 만들고 있으니, 옵션 구성을 늘리고 연관 상품을 같은 스토어에 배치하면 광고 효율이 배가됩니다.`);
+    }
+
+    // 13. 전환 지연 경고
+    if (attributionLag !== null) {
+      recommendations.push(`⏳ [전환 지연형 상품] 매출의 ${pct(attributionLag)}%가 클릭 다음 날 이후(14일 어트리뷰션)에 발생했습니다. 당일 성과만 보고 키워드를 끄면 실제로는 팔리는 키워드를 죽일 수 있습니다. 최소 7일 누적 데이터로 판단하세요.`);
+    }
+
+    // 14-0. 분석 기간이 짧아 키워드 판단이 어려운 경우
+    if (keywordDiag && keywordDiag.drain.length === 0 && keywordDiag.watch.length >= 20) {
+      recommendations.push(`📅 [기간 짧음 — 키워드 판단 보류] 키워드 대부분(${keywordDiag.watch.length}개)이 클릭 수 부족으로 '판단 보류' 상태입니다. 하루치 보고서로는 제외/확장 판단이 성급해질 수 있으니, 쿠팡윙에서 7~14일 기간으로 보고서를 받아 다시 분석하면 정확한 키워드 진단이 가능합니다.`);
+    }
+
+    // 14. 매출 최적화(자동) 캠페인 안내
+    if (adTypes.some((t: string) => String(t).includes("매출 최적화"))) {
+      recommendations.push(`🤖 [매출 최적화 캠페인 참고] 이 보고서에는 자동(매출 최적화) 캠페인이 포함되어 있습니다. 자동 캠페인은 키워드별 입찰 제어가 제한되므로, 위 제외 키워드는 '제외 키워드 등록'으로, 스타 키워드는 별도 수동 캠페인 분리로 대응하는 것이 정석입니다.`);
     }
 
     return {
       placementSummary, tot, totalRevenue, totalRealRoas, totalProfit, totalCtr, totalCvr, avgCPC,
       productSummary, badKeywords, recommendations,
+      revenueMode, campaignSummary, keywordDiag, indirectShare, attributionLag,
+      marginProvided, effectiveBE,
       precision: {
         ctrScore: ctrResult.score, ctrLevel: ctrResult.level,
         cvrScore: cvrResult.score, cvrLevel: cvrResult.level,
@@ -324,15 +516,15 @@ export function AnalyzerDashboard() {
     };
   }, [rawData, unitPrice, unitCost, deliveryFee, coupangFeeRate, netUnitMargin, targetROAS, breakEvenROAS]);
 
-  const gradeColor = (g: string) => ({ S: "text-purple-600", A: "text-blue-600", B: "text-green-600", C: "text-yellow-600", D: "text-red-600" }[g] || "text-slate-600");
-  const gradeBg = (g: string) => ({ S: "bg-purple-50 border-purple-200", A: "bg-blue-50 border-blue-200", B: "bg-green-50 border-green-200", C: "bg-yellow-50 border-yellow-200", D: "bg-red-50 border-red-200" }[g] || "bg-slate-50 border-slate-200");
+  const gradeColor = (g: string) => ({ S: "text-purple-600", A: "text-accent", B: "text-positive", C: "text-caution", D: "text-critical" }[g] || "text-ink-2");
+  const gradeBg = (g: string) => ({ S: "bg-purple-50 border-purple-200", A: "bg-accent-soft border-accent-line", B: "bg-positive-soft border-positive/30", C: "bg-caution-soft border-caution/30", D: "bg-critical-soft border-critical/30" }[g] || "bg-paper-2 border-line");
   const gradeEmoji = (g: string) => ({ S: "🏆", A: "🌟", B: "👍", C: "⚠️", D: "🚨" }[g] || "");
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-slate-50 overflow-hidden">
+    <div className="flex h-[calc(100vh-4rem)] bg-paper-2 overflow-hidden">
       {/* Sidebar */}
-      <div className="w-80 bg-white border-r border-slate-200 p-6 flex flex-col h-full overflow-y-auto shrink-0">
-        <h2 className="text-lg font-bold text-slate-900 mb-6">💰 마진 계산 설정</h2>
+      <div className="w-80 bg-paper border-r border-line p-6 flex flex-col h-full overflow-y-auto shrink-0">
+        <h2 className="text-lg font-semibold text-ink mb-6">💰 마진 계산 설정</h2>
         <div className="space-y-4">
           {[
             { label: "상품 판매가 (원)", val: unitPrice, set: setUnitPrice, step: "1" },
@@ -342,21 +534,21 @@ export function AnalyzerDashboard() {
             { label: "현재 목표수익률 (%)", val: targetROAS, set: setTargetROAS, step: "50" },
           ].map(({ label, val, set, step }) => (
             <div key={label}>
-              <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
+              <label className="block text-sm font-medium text-ink mb-1">{label}</label>
               <input
                 type="number" step={step} value={val || ""}
                 onChange={(e) => set(Number(e.target.value))}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                className="w-full px-3 py-2 border border-line rounded-control focus:ring-2 focus:ring-accent focus:border-accent outline-none transition-all"
               />
             </div>
           ))}
         </div>
-        <div className="mt-6 pt-6 border-t border-slate-200 space-y-3">
-          <div className="flex justify-between text-sm"><span className="text-slate-600">📦 입출고비 합계:</span><span>{deliveryFee.toLocaleString()}원</span></div>
-          <div className="flex justify-between text-sm"><span className="text-slate-600">📊 예상 수수료 ({coupangFeeRate}%):</span><span>{totalFeeAmount.toLocaleString()}원</span></div>
-          <div className="flex justify-between text-base font-bold"><span className="text-slate-900">💡 개당 예상 마진:</span><span className="text-emerald-600">{netUnitMargin.toLocaleString()}원</span></div>
-          {unitPrice > 0 && <div className="flex justify-between text-sm font-bold"><span>📈 예상 마진율:</span><span className="text-blue-600">{marginRate.toFixed(1)}%</span></div>}
-          {breakEvenROAS > 0 && <div className="flex justify-between text-sm font-bold"><span>🎯 손익분기 ROAS:</span><span className="text-orange-600">{breakEvenROAS.toFixed(0)}%</span></div>}
+        <div className="mt-6 pt-6 border-t border-line space-y-3">
+          <div className="flex justify-between text-sm"><span className="text-ink-2">📦 입출고비 합계:</span><span>{deliveryFee.toLocaleString()}원</span></div>
+          <div className="flex justify-between text-sm"><span className="text-ink-2">📊 예상 수수료 ({coupangFeeRate}%):</span><span>{totalFeeAmount.toLocaleString()}원</span></div>
+          <div className="flex justify-between text-base font-semibold"><span className="text-ink">💡 개당 예상 마진:</span><span className="text-positive">{netUnitMargin.toLocaleString()}원</span></div>
+          {unitPrice > 0 && <div className="flex justify-between text-sm font-semibold"><span>📈 예상 마진율:</span><span className="text-accent">{marginRate.toFixed(1)}%</span></div>}
+          {breakEvenROAS > 0 && <div className="flex justify-between text-sm font-semibold"><span>🎯 손익분기 ROAS:</span><span className="text-orange-600">{breakEvenROAS.toFixed(0)}%</span></div>}
         </div>
       </div>
 
@@ -364,56 +556,138 @@ export function AnalyzerDashboard() {
       <div className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-6xl mx-auto">
           <div className="mb-8">
-            <h1 className="text-2xl font-bold text-slate-900 mb-2">📊 쇼크트리 훈프로 쿠팡 광고 성과 분석기</h1>
-            <p className="text-slate-600">쿠팡 보고서(CSV 또는 XLSX)를 업로드하면 훈프로의 정밀 운영 전략이 자동으로 생성됩니다.</p>
+            <h1 className="text-[20px] font-semibold text-ink mb-2">📊 쇼크트리 훈프로 쿠팡 광고 성과 분석기</h1>
+            <p className="text-ink-2">쿠팡 보고서(CSV 또는 XLSX)를 업로드하면 훈프로의 정밀 운영 전략이 자동으로 생성됩니다.</p>
           </div>
 
           {/* File Upload */}
           <div className="mb-8">
-            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 border-dashed rounded-xl cursor-pointer bg-white hover:bg-slate-50 transition-colors">
+            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-line-strong border-dashed rounded-card cursor-pointer bg-paper hover:bg-paper-2 transition-colors">
               <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                <Upload className="w-8 h-8 text-slate-400 mb-2" />
-                <p className="mb-2 text-sm text-slate-500"><span className="font-semibold">클릭하여 파일 업로드</span> 또는 드래그 앤 드롭</p>
-                <p className="text-xs text-slate-500">CSV, XLSX 파일 지원</p>
+                <Upload className="w-8 h-8 text-ink-3 mb-2" />
+                <p className="mb-2 text-sm text-ink-2"><span className="font-semibold">클릭하여 파일 업로드</span> 또는 드래그 앤 드롭</p>
+                <p className="text-xs text-ink-2">CSV, XLSX 파일 지원</p>
               </div>
               <input type="file" className="hidden" accept=".csv, .xlsx" onChange={handleFileUpload} />
             </label>
-            {fileName && <p className="mt-2 text-sm text-emerald-600 font-medium">선택된 파일: {fileName}</p>}
-            {error && <p className="mt-2 text-sm text-red-500 font-medium">{error}</p>}
+            {fileName && <p className="mt-2 text-sm text-positive font-medium">선택된 파일: {fileName}</p>}
+            {error && <p className="mt-2 text-sm text-critical font-medium">{error}</p>}
           </div>
 
           {processedData && !("error" in processedData) && (
             <div className="space-y-8">
+              {/* 마진 미입력 안내 */}
+              {!processedData.marginProvided && (
+                <div className="rounded-card border border-caution/35 bg-caution-soft p-4 text-sm text-caution">
+                  <b>왼쪽에 판매가·원가·수수료를 입력하면 순이익과 손익분기 판정이 정확해집니다.</b>{" "}
+                  현재는 순이익을 계산할 수 없어 '—'로 표시하고, 판정은 기본 기준(손익분기 ROAS 300%)으로 대신하고 있습니다.
+                </div>
+              )}
+
               {/* KPI Cards */}
               <div>
-                <h3 className="text-lg font-bold text-slate-900 mb-4">📌 핵심 성과 지표</h3>
-                <div className="grid grid-cols-5 gap-3">
+                <div className="mb-4 flex items-center gap-2">
+                  <h3 className="text-lg font-semibold text-ink">📌 핵심 성과 지표</h3>
+                  <span className={`rounded-control border px-2 py-0.5 text-[11px] font-semibold ${
+                    processedData.revenueMode === "actual"
+                      ? "border-positive/35 bg-positive-soft text-positive"
+                      : "border-caution/35 bg-caution-soft text-caution"
+                  }`}>
+                    {processedData.revenueMode === "actual" ? "보고서 실측 매출 기준" : "판매수량 × 입력 판매가 추정"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
                   {[
-                    { label: "최종 실질 순이익", value: `${processedData.totalProfit.toLocaleString()}원`, color: processedData.totalProfit >= 0 ? "text-red-500" : "text-blue-500" },
-                    { label: "총 광고비", value: `${processedData.tot.광고비.toLocaleString()}원`, color: "text-slate-900" },
-                    { label: "실제 ROAS", value: `${(processedData.totalRealRoas * 100).toFixed(0)}%`, color: "text-slate-900" },
-                    { label: "총 판매수량", value: `${processedData.tot.판매수량.toLocaleString()}개`, color: "text-slate-900" },
-                    { label: "구매전환율(CVR)", value: `${(processedData.totalCvr * 100).toFixed(2)}%`, color: "text-slate-900" },
+                    { label: "최종 실질 순이익", value: processedData.marginProvided ? `${Math.round(processedData.totalProfit).toLocaleString()}원` : "—", color: !processedData.marginProvided ? "text-ink-3" : processedData.totalProfit >= 0 ? "text-positive" : "text-critical" },
+                    { label: "총 전환매출", value: `${Math.round(processedData.totalRevenue).toLocaleString()}원`, color: "text-ink" },
+                    { label: "총 광고비", value: `${processedData.tot.광고비.toLocaleString()}원`, color: "text-ink" },
+                    { label: "실제 ROAS", value: `${(processedData.totalRealRoas * 100).toFixed(0)}%`, color: "text-ink" },
+                    { label: "총 판매수량", value: `${processedData.tot.판매수량.toLocaleString()}개`, color: "text-ink" },
+                    { label: "구매전환율(CVR)", value: `${(processedData.totalCvr * 100).toFixed(2)}%`, color: "text-ink" },
                   ].map(({ label, value, color }) => (
-                    <div key={label} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center">
-                      <p className="text-xs text-slate-500 font-medium mb-1">{label}</p>
-                      <p className={`text-xl font-bold ${color}`}>{value}</p>
+                    <div key={label} className="bg-paper p-4 rounded-card border border-line text-center">
+                      <p className="text-xs text-ink-2 font-medium mb-1">{label}</p>
+                      <p className={`text-xl font-semibold tabular-nums ${color}`}>{value}</p>
                     </div>
                   ))}
                 </div>
+                {(processedData.indirectShare !== null || processedData.attributionLag !== null) && (
+                  <div className="mt-2 flex flex-wrap gap-2 text-[12px] text-ink-2">
+                    {processedData.indirectShare !== null && (
+                      <span className="rounded-control border border-line bg-paper px-2.5 py-1">간접 전환 비중 <b className="text-ink">{processedData.indirectShare.toFixed(0)}%</b></span>
+                    )}
+                    {processedData.attributionLag !== null && (
+                      <span className="rounded-control border border-line bg-paper px-2.5 py-1">익일 이후 전환 <b className="text-ink">{processedData.attributionLag.toFixed(0)}%</b> (전환 지연형)</span>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* 캠페인별 성과 */}
+              {processedData.campaignSummary && processedData.campaignSummary.length > 1 && (
+                <div>
+                  <h3 className="text-lg font-semibold text-ink mb-4">🗂️ 캠페인별 성과 판정</h3>
+                  <div className="overflow-x-auto border border-line rounded-card">
+                    <table className="w-full text-sm text-left">
+                      <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line">
+                        <tr>
+                          {["캠페인", "판정", "광고비", "매출", "ROAS", "검색 ROAS", "비검색 ROAS", "순이익", "추천 세팅"].map((h) => (
+                            <th key={h} className="px-4 py-3 text-right first:text-left last:text-left [&:nth-child(2)]:text-center">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {processedData.campaignSummary.map((c: any, idx: number) => {
+                          const V: Record<string, { label: string; cls: string }> = {
+                            scale: { label: "확대", cls: "border-positive/35 bg-positive-soft text-positive" },
+                            keep: { label: "유지", cls: "border-accent/35 bg-accent-soft text-accent" },
+                            fix: { label: "개선", cls: "border-caution/35 bg-caution-soft text-caution" },
+                            stop: { label: "중단 검토", cls: "border-critical/35 bg-critical-soft text-critical" },
+                            watch: { label: "관찰", cls: "border-line-strong bg-paper-2 text-ink-3" },
+                          };
+                          const v = V[c.verdict];
+                          return (
+                            <tr key={idx} className="bg-paper border-b border-line last:border-b-0 hover:bg-paper-2">
+                              <td className="px-4 py-3 font-medium text-ink">{c.캠페인}</td>
+                              <td className="px-4 py-3 text-center">
+                                <span className={`inline-flex rounded-control border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap ${v.cls}`}>{v.label}</span>
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums">{c.광고비.toLocaleString()}원</td>
+                              <td className="px-4 py-3 text-right tabular-nums">{Math.round(c.매출).toLocaleString()}원</td>
+                              <td className="px-4 py-3 text-right tabular-nums">{c.roasPct.toFixed(0)}%</td>
+                              <td className="px-4 py-3 text-right tabular-nums">
+                                {c.검색광고비 > 0 ? `${c.검색ROAS.toFixed(0)}%` : "—"}
+                                {c.광고비 > 0 && <span className="ml-1 text-[11px] text-ink-3">({c.검색비중.toFixed(0)}%)</span>}
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums">{c.비검색광고비 > 0 ? `${c.비검색ROAS.toFixed(0)}%` : "—"}</td>
+                              <td className={`px-4 py-3 text-right font-semibold tabular-nums ${!processedData.marginProvided ? "text-ink-3" : c.순이익 >= 0 ? "text-positive" : "text-critical"}`}>{processedData.marginProvided ? `${Math.round(c.순이익).toLocaleString()}원` : "—"}</td>
+                              <td className="px-4 py-3 text-left text-[12px] font-medium leading-snug text-ink whitespace-nowrap">{c.lever}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-2 text-[12px] text-ink-2">
+                    판정 기준(손익분기 ROAS {Math.round(processedData.effectiveBE)}%{processedData.marginProvided ? '' : ' — 마진 미입력으로 기본값 적용'}): <b>확대</b> 손익분기×1.3↑ & 판매 2건↑ · <b>유지</b> 손익분기 이상 · <b>개선</b> 미달(클릭 20↑) · <b>중단 검토</b> 클릭 30↑ 판매 0 · <b>관찰</b> 데이터 부족
+                  </p>
+                  <p className="mt-1 text-[12px] text-ink-2">
+                    검색 ROAS 옆 괄호는 광고비 중 검색 지면 비중입니다. <b>추천 세팅</b>의 목표수익률 %는 왼쪽 사이드바의 '현재 목표수익률' 입력값을 기준으로 계산됩니다 — 매출 최적화 캠페인의 조작 레버는 <b>예산</b>과 <b>목표수익률</b> 두 가지뿐이며, 목표수익률을 내리면 검색 노출·클릭이 늘고(CPC↑), 올리면 CPC가 절감되며 소진이 비검색 위주로 이동합니다.
+                  </p>
+                </div>
+              )}
 
               {/* 종합 등급 */}
               {processedData.precision && (
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">🎯 종합 진단 등급</h3>
-                  <div className={`border rounded-xl p-6 ${gradeBg(processedData.precision.grade)}`}>
+                  <h3 className="text-lg font-semibold text-ink mb-4">🎯 종합 진단 등급</h3>
+                  <div className={`border rounded-card p-6 ${gradeBg(processedData.precision.grade)}`}>
                     <div className="flex items-center gap-6 mb-6">
                       <div className="text-center">
-                        <div className={`text-6xl font-black ${gradeColor(processedData.precision.grade)}`}>
+                        <div className={`text-6xl font-semibold ${gradeColor(processedData.precision.grade)}`}>
                           {gradeEmoji(processedData.precision.grade)} {processedData.precision.grade}
                         </div>
-                        <p className="text-sm text-slate-600 mt-1">종합 점수 {processedData.precision.totalScore.toFixed(1)}점</p>
+                        <p className="text-sm text-ink-2 mt-1">종합 점수 {processedData.precision.totalScore.toFixed(1)}점</p>
                       </div>
                       <div className="flex-1 grid grid-cols-4 gap-4">
                         {[
@@ -423,10 +697,10 @@ export function AnalyzerDashboard() {
                           { label: "효율 점수", score: processedData.precision.efficiencyScore },
                         ].map(({ label, score }) => (
                           <div key={label} className="text-center">
-                            <p className="text-xs text-slate-600 mb-1">{label}</p>
-                            <p className="text-lg font-bold text-slate-900">{score.toFixed(0)}</p>
-                            <div className="w-full bg-slate-200 rounded-full h-2 mt-1">
-                              <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${Math.min(score, 100)}%` }} />
+                            <p className="text-xs text-ink-2 mb-1">{label}</p>
+                            <p className="text-lg font-semibold text-ink">{score.toFixed(0)}</p>
+                            <div className="w-full bg-line rounded-full h-2 mt-1">
+                              <div className="bg-accent h-2 rounded-full" style={{ width: `${Math.min(score, 100)}%` }} />
                             </div>
                           </div>
                         ))}
@@ -438,10 +712,10 @@ export function AnalyzerDashboard() {
 
               {/* Placement Table */}
               <div>
-                <h3 className="text-lg font-bold text-slate-900 mb-4">📍 지면별 상세 분석</h3>
-                <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-sm">
+                <h3 className="text-lg font-semibold text-ink mb-4">📍 지면별 상세 분석</h3>
+                <div className="overflow-x-auto border border-line rounded-card">
                   <table className="w-full text-sm text-left">
-                    <thead className="text-xs text-slate-700 uppercase bg-slate-50 border-b border-slate-200">
+                    <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line">
                       <tr>
                         {["지면","노출수","클릭수","광고비","판매수량","실제매출액","CPC","클릭률(CTR)","구매전환율(CVR)","실제ROAS","실질순이익"].map((h) => (
                           <th key={h} className="px-4 py-3 text-right first:text-left">{h}</th>
@@ -450,8 +724,8 @@ export function AnalyzerDashboard() {
                     </thead>
                     <tbody>
                       {processedData.placementSummary.map((row: any, idx: number) => (
-                        <tr key={idx} className="bg-white border-b border-slate-100 hover:bg-slate-50">
-                          <td className="px-4 py-3 font-medium text-slate-900">{row.지면}</td>
+                        <tr key={idx} className="bg-paper border-b border-line hover:bg-paper-2">
+                          <td className="px-4 py-3 font-medium text-ink">{row.지면}</td>
                           <td className="px-4 py-3 text-right">{row.노출수.toLocaleString()}</td>
                           <td className="px-4 py-3 text-right">{row.클릭수.toLocaleString()}</td>
                           <td className="px-4 py-3 text-right">{row.광고비.toLocaleString()}원</td>
@@ -461,7 +735,7 @@ export function AnalyzerDashboard() {
                           <td className="px-4 py-3 text-right">{(row.클릭률 * 100).toFixed(2)}%</td>
                           <td className="px-4 py-3 text-right">{(row.구매전환율 * 100).toFixed(2)}%</td>
                           <td className="px-4 py-3 text-right">{(row.실제ROAS * 100).toFixed(0)}%</td>
-                          <td className={`px-4 py-3 text-right font-bold ${row.실질순이익 >= 0 ? "text-red-500" : "text-blue-500"}`}>{row.실질순이익.toLocaleString()}원</td>
+                          <td className={`px-4 py-3 text-right font-semibold tabular-nums ${!processedData.marginProvided ? "text-ink-3" : row.실질순이익 >= 0 ? "text-positive" : "text-critical"}`}>{processedData.marginProvided ? `${Math.round(row.실질순이익).toLocaleString()}원` : "—"}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -472,22 +746,22 @@ export function AnalyzerDashboard() {
               {/* Products */}
               {processedData.productSummary && (
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">🛍️ 옵션별 성과 분석</h3>
+                  <h3 className="text-lg font-semibold text-ink mb-4">🛍️ 옵션별 성과 분석</h3>
                   <div className="flex flex-col gap-6">
                     <div>
-                      <h4 className="font-semibold text-slate-800 mb-3">🏆 효자 옵션 (판매순)</h4>
-                      <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-sm max-h-80">
+                      <h4 className="font-semibold text-ink mb-3">🏆 효자 옵션 (판매순)</h4>
+                      <div className="overflow-x-auto border border-line rounded-card max-h-80">
                         <table className="w-full text-sm text-left">
-                          <thead className="text-xs text-slate-700 uppercase bg-slate-50 border-b border-slate-200 sticky top-0">
+                          <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line sticky top-0">
                             <tr><th className="px-4 py-3">상품명</th><th className="px-4 py-3 text-right">판매수량</th><th className="px-4 py-3 text-right">광고비</th><th className="px-4 py-3 text-right">실질순이익</th></tr>
                           </thead>
                           <tbody>
                             {processedData.productSummary.filter((p: any) => p.판매수량 > 0).sort((a: any, b: any) => b.판매수량 - a.판매수량).map((row: any, idx: number) => (
-                              <tr key={idx} className="bg-white border-b border-slate-100 hover:bg-slate-50">
-                                <td className="px-4 py-3 font-medium text-slate-900 whitespace-normal break-words">{row.상품명}</td>
+                              <tr key={idx} className="bg-paper border-b border-line hover:bg-paper-2">
+                                <td className="px-4 py-3 font-medium text-ink whitespace-normal break-words">{row.상품명}</td>
                                 <td className="px-4 py-3 text-right">{row.판매수량.toLocaleString()}개</td>
                                 <td className="px-4 py-3 text-right">{row.광고비.toLocaleString()}원</td>
-                                <td className={`px-4 py-3 text-right font-bold ${row.실질순이익 >= 0 ? "text-red-500" : "text-blue-500"}`}>{row.실질순이익.toLocaleString()}원</td>
+                                <td className={`px-4 py-3 text-right font-semibold tabular-nums ${!processedData.marginProvided ? "text-ink-3" : row.실질순이익 >= 0 ? "text-positive" : "text-critical"}`}>{processedData.marginProvided ? `${Math.round(row.실질순이익).toLocaleString()}원` : "—"}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -495,17 +769,17 @@ export function AnalyzerDashboard() {
                       </div>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-slate-800 mb-3">💸 돈만 쓰는 옵션 (판매0)</h4>
-                      <div className="overflow-x-auto border border-slate-200 rounded-xl shadow-sm max-h-80">
+                      <h4 className="font-semibold text-ink mb-3">💸 돈만 쓰는 옵션 (판매0)</h4>
+                      <div className="overflow-x-auto border border-line rounded-card max-h-80">
                         <table className="w-full text-sm text-left">
-                          <thead className="text-xs text-slate-700 uppercase bg-slate-50 border-b border-slate-200 sticky top-0">
+                          <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line sticky top-0">
                             <tr><th className="px-4 py-3">상품명</th><th className="px-4 py-3 text-right">광고비</th><th className="px-4 py-3 text-right">클릭수</th></tr>
                           </thead>
                           <tbody>
                             {processedData.productSummary.filter((p: any) => p.판매수량 === 0 && p.광고비 > 0).sort((a: any, b: any) => b.광고비 - a.광고비).map((row: any, idx: number) => (
-                              <tr key={idx} className="bg-white border-b border-slate-100 hover:bg-slate-50">
-                                <td className="px-4 py-3 font-medium text-slate-900 whitespace-normal break-words">{row.상품명}</td>
-                                <td className="px-4 py-3 text-right text-red-500 font-medium">{row.광고비.toLocaleString()}원</td>
+                              <tr key={idx} className="bg-paper border-b border-line hover:bg-paper-2">
+                                <td className="px-4 py-3 font-medium text-ink whitespace-normal break-words">{row.상품명}</td>
+                                <td className="px-4 py-3 text-right text-critical font-medium">{row.광고비.toLocaleString()}원</td>
                                 <td className="px-4 py-3 text-right">{row.클릭수.toLocaleString()}</td>
                               </tr>
                             ))}
@@ -517,33 +791,79 @@ export function AnalyzerDashboard() {
                 </div>
               )}
 
-              {/* Bad Keywords */}
-              {processedData.badKeywords && processedData.badKeywords.length > 0 && (
+              {/* 키워드 정밀 진단 */}
+              {processedData.keywordDiag && processedData.keywordDiag.total > 0 && (
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">✂️ 제외 키워드 제안</h3>
-                  <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                    <p className="text-sm text-slate-600 mb-1">
-                      광고비만 소진하고 판매가 없는 키워드 <span className="font-bold text-red-500">{processedData.badKeywords.length}개</span> —
-                      낭비 광고비: <span className="font-bold text-red-500">₩{processedData.badKeywords.reduce((s: number, k: any) => s + k.광고비, 0).toLocaleString()}</span>
-                    </p>
-                    <p className="text-sm text-slate-600 mb-2">복사해서 제외 등록하세요:</p>
-                    <textarea
-                      readOnly
-                      className="w-full h-24 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none"
-                      value={processedData.badKeywords.map((k: any) => k.키워드).join(", ")}
-                    />
+                  <h3 className="text-lg font-semibold text-ink mb-1">🔬 키워드 정밀 진단 (검색 영역 {processedData.keywordDiag.total}개)</h3>
+                  <p className="text-[12px] text-ink-2 mb-4">
+                    현재 전환율 기준, 클릭 {processedData.keywordDiag.expectClicks}회면 1건은 팔렸어야 합니다 — 이 기준으로 '제외'와 '판단 보류'를 구분합니다.
+                  </p>
+                  <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-5">
+                    {[
+                      { label: "🌟 스타 (확장)", n: processedData.keywordDiag.star.length, sub: `매출 ₩${Math.round(processedData.keywordDiag.starRevenue).toLocaleString()}`, cls: "border-positive/35 bg-positive-soft text-positive" },
+                      { label: "✅ 효율 (유지)", n: processedData.keywordDiag.ok.length, sub: "손익분기 이상", cls: "border-accent/35 bg-accent-soft text-accent" },
+                      { label: "🟡 저효율 (개선)", n: processedData.keywordDiag.lowRoas.length, sub: "판매 有, 손익분기 미달", cls: "border-caution/35 bg-caution-soft text-caution" },
+                      { label: "🔴 제외 후보", n: processedData.keywordDiag.drain.length, sub: `낭비 ₩${processedData.keywordDiag.drainCost.toLocaleString()}`, cls: "border-critical/35 bg-critical-soft text-critical" },
+                      { label: "👀 판단 보류", n: processedData.keywordDiag.watch.length, sub: `₩${processedData.keywordDiag.watchCost.toLocaleString()} · 데이터 부족`, cls: "border-line-strong bg-paper-2 text-ink-2" },
+                    ].map(({ label, n, sub, cls }) => (
+                      <div key={label} className={`rounded-card border p-3 text-center ${cls}`}>
+                        <p className="text-[12px] font-semibold">{label}</p>
+                        <p className="mt-1 text-xl font-semibold tabular-nums">{n}</p>
+                        <p className="mt-0.5 text-[11px] opacity-80">{sub}</p>
+                      </div>
+                    ))}
                   </div>
+
+                  {processedData.keywordDiag.star.length > 0 && (
+                    <div className="mb-4">
+                      <h4 className="font-semibold text-ink mb-2">🌟 스타 키워드 — 수동 캠페인 분리·확대 추천</h4>
+                      <div className="overflow-x-auto border border-line rounded-card max-h-64">
+                        <table className="w-full text-sm text-left">
+                          <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line sticky top-0">
+                            <tr><th className="px-4 py-2.5">키워드</th><th className="px-4 py-2.5 text-right">클릭</th><th className="px-4 py-2.5 text-right">광고비</th><th className="px-4 py-2.5 text-right">매출</th><th className="px-4 py-2.5 text-right">ROAS</th><th className="px-4 py-2.5 text-right">CPC</th></tr>
+                          </thead>
+                          <tbody>
+                            {processedData.keywordDiag.star.map((k: any, i: number) => (
+                              <tr key={i} className="bg-paper border-b border-line last:border-b-0 hover:bg-paper-2">
+                                <td className="px-4 py-2.5 font-medium text-ink">{k.키워드}</td>
+                                <td className="px-4 py-2.5 text-right tabular-nums">{k.클릭수.toLocaleString()}</td>
+                                <td className="px-4 py-2.5 text-right tabular-nums">{k.광고비.toLocaleString()}원</td>
+                                <td className="px-4 py-2.5 text-right tabular-nums">{Math.round(k.매출).toLocaleString()}원</td>
+                                <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-positive">{k.roasPct.toFixed(0)}%</td>
+                                <td className="px-4 py-2.5 text-right tabular-nums">{k.cpc.toFixed(0)}원</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {processedData.keywordDiag.drain.length > 0 && (
+                    <div className="bg-paper border border-line rounded-card p-4">
+                      <p className="text-sm text-ink-2 mb-1">
+                        🔴 제외 후보 <span className="font-semibold text-critical">{processedData.keywordDiag.drain.length}개</span> —
+                        충분한 클릭에도 판매 0건, 낭비 광고비 <span className="font-semibold text-critical">₩{processedData.keywordDiag.drainCost.toLocaleString()}</span>
+                      </p>
+                      <p className="text-sm text-ink-2 mb-2">복사해서 제외 키워드로 등록하세요:</p>
+                      <textarea
+                        readOnly
+                        className="w-full h-24 p-3 bg-paper-2 border border-line rounded-control text-sm text-ink focus:outline-none"
+                        value={processedData.keywordDiag.drain.map((k: any) => k.키워드).join(", ")}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
               {/* Recommendations */}
               {processedData.recommendations.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">💡 훈프로의 정밀 운영 제안</h3>
+                  <h3 className="text-lg font-semibold text-ink mb-4">💡 훈프로의 정밀 운영 제안</h3>
                   <div className="space-y-3">
                     {processedData.recommendations.map((rec: string, idx: number) => (
-                      <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
-                        <p className="text-sm text-slate-800 leading-relaxed">{rec}</p>
+                      <div key={idx} className="bg-paper border border-line rounded-card p-4">
+                        <p className="text-sm text-ink leading-relaxed">{rec}</p>
                       </div>
                     ))}
                   </div>
@@ -553,7 +873,7 @@ export function AnalyzerDashboard() {
           )}
 
           {"error" in (processedData ?? {}) && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-600">
+            <div className="p-4 bg-critical-soft border border-critical/30 rounded-card text-critical">
               {(processedData as any).error}
             </div>
           )}

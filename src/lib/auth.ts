@@ -19,11 +19,29 @@ export function removeToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * JWT 페이로드를 UTF-8로 안전하게 디코딩한다.
+ * atob()는 바이트를 그대로 문자로 돌려주므로 한글 이름이 깨진다
+ * (예: '훈' = ED 9B 88 → 'í›ˆ'). 바이트로 되돌린 뒤 UTF-8로 해석해야 한다.
+ * JWT는 base64url(-, _)을 쓰고 패딩이 생략되므로 그것도 함께 보정한다.
+ */
+function decodeJwtPayload(token: string): any {
+  const part = token.split('.')[1];
+  if (!part) throw new Error('토큰 형식이 올바르지 않습니다.');
+  const base64 = part
+    .replace(/-/g, '+')
+    .replace(/_/g, '/')
+    .padEnd(Math.ceil(part.length / 4) * 4, '=');
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+  return JSON.parse(new TextDecoder('utf-8').decode(bytes));
+}
+
 export function getUser(): AuthUser | null {
   const token = getToken();
   if (!token) return null;
   try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
+    const payload = decodeJwtPayload(token);
     if (payload.exp * 1000 < Date.now()) {
       removeToken();
       return null;

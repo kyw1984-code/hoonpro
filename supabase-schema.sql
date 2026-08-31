@@ -121,14 +121,40 @@ create table if not exists sourcing_favorites (
 
 alter table sourcing_favorites disable row level security;
 
+-- 10. 내 상품 순위 추적 — 등록 상품이 키워드 검색 결과 몇 위인지 수집 시마다 기록
+create table if not exists sourcing_rank_watch (
+  user_id uuid not null,
+  keyword text not null,
+  product_id text not null,
+  product_name text,
+  created_at timestamptz default now(),
+  primary key (user_id, keyword, product_id)
+);
+
+alter table sourcing_rank_watch disable row level security;
+
+create table if not exists sourcing_rank_obs (
+  id bigserial primary key,
+  keyword text not null,
+  product_id text not null,
+  rank int,            -- 광고 제외(오가닉) 순위, null = 1페이지(60위) 밖
+  rank_with_ads int,   -- 광고 포함 노출 순서
+  price int,
+  captured_at timestamptz default now()
+);
+
+create index if not exists idx_sro on sourcing_rank_obs(keyword, product_id, captured_at);
+
+alter table sourcing_rank_obs disable row level security;
+
 -- ─────────────────────────────────────────────────────────────
 -- "훈프로에게 질문" RAG 챗봇 (지식 문서 + 청크 임베딩 + 질문 로그)
 -- ─────────────────────────────────────────────────────────────
 
--- 10. pgvector 확장 (Supabase 대시보드 Extensions에서도 활성화 가능)
+-- 11. pgvector 확장 (Supabase 대시보드 Extensions에서도 활성화 가능)
 create extension if not exists vector;
 
--- 11. 지식 문서 (강의 정리본 / 카톡 Q&A)
+-- 12. 지식 문서 (강의 정리본 / 카톡 Q&A)
 create table if not exists knowledge_docs (
   id uuid default gen_random_uuid() primary key,
   title text not null,
@@ -141,7 +167,7 @@ create table if not exists knowledge_docs (
 
 alter table knowledge_docs disable row level security;
 
--- 12. 지식 청크 (text-embedding-3-small = 1536차원)
+-- 13. 지식 청크 (text-embedding-3-small = 1536차원)
 create table if not exists knowledge_chunks (
   id uuid default gen_random_uuid() primary key,
   doc_id uuid references knowledge_docs(id) on delete cascade,
@@ -158,7 +184,7 @@ create index if not exists idx_knowledge_chunks_embedding on knowledge_chunks
 
 alter table knowledge_chunks disable row level security;
 
--- 13. 유사도 검색 RPC (코사인 유사도 상위 N개 청크 + 문서 정보)
+-- 14. 유사도 검색 RPC (코사인 유사도 상위 N개 청크 + 문서 정보)
 create or replace function match_knowledge_chunks(
   query_embedding vector(1536),
   match_count int default 5,
@@ -190,7 +216,7 @@ as $$
   limit match_count;
 $$;
 
--- 14. 질문/답변 로그 (피드백 포함)
+-- 15. 질문/답변 로그 (피드백 포함)
 create table if not exists qa_logs (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references users(id) on delete set null,
