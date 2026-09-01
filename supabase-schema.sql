@@ -366,3 +366,15 @@ create index if not exists idx_qa_logs_created_at on qa_logs(created_at);
 create index if not exists idx_qa_logs_user_id on qa_logs(user_id);
 
 alter table qa_logs disable row level security;
+
+-- 11. 광고 보고서 추이 — 분석 요약본을 저장해 지난 보고서 대비 변화를 비교
+create table if not exists ad_reports (
+  id bigserial primary key,
+  user_id uuid not null,
+  summary jsonb not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_adr_user on ad_reports(user_id, created_at desc);
+
+alter table ad_reports disable row level security;

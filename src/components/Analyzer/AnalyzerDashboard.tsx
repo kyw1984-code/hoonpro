@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
-import { Upload } from "lucide-react";
+import { Upload, Save, TrendingUp, X, Loader2 } from "lucide-react";
+import { getToken } from "../../lib/auth";
 
 // ─── 지면 분류 헬퍼 ("비검색"이 "검색"을 포함하는 substring 함정 방지) ───
 function isSearchPlatform(platform: string): boolean {
@@ -516,6 +517,68 @@ export function AnalyzerDashboard() {
     };
   }, [rawData, unitPrice, unitCost, deliveryFee, coupangFeeRate, netUnitMargin, targetROAS, breakEvenROAS]);
 
+  // ─── 성과 추이 — 보고서 요약을 저장해 지난 분석 대비 변화를 비교 ────────────
+  const [savedReports, setSavedReports] = useState<any[] | null>(null);
+  const [reportSaving, setReportSaving] = useState(false);
+  const [reportMsg, setReportMsg] = useState<string | null>(null);
+
+  const usageHeaders = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` });
+
+  const loadReports = async () => {
+    try {
+      const res = await fetch("/api/usage?action=report-list", { method: "POST", headers: usageHeaders(), body: "{}" });
+      const data = await res.json();
+      setSavedReports(res.ok && Array.isArray(data.reports) ? data.reports : []);
+    } catch {
+      setSavedReports([]);
+    }
+  };
+  useEffect(() => { loadReports(); }, []);
+
+  const buildReportSummary = () => {
+    if (!processedData) return null;
+    const pd: any = processedData;
+    return {
+      grade: pd.precision?.grade ?? null,
+      totalCost: Math.round(pd.tot?.광고비 || 0),
+      totalRevenue: Math.round(pd.totalRevenue || 0),
+      roasPct: Math.round((pd.totalRealRoas || 0) * 1000) / 10,
+      totalProfit: pd.marginProvided ? Math.round(pd.totalProfit || 0) : null,
+      qty: pd.tot?.판매수량 || 0,
+      starCount: pd.keywordDiag?.star?.length ?? null,
+      drainCount: pd.keywordDiag?.drain?.length ?? null,
+      drainCost: pd.keywordDiag ? Math.round(pd.keywordDiag.drainCost || 0) : null,
+    };
+  };
+
+  const saveReport = async () => {
+    const summary = buildReportSummary();
+    if (!summary || reportSaving) return;
+    setReportSaving(true);
+    setReportMsg(null);
+    try {
+      const res = await fetch("/api/usage?action=report-save", {
+        method: "POST", headers: usageHeaders(),
+        body: JSON.stringify({ action: "report-save", summary }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) setReportMsg(data.error || "저장 실패");
+      else { setReportMsg("저장됐습니다. 다음 보고서 분석 때 자동으로 비교됩니다."); loadReports(); }
+    } catch (e: any) {
+      setReportMsg(e.message);
+    } finally {
+      setReportSaving(false);
+    }
+  };
+
+  const deleteReport = async (id: number) => {
+    await fetch("/api/usage?action=report-delete", {
+      method: "POST", headers: usageHeaders(),
+      body: JSON.stringify({ action: "report-delete", id }),
+    }).catch(() => {});
+    loadReports();
+  };
+
   const gradeColor = (g: string) => ({ S: "text-purple-600", A: "text-accent", B: "text-positive", C: "text-caution", D: "text-critical" }[g] || "text-ink-2");
   const gradeBg = (g: string) => ({ S: "bg-purple-50 border-purple-200", A: "bg-accent-soft border-accent-line", B: "bg-positive-soft border-positive/30", C: "bg-caution-soft border-caution/30", D: "bg-critical-soft border-critical/30" }[g] || "bg-paper-2 border-line");
   const gradeEmoji = (g: string) => ({ S: "🏆", A: "🌟", B: "👍", C: "⚠️", D: "🚨" }[g] || "");
@@ -709,6 +772,108 @@ export function AnalyzerDashboard() {
                   </div>
                 </div>
               )}
+
+              {/* 성과 추이 — 지난 보고서 대비 변화 */}
+              <div>
+                <h3 className="text-lg font-semibold text-ink mb-4">📈 성과 추이 — 지난 보고서와 비교</h3>
+                <div className="rounded-card border border-line bg-paper p-5">
+                  {(() => {
+                    const cur = buildReportSummary();
+                    const prev = savedReports && savedReports.length > 0 ? savedReports[0].summary : null;
+                    const deltaBadge = (d: number | null, unit: string, goodUp: boolean, digits = 0) => {
+                      if (d === null || Math.abs(d) < 0.05) return <span className="text-[11px] text-ink-3">변화 없음</span>;
+                      const good = goodUp ? d > 0 : d < 0;
+                      return (
+                        <span className={`inline-flex items-center rounded-control border px-1.5 py-0.5 text-[11px] font-semibold tabular-nums ${good ? "border-positive/35 bg-positive-soft text-positive" : "border-critical/35 bg-critical-soft text-critical"}`}>
+                          {d > 0 ? "▲" : "▼"} {Math.abs(d).toLocaleString(undefined, { maximumFractionDigits: digits })}{unit}
+                        </span>
+                      );
+                    };
+                    const num = (v: any): number | null => (typeof v === "number" ? v : null);
+                    return (
+                      <>
+                        {cur && prev ? (
+                          <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                            {[
+                              { label: "ROAS", cur: `${cur.roasPct.toFixed(0)}%`, d: cur.roasPct - (num(prev.roasPct) ?? cur.roasPct), unit: "%p", goodUp: true, digits: 1 },
+                              { label: "광고비", cur: `${cur.totalCost.toLocaleString()}원`, d: cur.totalCost - (num(prev.totalCost) ?? cur.totalCost), unit: "원", goodUp: false },
+                              { label: "실질 순이익", cur: cur.totalProfit !== null ? `${cur.totalProfit.toLocaleString()}원` : "—", d: cur.totalProfit !== null && num(prev.totalProfit) !== null ? cur.totalProfit - prev.totalProfit : null, unit: "원", goodUp: true },
+                              { label: "제외 후보 키워드", cur: cur.drainCount !== null ? `${cur.drainCount}개` : "—", d: cur.drainCount !== null && num(prev.drainCount) !== null ? cur.drainCount - prev.drainCount : null, unit: "개", goodUp: false },
+                            ].map(({ label, cur: cv, d, unit, goodUp, digits }) => (
+                              <div key={label} className="rounded-card border border-line bg-paper-2 p-3.5">
+                                <p className="text-[11px] font-semibold text-ink-3">{label}</p>
+                                <p className="mt-0.5 text-[17px] font-semibold tabular-nums text-ink">{cv}</p>
+                                <div className="mt-1">{deltaBadge(d, unit, goodUp, digits)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mb-4 text-[13px] text-ink-2">
+                            아직 저장된 보고서가 없습니다. 아래 버튼으로 이번 분석을 저장해두면, <b>다음 보고서를 올릴 때 지난번 대비 변화</b>(ROAS·순이익·제외 키워드)가 여기 표시됩니다 — 코칭을 반영한 결과를 데이터로 확인하세요.
+                          </p>
+                        )}
+                        {cur && prev && (
+                          <p className="mb-4 text-[11px] text-ink-3">
+                            비교 기준: {new Date(savedReports![0].created_at).toLocaleDateString("ko-KR")} 저장 보고서 · 광고비 증가는 확장 중이면 정상이니 ROAS·순이익과 함께 보세요.
+                          </p>
+                        )}
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <button onClick={saveReport} disabled={reportSaving || !cur}
+                            className="flex items-center gap-1.5 rounded-control bg-ink px-4 py-2 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
+                            {reportSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            현재 분석 저장
+                          </button>
+                          {reportMsg && <span className={`text-[12px] ${reportMsg.includes("저장됐") ? "text-positive" : "text-critical"}`}>{reportMsg}</span>}
+                        </div>
+
+                        {savedReports && savedReports.length > 0 && (
+                          <div className="mt-5">
+                            <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-ink-3">
+                              <TrendingUp className="h-3.5 w-3.5" />저장된 보고서 ({savedReports.length})
+                            </p>
+                            <div className="overflow-x-auto rounded-card border border-line">
+                              <table className="w-full text-[13px]">
+                                <thead className="bg-paper-2 text-[11px] font-semibold uppercase tracking-wider text-ink-3">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left">저장일</th>
+                                    <th className="px-4 py-2 text-center">등급</th>
+                                    <th className="px-4 py-2 text-right">광고비</th>
+                                    <th className="px-4 py-2 text-right">매출</th>
+                                    <th className="px-4 py-2 text-right">ROAS</th>
+                                    <th className="px-4 py-2 text-right">순이익</th>
+                                    <th className="px-4 py-2 text-right">제외 후보</th>
+                                    <th className="px-4 py-2"></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {savedReports.map((r: any) => (
+                                    <tr key={r.id} className="border-t border-line bg-paper hover:bg-paper-2">
+                                      <td className="px-4 py-2 whitespace-nowrap text-ink">{new Date(r.created_at).toLocaleDateString("ko-KR")} {new Date(r.created_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</td>
+                                      <td className="px-4 py-2 text-center font-semibold text-ink">{r.summary?.grade ?? "—"}</td>
+                                      <td className="px-4 py-2 text-right tabular-nums text-ink-2">{Number(r.summary?.totalCost ?? 0).toLocaleString()}원</td>
+                                      <td className="px-4 py-2 text-right tabular-nums text-ink-2">{Number(r.summary?.totalRevenue ?? 0).toLocaleString()}원</td>
+                                      <td className="px-4 py-2 text-right tabular-nums font-semibold text-ink">{Number(r.summary?.roasPct ?? 0).toFixed(0)}%</td>
+                                      <td className={`px-4 py-2 text-right tabular-nums font-semibold ${r.summary?.totalProfit === null || r.summary?.totalProfit === undefined ? "text-ink-3" : r.summary.totalProfit >= 0 ? "text-positive" : "text-critical"}`}>
+                                        {r.summary?.totalProfit === null || r.summary?.totalProfit === undefined ? "—" : `${Number(r.summary.totalProfit).toLocaleString()}원`}
+                                      </td>
+                                      <td className="px-4 py-2 text-right tabular-nums text-ink-2">{r.summary?.drainCount ?? "—"}</td>
+                                      <td className="px-2 py-2 text-right">
+                                        <button onClick={() => deleteReport(r.id)} title="삭제" className="rounded-control p-1 text-ink-3 hover:bg-paper-2 hover:text-critical">
+                                          <X className="h-3.5 w-3.5" />
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
 
               {/* Placement Table */}
               <div>

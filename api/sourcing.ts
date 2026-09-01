@@ -1499,10 +1499,14 @@ async function handleCron(req: VercelRequest, res: VercelResponse) {
   } catch { /* 정렬 실패 시 원래 순서 유지 */ }
   keywords.sort((a, b) => (ageMap.get(keyOf(a)) ?? 0) - (ageMap.get(keyOf(b)) ?? 0));
 
+  // 시간 기반 상한: 60초 제한 안에서 최대한 수집 (구 6개 고정 → 보통 10개 이상 처리)
+  const cronStart = Date.now();
+  const CRON_BUDGET_MS = 45_000;
+  const CRON_MAX = 15;
   let crawled = 0;
   const results: string[] = [];
   for (const kw of keywords) {
-    if (crawled >= 6) break; // maxDuration(60s) 내에서 안전한 상한
+    if (crawled >= CRON_MAX || Date.now() - cronStart > CRON_BUDGET_MS) break;
     const cacheKey = keyOf(kw);
     const cachedAt = ageMap.get(cacheKey);
     if (cachedAt && Date.now() - cachedAt < 20 * 3600 * 1000) continue; // 오늘 이미 수집됨
@@ -1546,6 +1550,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     decoded = jwt.verify(auth.slice(7), process.env.JWT_SECRET!);
   } catch {
     return res.status(401).json({ error: "유효하지 않은 토큰입니다. 다시 로그인해주세요." });
+  }
+
+  // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 사용 불가 (api/qa.ts와 동일 기준)
+  if (!decoded.isAdmin && supabase) {
+    const { data: enforcedCfg } = await supabase
+      .from("app_config")
+      .select("value")
+      .eq("key", "billing_enforced")
+      .maybeSingle();
+    if (enforcedCfg?.value === "true") {
+      const { data: sub } = await supabase
+        .from("subscriptions")
+        .select("status")
+        .eq("user_id", decoded.userId)
+        .maybeSingle();
+      if (!sub || !["trial", "active", "past_due"].includes(sub.status)) {
+        return res.status(402).json({
+          error: "구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.",
+          subscriptionRequired: true,
+        });
+      }
+    }
   }
 
   if (type === "keywords") return handleKeywords(req, res);

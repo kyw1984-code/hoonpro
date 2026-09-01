@@ -99,6 +99,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: '유효하지 않은 토큰입니다.' });
   }
 
+  // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 사용 불가 (api/qa.ts와 동일 기준)
+  if (!decoded.isAdmin) {
+    const { data: enforcedCfg } = await supabase
+      .from('app_config')
+      .select('value')
+      .eq('key', 'billing_enforced')
+      .maybeSingle();
+    if (enforcedCfg?.value === 'true') {
+      const { data: sub } = await supabase
+        .from('subscriptions')
+        .select('status')
+        .eq('user_id', decoded.userId)
+        .maybeSingle();
+      if (!sub || !['trial', 'active', 'past_due'].includes(sub.status)) {
+        return res.status(402).json({
+          error: '구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.',
+          subscriptionRequired: true,
+        });
+      }
+    }
+  }
+
   const { prompt, feature, mode } = req.body ?? {};
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: '프롬프트가 필요합니다.' });

@@ -68,6 +68,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  // ─── 광고 보고서 추이 (요약본 저장·조회 — 지난 보고서 대비 변화 비교용) ───
+  if (action === 'report-save') {
+    const { summary } = req.body ?? {};
+    if (!summary || typeof summary !== 'object') return res.status(400).json({ error: '저장할 요약이 없습니다.' });
+    const { error } = await supabase.from('ad_reports').insert({ user_id: decoded.userId, summary });
+    if (error) {
+      if (/ad_reports/.test(error.message || '')) {
+        return res.status(400).json({ error: 'ad_reports 테이블이 없습니다. supabase-schema.sql 마이그레이션을 실행해주세요.' });
+      }
+      return res.status(500).json({ error: '저장 실패' });
+    }
+    // 사용자당 최근 24개만 보존
+    try {
+      const { data: old } = await supabase
+        .from('ad_reports')
+        .select('id')
+        .eq('user_id', decoded.userId)
+        .order('created_at', { ascending: false })
+        .range(24, 200);
+      if (old && old.length > 0) {
+        await supabase.from('ad_reports').delete().in('id', old.map(r => r.id));
+      }
+    } catch { /* 정리 실패는 무시 */ }
+    return res.status(200).json({ ok: true });
+  }
+
+  if (action === 'report-list') {
+    const { data, error } = await supabase
+      .from('ad_reports')
+      .select('id, summary, created_at')
+      .eq('user_id', decoded.userId)
+      .order('created_at', { ascending: false })
+      .limit(12);
+    if (error) return res.status(200).json({ reports: [] });
+    return res.status(200).json({ reports: data || [] });
+  }
+
+  if (action === 'report-delete') {
+    const { id } = req.body ?? {};
+    if (!id) return res.status(400).json({ error: 'id가 필요합니다.' });
+    await supabase.from('ad_reports').delete().eq('user_id', decoded.userId).eq('id', id);
+    return res.status(200).json({ ok: true });
+  }
+
   // 사용량 호출 기록 (비용/모델 로깅)
   if (action === 'log') {
     const { feature, model, inputTokens, outputTokens } = req.body ?? {};
