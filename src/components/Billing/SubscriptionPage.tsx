@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { CreditCard, BadgeCheck, AlertTriangle, Ticket, Loader2, CalendarClock, Receipt } from 'lucide-react';
+import { CreditCard, BadgeCheck, AlertTriangle, Ticket, Loader2, CalendarClock, Receipt, Gift } from 'lucide-react';
+import { getToken } from '../../lib/auth';
 import {
   fetchBillingStatus, validateCoupon, subscribeWithCard, cancelSubscription, resumeSubscription,
   changeCard, requestRefund, startCardRegistration, consumeBillingReturn, tossConfigured,
@@ -40,6 +41,29 @@ export function SubscriptionPage() {
   const [couponPreview, setCouponPreview] = useState<CouponPreview | null>(null);
   // 연간 결제를 기본 선택으로 유도
   const [selectedPlanId, setSelectedPlanId] = useState('yearly');
+
+  // 친구 추천 코드 (개인 쿠폰 — 사용 현황 포함)
+  const [referral, setReferral] = useState<any | null>(null);
+  const [refCopied, setRefCopied] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/billing?action=referral', { headers: { Authorization: `Bearer ${getToken()}` } });
+        const data = await res.json();
+        if (res.ok && data.code) setReferral(data);
+      } catch { /* 무시 */ }
+    })();
+  }, []);
+
+  const copyReferral = async () => {
+    if (!referral) return;
+    try {
+      await navigator.clipboard.writeText(referral.code);
+      setRefCopied(true);
+      setTimeout(() => setRefCopied(false), 2000);
+    } catch { /* 무시 */ }
+  };
 
   const reload = async () => {
     try {
@@ -437,6 +461,27 @@ export function SubscriptionPage() {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 친구 추천 */}
+      {referral && referral.active && (
+        <div className="rounded-panel border border-line bg-paper p-6">
+          <div className="mb-1 flex items-center gap-2">
+            <Gift className="h-4 w-4 text-accent" />
+            <h3 className="text-[15px] font-semibold text-ink">친구 추천</h3>
+          </div>
+          <p className="text-[12.5px] text-ink-2">
+            이 코드를 동료 셀러에게 공유하세요. 친구가 구독할 때 쿠폰 코드로 입력하면 <b>첫 결제 {referral.value}% 할인</b>을 받습니다.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="rounded-control border border-accent-line bg-accent-soft px-4 py-2 font-mono text-[15px] font-semibold tracking-wide text-accent">{referral.code}</span>
+            <button onClick={copyReferral}
+              className="rounded-control border border-line px-3 py-2 text-[13px] font-semibold text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
+              {refCopied ? '복사됨 ✓' : '코드 복사'}
+            </button>
+            <span className="ml-auto text-[12px] tabular-nums text-ink-3">지금까지 {referral.redeemedCount ?? 0}명이 사용했습니다</span>
           </div>
         </div>
       )}

@@ -15,15 +15,18 @@ import { AuthGate } from './components/Auth/AuthGate';
 import { AdminPanel } from './components/Admin/AdminPanel';
 import { SubscriptionPage } from './components/Billing/SubscriptionPage';
 import { AskHoonpro } from './components/QA/AskHoonpro';
-import { LayoutTemplate, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock } from 'lucide-react';
+import { HomeDashboard } from './components/Home/HomeDashboard';
+import { WorksLibrary } from './components/Works/WorksLibrary';
+import { Home, FolderOpen, LayoutTemplate, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock } from 'lucide-react';
 import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 import { fetchBillingStatus, type BillingStatus } from './lib/billing';
 
-type Tab = 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'qa' | 'billing' | 'admin';
+type Tab = 'home' | 'works' | 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'qa' | 'billing' | 'admin';
 
 type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
 
 const TABS: TabDef[] = [
+  { id: 'home', label: '홈', icon: Home },
   { id: 'thumbnail', label: '썸네일 제작', icon: ImageIcon },
   { id: 'detail', label: '상세페이지 제작', icon: LayoutTemplate },
   { id: 'sourcing', label: '훈프로 소싱AI', icon: TrendingUp },
@@ -31,6 +34,7 @@ const TABS: TabDef[] = [
   { id: 'review', label: '리뷰 분석', icon: MessageSquareText },
   { id: 'analyzer', label: '광고 성과 분석', icon: BarChart3 },
   { id: 'qa', label: '훈프로에게 질문', icon: MessageCircleQuestion },
+  { id: 'works', label: '내 작업', icon: FolderOpen },
 ];
 
 // 관리자가 저장한 탭 순서 (app_config.tab_order). 로컬 캐시로 첫 화면 깜빡임을 막는다.
@@ -67,7 +71,7 @@ const getTabButtonClass = (active: boolean): string => (
 
 // 토스 카드 등록에서 돌아온 리다이렉트는 구독 탭에서 이어서 처리한다
 const initialTab = (): Tab =>
-  window.location.search.includes('billingAuth') ? 'billing' : 'thumbnail';
+  window.location.search.includes('billingAuth') ? 'billing' : 'home';
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);
@@ -234,13 +238,15 @@ export default function App() {
             </div>
           ) : (
             <>
-              {activeTab === 'thumbnail' && <ThumbnailGenerator />}
+              {activeTab === 'home' && <HomeDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
+          {activeTab === 'thumbnail' && <ThumbnailGenerator />}
               {activeTab === 'detail' && <DetailPlanner />}
               {activeTab === 'sourcing' && <SourcingFinder />}
               {activeTab === 'ranktracker' && <RankTracker />}
               {activeTab === 'review' && <ReviewAnalyzer />}
               {activeTab === 'analyzer' && <AdAnalyzer />}
-              {activeTab === 'qa' && qaVisible && <AskHoonpro />}
+              {activeTab === 'works' && <WorksLibrary />}
+          {activeTab === 'qa' && qaVisible && <AskHoonpro />}
               {activeTab === 'billing' && <SubscriptionPage />}
               {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
             </>

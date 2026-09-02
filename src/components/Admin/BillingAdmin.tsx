@@ -64,6 +64,7 @@ async function callBilling(action: string, body?: Record<string, unknown>) {
 
 export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }) {
   const [subs, setSubs] = useState<SubRow[]>([]);
+  const [stats, setStats] = useState<any | null>(null);
   const [byStatus, setByStatus] = useState<Record<string, number>>({});
   const [coupons, setCoupons] = useState<CouponRow[]>([]);
   const [enforced, setEnforced] = useState<boolean | null>(null);
@@ -79,15 +80,17 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
   const reload = async () => {
     setLoading(true);
     try {
-      const [subData, couponData, cfg] = await Promise.all([
+      const [subData, couponData, cfg, statData] = await Promise.all([
         callBilling('admin-subscriptions'),
         callBilling('admin-coupons'),
         callBilling('admin-config'),
+        callBilling('admin-stats').catch(() => null),
       ]);
       setSubs(subData.subscriptions ?? []);
       setByStatus(subData.byStatus ?? {});
       setCoupons(couponData.coupons ?? []);
       setEnforced(Boolean(cfg.billingEnforced));
+      setStats(statData);
     } catch (e: any) {
       showToast(e?.message ?? '구독 정보를 불러오지 못했습니다. (DB 마이그레이션 확인)');
     } finally {
@@ -158,6 +161,24 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
 
   return (
     <div className="space-y-8">
+      {/* 수익 요약 */}
+      {stats && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {[
+            { label: '유효 구독자', value: `${(stats.totalSubscribers ?? 0).toLocaleString()}명`, sub: `체험 ${stats.counts?.trial ?? 0} · 활성 ${stats.counts?.active ?? 0} · 재시도 ${stats.counts?.past_due ?? 0}` },
+            { label: '월 반복 매출 (MRR)', value: `${(stats.mrr ?? 0).toLocaleString()}원`, sub: '활성·재시도 구독 기준 추정' },
+            { label: '최근 30일 결제액', value: `${(stats.revenue30d ?? 0).toLocaleString()}원`, sub: `성공 ${stats.payments30d ?? 0}건 · 실패 ${stats.failed30d ?? 0}건` },
+            { label: '최근 30일 해지', value: `${(stats.canceled30d ?? 0).toLocaleString()}명`, sub: `누적 해지 ${stats.counts?.canceled ?? 0} · 정지 ${stats.counts?.paused ?? 0}` },
+          ].map(({ label, value, sub }) => (
+            <div key={label} className="rounded-card border border-line bg-paper p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-ink-3">{label}</p>
+              <p className="mt-1 text-[20px] font-semibold tabular-nums text-ink">{value}</p>
+              <p className="mt-0.5 text-[11px] text-ink-3">{sub}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 유료화 스위치 */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-paper p-5">
         <div>

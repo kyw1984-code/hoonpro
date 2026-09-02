@@ -579,6 +579,22 @@ export function AnalyzerDashboard() {
     loadReports();
   };
 
+  // 스타 키워드 → 소싱AI 관심 키워드 원클릭 등록 (매일 자동 추적 대상이 됨)
+  const [favAdded, setFavAdded] = useState<Record<string, boolean>>({});
+
+  const addStarToFavorites = async (keyword: string) => {
+    if (favAdded[keyword]) return;
+    try {
+      const params = new URLSearchParams({ type: "favorites", action: "add", keyword });
+      const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: { Authorization: `Bearer ${getToken()}` } });
+      const data = await res.json();
+      if (!res.ok || data.error) { alert(data.error || "등록 실패"); return; }
+      setFavAdded(prev => ({ ...prev, [keyword]: true }));
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
   const gradeColor = (g: string) => ({ S: "text-purple-600", A: "text-accent", B: "text-positive", C: "text-caution", D: "text-critical" }[g] || "text-ink-2");
   const gradeBg = (g: string) => ({ S: "bg-purple-50 border-purple-200", A: "bg-accent-soft border-accent-line", B: "bg-positive-soft border-positive/30", C: "bg-caution-soft border-caution/30", D: "bg-critical-soft border-critical/30" }[g] || "bg-paper-2 border-line");
   const gradeEmoji = (g: string) => ({ S: "🏆", A: "🌟", B: "👍", C: "⚠️", D: "🚨" }[g] || "");
@@ -985,7 +1001,7 @@ export function AnalyzerDashboard() {
                       <div className="overflow-x-auto border border-line rounded-card max-h-64">
                         <table className="w-full text-sm text-left">
                           <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line sticky top-0">
-                            <tr><th className="px-4 py-2.5">키워드</th><th className="px-4 py-2.5 text-right">클릭</th><th className="px-4 py-2.5 text-right">광고비</th><th className="px-4 py-2.5 text-right">매출</th><th className="px-4 py-2.5 text-right">ROAS</th><th className="px-4 py-2.5 text-right">CPC</th></tr>
+                            <tr><th className="px-4 py-2.5">키워드</th><th className="px-4 py-2.5 text-right">클릭</th><th className="px-4 py-2.5 text-right">광고비</th><th className="px-4 py-2.5 text-right">매출</th><th className="px-4 py-2.5 text-right">ROAS</th><th className="px-4 py-2.5 text-right">CPC</th><th className="px-4 py-2.5 text-right">소싱AI</th></tr>
                           </thead>
                           <tbody>
                             {processedData.keywordDiag.star.map((k: any, i: number) => (
@@ -996,6 +1012,13 @@ export function AnalyzerDashboard() {
                                 <td className="px-4 py-2.5 text-right tabular-nums">{Math.round(k.매출).toLocaleString()}원</td>
                                 <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-positive">{k.roasPct.toFixed(0)}%</td>
                                 <td className="px-4 py-2.5 text-right tabular-nums">{k.cpc.toFixed(0)}원</td>
+                                <td className="px-4 py-2.5 text-right">
+                                  <button onClick={() => addStarToFavorites(k.키워드)} disabled={favAdded[k.키워드]}
+                                    title="소싱AI 관심 키워드로 저장 — 매일 자동 수집·시장 추적 대상이 됩니다"
+                                    className="rounded-control border border-line px-2 py-1 text-[11px] font-semibold text-ink-2 hover:border-line-strong hover:text-ink disabled:opacity-60 whitespace-nowrap">
+                                    {favAdded[k.키워드] ? "✓ 추적 중" : "★ 관심 등록"}
+                                  </button>
+                                </td>
                               </tr>
                             ))}
                           </tbody>

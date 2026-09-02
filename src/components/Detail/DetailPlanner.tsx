@@ -1881,6 +1881,128 @@ export const DetailPlanner: React.FC = () => {
         await Promise.all(sortImagesByGenerationPriority(warningTargets).map(seg => generateOne(seg, true, masters, visualLock, true)));
     };
 
+    // ─── 기획안 전체를 텍스트로 복사 (상세페이지 텍스트 영역·문서 정리용) ──────
+    const [planCopied, setPlanCopied] = useState(false);
+
+    const buildPlanText = (): string => {
+        if (!plan) return '';
+        const L: string[] = [];
+        L.push(`■ 상세페이지 기획안 — ${info.name || '상품'}`);
+        L.push('');
+        L.push('[제품 정의]');
+        L.push(plan.productDefinition);
+        if (plan.productReason) L.push(`왜 존재하는가: ${plan.productReason}`);
+        if (plan.productProblem) L.push(`해결하는 문제: ${plan.productProblem}`);
+        L.push('');
+        L.push('[고객 분석]');
+        L.push(`타겟: ${plan.customer?.target || ''} (${plan.customer?.age || ''} / ${plan.customer?.gender || ''} / ${plan.customer?.job || ''})`);
+        if (plan.customer?.lifestyle) L.push(`라이프스타일: ${plan.customer.lifestyle}`);
+        if (plan.customer?.purchaseSituation) L.push(`구매 상황: ${plan.customer.purchaseSituation}`);
+        L.push(`표면 니즈: ${plan.customer?.surfaceNeed || ''}`);
+        L.push(`실제 니즈: ${plan.customer?.realNeed || ''}`);
+        L.push('');
+        L.push('[경쟁 대비 차별점]');
+        (plan.differentiators || []).forEach(d => L.push(`- ${d}`));
+        if (plan.competitorComparison?.length) {
+            L.push('');
+            L.push('[경쟁상품 비교표]');
+            plan.competitorComparison.forEach(r => L.push(`- ${r.item}: 경쟁상품 "${r.competitor}" vs 본 제품 "${r.ours}"`));
+        }
+        L.push('');
+        L.push('[구매 저항 요소]');
+        (plan.purchaseResistances || []).forEach(d => L.push(`- ${d}`));
+        if (plan.detailInfoItems?.length) {
+            L.push('');
+            L.push(`[카테고리별 상세 정보${plan.productCategory ? ` — ${plan.productCategory}` : ''}]`);
+            plan.detailInfoItems.forEach(d => L.push(`- ${d}`));
+        }
+        if (plan.faqItems?.length) {
+            L.push('');
+            L.push('[구매 전 자주 묻는 질문]');
+            plan.faqItems.forEach(d => L.push(`- ${d}`));
+        }
+        L.push('');
+        L.push('[이미지별 구성]');
+        images.forEach(img => {
+            L.push(`${img.number}. [${img.role}] ${normalizeOverlayCopy(img.mainCopy)}${img.subCopy ? ` / ${img.subCopy}` : ''}`);
+            if (img.purpose) L.push(`   목적: ${img.purpose}`);
+            if (img.trustElement) L.push(`   신뢰 요소: ${img.trustElement}`);
+        });
+        return L.join('\n');
+    };
+
+    // 보관함에 저장 — '내 작업' 탭에서 다시 볼 수 있다
+    const [planSaving, setPlanSaving] = useState(false);
+    const [planStoreSaved, setPlanStoreSaved] = useState(false);
+
+    const handleSavePlanToWorks = async () => {
+        const text = buildPlanText();
+        if (!text || planSaving || planStoreSaved) return;
+        setPlanSaving(true);
+        try {
+            const res = await fetch('/api/works?action=save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+                body: JSON.stringify({
+                    kind: 'detail-plan',
+                    title: info.name || '상세페이지 기획안',
+                    payload: { planText: text },
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) alert(data.error || '보관함 저장 실패');
+            else setPlanStoreSaved(true);
+        } catch (e: any) {
+            alert(e.message);
+        } finally {
+            setPlanSaving(false);
+        }
+    };
+
+    const handleCopyPlan = async () => {
+        const text = buildPlanText();
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            setPlanCopied(true);
+            setTimeout(() => setPlanCopied(false), 2500);
+        } catch {
+            window.prompt('아래 내용을 복사하세요 (Ctrl+C):', text.slice(0, 2000));
+        }
+    };
+
+    // ─── 완성 이미지 전체를 ZIP 하나로 다운로드 ─────────────────────────────
+    const [zipBuilding, setZipBuilding] = useState(false);
+
+    const handleDownloadZip = async () => {
+        const done = images.filter(img => img.imageUrl);
+        if (done.length === 0 || zipBuilding) return;
+        setZipBuilding(true);
+        try {
+            const { default: JSZip } = await import('jszip');
+            const zip = new JSZip();
+            for (let i = 0; i < done.length; i++) {
+                const img = done[i];
+                const blob = await (await fetch(img.imageUrl)).blob();
+                const safeRole = (img.role || '섹션').replace(/[\\/:*?"<>|\s]/g, '');
+                zip.file(`detail_${String(i + 1).padStart(2, '0')}_${safeRole}.png`, blob);
+            }
+            const out = await zip.generateAsync({ type: 'blob' });
+            const url = URL.createObjectURL(out);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `상세페이지_${(info.name || '상품').replace(/[\\/:*?"<>|\s]/g, '_').slice(0, 30)}.zip`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (e: any) {
+            alert(`ZIP 생성 실패: ${e?.message || e}`);
+        } finally {
+            setZipBuilding(false);
+        }
+    };
+
     const handleDownloadAll = () => {
         if (qaWarnings.length > 0) {
             const ok = window.confirm(`최종 QA 경고가 ${qaWarnings.length}건 있습니다.\n그래도 다운로드할까요?`);
@@ -2189,6 +2311,19 @@ export const DetailPlanner: React.FC = () => {
                                     <p className="text-xs text-ink-2">AI가 도출한 구매 설득 구조입니다.</p>
                                 </div>
                             </div>
+                            <div className="flex items-center gap-2">
+                                <button onClick={handleCopyPlan}
+                                    title="기획안 전체(분석·비교표·FAQ·이미지별 카피)를 텍스트로 복사"
+                                    className="flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12px] font-semibold text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
+                                    <FileText className="h-3.5 w-3.5" />{planCopied ? '복사됨 ✓' : '기획안 전체 복사'}
+                                </button>
+                                <button onClick={handleSavePlanToWorks} disabled={planSaving || planStoreSaved}
+                                    title="'내 작업' 탭에 저장 — 새로고침해도 사라지지 않습니다"
+                                    className="flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12px] font-semibold text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60">
+                                    {planSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Layers3 className="h-3.5 w-3.5" />}
+                                    {planStoreSaved ? '보관함 저장됨 ✓' : '보관함에 저장'}
+                                </button>
+                            </div>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                             <div className="rounded-card border border-line bg-paper-2 p-4">
@@ -2248,6 +2383,15 @@ export const DetailPlanner: React.FC = () => {
                                         {plan.detailInfoItems.map((d, i) => <li key={i} className="list-disc list-inside">{d}</li>)}
                                     </ul>
                                     <p className="mt-1.5 text-[11px] text-ink-3">"상품 등록 정보 확인 필요" 항목은 실제 값으로 채워서 상세페이지 텍스트 영역에 사용하세요.</p>
+                                </div>
+                            )}
+                            {plan.faqItems && plan.faqItems.length > 0 && (
+                                <div className="rounded-card border border-line bg-paper-2 p-4 md:col-span-2">
+                                    <p className="font-semibold text-ink mb-1.5">구매 전 자주 묻는 질문 (FAQ)</p>
+                                    <ul className="space-y-1 text-ink-2">
+                                        {plan.faqItems.map((d, i) => <li key={i} className="leading-relaxed">{d}</li>)}
+                                    </ul>
+                                    <p className="mt-1.5 text-[11px] text-ink-3">이미지에 넣지 말고 상세페이지 하단 텍스트 영역(FAQ)에 붙여 넣으세요 — 구매 저항을 마지막에 해소하는 역할입니다.</p>
                                 </div>
                             )}
                         </div>
@@ -2504,6 +2648,11 @@ export const DetailPlanner: React.FC = () => {
                             </button>
                             <button onClick={handleRetryVisionWarnings} disabled={visionWarningCount === 0 || generatingCount > 0} className="flex items-center gap-1 rounded-control border border-accent/35 px-5 py-2.5 text-[13px] font-medium text-accent transition-colors disabled:border-line disabled:text-ink-3">
                                 <RefreshCw className="w-4 h-4" /> QA 경고 재생성 ({visionWarningCount})
+                            </button>
+                            <button onClick={handleDownloadZip} disabled={generatedCount === 0 || zipBuilding}
+                                title="완성 이미지 전체를 ZIP 파일 하나로 다운로드"
+                                className="flex items-center gap-2 rounded-control border border-line px-5 py-2.5 text-[13px] font-semibold text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40">
+                                {zipBuilding ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />} ZIP 다운로드
                             </button>
                             <button onClick={handleDownloadAll} disabled={generatedCount === 0} className="flex items-center rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
                                 <Download className="w-5 h-5 mr-2" /> 전체 다운로드

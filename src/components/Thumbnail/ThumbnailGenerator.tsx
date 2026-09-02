@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { generateImage } from '../../api/aiService';
-import { Box, Download, Image as ImageIcon, Layers3, Loader2, Palette, Sparkles, Type, Upload, Wand2, X, UserRound } from 'lucide-react';
+import { Box, Download, FolderOpen, Image as ImageIcon, Layers3, Loader2, Palette, Sparkles, Type, Upload, Wand2, X, UserRound } from 'lucide-react';
+import { getToken } from '../../lib/auth';
 
 export const ThumbnailGenerator: React.FC = () => {
     const [loading, setLoading] = useState(false);
@@ -10,6 +11,28 @@ export const ThumbnailGenerator: React.FC = () => {
     const [shotType, setShotType] = useState<'product' | 'model'>('product');
     const [referenceImages, setReferenceImages] = useState<string[]>([]);
     const [resultImage, setResultImage] = useState<string>('');
+    // 보관함 저장 (내 작업 탭에서 다시 보기)
+    const [workSaving, setWorkSaving] = useState(false);
+    const [workSaved, setWorkSaved] = useState(false);
+
+    const saveToWorks = async () => {
+        if (!resultImage || workSaving || workSaved) return;
+        setWorkSaving(true);
+        try {
+            const res = await fetch('/api/works?action=save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+                body: JSON.stringify({ kind: 'thumbnail', title: `썸네일 ${new Date().toLocaleDateString('ko-KR')}`, image: resultImage }),
+            });
+            const data = await res.json();
+            if (!res.ok || data.error) alert(data.error || '보관함 저장 실패');
+            else setWorkSaved(true);
+        } catch (e: any) {
+            alert(e.message);
+        } finally {
+            setWorkSaving(false);
+        }
+    };
     const [baseImage, setBaseImage] = useState<string>('');
     const [overlayText, setOverlayText] = useState('');
     const [textPosition, setTextPosition] = useState<'top' | 'middle' | 'bottom'>('top');
@@ -142,6 +165,7 @@ export const ThumbnailGenerator: React.FC = () => {
             });
             const imageUrl = result?.image;
             if (imageUrl) {
+                setWorkSaved(false);
                 const resizedUrl = await new Promise<string>((resolve) => {
                     const img = new Image();
                     img.crossOrigin = "anonymous";
@@ -397,6 +421,13 @@ export const ThumbnailGenerator: React.FC = () => {
                         <p className="mt-1 text-xs text-ink-2">1000 x 1000 PNG</p>
                     </div>
                     {resultImage && (
+                        <div className="flex items-center gap-2">
+                        <button onClick={saveToWorks} disabled={workSaving || workSaved}
+                            title="내 작업 탭에 저장 — 새로고침해도 사라지지 않습니다"
+                            className="flex items-center rounded-card border border-line px-4 py-2.5 font-semibold text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-60">
+                            {workSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FolderOpen className="w-4 h-4 mr-2" />}
+                            {workSaved ? '저장됨 ✓' : '보관함에 저장'}
+                        </button>
                         <a 
                             href={resultImage}
                             download="thumbnail.png"
@@ -405,6 +436,7 @@ export const ThumbnailGenerator: React.FC = () => {
                             <Download className="w-4 h-4 mr-2" />
                             다운로드
                         </a>
+                        </div>
                     )}
                 </div>
                 

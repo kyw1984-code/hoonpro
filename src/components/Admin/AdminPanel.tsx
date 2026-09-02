@@ -363,6 +363,7 @@ const COST_TABLE: Record<string, Record<string, number>> = {
 
 // ─── 탭 순서 설정 — App.tsx TABS와 id·라벨이 일치해야 함 ─────────────────────
 const TAB_LABELS: { id: string; label: string }[] = [
+  { id: 'home', label: '홈' },
   { id: 'thumbnail', label: '썸네일 제작' },
   { id: 'detail', label: '상세페이지 제작' },
   { id: 'sourcing', label: '훈프로 소싱AI' },
@@ -370,6 +371,7 @@ const TAB_LABELS: { id: string; label: string }[] = [
   { id: 'review', label: '리뷰 분석' },
   { id: 'analyzer', label: '광고 성과 분석' },
   { id: 'qa', label: '훈프로에게 질문' },
+  { id: 'works', label: '내 작업' },
 ];
 
 function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {

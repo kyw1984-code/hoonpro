@@ -1458,6 +1458,130 @@ async function handleFavorites(req: VercelRequest, res: VercelResponse, decoded:
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// 이메일 알림 — 순위 급락 즉시 알림 + 주 1회 요약 (크론에서 호출)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// 이메일 발송 (Resend) — 키가 없으면 조용히 스킵 (api/billing.ts와 동일)
+async function sendEmail(to: string, subject: string, html: string): Promise<void> {
+  const key = process.env.RESEND_API_KEY;
+  if (!key || !to) return;
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: process.env.EMAIL_FROM || "no-reply@hoonpro.app", to: [to], subject, html }),
+    });
+  } catch { /* 발송 실패가 수집을 막지 않도록 */ }
+}
+
+const esc = (s: string) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// 사용자별 순위 현황: 추적 항목마다 최근 관측 2개를 뽑아 최신 순위와 변화를 계산
+async function collectRankStates() {
+  if (!supabase) return [];
+  const { data: watches } = await supabase
+    .from("sourcing_rank_watch")
+    .select("user_id, keyword, product_id, product_name");
+  if (!watches || watches.length === 0) return [];
+  const { data: obs } = await supabase
+    .from("sourcing_rank_obs")
+    .select("keyword, product_id, rank, captured_at")
+    .in("product_id", [...new Set(watches.map(w => w.product_id))])
+    .gte("captured_at", new Date(Date.now() - 8 * 86400000).toISOString())
+    .order("captured_at", { ascending: false })
+    .limit(3000);
+  return watches.map(w => {
+    const hist = (obs || []).filter(o => o.keyword === w.keyword && o.product_id === w.product_id);
+    const latest = hist[0] || null;
+    const prev = hist.find(o => latest && o.captured_at < latest.captured_at) || null;
+    return { ...w, latestRank: latest ? latest.rank : undefined, prevRank: prev ? prev.rank : undefined, latestAt: latest?.captured_at || null };
+  });
+}
+
+// 순위 급락(5계단↑ 하락 또는 20위 이내 → 순위권 밖) 시 소유자에게 즉시 메일
+async function sendRankAlerts(): Promise<number> {
+  if (!supabase) return 0;
+  const states = await collectRankStates();
+  const alerts = states.filter(s => {
+    if (s.latestRank === undefined || s.prevRank === undefined) return false;
+    if (s.prevRank !== null && s.latestRank === null && s.prevRank <= 20) return true; // 순위권 이탈
+    if (s.prevRank !== null && s.latestRank !== null && s.latestRank - s.prevRank >= 5) return true; // 5계단↑ 하락
+    return false;
+  });
+  if (alerts.length === 0) return 0;
+
+  const byUser = new Map<string, typeof alerts>();
+  for (const a of alerts) {
+    if (!byUser.has(a.user_id)) byUser.set(a.user_id, []);
+    byUser.get(a.user_id)!.push(a);
+  }
+  const { data: users } = await supabase.from("users").select("id, email, name").in("id", [...byUser.keys()]);
+  let sent = 0;
+  for (const [uid, list] of byUser) {
+    if (sent >= 50) break;
+    const u = (users || []).find(x => x.id === uid);
+    if (!u?.email) continue;
+    const rows = list.map(a =>
+      `<li><b>"${esc(a.keyword)}"</b> — ${esc(a.product_name || `상품 ${a.product_id}`)}: ` +
+      `${a.prevRank === null ? "순위권 밖" : `${a.prevRank}위`} → <b style="color:#b4342b">${a.latestRank === null ? "순위권(60위) 밖" : `${a.latestRank}위`}</b></li>`,
+    ).join("");
+    await sendEmail(
+      u.email,
+      "[훈프로] 내 상품 순위가 하락했습니다",
+      `<p>${esc(u.name || "")}님, 추적 중인 상품의 검색 순위가 하락했습니다.</p><ul>${rows}</ul>` +
+      `<p>순위 하락은 보통 경쟁 상품의 광고 강화나 리뷰 역전이 원인입니다. 훈프로의 [순위 추적]과 [광고 성과 분석]에서 원인을 점검해보세요.</p>`,
+    );
+    sent += 1;
+  }
+  return sent;
+}
+
+// 주 1회(월요일 새벽 KST) 요약: 내 상품 순위 현황 + 이번 주 추천 소싱 키워드
+async function sendWeeklyDigest(): Promise<number> {
+  if (!supabase) return 0;
+  const states = await collectRankStates();
+  const byUser = new Map<string, typeof states>();
+  for (const s of states) {
+    if (!byUser.has(s.user_id)) byUser.set(s.user_id, []);
+    byUser.get(s.user_id)!.push(s);
+  }
+  if (byUser.size === 0) return 0;
+
+  // 이번 주 추천 키워드 (브리핑 캐시 재사용)
+  const nextMonth = (new Date().getMonth() + 1) % 12 + 1;
+  const briefing = await cacheGet(`briefing:v1:${nextMonth}`);
+  const picks: any[] = (briefing?.payload?.items || []).slice(0, 5);
+  const pickHtml = picks.length
+    ? `<p><b>이번 주 추천 소싱 키워드 (${nextMonth}월 판매 준비)</b></p><ul>` +
+      picks.map(p => `<li>${esc(p.keyword)} — 월 검색량 ${Number(p.monthlyVolume).toLocaleString()}</li>`).join("") + "</ul>"
+    : "";
+
+  const { data: users } = await supabase.from("users").select("id, email, name").in("id", [...byUser.keys()]);
+  let sent = 0;
+  for (const [uid, list] of byUser) {
+    if (sent >= 100) break;
+    const u = (users || []).find(x => x.id === uid);
+    if (!u?.email) continue;
+    const rows = list.slice(0, 15).map(s => {
+      const cur = s.latestRank === undefined ? "기록 대기" : s.latestRank === null ? "60위 밖" : `${s.latestRank}위`;
+      const delta = s.prevRank !== undefined && s.prevRank !== null && s.latestRank !== undefined && s.latestRank !== null
+        ? (s.prevRank - s.latestRank > 0 ? ` (▲${s.prevRank - s.latestRank})` : s.prevRank - s.latestRank < 0 ? ` (▼${s.latestRank - s.prevRank})` : "")
+        : "";
+      return `<li><b>"${esc(s.keyword)}"</b> ${esc(s.product_name || `상품 ${s.product_id}`)} — <b>${cur}</b>${delta}</li>`;
+    }).join("");
+    await sendEmail(
+      u.email,
+      "[훈프로] 주간 리포트 — 내 상품 순위와 이번 주 추천 키워드",
+      `<p>${esc(u.name || "")}님, 이번 주 훈프로 요약입니다.</p>` +
+      `<p><b>내 상품 순위 현황</b></p><ul>${rows}</ul>${pickHtml}` +
+      `<p>자세한 내용은 훈프로 앱의 홈 대시보드에서 확인하세요.</p>`,
+    );
+    sent += 1;
+  }
+  return sent;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // 크론: 관심 키워드 자동 재수집 → 리뷰 증가속도(판매속도) 자동 축적
 // Vercel Cron이 매일 호출 (vercel.json). 실행당 최대 6개 키워드,
 // 20시간 이내 수집된 키워드는 건너뛰므로 비용이 자연히 상한된다.
@@ -1524,7 +1648,15 @@ async function handleCron(req: VercelRequest, res: VercelResponse) {
       results.push(`${kw}: 파싱 ${p.products.length}개`);
     }
   }
-  return res.status(200).json({ ok: true, totalFavorites: keywords.length, crawled, results });
+  // ── 이메일 알림: 순위 급락 즉시 + 일요일(UTC, KST 월요일 새벽)엔 주간 요약 ──
+  let alertMails = 0;
+  let weeklyMails = 0;
+  try { alertMails = await sendRankAlerts(); } catch { /* 알림 실패는 수집 결과에 영향 없음 */ }
+  if (new Date().getUTCDay() === 0) {
+    try { weeklyMails = await sendWeeklyDigest(); } catch { /* 동일 */ }
+  }
+
+  return res.status(200).json({ ok: true, totalFavorites: keywords.length, crawled, results, alertMails, weeklyMails });
 }
 
 // ─── 메인 핸들러 ──────────────────────────────────────────────────────────────

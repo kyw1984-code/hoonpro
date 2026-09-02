@@ -378,3 +378,21 @@ create table if not exists ad_reports (
 create index if not exists idx_adr_user on ad_reports(user_id, created_at desc);
 
 alter table ad_reports disable row level security;
+
+-- 12. 작업 보관함 — 상세페이지 기획안·썸네일 결과물 저장
+create table if not exists saved_works (
+  id bigserial primary key,
+  user_id uuid not null,
+  kind text not null,
+  title text,
+  payload jsonb not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_sw_user on saved_works(user_id, created_at desc);
+
+alter table saved_works disable row level security;
+
+-- 썸네일 이미지 보관용 공개 버킷
+insert into storage.buckets (id, name, public) values ('works', 'works', true)
+on conflict (id) do nothing;

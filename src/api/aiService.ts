@@ -285,6 +285,7 @@ export interface DetailPlan {
   // STEP 3 이미지 13 — 카테고리별 상세 정보 자동 생성
   productCategory: string;      // 식품·건기식 / 의류·패션 / 뷰티·화장품 / 가전·전자 / 생활·주방 / 가구·인테리어 / 기타
   detailInfoItems: string[];    // 카테고리에 맞는 상세 정보 항목 (예: 사이즈표, 소재, 세탁법 ...)
+  faqItems: string[];           // 구매 전 자주 묻는 질문 TOP5 (Q/A — 상세페이지 텍스트 영역용)
   // STEP 5 — 디자인 시스템
   designSystem: {
     tone: string;
@@ -544,6 +545,11 @@ const createFallbackDetailPlan = (data: any, reason = 'GPT 기획안 생성 실�
       { item: '정보 제공', competitor: '사진 위주의 단순 나열', ours: '구매 판단에 필요한 정보까지 제공' },
     ],
     purchaseResistances: ['내게 맞을까', '품질이 괜찮을까', '오래 쓸 수 있을까', '사진과 다르지 않을까', '구매 후 후회하지 않을까'],
+    faqItems: [
+      'Q. 배송은 얼마나 걸리나요? — A. 주문 후 영업일 기준 안내된 출고 일정에 따라 발송됩니다.',
+      'Q. 사이즈/사양이 저에게 맞을까요? — A. 상세 정보의 표를 확인하시고, 애매하면 문의를 남겨주세요.',
+      'Q. 교환·반품이 가능한가요? — A. 수령 후 7일 이내 미사용 상태면 가능합니다.',
+    ],
     productCategory: '기타',
     detailInfoItems: [
       '제품 구성: 상품 등록 정보 확인 필요',
@@ -675,6 +681,7 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
     purchaseResistances: Array.isArray(plan.purchaseResistances) && plan.purchaseResistances.length > 0 ? plan.purchaseResistances.map(String) : fallback.purchaseResistances,
     productCategory: String(plan.productCategory || fallback.productCategory),
     detailInfoItems: Array.isArray(plan.detailInfoItems) && plan.detailInfoItems.length > 0 ? plan.detailInfoItems.slice(0, 8).map(String) : fallback.detailInfoItems,
+    faqItems: Array.isArray(plan.faqItems) && plan.faqItems.length > 0 ? plan.faqItems.slice(0, 6).map(String) : fallback.faqItems,
     designSystem: {
       tone: String(plan.designSystem?.tone || fallback.designSystem.tone),
       colors: {
@@ -757,6 +764,7 @@ ${productBriefGuide}
   · 가구·인테리어 → 사이즈, 소재, 조립 여부, 관리법, 배송 정보
   · 기타 → 제품 구성, 핵심 사양, 사용 방법, 보관 방법, 주의사항
   '상세 정보' 섹션 이미지의 trustElement와 designLayout에는 이 항목들이 반영되어야 합니다. 확인 불가능한 값은 지어내지 말고 "상품 등록 정보 확인 필요"로 표기하세요.
+- 구매 전 자주 묻는 질문 TOP5(faqItems)를 작성하세요. 각 항목은 "Q. 질문 — A. 답변" 한 줄 형식이며, 구매 저항 요소를 해소하는 실제적인 Q&A여야 합니다. 이미지에 넣는 것이 아니라 상세페이지 하단 텍스트 영역에 쓸 자료입니다.
 
 [STEP 2 — 전환 전략]
 - 심리 흐름: 인지 → 공감 → 문제 인식 → 해결책 발견 → 신뢰 형성 → 구매 확신 → 결제
@@ -845,6 +853,7 @@ ${bundleRules}
   "purchaseResistances": ["저항1", "저항2", "저항3", "저항4", "저항5"],
   "productCategory": "의류·패션",
   "detailInfoItems": ["사이즈표: S/M/L 상세 치수는 상품 등록 정보 확인 필요", "소재: 코튼 100%", "세탁법: 찬물 단독 세탁"],
+  "faqItems": ["Q. 세탁하면 줄어들지 않나요? — A. 코튼 혼방 원단으로 찬물 세탁 시 수축이 거의 없습니다."],
   "designSystem": { "tone": "프리미엄/미니멀/감성 등 1개", "colors": { "primary": "#hex", "secondary": "#hex", "accent": "#hex", "background": "#hex", "text": "#hex" } },
   "images": [
     { "number": 1, "role": "Hook", "stage": "인지", "sectionType": "offer", "shotType": "model", "purpose": "3초 안에 시선을 잡아 스크롤을 멈추게 한다", "mainCopy": "메인카피\\n둘째줄", "subCopy": "서브카피", "trustElement": "신뢰 요소", "trigger": "감정적 보상", "designLayout": "하단 카피 영역 + 제품 중심 단일 포컬 구성", "heightPx": 1000, "textPosition": "bottom", "visualPrompt": "A premium Hook model cut with one fictional Korean model wearing or using the exact reference product, strong first impression, product large and clearly visible, designer-made detail-page hero scene ..." }

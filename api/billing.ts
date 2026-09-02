@@ -335,6 +335,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!user) return res.status(401).json({ error: '로그인이 필요합니다.' });
 
     if (action === 'status') return await getStatus(user, res);
+    if (action === 'referral') return await getReferralCode(user, res);
     if (action === 'coupon-validate') return await couponValidate(user, req, res);
     if (action === 'subscribe') return await subscribe(user, req, res);
     if (action === 'cancel') return await cancelSubscription(user, req, res);
@@ -345,6 +346,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── 관리자 ──
     if (action.startsWith('admin-')) {
       if (!user.isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+      if (action === 'admin-stats') return await adminStats(res);
       if (action === 'admin-coupons') return await adminCoupons(res);
       if (action === 'admin-coupon-create') return await adminCouponCreate(req, res);
       if (action === 'admin-coupon-update') return await adminCouponUpdate(req, res);
@@ -778,6 +780,71 @@ async function chargeDue(req: VercelRequest, res: VercelResponse) {
 }
 
 // ── 관리자 ────────────────────────────────────────────────
+
+// 친구 추천 — 사용자마다 개인 추천 코드(첫 결제 10% 할인 쿠폰)를 만들어준다.
+// 쿠폰 시스템을 그대로 재활용: note='referral:{userId}'로 소유자를 식별하고,
+// 사용 횟수는 coupons.redeemed_count로 확인한다 (추천 보상은 관리자가 쿠폰으로 지급).
+async function getReferralCode(user: { userId: string }, res: VercelResponse) {
+  const note = `referral:${user.userId}`;
+  let { data: existing } = await supabase.from('coupons').select('*').eq('note', note).maybeSingle();
+  if (!existing) {
+    for (let attempt = 0; attempt < 3 && !existing; attempt++) {
+      const code = 'HOON-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+      const { data, error } = await supabase.from('coupons').insert({
+        code,
+        type: 'percent',
+        value: 10,
+        duration_cycles: 1,
+        max_redemptions: null,
+        expires_at: null,
+        note,
+      }).select('*').single();
+      if (!error) existing = data;
+      else if (error.code !== '23505') return res.status(500).json({ error: '추천 코드 생성에 실패했습니다.' });
+    }
+    if (!existing) return res.status(500).json({ error: '추천 코드 생성에 실패했습니다.' });
+  }
+  return res.status(200).json({
+    code: existing.code,
+    type: existing.type,
+    value: existing.value,
+    redeemedCount: existing.redeemed_count ?? 0,
+    active: existing.active !== false,
+  });
+}
+
+// 수익 요약 — 구독자 수(상태별)·MRR 추정·최근 30일 결제액·해지 수
+async function adminStats(res: VercelResponse) {
+  const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+  const [{ data: subs }, { data: planRows }, { data: pays }] = await Promise.all([
+    supabase.from('subscriptions').select('status, plan_id, canceled_at, updated_at'),
+    supabase.from('plans').select('id, price, interval'),
+    supabase.from('payments').select('amount, status, created_at').gte('created_at', monthAgo),
+  ]);
+  const planMap = new Map((planRows ?? []).map(p => [p.id, p]));
+  const counts: Record<string, number> = { trial: 0, active: 0, past_due: 0, paused: 0, canceled: 0 };
+  let mrr = 0;
+  let canceled30d = 0;
+  for (const s of subs ?? []) {
+    counts[s.status] = (counts[s.status] || 0) + 1;
+    if (['active', 'past_due'].includes(s.status)) {
+      const p = planMap.get(s.plan_id);
+      if (p) mrr += p.interval === 'year' ? Math.round(Number(p.price) / 12) : Number(p.price);
+    }
+    if (s.status === 'canceled' && s.canceled_at && s.canceled_at >= monthAgo) canceled30d += 1;
+  }
+  const paidList = (pays ?? []).filter(p => p.status === 'paid');
+  const failedList = (pays ?? []).filter(p => p.status === 'failed');
+  return res.status(200).json({
+    counts,
+    totalSubscribers: counts.trial + counts.active + counts.past_due,
+    mrr,
+    revenue30d: paidList.reduce((s, p) => s + Number(p.amount || 0), 0),
+    payments30d: paidList.length,
+    failed30d: failedList.length,
+    canceled30d,
+  });
+}
 
 async function adminCoupons(res: VercelResponse) {
   const { data } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });

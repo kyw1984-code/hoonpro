@@ -273,7 +273,7 @@ const ALLOWED_MODELS = [
 const ALLOWED_QUALITY = ['low', 'medium', 'high'];
 const DEFAULTS = { imageModel: 'gpt-image-2', imageQuality: 'high', aiIntegratedTextEnabled: false };
 // 탭 순서 설정에 허용되는 탭 id (App.tsx TABS와 일치해야 함)
-const TAB_IDS = ['thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'qa'];
+const TAB_IDS = ['home', 'thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'qa', 'works'];
 
 // app_config 테이블 미존재 오류 판별
 function isMissingTable(error: any): boolean {
