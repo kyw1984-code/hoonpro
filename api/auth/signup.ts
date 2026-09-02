@@ -31,7 +31,7 @@ async function sendCodeEmail(to: string, code: string): Promise<boolean> {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'no-reply@hoonproai.com',
+        from: process.env.EMAIL_FROM || 'no-reply@hoonpro.app',
         to: [to],
         subject: `[훈프로] 가입 인증코드: ${code}`,
         html: `<p>훈프로 가입 인증코드입니다.</p>` +

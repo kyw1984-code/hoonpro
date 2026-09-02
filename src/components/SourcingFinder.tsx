@@ -140,42 +140,6 @@ export function SourcingFinder() {
   const [reviewTarget, setReviewTarget] = useState<Product | null>(null);
   const [reviewData, setReviewData] = useState<any | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
-  // 1688 이미지 매칭 (동일/유사 상품 + 도매가)
-  const [find1688Target, setFind1688Target] = useState<Product | null>(null);
-  const [find1688Data, setFind1688Data] = useState<any | null>(null);
-  const [find1688Loading, setFind1688Loading] = useState(false);
-
-  const fetchFind1688 = async (p: Product) => {
-    setFind1688Target(p);
-    setFind1688Data(null);
-    setFind1688Loading(true);
-    try {
-      const params = new URLSearchParams({ type: 'find1688', product: p.productId, image: p.productImage || '' });
-      const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() });
-      const data = await safeJson(res);
-      setFind1688Data(data);
-      if (typeof data.remaining === 'number') {
-        window.dispatchEvent(new CustomEvent('usage-updated', { detail: { remaining: data.remaining } }));
-      }
-    } catch (e: any) {
-      setFind1688Data({ error: e.message });
-    } finally {
-      setFind1688Loading(false);
-    }
-  };
-
-  // 매칭 결과의 도매가를 이 상품의 예상 1688 원가로 채우고 마진 계산기 열기
-  const applyMatchedPrice = (p: Product, priceCny: number) => {
-    setProducts(prev => prev.map(x => x.productId === p.productId ? { ...x, estimated1688Price: priceCny } : x));
-    try {
-      const saved = JSON.parse(localStorage.getItem('1688prices') || '{}');
-      saved[p.productId] = priceCny;
-      localStorage.setItem('1688prices', JSON.stringify(saved));
-    } catch { /* 무시 */ }
-    setFind1688Target(null);
-    openCalcForProduct({ ...p, estimated1688Price: priceCny });
-  };
-
   // 내 상품 순위 추적 (목록·관리는 '순위 추적' 탭, 여기선 원클릭 등록만)
   const [rankAdded, setRankAdded] = useState<Record<string, boolean>>({});
 
@@ -1343,10 +1307,10 @@ export function SourcingFinder() {
                                 </button>
                               </div>
                               <div className="flex gap-2">
-                                <button onClick={() => fetchFind1688(product)}
-                                  title="상품 이미지로 1688에서 동일·유사 상품과 도매가 찾기"
+                                <button onClick={() => handle1688Click(product)}
+                                  title="상품 이미지로 1688 소싱처 검색"
                                   className="flex-1 py-3 bg-accent-soft rounded-card text-[11px] font-semibold text-accent flex items-center justify-center gap-2 hover:bg-accent-soft transition-colors">
-                                  1688 매칭
+                                  1688 소싱처
                                 </button>
                                 <button onClick={() => openCalcForProduct(product)}
                                   className="flex-1 py-3 bg-ink text-paper rounded-card text-[11px] font-semibold flex items-center justify-center gap-2 hover:bg-ink-2 transition-colors">
@@ -1396,106 +1360,6 @@ export function SourcingFinder() {
                     </div>
                   ) : (
                     <ReviewSummaryView data={reviewData} />
-                  )}
-                </div>
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
-
-        {/* ══════════ 1688 이미지 매칭 모달 ══════════ */}
-        <AnimatePresence>
-          {find1688Target && (
-            <>
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                onClick={() => { if (!find1688Loading) setFind1688Target(null); }}
-                className="fixed inset-0 z-[80] bg-ink/50 backdrop-blur-sm" />
-              <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-                className="fixed inset-0 m-auto z-[90] w-[92%] max-w-[760px] h-fit max-h-[88vh] bg-paper rounded-panel border border-line shadow-overlay overflow-y-auto">
-                <div className="flex items-start justify-between gap-4 px-7 pt-6 pb-2">
-                  <div className="flex min-w-0 items-center gap-3">
-                    {find1688Target.productImage && <img src={find1688Target.productImage} alt="" className="h-12 w-12 shrink-0 rounded-control border border-line object-cover" />}
-                    <div className="min-w-0">
-                      <p className="text-[11px] font-semibold uppercase tracking-widest text-accent">1688 Match</p>
-                      <h3 className="truncate text-[15px] font-semibold text-ink">{find1688Target.productName}</h3>
-                      <p className="text-[11px] text-ink-3">쿠팡가 {find1688Target.productPrice.toLocaleString()}원 · 환산 배수 ×{sourcingMultiplier} (마진 계산기 설정)</p>
-                    </div>
-                  </div>
-                  <button onClick={() => setFind1688Target(null)} className="rounded-full p-1.5 text-ink-3 transition-all hover:bg-paper-2 hover:text-ink-2">
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-                <div className="px-7 pb-6 pt-2">
-                  {find1688Loading ? (
-                    <div className="flex flex-col items-center gap-3 py-10 text-ink-3">
-                      <Loader2 className="h-8 w-8 animate-spin text-accent" />
-                      <p className="text-sm font-semibold">1688에서 같은 상품을 이미지로 찾는 중... (5~15초)</p>
-                    </div>
-                  ) : find1688Data?.error ? (
-                    <div className="rounded-card border border-critical/30 bg-critical-soft p-4 text-[13px] text-critical">
-                      {find1688Data.error}
-                      {find1688Data.notConfigured && (
-                        <p className="mt-2 text-[12px] opacity-90">키 등록 전에는 아래 [외부 이미지 검색]으로 같은 작업을 할 수 있습니다.</p>
-                      )}
-                    </div>
-                  ) : Array.isArray(find1688Data?.items) && find1688Data.items.length > 0 ? (
-                    <>
-                      <p className="mb-3 text-[12px] text-ink-2">
-                        비슷한 순서대로 {find1688Data.items.length}개를 찾았습니다. 원가를 고르면 <b>마진 계산기에 바로 채워집니다</b>. 결과는 7일간 캐시됩니다.
-                      </p>
-                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                        {find1688Data.items.map((m: any, i: number) => {
-                          const krw = Math.round(m.priceCny * sourcingMultiplier);
-                          const margin = find1688Target.productPrice > 0
-                            ? ((find1688Target.productPrice - krw - 3000 - Math.round(find1688Target.productPrice * 0.12)) / find1688Target.productPrice) * 100
-                            : null;
-                          return (
-                            <div key={m.id || i} className="flex flex-col overflow-hidden rounded-card border border-line bg-paper">
-                              <a href={m.url} target="_blank" rel="noopener noreferrer" className="block aspect-square bg-paper-2">
-                                {m.image ? <img src={m.image} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" /> : null}
-                              </a>
-                              <div className="flex flex-1 flex-col gap-1 p-2.5">
-                                <p className="line-clamp-2 text-[11px] leading-snug text-ink-2">{m.title}</p>
-                                <div className="mt-auto flex items-baseline gap-1.5">
-                                  <span className="text-[14px] font-semibold tabular-nums text-ink">¥{m.priceCny}</span>
-                                  <span className="text-[11px] tabular-nums text-ink-3">≈ {krw.toLocaleString()}원</span>
-                                </div>
-                                <div className="flex items-center gap-1.5 text-[10px] text-ink-3">
-                                  {m.minOrder ? <span>최소 {m.minOrder}개</span> : null}
-                                  {m.sales ? <span>· 판매 {Number(m.sales).toLocaleString()}</span> : null}
-                                  {margin !== null && (
-                                    <span className={`ml-auto font-semibold ${margin >= 20 ? 'text-positive' : margin > 0 ? 'text-caution' : 'text-critical'}`}>
-                                      마진 {margin.toFixed(0)}%
-                                    </span>
-                                  )}
-                                </div>
-                                <button onClick={() => applyMatchedPrice(find1688Target, m.priceCny)}
-                                  className="mt-1 rounded-control bg-ink py-1.5 text-[11px] font-semibold text-paper transition-opacity hover:opacity-90">
-                                  이 원가로 마진 계산
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : find1688Data ? (
-                    <div className="rounded-card border border-line bg-paper-2 p-4 text-[13px] text-ink-2">
-                      매칭되는 상품을 찾지 못했습니다. 아래 [외부 이미지 검색]으로 다시 시도해보세요.
-                      {find1688Data.diagnostics && (
-                        <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px] text-ink-3">{find1688Data.diagnostics}</pre>
-                      )}
-                    </div>
-                  ) : null}
-
-                  {!find1688Loading && (
-                    <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-4">
-                      <p className="text-[11px] text-ink-3">마진 = 쿠팡가 − (¥×배수) − 배송비 3,000원 − 수수료 12% 기준 추정치</p>
-                      <button onClick={() => { const t = find1688Target; setFind1688Target(null); handle1688Click(t); }}
-                        className="shrink-0 rounded-control border border-line px-3 py-1.5 text-[12px] font-semibold text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
-                        외부 이미지 검색 (중다리)
-                      </button>
-                    </div>
                   )}
                 </div>
               </motion.div>

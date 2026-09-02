@@ -111,7 +111,7 @@ async function sendEmail(to: string, subject: string, html: string): Promise<voi
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'no-reply@hoonproai.com',
+        from: process.env.EMAIL_FROM || 'no-reply@hoonpro.app',
         to: [to],
         subject,
         html,
