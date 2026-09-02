@@ -1515,12 +1515,12 @@ async function sendRankAlerts(): Promise<number> {
     if (!byUser.has(a.user_id)) byUser.set(a.user_id, []);
     byUser.get(a.user_id)!.push(a);
   }
-  const { data: users } = await supabase.from("users").select("id, email, name").in("id", [...byUser.keys()]);
+  const { data: users } = await supabase.from("users").select("id, email, name, email_opt_out").in("id", [...byUser.keys()]);
   let sent = 0;
   for (const [uid, list] of byUser) {
     if (sent >= 50) break;
     const u = (users || []).find(x => x.id === uid);
-    if (!u?.email) continue;
+    if (!u?.email || u.email_opt_out) continue; // 수신 거부 존중
     const rows = list.map(a =>
       `<li><b>"${esc(a.keyword)}"</b> — ${esc(a.product_name || `상품 ${a.product_id}`)}: ` +
       `${a.prevRank === null ? "순위권 밖" : `${a.prevRank}위`} → <b style="color:#b4342b">${a.latestRank === null ? "순위권(60위) 밖" : `${a.latestRank}위`}</b></li>`,
@@ -1529,7 +1529,8 @@ async function sendRankAlerts(): Promise<number> {
       u.email,
       "[훈프로] 내 상품 순위가 하락했습니다",
       `<p>${esc(u.name || "")}님, 추적 중인 상품의 검색 순위가 하락했습니다.</p><ul>${rows}</ul>` +
-      `<p>순위 하락은 보통 경쟁 상품의 광고 강화나 리뷰 역전이 원인입니다. 훈프로의 [순위 추적]과 [광고 성과 분석]에서 원인을 점검해보세요.</p>`,
+      `<p>순위 하락은 보통 경쟁 상품의 광고 강화나 리뷰 역전이 원인입니다. 훈프로의 [순위 추적]과 [광고 성과 분석]에서 원인을 점검해보세요.</p>` +
+      '<p style="color:#888;font-size:12px">알림 메일은 훈프로 앱의 [구독 관리] 탭에서 언제든 끌 수 있습니다.</p>',
     );
     sent += 1;
   }
@@ -1556,12 +1557,12 @@ async function sendWeeklyDigest(): Promise<number> {
       picks.map(p => `<li>${esc(p.keyword)} — 월 검색량 ${Number(p.monthlyVolume).toLocaleString()}</li>`).join("") + "</ul>"
     : "";
 
-  const { data: users } = await supabase.from("users").select("id, email, name").in("id", [...byUser.keys()]);
+  const { data: users } = await supabase.from("users").select("id, email, name, email_opt_out").in("id", [...byUser.keys()]);
   let sent = 0;
   for (const [uid, list] of byUser) {
     if (sent >= 100) break;
     const u = (users || []).find(x => x.id === uid);
-    if (!u?.email) continue;
+    if (!u?.email || u.email_opt_out) continue; // 수신 거부 존중
     const rows = list.slice(0, 15).map(s => {
       const cur = s.latestRank === undefined ? "기록 대기" : s.latestRank === null ? "60위 밖" : `${s.latestRank}위`;
       const delta = s.prevRank !== undefined && s.prevRank !== null && s.latestRank !== undefined && s.latestRank !== null
@@ -1574,7 +1575,8 @@ async function sendWeeklyDigest(): Promise<number> {
       "[훈프로] 주간 리포트 — 내 상품 순위와 이번 주 추천 키워드",
       `<p>${esc(u.name || "")}님, 이번 주 훈프로 요약입니다.</p>` +
       `<p><b>내 상품 순위 현황</b></p><ul>${rows}</ul>${pickHtml}` +
-      `<p>자세한 내용은 훈프로 앱의 홈 대시보드에서 확인하세요.</p>`,
+      `<p>자세한 내용은 훈프로 앱의 홈 대시보드에서 확인하세요.</p>` +
+      '<p style="color:#888;font-size:12px">알림 메일은 훈프로 앱의 [구독 관리] 탭에서 언제든 끌 수 있습니다.</p>',
     );
     sent += 1;
   }

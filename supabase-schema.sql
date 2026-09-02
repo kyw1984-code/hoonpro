@@ -396,3 +396,6 @@ alter table saved_works disable row level security;
 -- 썸네일 이미지 보관용 공개 버킷
 insert into storage.buckets (id, name, public) values ('works', 'works', true)
 on conflict (id) do nothing;
+
+-- 13. 알림 이메일 수신 거부 (순위·주간 리포트 메일 — 결제 관련 메일은 항상 발송)
+alter table users add column if not exists email_opt_out boolean default false;

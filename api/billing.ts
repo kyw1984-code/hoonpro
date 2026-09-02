@@ -336,6 +336,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'status') return await getStatus(user, res);
     if (action === 'referral') return await getReferralCode(user, res);
+    if (action === 'email-pref') return await emailPref(user, req, res);
     if (action === 'coupon-validate') return await couponValidate(user, req, res);
     if (action === 'subscribe') return await subscribe(user, req, res);
     if (action === 'cancel') return await cancelSubscription(user, req, res);
@@ -780,6 +781,18 @@ async function chargeDue(req: VercelRequest, res: VercelResponse) {
 }
 
 // ── 관리자 ────────────────────────────────────────────────
+
+// 알림 이메일 수신 설정 — 순위·주간 리포트 메일에만 적용 (결제 메일은 항상 발송)
+async function emailPref(user: { userId: string }, req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'POST') {
+    const optOut = req.body?.optOut === true;
+    const { error } = await supabase.from('users').update({ email_opt_out: optOut }).eq('id', user.userId);
+    if (error) return res.status(500).json({ error: '설정 저장에 실패했습니다. (users 테이블에 email_opt_out 컬럼이 있는지 확인)' });
+    return res.status(200).json({ optOut });
+  }
+  const { data } = await supabase.from('users').select('email_opt_out').eq('id', user.userId).maybeSingle();
+  return res.status(200).json({ optOut: data?.email_opt_out === true });
+}
 
 // 친구 추천 — 사용자마다 개인 추천 코드(첫 결제 10% 할인 쿠폰)를 만들어준다.
 // 쿠폰 시스템을 그대로 재활용: note='referral:{userId}'로 소유자를 식별하고,

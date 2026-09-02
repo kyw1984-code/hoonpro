@@ -56,6 +56,39 @@ export function SubscriptionPage() {
     })();
   }, []);
 
+  // 알림 이메일 수신 설정 (순위·주간 리포트)
+  const [emailOptOut, setEmailOptOut] = useState<boolean | null>(null);
+  const [prefBusy, setPrefBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/billing?action=email-pref', { headers: { Authorization: `Bearer ${getToken()}` } });
+        const data = await res.json();
+        if (res.ok) setEmailOptOut(data.optOut === true);
+      } catch { /* 무시 */ }
+    })();
+  }, []);
+
+  const toggleEmailPref = async () => {
+    if (emailOptOut === null || prefBusy) return;
+    setPrefBusy(true);
+    try {
+      const res = await fetch('/api/billing?action=email-pref', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ optOut: !emailOptOut }),
+      });
+      const data = await res.json();
+      if (res.ok) setEmailOptOut(data.optOut === true);
+      else alert(data.error || '설정 저장 실패');
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setPrefBusy(false);
+    }
+  };
+
   const copyReferral = async () => {
     if (!referral) return;
     try {
@@ -483,6 +516,22 @@ export function SubscriptionPage() {
             </button>
             <span className="ml-auto text-[12px] tabular-nums text-ink-3">지금까지 {referral.redeemedCount ?? 0}명이 사용했습니다</span>
           </div>
+        </div>
+      )}
+
+      {/* 알림 이메일 설정 */}
+      {emailOptOut !== null && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-panel border border-line bg-paper p-6">
+          <div>
+            <h3 className="text-[15px] font-semibold text-ink">알림 이메일</h3>
+            <p className="mt-1 text-[12.5px] text-ink-2">
+              내 상품 순위 급락 알림과 주간 리포트를 이메일로 받습니다. 결제 관련 안내 메일은 이 설정과 무관하게 항상 발송됩니다.
+            </p>
+          </div>
+          <button onClick={toggleEmailPref} disabled={prefBusy} role="switch" aria-checked={!emailOptOut}
+            className={`relative h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50 ${!emailOptOut ? 'bg-positive' : 'bg-line-strong'}`}>
+            <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-paper shadow transition-all ${!emailOptOut ? 'left-[22px]' : 'left-0.5'}`} />
+          </button>
         </div>
       )}
     </div>
