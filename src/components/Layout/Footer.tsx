@@ -19,7 +19,7 @@ export const Footer: React.FC = () => {
       className="relative mt-auto border-t border-line"
       style={{ background: 'rgba(7,9,18,.6)', backdropFilter: 'blur(10px)' }}
     >
-      <div className="mx-auto max-w-[1240px] px-6 py-10">
+      <div className="mx-auto max-w-[1240px] px-4 py-9 sm:px-6 md:py-10">
         {/* 상단 — 유튜브 / 홈페이지 링크 */}
         <div className="text-center">
           <p className="text-[13px] text-ink-2">
@@ -31,7 +31,7 @@ export const Footer: React.FC = () => {
               href="https://www.youtube.com/@saupsin89"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white/[0.03] px-3.5 py-1.5 text-[12.5px] font-medium text-ink transition-all hover:border-accent/40 hover:bg-accent/5 hover:-translate-y-0.5"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-line bg-white/[0.03] px-4 text-[12.5px] font-medium text-ink transition-all hover:border-accent/40 hover:bg-accent/5 hover:-translate-y-0.5"
             >
               <Youtube className="h-3.5 w-3.5" style={{ color: '#ff5b5b' }} />
               유튜브
@@ -40,7 +40,7 @@ export const Footer: React.FC = () => {
               href="https://hoonpro.liveklass.com/"
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-full border border-line bg-white/[0.03] px-3.5 py-1.5 text-[12.5px] font-medium text-ink transition-all hover:border-accent/40 hover:bg-accent/5 hover:-translate-y-0.5"
+              className="inline-flex min-h-[44px] items-center gap-1.5 rounded-full border border-line bg-white/[0.03] px-4 text-[12.5px] font-medium text-ink transition-all hover:border-accent/40 hover:bg-accent/5 hover:-translate-y-0.5"
             >
               <ExternalLink className="h-3.5 w-3.5 text-accent" />
               훈프로 홈페이지
@@ -49,16 +49,16 @@ export const Footer: React.FC = () => {
         </div>
 
         {/* 약관·정책 */}
-        <div className="mt-7 flex flex-wrap justify-center gap-x-4 gap-y-2 text-[13px]">
-          <a href="/terms.html" target="_blank" rel="noreferrer" className="text-ink-2 transition-colors hover:text-ink hover:underline">이용약관</a>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-2 text-[13px]">
+          <a href="/terms.html" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1.5 text-ink-2 transition-colors hover:text-ink hover:underline">이용약관</a>
           <span className="text-ink-3">|</span>
-          <a href="/privacy.html" target="_blank" rel="noreferrer" className="font-semibold text-ink transition-colors hover:underline">개인정보처리방침</a>
+          <a href="/privacy.html" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1.5 font-semibold text-ink transition-colors hover:underline">개인정보처리방침</a>
           <span className="text-ink-3">|</span>
-          <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="text-ink-2 transition-colors hover:text-ink hover:underline">환불 정책</a>
+          <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1.5 text-ink-2 transition-colors hover:text-ink hover:underline">환불 정책</a>
         </div>
 
         {/* 사업자 정보 (전자상거래법 제10조) */}
-        <div className="mt-5 space-y-1 text-center text-[12px] leading-relaxed text-ink-3">
+        <div className="mt-4 space-y-1 break-keep text-center text-[11.5px] leading-relaxed text-ink-3 sm:text-[12px]">
           <p>
             상호: <span className="text-ink-2">{company.name}</span>
             <span className="mx-2">·</span>

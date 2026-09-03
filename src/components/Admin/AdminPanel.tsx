@@ -124,10 +124,11 @@ export function AdminPanel() {
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       {/* 탭 네비게이션 */}
-      <div className="flex gap-1 mb-6 border-b border-line">
+      {/* 모바일: 탭이 많아 가로로 넘치므로 스크롤 처리 (라벨은 줄바꿈 금지) */}
+      <div className="mb-6 flex gap-1 overflow-x-auto border-b border-line -mx-6 px-6 sm:mx-0 sm:px-0">
         <button
           onClick={() => setTab('users')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
             tab === 'users' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
@@ -135,7 +136,7 @@ export function AdminPanel() {
         </button>
         <button
           onClick={() => setTab('billing')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
             tab === 'billing' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
@@ -143,7 +144,7 @@ export function AdminPanel() {
         </button>
         <button
           onClick={() => setTab('stats')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
             tab === 'stats' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
@@ -151,7 +152,7 @@ export function AdminPanel() {
         </button>
         <button
           onClick={() => setTab('config')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
             tab === 'config' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
@@ -159,7 +160,7 @@ export function AdminPanel() {
         </button>
         <button
           onClick={() => setTab('taborder')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
             tab === 'taborder' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
@@ -167,7 +168,7 @@ export function AdminPanel() {
         </button>
         <button
           onClick={() => setTab('company')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
             tab === 'company' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
@@ -175,7 +176,7 @@ export function AdminPanel() {
         </button>
         <button
           onClick={() => setTab('qa')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
             tab === 'qa' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
@@ -267,8 +268,9 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-ink-3">회원이 없습니다.</div>
       ) : (
-        <div className="bg-paper rounded-card border border-line overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="overflow-hidden rounded-card border border-line bg-paper">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-paper-2 border-b border-line">
               <tr>
                 {['성함', '연락처', '이메일', '상태', '오늘 사용', '가입일', '관리'].map(h => (
@@ -332,6 +334,7 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

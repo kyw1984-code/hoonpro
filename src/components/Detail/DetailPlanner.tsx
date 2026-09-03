@@ -2397,7 +2397,8 @@ export const DetailPlanner: React.FC = () => {
                         </div>
                         {plan.competitorComparison?.length > 0 && (
                             <div className="mt-4 overflow-hidden rounded-card border border-line">
-                                <table className="w-full text-sm">
+                                <div className="overflow-x-auto">
+                                <table className="w-full min-w-[520px] text-sm">
                                     <thead>
                                         <tr className="bg-paper-2 text-[11px] font-semibold uppercase tracking-wider text-ink-2">
                                             <th className="px-4 py-2 text-left">비교 항목</th>
@@ -2415,6 +2416,7 @@ export const DetailPlanner: React.FC = () => {
                                         ))}
                                     </tbody>
                                 </table>
+                                </div>
                             </div>
                         )}
                         {productBrief && (

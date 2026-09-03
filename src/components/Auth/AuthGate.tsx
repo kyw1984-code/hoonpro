@@ -554,7 +554,7 @@ export function AuthGate({ onSuccess }: Props) {
       <div className="hp-cursor" ref={cursorRef} aria-hidden="true" />
 
       {/* 상단 네비 */}
-      <header className="relative z-10 mx-auto flex max-w-[1440px] items-center justify-between px-6 py-5 md:px-12">
+      <header className="relative z-10 mx-auto flex max-w-[1440px] items-center justify-between gap-3 px-4 py-4 sm:px-6 sm:py-5 md:px-12">
         <div className="flex items-center gap-3">
           <div
             className="grid h-9 w-9 place-items-center rounded-[10px] text-[15px] font-extrabold"
@@ -584,18 +584,18 @@ export function AuthGate({ onSuccess }: Props) {
         </div>
         <button
           onClick={scrollToAuth}
-          className="hp-cta group flex items-center gap-2 rounded-full border border-[#1c2542] bg-[#0f1526]/70 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5 md:hidden"
+          className="hp-cta group flex min-h-[44px] items-center gap-2 rounded-full border border-[#1c2542] bg-[#0f1526]/70 px-4 text-[13px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5 md:hidden"
         >
           로그인 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" />
         </button>
       </header>
 
       {/* 메인 그리드 */}
-      <main className="relative z-[5] mx-auto grid min-h-[calc(100vh-88px)] max-w-[1440px] grid-cols-1 items-center gap-12 px-6 pb-16 pt-4 md:px-12 lg:grid-cols-[1.35fr_1fr] lg:gap-16">
+      <main className="relative z-[5] mx-auto grid min-h-[calc(100vh-88px)] max-w-[1440px] grid-cols-1 items-center gap-10 px-4 pb-14 pt-2 sm:px-6 md:px-12 lg:grid-cols-[1.35fr_1fr] lg:gap-16">
         {/* LEFT — 랜딩 */}
         <section className="relative">
           {/* 떠다니는 키워드 버블 */}
-          <div className="pointer-events-none absolute inset-0 z-[2]">
+          <div className="pointer-events-none absolute inset-0 z-[2] hidden lg:block">
             {keywordBubbles.map((k, i) => (
               <div
                 key={i}
@@ -735,7 +735,7 @@ export function AuthGate({ onSuccess }: Props) {
         {/* RIGHT — 로그인 카드 (기존 폼) */}
         <aside className="relative flex justify-center" ref={authRef}>
           <div
-            className="hp-login-card relative w-full max-w-[420px] rounded-[22px] border p-7 md:p-8"
+            className="hp-login-card relative w-full max-w-[420px] rounded-[22px] border p-5 sm:p-7 md:p-8"
             style={{
               background: 'linear-gradient(180deg, rgba(20,27,49,.85), rgba(11,16,32,.85))',
               borderColor: '#1c2542',
@@ -946,17 +946,17 @@ export function AuthGate({ onSuccess }: Props) {
                 </button>
 
                 {/* 아이디 / 비밀번호 찾기 */}
-                <div className="flex items-center justify-center gap-3 pt-1 text-[12.5px] text-[#5a627a]">
+                <div className="flex items-center justify-center text-[13px] text-[#5a627a]">
                   <button
                     onClick={() => { setHelper('find-id'); setMessage(null); setFoundEmails(null); }}
-                    className="inline-flex items-center gap-1 transition-colors hover:text-white"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 px-3 transition-colors hover:text-white"
                   >
                     <Mail className="h-3.5 w-3.5" /> 아이디 찾기
                   </button>
                   <span style={{ color: '#1c2542' }}>|</span>
                   <button
                     onClick={() => { setHelper('reset'); setMessage(null); setResetEmail(loginEmail.trim()); }}
-                    className="inline-flex items-center gap-1 transition-colors hover:text-white"
+                    className="inline-flex min-h-[44px] items-center gap-1.5 px-3 transition-colors hover:text-white"
                   >
                     <KeyRound className="h-3.5 w-3.5" /> 비밀번호 찾기
                   </button>
@@ -1104,7 +1104,7 @@ export function AuthGate({ onSuccess }: Props) {
       </main>
 
       {/* ─── 요금 안내 (비회원도 가입 전에 가격을 확인할 수 있어야 한다) ─── */}
-      <section id="pricing" className="relative z-[5] border-t px-6 py-16 md:px-12 md:py-20" style={{ borderColor: '#1c2542' }}>
+      <section id="pricing" className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#1c2542' }}>
         <div className="mx-auto max-w-[880px]">
           <div className="text-center">
             <p className="text-[11.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: '#7cf5ff' }}>PRICING</p>
@@ -1213,7 +1213,7 @@ export function AuthGate({ onSuccess }: Props) {
 
       {/* 다크 테마 푸터 — 전자상거래법 표기 (미로그인 상태에서도 접근 가능해야 함) */}
       <footer className="relative z-[5] border-t" style={{ borderColor: '#1c2542', background: 'rgba(7,9,18,.6)', backdropFilter: 'blur(10px)' }}>
-        <div className="mx-auto max-w-[1440px] px-6 py-10 md:px-12">
+        <div className="mx-auto max-w-[1440px] px-4 py-9 sm:px-6 md:px-12 md:py-10">
           {/* 상단 — 유튜브 / 홈페이지 링크 */}
           <div className="text-center">
             <p className="text-[13px] text-[#8a92a6]">
@@ -1225,7 +1225,7 @@ export function AuthGate({ onSuccess }: Props) {
                 href="https://www.youtube.com/@saupsin89"
                 target="_blank"
                 rel="noreferrer"
-                className="hp-chip inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] font-medium transition-all"
+                className="hp-chip inline-flex min-h-[44px] items-center gap-1.5 rounded-full border px-4 text-[12.5px] font-medium transition-all"
                 style={{ background: 'rgba(255,255,255,.03)', borderColor: '#1c2542', color: '#e8ecf5' }}
               >
                 <Youtube className="h-3.5 w-3.5" style={{ color: '#ff5b5b' }} />
@@ -1235,7 +1235,7 @@ export function AuthGate({ onSuccess }: Props) {
                 href="https://hoonpro.liveklass.com/"
                 target="_blank"
                 rel="noreferrer"
-                className="hp-chip inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] font-medium transition-all"
+                className="hp-chip inline-flex min-h-[44px] items-center gap-1.5 rounded-full border px-4 text-[12.5px] font-medium transition-all"
                 style={{ background: 'rgba(255,255,255,.03)', borderColor: '#1c2542', color: '#e8ecf5' }}
               >
                 <ExternalLink className="h-3.5 w-3.5" style={{ color: '#7cf5ff' }} />
@@ -1246,11 +1246,11 @@ export function AuthGate({ onSuccess }: Props) {
 
           {/* 약관·정책 */}
           <div className="mt-7 flex flex-wrap justify-center gap-x-4 gap-y-2 text-[13px]">
-            <a href="/terms.html" target="_blank" rel="noreferrer" className="text-[#8a92a6] transition-colors hover:text-white hover:underline">이용약관</a>
+            <a href="/terms.html" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1 text-[#8a92a6] transition-colors hover:text-white hover:underline">이용약관</a>
             <span className="text-[#3a4256]">|</span>
-            <a href="/privacy.html" target="_blank" rel="noreferrer" className="font-semibold text-[#e8ecf5] transition-colors hover:text-white hover:underline">개인정보처리방침</a>
+            <a href="/privacy.html" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1 font-semibold text-[#e8ecf5] transition-colors hover:text-white hover:underline">개인정보처리방침</a>
             <span className="text-[#3a4256]">|</span>
-            <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="text-[#8a92a6] transition-colors hover:text-white hover:underline">환불 정책</a>
+            <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1 text-[#8a92a6] transition-colors hover:text-white hover:underline">환불 정책</a>
           </div>
 
           {/* 사업자 정보 (전자상거래법 제10조) */}
