@@ -19,8 +19,12 @@ export const safeJson = async (res: Response): Promise<any> => {
   try {
     return JSON.parse(text);
   } catch {
-    if (res.status === 504 || /timeout|timed out/i.test(text)) {
-      return { error: '분석 시간이 초과되었습니다. 리뷰 수집이 오래 걸린 경우이니 잠시 후 다시 시도해주세요 — 재시도 시 이어서 더 빨리 처리됩니다.' };
+    // Vercel 함수 제한 초과/충돌 시 JSON 대신 "An error occurred with your deployment" HTML이 돌아온다
+    if (res.status === 504 || /timeout|timed out|FUNCTION_INVOCATION_TIMEOUT/i.test(text)) {
+      return { error: '처리 시간이 초과되었습니다. 쿠팡 수집이 오래 걸린 경우이니 잠시 후 다시 시도해주세요 — 재시도 시 캐시 덕분에 더 빨리 처리됩니다.' };
+    }
+    if (/An error occurred|FUNCTION_INVOCATION_FAILED/i.test(text)) {
+      return { error: '서버 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요. 계속되면 관리자에게 알려주세요.' };
     }
     return { error: `서버 응답 오류 (HTTP ${res.status}) — 잠시 후 다시 시도해주세요.` };
   }

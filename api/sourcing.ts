@@ -517,10 +517,62 @@ async function handleBriefing(_req: VercelRequest, res: VercelResponse) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 쿠팡 상품 분석 — Bright Data Web Unlocker (실시간)
 // ═══════════════════════════════════════════════════════════════════════════════
-async function fetchViaUnlocker(targetUrl: string, retries = 2, minSize = 20000): Promise<{ ok: boolean; html?: string; error?: string }> {
+// ─── 외부 API 비용 기록 (관리자 [비용 현황]에 실시간 반영) ─────────────────────
+// Bright Data Web Unlocker: 성공 요청 기준 약 $1.5/1,000건 → 건당 $0.0015 (환경변수로 조정 가능)
+const UNLOCKER_COST_USD = Number(process.env.UNLOCKER_COST_USD) || 0.0015;
+// 1688 이미지 검색(OneBound/TMAPI 등 3rd-party) 건당 추정 단가 — 계약 단가에 맞춰 환경변수로 조정
+const API1688_COST_USD = Number(process.env.API1688_COST_USD) || 0.005;
+// GPT 리뷰 요약 단가 (usage.ts MODEL_PRICING과 동일 기준, 1M 토큰당 USD)
+const GPT_PRICING: Record<string, { input: number; output: number }> = {
+  "gpt-4.1-mini": { input: 0.40, output: 1.60 },
+  "gpt-4.1": { input: 2.00, output: 8.00 },
+  "gpt-4o-mini": { input: 0.15, output: 0.60 },
+  "gpt-4o": { input: 2.50, output: 10.00 },
+};
+
+async function logCost(
+  userId: string | null | undefined,
+  feature: string,
+  model: string,
+  costUsd: number,
+  tokens: { input?: number; output?: number } = {},
+) {
+  if (!supabase) return;
+  try {
+    await supabase.from("api_calls").insert({
+      user_id: userId || null,
+      feature,
+      model,
+      input_tokens: tokens.input || 0,
+      output_tokens: tokens.output || 0,
+      cost_usd: Math.round(costUsd * 1_000_000) / 1_000_000,
+    });
+  } catch { /* 비용 기록 실패는 기능을 막지 않음 */ }
+}
+
+// Vercel 함수 제한(60초) 안에서 반드시 JSON으로 응답하기 위한 시간 예산
+//  - 시도 1회당 최대 UNLOCKER_ATTEMPT_MS, 전체 재시도 합계는 UNLOCKER_BUDGET_MS 이내
+//  - 예산을 넘기면 재시도를 멈추고 오류 JSON을 돌려준다 (예전에는 60초를 넘겨 Vercel의 HTML 오류 페이지가 그대로 노출됨)
+const UNLOCKER_ATTEMPT_MS = 25_000;
+const UNLOCKER_BUDGET_MS = 45_000;
+
+async function fetchViaUnlocker(
+  targetUrl: string,
+  retries = 2,
+  minSize = 20000,
+  costCtx: { userId?: string | null; feature: string } = { feature: "sourcing-coupang" },
+): Promise<{ ok: boolean; html?: string; error?: string }> {
   let lastError = "Bright Data 호출 실패";
+  const started = Date.now();
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * attempt));
+    const remainingBudget = UNLOCKER_BUDGET_MS - (Date.now() - started);
+    if (remainingBudget < 5_000) {
+      lastError = "쿠팡 페이지 수집이 지연되어 시간 예산을 초과했습니다. 잠시 후 다시 시도해주세요.";
+      break;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.min(UNLOCKER_ATTEMPT_MS, remainingBudget));
     try {
       const res = await fetch("https://api.brightdata.com/request", {
         method: "POST",
@@ -529,7 +581,10 @@ async function fetchViaUnlocker(targetUrl: string, retries = 2, minSize = 20000)
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ zone: BRIGHTDATA_UNLOCKER_ZONE, url: targetUrl, format: "raw" }),
+        signal: controller.signal,
       });
+      // Bright Data는 성공 응답(2xx) 건에 과금 → 성공 건만 비용으로 기록
+      if (res.ok) void logCost(costCtx.userId, costCtx.feature, "brightdata-unlocker", UNLOCKER_COST_USD);
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         lastError = `Bright Data Unlocker 오류 (HTTP ${res.status}) ${body.slice(0, 300)}`;
@@ -544,7 +599,11 @@ async function fetchViaUnlocker(targetUrl: string, retries = 2, minSize = 20000)
       }
       return { ok: true, html };
     } catch (e: any) {
-      lastError = e?.message || "Bright Data 호출 실패";
+      lastError = e?.name === "AbortError"
+        ? "쿠팡 페이지 응답이 늦어 시간 내 수집하지 못했습니다. 잠시 후 다시 시도해주세요."
+        : (e?.message || "Bright Data 호출 실패");
+    } finally {
+      clearTimeout(timer);
     }
   }
   return { ok: false, error: lastError };
@@ -933,7 +992,7 @@ async function checkRankNow(keyword: string, productId: string, decoded: any): P
       } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
     }
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
-    const result = await fetchViaUnlocker(url);
+    const result = await fetchViaUnlocker(url, 2, 20000, { userId: decoded?.userId, feature: "rank-check" });
     if (result.ok) {
       const p = parseCoupangSearch(result.html!);
       if (p.products.length > 0) {
@@ -1177,7 +1236,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
       } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
     }
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
-    const result = await fetchViaUnlocker(url);
+    const result = await fetchViaUnlocker(url, 2, 20000, { userId: decoded?.userId, feature: "sourcing-coupang" });
     if (result.ok) {
       const p = parseCoupangSearch(result.html!);
       parseDebug = p.diagnostics;
@@ -1248,7 +1307,7 @@ function parseReviews(html: string): { rating: number; text: string }[] {
   return out;
 }
 
-async function summarizeReviews(productName: string, reviews: { rating: number; text: string }[]): Promise<any> {
+async function summarizeReviews(productName: string, reviews: { rating: number; text: string }[], userId?: string | null): Promise<any> {
   const apiKey = (process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY || "").trim();
   if (!apiKey) return { error: "OpenAI API 키가 설정되지 않았습니다." };
   const model = String(process.env.OPENAI_TEXT_MODEL || "gpt-4.1-mini");
@@ -1279,6 +1338,10 @@ ${sample}`;
     });
     if (!r.ok) return { error: `GPT 요약 실패 (HTTP ${r.status})` };
     const data = await r.json();
+    const inTok = Number(data?.usage?.prompt_tokens) || 0;
+    const outTok = Number(data?.usage?.completion_tokens) || 0;
+    const price = GPT_PRICING[model];
+    if (price) void logCost(userId, "sourcing-review", model, (inTok * price.input + outTok * price.output) / 1_000_000, { input: inTok, output: outTok });
     return JSON.parse(data?.choices?.[0]?.message?.content || "{}");
   } catch (e: any) {
     return { error: e?.message || "GPT 요약 실패" };
@@ -1316,7 +1379,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   let reviews: { rating: number; text: string }[] = [];
   let diag = "";
   const reviewUrl = `https://www.coupang.com/vp/product/reviews?productId=${productId}&page=1&size=30&sortBy=ORDER_SCORE_ASC&ratingSummary=true`;
-  const r1 = await fetchViaUnlocker(reviewUrl, 1, 500);
+  const r1 = await fetchViaUnlocker(reviewUrl, 1, 500, { userId: decoded?.userId, feature: "sourcing-review" });
   if (r1.ok) {
     reviews = parseReviews(r1.html!);
     if (reviews.length < 3) diag = `리뷰엔드포인트: htmlLen=${r1.html!.length}, 파싱=${reviews.length}개`;
@@ -1324,7 +1387,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     diag = `리뷰엔드포인트 실패: ${r1.error}`;
   }
   if (reviews.length < 3) {
-    const r2 = await fetchViaUnlocker(`https://www.coupang.com/vp/products/${productId}`, 0);
+    const r2 = await fetchViaUnlocker(`https://www.coupang.com/vp/products/${productId}`, 0, 20000, { userId: decoded?.userId, feature: "sourcing-review" });
     if (r2.ok) {
       const more = parseReviews(r2.html!);
       if (more.length > reviews.length) reviews = more;
@@ -1338,7 +1401,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     return res.status(502).json({ error: `리뷰를 수집하지 못했습니다. 잠시 후 다시 시도해주세요.`, diagnostics: diag });
   }
 
-  const summary = await summarizeReviews(productName, reviews);
+  const summary = await summarizeReviews(productName, reviews, decoded?.userId);
   const payload = {
     productId,
     productName,
@@ -1461,6 +1524,7 @@ async function handleFind1688(req: VercelRequest, res: VercelResponse, decoded: 
     status = r.status;
     text = await r.text();
     try { raw = JSON.parse(text); } catch { raw = null; }
+    if (r.ok) void logCost(decoded?.userId, "sourcing-1688", provider, API1688_COST_USD);
   } catch (e: any) {
     return res.status(502).json({ error: `1688 API 호출 실패: ${e?.message || e}` });
   }
@@ -1760,7 +1824,7 @@ async function handleCron(req: VercelRequest, res: VercelResponse) {
     const cachedAt = ageMap.get(cacheKey);
     if (cachedAt && Date.now() - cachedAt < 20 * 3600 * 1000) continue; // 오늘 이미 수집됨
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(kw)}&channel=user&sorter=scoreDesc&listSize=60`;
-    const result = await fetchViaUnlocker(url, 1);
+    const result = await fetchViaUnlocker(url, 1, 20000, { userId: null, feature: "sourcing-cron" });
     if (!result.ok) { results.push(`${kw}: 실패`); continue; }
     const p = parseCoupangSearch(result.html!);
     if (p.products.length >= 5) {
@@ -1831,13 +1895,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  if (type === "keywords") return handleKeywords(req, res);
-  if (type === "trend") return handleTrend(req, res);
-  if (type === "briefing") return handleBriefing(req, res);
-  if (type === "products") return handleProducts(req, res, decoded);
-  if (type === "reviews") return handleReviews(req, res, decoded);
-  if (type === "find1688") return handleFind1688(req, res, decoded);
-  if (type === "favorites") return handleFavorites(req, res, decoded);
-  if (type === "rankwatch") return handleRankWatch(req, res, decoded);
-  return res.status(400).json({ error: "type=keywords | trend | briefing | products | reviews | favorites | rankwatch 가 필요합니다." });
+  try {
+    if (type === "keywords") return await handleKeywords(req, res);
+    if (type === "trend") return await handleTrend(req, res);
+    if (type === "briefing") return await handleBriefing(req, res);
+    if (type === "products") return await handleProducts(req, res, decoded);
+    if (type === "reviews") return await handleReviews(req, res, decoded);
+    if (type === "find1688") return await handleFind1688(req, res, decoded);
+    if (type === "favorites") return await handleFavorites(req, res, decoded);
+    if (type === "rankwatch") return await handleRankWatch(req, res, decoded);
+    return res.status(400).json({ error: "type=keywords | trend | briefing | products | reviews | favorites | rankwatch 가 필요합니다." });
+  } catch (e: any) {
+    // 예외가 새어 나가면 Vercel이 HTML 오류 페이지를 돌려주어 화면에 "Unexpected token 'A'"가 뜬다 → 항상 JSON으로 응답
+    console.error("[sourcing]", type, e);
+    return res.status(500).json({ error: `처리 중 오류가 발생했습니다: ${e?.message || "알 수 없는 오류"}. 잠시 후 다시 시도해주세요.` });
+  }
 }

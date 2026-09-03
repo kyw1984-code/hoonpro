@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Wallet } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
 import { BillingAdmin } from './BillingAdmin';
+import { CostOverview } from './CostOverview';
 import { QAManager } from './QAManager';
 
 interface UserRow {
@@ -31,7 +32,7 @@ const STATUS_COLOR: Record<string, string> = {
 const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'billing' | 'stats' | 'config' | 'taborder' | 'qa'>('users');
+  const [tab, setTab] = useState<'users' | 'billing' | 'stats' | 'costs' | 'config' | 'taborder' | 'qa'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -123,7 +124,7 @@ export function AdminPanel() {
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       {/* 탭 네비게이션 */}
-      <div className="flex gap-1 mb-6 border-b border-line">
+      <div className="flex flex-wrap gap-1 mb-6 border-b border-line">
         <button
           onClick={() => setTab('users')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -147,6 +148,14 @@ export function AdminPanel() {
           }`}
         >
           <BarChart3 className="w-4 h-4" /> API 사용량 통계
+        </button>
+        <button
+          onClick={() => setTab('costs')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'costs' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <Wallet className="w-4 h-4" /> 비용 현황
         </button>
         <button
           onClick={() => setTab('config')}
@@ -174,7 +183,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
+      {tab === 'stats' ? <UsageStats /> : tab === 'costs' ? <CostOverview showToast={showToast} /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <ImageConfigTab showToast={showToast} />
       ) : tab === 'taborder' ? (
         <TabOrderConfig showToast={showToast} />

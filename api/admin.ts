@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 //   action=user-action  (POST)     승인/거절/일괄승인/사용량 리셋 (세부 동작은 body.action)
 //   action=stats        (GET)      API 사용량 통계 (period=today|7d|30d|all)
 //   action=config       (GET/POST) 이미지 모델/품질 설정
+//   action=costs        (GET/POST) 비용 현황 — 고정비(app_config.fixed_costs) + API 변동비(api_calls) 집계
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -41,6 +42,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'users') return await handleUsers(req, res);
     if (action === 'user-action') return await handleUserAction(req, res);
     if (action === 'stats') return await handleStats(req, res);
+    if (action === 'costs') return await handleCosts(req, res);
     return res.status(400).json({ error: '알 수 없는 action입니다.' });
   } catch (e) {
     console.error('[admin]', action, e);
@@ -359,4 +361,105 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
+}
+
+// ── 비용 현황 ─────────────────────────────────────────────
+// 고정비: app_config.fixed_costs(JSON 배열) — 관리자가 직접 입력 (Vercel Pro, 도메인, Supabase 등)
+// 변동비: api_calls.cost_usd — 각 API가 호출 시점에 기록하므로 새로고침할 때마다 실시간 반영
+//   (소싱AI: sourcing-coupang / sourcing-review / sourcing-1688 / rank-check / sourcing-cron)
+
+interface FixedCost {
+  id: string;
+  name: string;
+  amountKrw: number;
+  cycle: 'monthly' | 'yearly';
+  note?: string;
+}
+
+// KST 기준 이번 달 1일 00:00 → UTC ISO
+function kstMonthStart(offsetMonths = 0): string {
+  const now = new Date(Date.now() + 9 * 3600 * 1000);
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offsetMonths, 1, 0, 0, 0));
+  return new Date(d.getTime() - 9 * 3600 * 1000).toISOString();
+}
+function kstDayStart(): string {
+  const now = new Date(Date.now() + 9 * 3600 * 1000);
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
+  return new Date(d.getTime() - 9 * 3600 * 1000).toISOString();
+}
+
+async function handleCosts(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'POST') {
+    const items = Array.isArray(req.body?.fixedCosts) ? req.body.fixedCosts : null;
+    if (!items) return res.status(400).json({ error: 'fixedCosts 배열이 필요합니다.' });
+    const cleaned: FixedCost[] = items
+      .map((it: any) => ({
+        id: String(it.id || Math.random().toString(36).slice(2, 10)),
+        name: String(it.name || '').trim().slice(0, 60),
+        amountKrw: Math.max(0, Math.round(Number(it.amountKrw) || 0)),
+        cycle: it.cycle === 'yearly' ? 'yearly' : 'monthly',
+        note: String(it.note || '').trim().slice(0, 120),
+      }))
+      .filter((it: FixedCost) => it.name.length > 0)
+      .slice(0, 50);
+    const { error } = await supabase
+      .from('app_config')
+      .upsert({ key: 'fixed_costs', value: JSON.stringify(cleaned), updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    if (error) {
+      if (isMissingTable(error)) return res.status(400).json({ error: 'app_config 테이블이 없습니다. supabase-schema.sql 마이그레이션을 먼저 실행하세요.' });
+      return res.status(500).json({ error: '고정비 저장 실패' });
+    }
+    return res.status(200).json({ ok: true, fixedCosts: cleaned });
+  }
+
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+
+  // 고정비
+  let fixedCosts: FixedCost[] = [];
+  const { data: cfg } = await supabase.from('app_config').select('value').eq('key', 'fixed_costs').maybeSingle();
+  if (cfg?.value) {
+    try { fixedCosts = JSON.parse(cfg.value); } catch { fixedCosts = []; }
+  }
+
+  // 변동비 — 이번 달 / 지난 달 / 오늘 (KST 기준)
+  const monthStart = kstMonthStart(0);
+  const prevMonthStart = kstMonthStart(-1);
+  const dayStart = kstDayStart();
+  const { data: calls, error } = await supabase
+    .from('api_calls')
+    .select('feature, model, cost_usd, created_at')
+    .gte('created_at', prevMonthStart);
+  if (error) return res.status(500).json({ error: '변동비 집계 실패' });
+
+  type Agg = { calls: number; costUsd: number };
+  const empty = (): Agg => ({ calls: 0, costUsd: 0 });
+  const thisMonth = empty(), prevMonth = empty(), today = empty();
+  const byFeature: Record<string, Agg> = {};
+  const byModel: Record<string, Agg> = {};
+  for (const r of (calls ?? []) as any[]) {
+    const c = Number(r.cost_usd || 0);
+    if (r.created_at >= monthStart) {
+      thisMonth.calls += 1; thisMonth.costUsd += c;
+      const f = String(r.feature || 'unknown');
+      const m = String(r.model || 'unknown');
+      (byFeature[f] ||= empty()).calls += 1; byFeature[f].costUsd += c;
+      (byModel[m] ||= empty()).calls += 1; byModel[m].costUsd += c;
+      if (r.created_at >= dayStart) { today.calls += 1; today.costUsd += c; }
+    } else {
+      prevMonth.calls += 1; prevMonth.costUsd += c;
+    }
+  }
+
+  return res.status(200).json({
+    generatedAt: new Date().toISOString(),
+    monthStart,
+    fixedCosts,
+    variable: {
+      thisMonth,
+      prevMonth,
+      today,
+      byFeature: Object.entries(byFeature).map(([feature, a]) => ({ feature, ...a })).sort((a, b) => b.costUsd - a.costUsd),
+      byModel: Object.entries(byModel).map(([model, a]) => ({ model, ...a })).sort((a, b) => b.costUsd - a.costUsd),
+    },
+  });
 }

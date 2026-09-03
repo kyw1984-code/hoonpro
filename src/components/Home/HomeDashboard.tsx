@@ -9,6 +9,7 @@ import {
   LayoutTemplate, BarChart3, MessageSquareText, Loader2,
 } from 'lucide-react';
 import { getToken, getUser } from '../../lib/auth';
+import { safeJson } from '../ReviewAnalyzer';
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -31,21 +32,21 @@ export function HomeDashboard({ onNavigate }: Props) {
     (async () => {
       try {
         const res = await fetch('/api/sourcing?type=rankwatch&action=list', { headers: authHeaders() });
-        const data = await res.json();
+        const data = await safeJson(res);
         setWatches(res.ok && Array.isArray(data.watches) ? data.watches : []);
       } catch { setWatches([]); }
     })();
     (async () => {
       try {
         const res = await fetch('/api/sourcing?type=favorites&action=report', { headers: authHeaders() });
-        const data = await res.json();
+        const data = await safeJson(res);
         setReport(res.ok && Array.isArray(data.report) ? data.report : []);
       } catch { setReport([]); }
     })();
     (async () => {
       try {
         const res = await fetch('/api/sourcing?type=briefing', { headers: authHeaders() });
-        const data = await res.json();
+        const data = await safeJson(res);
         if (res.ok && !data.error) setBriefing(data);
       } catch { /* 무시 */ }
     })();

@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import { ListOrdered, Loader2, RefreshCw, X } from 'lucide-react';
 import { getToken } from '../lib/auth';
+import { safeJson } from './ReviewAnalyzer';
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -33,7 +34,7 @@ export function RankTracker() {
     setLoading(true);
     try {
       const res = await fetch('/api/sourcing?type=rankwatch&action=list', { headers: authHeaders() });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok || data.error) { setWatches([]); setMsg(data.error || null); }
       else setWatches(data.watches || []);
     } catch {
@@ -52,7 +53,7 @@ export function RankTracker() {
     try {
       const params = new URLSearchParams({ type: 'rankwatch', action: 'add', keyword: kw.trim(), product: product.trim() });
       const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok || data.error) { setMsg(data.error || '등록 실패'); return; }
       notifyUsage(data.remaining);
       setKw(''); setProduct('');
@@ -77,7 +78,7 @@ export function RankTracker() {
     try {
       const res = await fetch(`/api/sourcing?type=rankwatch&action=check&keyword=${encodeURIComponent(keyword)}&product=${encodeURIComponent(productId)}`,
         { headers: authHeaders() });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok || data.error) setMsg(data.error || '순위 확인 실패');
       else notifyUsage(data.remaining);
       load();

@@ -45,4 +45,13 @@ export const FEATURE_LABEL: Record<string, string> = {
   'features-recommend': '핵심 특징 추천',
   'competitor-estimate': '경쟁사 데이터 추정',
   'competitor-analyze': '경쟁사 분석',
+  'qa-ask': '훈프로에게 질문',
+  'sourcing-coupang': '소싱AI · 쿠팡 수집',
+  'sourcing-review': '소싱AI · 상품 리뷰 분석',
+  'sourcing-1688': '소싱AI · 1688 이미지 매칭',
+  'rank-check': '순위 추적 · 실시간 확인',
+  'sourcing-cron': '순위 추적 · 자동 수집(크론)',
 };
+
+// 소싱AI 계열 기능 (비용 현황에서 별도 강조)
+export const SOURCING_FEATURES = ['sourcing-coupang', 'sourcing-review', 'sourcing-1688', 'rank-check', 'sourcing-cron'];
