@@ -399,3 +399,15 @@ on conflict (id) do nothing;
 
 -- 13. 알림 이메일 수신 거부 (순위·주간 리포트 메일 — 결제 관련 메일은 항상 발송)
 alter table users add column if not exists email_opt_out boolean default false;
+
+-- ─────────────────────────────────────────────────────────────
+-- 21. 비밀번호 로그인 · 아이디/비밀번호 찾기 · 회원 탈퇴
+-- ─────────────────────────────────────────────────────────────
+
+-- 비밀번호 해시 (scrypt) — 기존 회원은 null이며, 비밀번호 찾기로 최초 설정한다
+alter table users add column if not exists password_hash text;
+-- 탈퇴 시각 — 값이 있으면 로그인 차단 (개인정보는 익명화, 결제 기록은 법정 보존)
+alter table users add column if not exists withdrawn_at timestamptz;
+
+-- 인증코드 용도 구분 (signup: 가입 / reset: 비밀번호 재설정)
+alter table email_verifications add column if not exists purpose text default 'signup';

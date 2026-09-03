@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 
 // 구독 결제 통합 엔드포인트 (서버리스 함수 1개로 통합 — Vercel 함수 한도 대응)
 //   subscribe        카드 등록(빌링키 발급) + 첫 결제 → 구독 활성화
+//   plans            공개 요금표 (로그인 전 랜딩용)
 //   status           내 구독 상태 + 결제 이력
 //   coupon-validate  쿠폰 코드 검증 (CI 기준 1인 1회)
 //   cancel / resume  기간 만료 해지 예약 / 예약 취소
@@ -100,6 +101,31 @@ function verifyAuth(req: VercelRequest): { userId: string; email: string; name: 
   } catch {
     return null;
   }
+}
+
+// 브랜드 이메일 템플릿 (api/auth/login.ts · api/auth/signup.ts와 동일 디자인)
+function wrapEmail(heading: string, bodyHtml: string): string {
+  return `<div style="margin:0;padding:24px 12px;background:#0b1020;font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;">
+  <div style="max-width:520px;margin:0 auto;background:#141b31;border:1px solid #1c2542;border-radius:18px;overflow:hidden;">
+    <div style="padding:22px 28px 0;">
+      <span style="display:inline-block;width:30px;height:30px;line-height:30px;text-align:center;border-radius:9px;background:linear-gradient(135deg,#7cf5ff,#8b7bff);color:#0b1020;font-weight:800;font-size:14px;">훈</span>
+      <span style="margin-left:9px;font-size:14px;font-weight:600;color:#e8ecf5;vertical-align:middle;">쇼크트리 훈프로 <span style="color:#5a627a;font-weight:500;">AI 자동화</span></span>
+    </div>
+    <div style="padding:18px 28px 26px;">
+      <h1 style="margin:0 0 14px;font-size:19px;line-height:1.4;color:#ffffff;font-weight:700;">${heading}</h1>
+      <div style="font-size:14px;line-height:1.75;color:#b9c0d0;">${bodyHtml}</div>
+    </div>
+    <div style="padding:16px 28px;border-top:1px solid #1c2542;font-size:11.5px;line-height:1.7;color:#5a627a;">
+      본 메일은 발신 전용입니다. 결제 관련 문의는 서비스 내 [구독 관리]에서 확인해주세요.<br>
+      <a href="https://hoonproai.com" style="color:#7cf5ff;text-decoration:none;">hoonproai.com</a>
+    </div>
+  </div>
+</div>`;
+}
+
+// 본문 안에서 쓰는 버튼 (구독 관리로 유도)
+function emailButton(label: string, href = 'https://hoonproai.com'): string {
+  return `<div style="margin:20px 0 4px;"><a href="${href}" style="display:inline-block;padding:11px 20px;border-radius:10px;background:linear-gradient(135deg,#7cf5ff,#8b7bff);color:#0a0f1f;font-weight:700;font-size:13.5px;text-decoration:none;">${label}</a></div>`;
 }
 
 // 이메일 발송 (Resend) — 키가 없으면 조용히 스킵 (개발 환경)
@@ -285,10 +311,11 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
       updated_at: new Date().toISOString(),
     }).eq('id', sub.id);
 
-    await sendEmail(user.email, `[훈프로] 결제 완료 — ${won(amount)}`,
-      `<p>${user.name}님, ${orderName} ${won(amount)} 결제가 완료됐습니다.</p>` +
-      `<p>다음 결제 예정일: ${nextBilling}</p>` +
-      (result.receiptUrl ? `<p><a href="${result.receiptUrl}">영수증 보기</a></p>` : ''));
+    await sendEmail(user.email, `[훈프로] 결제 완료 — ${won(amount)}`, wrapEmail(
+      `결제가 완료됐습니다`,
+      `<p>${user.name}님, ${orderName} <b style="color:#e8ecf5;">${won(amount)}</b> 결제가 완료됐습니다.</p>` +
+      `<p>다음 결제 예정일: <b style="color:#e8ecf5;">${nextBilling}</b></p>` +
+      (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('구독 관리 열기'))));
     return { ok: true };
   }
 
@@ -298,17 +325,23 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
     await supabase.from('subscriptions').update({
       status: 'paused', fail_count: failCount, next_billing_at: null, updated_at: new Date().toISOString(),
     }).eq('id', sub.id);
-    await sendEmail(user.email, '[훈프로] 구독이 정지됐습니다',
-      `<p>${user.name}님, 결제가 3회 실패해 구독이 정지됐습니다. (사유: ${result.failReason})</p>` +
-      `<p>데이터는 그대로 보존됩니다. 마이페이지에서 카드를 다시 등록하면 즉시 복구됩니다.</p>`);
+    await sendEmail(user.email, '[훈프로] 구독이 정지됐습니다', wrapEmail(
+      '구독이 정지됐습니다',
+      `<p>${user.name}님, 결제가 3회 실패해 구독이 정지됐습니다.</p>` +
+      `<p style="color:#8a92a6;">사유: ${result.failReason}</p>` +
+      `<p>관심 키워드·순위 추적 이력 등 데이터는 그대로 보존됩니다. 카드를 다시 등록하면 즉시 복구됩니다.</p>` +
+      emailButton('카드 다시 등록하기')));
   } else {
     const retryDate = addDays(today, RETRY_SCHEDULE_DAYS[failCount - 1] ?? 2);
     await supabase.from('subscriptions').update({
       status: 'past_due', fail_count: failCount, next_billing_at: retryDate, updated_at: new Date().toISOString(),
     }).eq('id', sub.id);
-    await sendEmail(user.email, '[훈프로] 결제 실패 안내',
-      `<p>${user.name}님, ${orderName} 결제가 실패했습니다. (사유: ${result.failReason})</p>` +
-      `<p>${retryDate}에 다시 시도합니다. 카드 한도·유효기간을 확인하시거나 마이페이지에서 카드를 변경해주세요.</p>`);
+    await sendEmail(user.email, '[훈프로] 결제 실패 안내', wrapEmail(
+      '결제가 실패했습니다',
+      `<p>${user.name}님, ${orderName} 결제가 실패했습니다.</p>` +
+      `<p style="color:#8a92a6;">사유: ${result.failReason}</p>` +
+      `<p><b style="color:#e8ecf5;">${retryDate}</b>에 다시 시도합니다. 카드 한도·유효기간을 확인하시거나 카드를 변경해주세요.</p>` +
+      emailButton('카드 변경하기')));
   }
   return { ok: false, failReason: result.failReason };
 }
@@ -329,6 +362,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── 토스 웹훅 (서명 없음 → paymentKey 재조회로 검증) ──
     if (action === 'webhook') return await tossWebhook(req, res);
+
+    // ── 공개 요금표 (로그인 전 랜딩에서 가격을 보여주기 위해 인증 없이 제공) ──
+    if (action === 'plans') {
+      const { data } = await supabase
+        .from('plans').select('id, name, price, interval')
+        .eq('active', true).order('price', { ascending: false });
+      return res.status(200).json({
+        plans: (data ?? []).map(p => ({ ...p, interval: p.interval ?? 'month' })),
+      });
+    }
 
     // 이하 전부 로그인 필요
     const user = verifyAuth(req);
@@ -523,14 +566,17 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
       return res.status(402).json({ error: `결제에 실패했습니다: ${result.failReason}` });
     }
 
-    await sendEmail(userRow?.email ?? user.email, `[훈프로] 구독 시작 — ${won(amount)} 결제 완료`,
-      `<p>${userRow?.name ?? user.name}님, ${orderName} 구독이 시작됐습니다.</p>` +
-      `<p>결제 금액: ${won(amount)}${discount > 0 ? ` (쿠폰 할인 ${won(discount)})` : ''} · 다음 결제일: ${periodEnd}</p>` +
-      (result.receiptUrl ? `<p><a href="${result.receiptUrl}">영수증 보기</a></p>` : ''));
+    await sendEmail(userRow?.email ?? user.email, `[훈프로] 구독 시작 — ${won(amount)} 결제 완료`, wrapEmail(
+      '구독이 시작됐습니다',
+      `<p>${userRow?.name ?? user.name}님, ${orderName} 구독이 시작됐습니다. 이제 모든 AI 도구를 이용할 수 있습니다.</p>` +
+      `<p>결제 금액: <b style="color:#e8ecf5;">${won(amount)}</b>${discount > 0 ? ` (쿠폰 할인 ${won(discount)})` : ''}<br>다음 결제일: <b style="color:#e8ecf5;">${periodEnd}</b></p>` +
+      (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('훈프로 열기'))));
   } else {
-    await sendEmail(userRow?.email ?? user.email, `[훈프로] 무료 이용 시작 (${coupon!.value}일)`,
-      `<p>${userRow?.name ?? user.name}님, 무료 이용이 시작됐습니다.</p>` +
-      `<p>무료 기간 종료일(${periodEnd})부터 ${won(plan.price)}/${plan.interval === 'year' ? '연' : '월'}이 등록하신 카드로 자동결제됩니다. 그 전에 언제든 해지할 수 있습니다.</p>`);
+    await sendEmail(userRow?.email ?? user.email, `[훈프로] 무료 이용 시작 (${coupon!.value}일)`, wrapEmail(
+      '무료 이용이 시작됐습니다',
+      `<p>${userRow?.name ?? user.name}님, 지금부터 모든 AI 도구를 무료로 이용할 수 있습니다.</p>` +
+      `<p>무료 기간 종료일 <b style="color:#e8ecf5;">${periodEnd}</b>부터 ${won(plan.price)}/${plan.interval === 'year' ? '연' : '월'}이 등록하신 카드로 자동결제됩니다.<br>그 전에 언제든 해지하실 수 있고, 해지하면 결제되지 않습니다.</p>` +
+      emailButton('훈프로 열기')));
   }
 
   // 쿠폰 사용 기록 (CI 기준 1인 1회 어뷰징 차단)
@@ -684,8 +730,11 @@ async function refund(user: any, res: VercelResponse) {
   }
 
   await supabase.from('subscriptions').update(endNow).eq('id', sub.id);
-  await sendEmail(user.email, '[훈프로] 환불 및 해지 완료',
-    `<p>${user.name}님, 구독이 해지됐습니다.</p><p>환불 금액: ${won(refundAmount)} (${reason})</p>`);
+  await sendEmail(user.email, '[훈프로] 환불 및 해지 완료', wrapEmail(
+    '환불 및 해지가 완료됐습니다',
+    `<p>${user.name}님, 구독이 해지됐습니다.</p>` +
+    `<p>환불 금액: <b style="color:#e8ecf5;">${won(refundAmount)}</b><br><span style="color:#8a92a6;">${reason}</span></p>` +
+    `<p style="color:#8a92a6;">카드사 사정에 따라 환불 반영까지 3~7영업일이 소요될 수 있습니다.</p>`));
   return res.status(200).json({ ok: true, refunded: refundAmount, message: reason });
 }
 
@@ -745,9 +794,11 @@ async function chargeDue(req: VercelRequest, res: VercelResponse) {
   for (const sub of upcoming ?? []) {
     const u = (sub as any).users, p = (sub as any).plans;
     if (!u?.email) continue;
-    await sendEmail(u.email, `[훈프로] ${noticeDate} 정기결제 예정 안내`,
-      `<p>${u.name}님, ${noticeDate}에 ${p?.name ?? '훈프로'} 구독 요금이 등록하신 카드(${sub.card_summary ?? ''})로 자동결제될 예정입니다.</p>` +
-      `<p>결제를 원치 않으시면 그 전에 마이페이지에서 해지해주세요. 해지 시 남은 기간까지는 그대로 이용할 수 있습니다.</p>`);
+    await sendEmail(u.email, `[훈프로] ${noticeDate} 정기결제 예정 안내`, wrapEmail(
+      '정기결제 예정 안내',
+      `<p>${u.name}님, <b style="color:#e8ecf5;">${noticeDate}</b>에 ${p?.name ?? '훈프로'} 구독 요금 <b style="color:#e8ecf5;">${won(p?.price ?? 0)}</b>이 등록하신 카드(${sub.card_summary ?? ''})로 자동결제될 예정입니다.</p>` +
+      `<p>결제를 원치 않으시면 그 전에 해지해주세요. 해지해도 남은 기간까지는 그대로 이용할 수 있습니다.</p>` +
+      emailButton('구독 관리 열기')));
     summary.notified++;
   }
 

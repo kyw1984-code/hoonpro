@@ -3,6 +3,7 @@ import {
   Lock, UserPlus, LogIn, ShieldCheck, ArrowRight, Sparkles, Activity,
   TrendingUp, Image as ImageIcon, LayoutTemplate, ListOrdered, MessageSquareText,
   BarChart3, MessageCircleQuestion, ChevronRight, Youtube, ExternalLink,
+  KeyRound, ArrowLeft, Mail, Check,
 } from 'lucide-react';
 import { setToken } from '../../lib/auth';
 import { certificationAvailable, requestCertification } from '../../lib/certification';
@@ -72,9 +73,21 @@ export function AuthGate({ onSuccess }: Props) {
   const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
 
   const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [signupName, setSignupName] = useState('');
   const [signupPhone, setSignupPhone] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+
+  // 아이디/비밀번호 찾기 패널 — null이면 일반 로그인/가입 폼
+  const [helper, setHelper] = useState<null | 'find-id' | 'reset'>(null);
+  const [findName, setFindName] = useState('');
+  const [findPhone, setFindPhone] = useState('');
+  const [foundEmails, setFoundEmails] = useState<{ masked: string; joinedAt: string | null }[] | null>(null);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
+  const [resetSent, setResetSent] = useState(false);
 
   const [verificationRequired, setVerificationRequired] = useState(false);
   const [emailCodeRequired, setEmailCodeRequired] = useState(false);
@@ -96,6 +109,24 @@ export function AuthGate({ onSuccess }: Props) {
       })
       .catch(() => { setVerificationRequired(false); setEmailCodeRequired(false); });
   }, []);
+
+  // 요금제 — 비회원에게도 가격을 보여준다 (서버 값 우선, 실패 시 기본가)
+  const [plans, setPlans] = useState<{ id: string; name: string; price: number; interval: string }[]>([
+    { id: 'yearly', name: '훈프로 연간', price: 357600, interval: 'year' },
+    { id: 'standard', name: '훈프로 월간', price: 39800, interval: 'month' },
+  ]);
+  useEffect(() => {
+    fetch('/api/billing?action=plans')
+      .then(r => r.json())
+      .then(d => { if (Array.isArray(d?.plans) && d.plans.length) setPlans(d.plans); })
+      .catch(() => { /* 기본가 유지 */ });
+  }, []);
+
+  const yearly = plans.find(p => p.interval === 'year');
+  const monthly = plans.find(p => p.interval === 'month');
+  const yearlyDiscount = yearly && monthly
+    ? Math.round((1 - yearly.price / 12 / monthly.price) * 100)
+    : 0;
 
   // 사업자 정보 (전자상거래법 표기용) — 캐시된 값 먼저, 서버 응답으로 갱신
   const [company, setCompany] = useState<CompanyInfo>(loadCachedCompany);
@@ -132,10 +163,17 @@ export function AuthGate({ onSuccess }: Props) {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail.trim().toLowerCase() }),
+        body: JSON.stringify({ email: loginEmail.trim().toLowerCase(), password: loginPassword }),
       });
       const data = await res.json();
-      if (!res.ok) return setMessage({ text: data.error, type: 'error' });
+      if (!res.ok) {
+        // 비밀번호 도입 이전 계정 — 재설정 화면으로 바로 안내
+        if (data.passwordSetupRequired) {
+          setResetEmail(loginEmail.trim().toLowerCase());
+          setHelper('reset');
+        }
+        return setMessage({ text: data.error, type: 'error' });
+      }
       setToken(data.token);
       onSuccess();
     } catch {
@@ -143,6 +181,85 @@ export function AuthGate({ onSuccess }: Props) {
     } finally {
       setLoading(false);
     }
+  };
+
+  // ── 아이디(이메일) 찾기 ──
+  const handleFindId = async () => {
+    if (!findName.trim() || !findPhone.trim()) {
+      return setMessage({ text: '이름과 연락처를 모두 입력해주세요.', type: 'error' });
+    }
+    setLoading(true);
+    setMessage(null);
+    setFoundEmails(null);
+    try {
+      const res = await fetch('/api/auth/login?action=find-id', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: findName.trim(), phone: findPhone.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) return setMessage({ text: data.error, type: 'error' });
+      setFoundEmails(data.emails ?? []);
+    } catch {
+      setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── 비밀번호 재설정: 코드 요청 ──
+  const handleResetRequest = async () => {
+    if (!resetEmail.trim()) return setMessage({ text: '이메일을 입력해주세요.', type: 'error' });
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/auth/login?action=reset-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail.trim().toLowerCase() }),
+      });
+      const data = await res.json();
+      if (!res.ok) return setMessage({ text: data.error, type: 'error' });
+      setResetSent(true);
+      setMessage({ text: data.message, type: 'success' });
+    } catch {
+      setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── 비밀번호 재설정: 코드 확인 + 저장 ──
+  const handleResetConfirm = async () => {
+    if (!/^\d{6}$/.test(resetCode.trim())) return setMessage({ text: '인증코드 6자리를 입력해주세요.', type: 'error' });
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/auth/login?action=reset-confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: resetEmail.trim().toLowerCase(), code: resetCode.trim(), password: resetPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) return setMessage({ text: data.error, type: 'error' });
+      // 재설정 완료 → 로그인 폼으로 복귀 (이메일은 채워둔다)
+      setLoginEmail(resetEmail.trim().toLowerCase());
+      setLoginPassword('');
+      setHelper(null);
+      setResetSent(false); setResetCode(''); setResetPassword('');
+      setMessage({ text: data.message, type: 'success' });
+    } catch {
+      setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const closeHelper = () => {
+    setHelper(null);
+    setMessage(null);
+    setFoundEmails(null);
+    setResetSent(false); setResetCode(''); setResetPassword('');
   };
 
   const handleSignup = async () => {
@@ -153,6 +270,9 @@ export function AuthGate({ onSuccess }: Props) {
     }
     if (emailCodeRequired && !verificationRequired) {
       if (!/^\d{6}$/.test(signupCode.trim())) return setMessage({ text: '이메일로 받은 6자리 인증코드를 입력해주세요.', type: 'error' });
+      if (signupPassword.length < 8 || !/[A-Za-z]/.test(signupPassword) || !/[0-9]/.test(signupPassword)) {
+        return setMessage({ text: '비밀번호는 영문·숫자를 포함해 8자 이상이어야 합니다.', type: 'error' });
+      }
       if (!ageChecked) return setMessage({ text: '만 14세 이상 확인에 동의해주세요.', type: 'error' });
     }
     setLoading(true);
@@ -176,13 +296,14 @@ export function AuthGate({ onSuccess }: Props) {
           impUid,
           code: signupCode.trim() || undefined,
           ageConfirmed: ageChecked || undefined,
+          password: signupPassword || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) return setMessage({ text: data.error, type: 'error' });
       setMessage({ text: data.message, type: 'success' });
       setSignupName(''); setSignupPhone(''); setSignupEmail('');
-      setSignupCode(''); setAgeChecked(false); setCodeSent(false);
+      setSignupCode(''); setAgeChecked(false); setCodeSent(false); setSignupPassword('');
     } catch {
       setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
     } finally {
@@ -448,9 +569,18 @@ export function AuthGate({ onSuccess }: Props) {
             <div className="text-[11px] text-[#8a92a6]">Seller AI Automation</div>
           </div>
         </div>
-        <div className="hidden items-center gap-2 text-[13px] text-[#8a92a6] md:flex">
-          <span className="hp-dot" />
-          <span>지금 <b className="font-semibold text-white tabular-nums">{activeCount.toLocaleString('ko-KR')}</b>명의 셀러가 사용 중</span>
+        <div className="hidden items-center gap-4 md:flex">
+          <a
+            href="#pricing"
+            onClick={e => { e.preventDefault(); document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
+            className="text-[13px] font-medium text-[#8a92a6] transition-colors hover:text-white"
+          >
+            요금 안내
+          </a>
+          <div className="flex items-center gap-2 text-[13px] text-[#8a92a6]">
+            <span className="hp-dot" />
+            <span>지금 <b className="font-semibold text-white tabular-nums">{activeCount.toLocaleString('ko-KR')}</b>명의 셀러가 사용 중</span>
+          </div>
         </div>
         <button
           onClick={scrollToAuth}
@@ -618,20 +748,27 @@ export function AuthGate({ onSuccess }: Props) {
               className="mx-auto mb-4 grid h-[52px] w-[52px] place-items-center rounded-[14px] border"
               style={{ background: 'linear-gradient(135deg,#141b31,#1c2542)', borderColor: '#1c2542', color: '#7cf5ff', boxShadow: '0 6px 24px rgba(124,245,255,.15)' }}
             >
-              <Lock className="h-5 w-5" />
+              {helper ? <KeyRound className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
             </div>
-            <h2 className="text-center text-[22px] font-bold tracking-[-0.02em] text-white">훈프로 시작하기</h2>
+            <h2 className="text-center text-[22px] font-bold tracking-[-0.02em] text-white">
+              {helper === 'find-id' ? '아이디 찾기' : helper === 'reset' ? '비밀번호 찾기' : '훈프로 시작하기'}
+            </h2>
             <p className="mt-1.5 text-center text-[13px] text-[#5a627a]">
-              {verificationRequired
+              {helper === 'find-id'
+                ? '이름과 연락처로 가입 이메일을 확인합니다'
+                : helper === 'reset'
+                ? '이메일 인증으로 새 비밀번호를 설정합니다'
+                : verificationRequired
                 ? '휴대폰 인증 한 번으로 셀러 자동화가 켜집니다'
                 : emailCodeRequired
                   ? '이메일 인증 즉시 모든 AI 도구가 열립니다'
                   : mode === 'signup'
                     ? '가입 후 관리자 승인이 완료되면 이용하실 수 있습니다'
-                    : '이메일 한 줄로 셀러 자동화가 켜집니다'}
+                    : '이메일과 비밀번호로 로그인하세요'}
             </p>
 
-            {/* 탭 */}
+            {/* 탭 — 아이디/비밀번호 찾기 중에는 숨김 */}
+            {!helper && (
             <div className="mt-6 flex border-b" style={{ borderColor: '#1c2542' }}>
               <button
                 onClick={() => { setMode('login'); setMessage(null); }}
@@ -654,9 +791,128 @@ export function AuthGate({ onSuccess }: Props) {
                 <UserPlus className="h-4 w-4" /> 가입 신청
               </button>
             </div>
+            )}
 
             {/* 폼 */}
-            {mode === 'login' ? (
+            {helper ? (
+              /* ─── 아이디 / 비밀번호 찾기 ─── */
+              <div className="mt-5 space-y-3">
+                <button
+                  onClick={closeHelper}
+                  className="mb-1 inline-flex items-center gap-1 text-[12.5px] text-[#8a92a6] transition-colors hover:text-white"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" /> 로그인으로 돌아가기
+                </button>
+
+                {helper === 'find-id' ? (
+                  <>
+                    <p className="text-[13px] leading-relaxed text-[#8a92a6]">
+                      가입 시 입력한 <b className="text-[#e8ecf5]">이름과 연락처</b>로 가입된 이메일을 찾아드립니다.
+                    </p>
+                    <input
+                      type="text"
+                      value={findName}
+                      onChange={e => setFindName(e.target.value)}
+                      placeholder="성함"
+                      autoFocus
+                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                    />
+                    <input
+                      type="tel"
+                      value={findPhone}
+                      onChange={e => setFindPhone(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleFindId()}
+                      placeholder="연락처 (예: 010-1234-5678)"
+                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                    />
+                    <button
+                      onClick={handleFindId}
+                      disabled={loading}
+                      className="hp-submit hp-cta group flex w-full items-center justify-center gap-1.5 rounded-[11px] py-3 text-[14px]"
+                    >
+                      {loading ? '찾는 중...' : <>이메일 찾기 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" /></>}
+                    </button>
+
+                    {foundEmails && foundEmails.length > 0 && (
+                      <div className="rounded-[12px] border p-4" style={{ borderColor: 'rgba(62,231,163,.25)', background: 'rgba(62,231,163,.06)' }}>
+                        <p className="mb-2 flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: '#3ee7a3' }}>
+                          <Check className="h-3.5 w-3.5" /> 가입된 이메일을 찾았습니다
+                        </p>
+                        {foundEmails.map((e, i) => (
+                          <div key={i} className="flex items-baseline justify-between py-1 text-[13.5px] text-white">
+                            <span className="font-medium tabular">{e.masked}</span>
+                            {e.joinedAt && <span className="text-[11.5px] text-[#5a627a]">{e.joinedAt} 가입</span>}
+                          </div>
+                        ))}
+                        <p className="mt-2 text-[11.5px] leading-relaxed text-[#8a92a6]">
+                          개인정보 보호를 위해 일부를 가렸습니다. 전체 주소가 기억나지 않으면 비밀번호 찾기로 재설정해주세요.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[13px] leading-relaxed text-[#8a92a6]">
+                      가입한 이메일로 <b className="text-[#e8ecf5]">인증코드</b>를 보내드립니다. 코드 확인 후 새 비밀번호를 설정하세요.
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="email"
+                        value={resetEmail}
+                        onChange={e => { setResetEmail(e.target.value); setResetSent(false); }}
+                        onKeyDown={e => e.key === 'Enter' && handleResetRequest()}
+                        placeholder="가입한 이메일 주소"
+                        autoFocus
+                        className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                      />
+                      <button
+                        onClick={handleResetRequest}
+                        disabled={loading || !resetEmail.trim()}
+                        className="shrink-0 whitespace-nowrap rounded-[11px] border px-3 py-3 text-[12.5px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5 disabled:opacity-40"
+                        style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.02)' }}
+                      >
+                        {loading && !resetSent ? '발송 중...' : resetSent ? '재발송' : '코드 받기'}
+                      </button>
+                    </div>
+
+                    {resetSent && (
+                      <>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={6}
+                          value={resetCode}
+                          onChange={e => setResetCode(e.target.value.replace(/\D/g, ''))}
+                          placeholder="인증코드 6자리"
+                          className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-center text-[15px] tracking-[0.4em] text-white outline-none transition-all placeholder:tracking-normal"
+                          style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                        />
+                        <input
+                          type="password"
+                          value={resetPassword}
+                          onChange={e => setResetPassword(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && handleResetConfirm()}
+                          placeholder="새 비밀번호 (영문·숫자 포함 8자 이상)"
+                          autoComplete="new-password"
+                          className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                        />
+                        <button
+                          onClick={handleResetConfirm}
+                          disabled={loading}
+                          className="hp-submit hp-cta group flex w-full items-center justify-center gap-1.5 rounded-[11px] py-3 text-[14px]"
+                        >
+                          {loading ? '설정 중...' : <>비밀번호 설정하기 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" /></>}
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : mode === 'login' ? (
               <div className="mt-5 space-y-3">
                 <input
                   type="email"
@@ -664,7 +920,18 @@ export function AuthGate({ onSuccess }: Props) {
                   onChange={e => setLoginEmail(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleLogin()}
                   placeholder="이메일 주소"
+                  autoComplete="username"
                   autoFocus
+                  className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                />
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={e => setLoginPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                  placeholder="비밀번호"
+                  autoComplete="current-password"
                   className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
                   style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
                 />
@@ -677,6 +944,23 @@ export function AuthGate({ onSuccess }: Props) {
                     <>입장하기 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" /></>
                   )}
                 </button>
+
+                {/* 아이디 / 비밀번호 찾기 */}
+                <div className="flex items-center justify-center gap-3 pt-1 text-[12.5px] text-[#5a627a]">
+                  <button
+                    onClick={() => { setHelper('find-id'); setMessage(null); setFoundEmails(null); }}
+                    className="inline-flex items-center gap-1 transition-colors hover:text-white"
+                  >
+                    <Mail className="h-3.5 w-3.5" /> 아이디 찾기
+                  </button>
+                  <span style={{ color: '#1c2542' }}>|</span>
+                  <button
+                    onClick={() => { setHelper('reset'); setMessage(null); setResetEmail(loginEmail.trim()); }}
+                    className="inline-flex items-center gap-1 transition-colors hover:text-white"
+                  >
+                    <KeyRound className="h-3.5 w-3.5" /> 비밀번호 찾기
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="mt-5 space-y-3">
@@ -734,6 +1018,16 @@ export function AuthGate({ onSuccess }: Props) {
                       onKeyDown={e => e.key === 'Enter' && handleSignup()}
                       placeholder="인증코드 6자리"
                       className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-center text-[15px] tracking-[0.4em] text-white outline-none transition-all placeholder:tracking-normal"
+                      style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                    />
+                    <input
+                      type="password"
+                      value={signupPassword}
+                      onChange={e => setSignupPassword(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleSignup()}
+                      placeholder="비밀번호 (영문·숫자 포함 8자 이상)"
+                      autoComplete="new-password"
+                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
                       style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
                     />
                     <label className="flex cursor-pointer items-center gap-2 px-1 text-[12.5px] text-[#8a92a6]">
@@ -808,6 +1102,114 @@ export function AuthGate({ onSuccess }: Props) {
           </div>
         </aside>
       </main>
+
+      {/* ─── 요금 안내 (비회원도 가입 전에 가격을 확인할 수 있어야 한다) ─── */}
+      <section id="pricing" className="relative z-[5] border-t px-6 py-16 md:px-12 md:py-20" style={{ borderColor: '#1c2542' }}>
+        <div className="mx-auto max-w-[880px]">
+          <div className="text-center">
+            <p className="text-[11.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: '#7cf5ff' }}>PRICING</p>
+            <h2 className="mt-2.5 text-[26px] font-bold tracking-[-0.02em] text-white md:text-[32px]">
+              도구 하나 값으로, 팀 하나를 씁니다
+            </h2>
+            <p className="mt-3 text-[14px] leading-relaxed text-[#8a92a6]">
+              7가지 AI 도구를 하나의 구독으로. 언제든 해지할 수 있고, 해지해도 남은 기간은 그대로 이용합니다.
+            </p>
+          </div>
+
+          <div className="mt-9 grid gap-4 md:grid-cols-2">
+            {/* 연간 — 추천 */}
+            {yearly && (
+              <div
+                className="hp-login-card relative rounded-[20px] border p-7"
+                style={{
+                  background: 'linear-gradient(180deg, rgba(20,27,49,.9), rgba(11,16,32,.9))',
+                  borderColor: '#1c2542',
+                  boxShadow: '0 30px 70px -30px rgba(0,0,0,.7)',
+                }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[14px] font-semibold text-white">연간 결제</span>
+                  {yearlyDiscount > 0 && (
+                    <span
+                      className="rounded-full px-2.5 py-1 text-[11px] font-bold"
+                      style={{ background: 'linear-gradient(135deg,#7cf5ff,#8b7bff)', color: '#0a0f1f' }}
+                    >
+                      {yearlyDiscount}% 할인
+                    </span>
+                  )}
+                </div>
+                <div className="mt-4 flex items-baseline gap-1.5">
+                  <span className="text-[38px] font-bold tracking-[-0.03em] text-white tabular">
+                    {Math.round(yearly.price / 12).toLocaleString()}
+                  </span>
+                  <span className="text-[14px] font-medium text-[#8a92a6]">원 / 월</span>
+                </div>
+                <p className="mt-1.5 text-[12.5px] text-[#5a627a]">
+                  연 {yearly.price.toLocaleString()}원 일시 결제 · 매년 자동갱신
+                </p>
+                {monthly && yearlyDiscount > 0 && (
+                  <p className="mt-3 text-[12.5px] font-medium" style={{ color: '#3ee7a3' }}>
+                    월간 결제 대비 연 {(monthly.price * 12 - yearly.price).toLocaleString()}원 절약
+                  </p>
+                )}
+                <button
+                  onClick={scrollToAuth}
+                  className="hp-submit hp-cta group mt-6 flex w-full items-center justify-center gap-1.5 rounded-[11px] py-3 text-[14px]"
+                >
+                  연간으로 시작하기 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" />
+                </button>
+              </div>
+            )}
+
+            {/* 월간 */}
+            {monthly && (
+              <div
+                className="rounded-[20px] border p-7"
+                style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+              >
+                <span className="text-[14px] font-semibold text-white">월간 결제</span>
+                <div className="mt-4 flex items-baseline gap-1.5">
+                  <span className="text-[38px] font-bold tracking-[-0.03em] text-white tabular">
+                    {monthly.price.toLocaleString()}
+                  </span>
+                  <span className="text-[14px] font-medium text-[#8a92a6]">원 / 월</span>
+                </div>
+                <p className="mt-1.5 text-[12.5px] text-[#5a627a]">매월 자동결제 · 부담 없이 시작</p>
+                <button
+                  onClick={scrollToAuth}
+                  className="mt-6 w-full rounded-[11px] border py-3 text-[14px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5"
+                  style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.02)' }}
+                >
+                  월간으로 시작하기
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 포함 기능 */}
+          <div className="mt-8 rounded-[16px] border p-6" style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.02)' }}>
+            <p className="mb-4 text-[12.5px] font-semibold text-white">두 플랜 모두 포함</p>
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              {TOOLS.map(t => (
+                <div key={t.label} className="flex items-center gap-2 text-[13px] text-[#b9c0d0]">
+                  <Check className="h-3.5 w-3.5 shrink-0" style={{ color: '#3ee7a3' }} />
+                  {t.label}
+                </div>
+              ))}
+              <div className="flex items-center gap-2 text-[13px] text-[#b9c0d0]">
+                <Check className="h-3.5 w-3.5 shrink-0" style={{ color: '#3ee7a3' }} />
+                내 작업 저장 · 불러오기
+              </div>
+            </div>
+          </div>
+
+          <p className="mt-5 text-center text-[12px] leading-relaxed text-[#5a627a]">
+            표시 금액은 부가세 포함입니다. 결제 후 7일 이내 미사용 시 전액 환불되며,
+            그 외에는 <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="underline hover:text-white">환불 정책</a>에 따라 처리됩니다.
+            <br />결제일 7일 전 이메일로 미리 안내드립니다.
+          </p>
+        </div>
+      </section>
 
       {/* 다크 테마 푸터 — 전자상거래법 표기 (미로그인 상태에서도 접근 가능해야 함) */}
       <footer className="relative z-[5] border-t" style={{ borderColor: '#1c2542', background: 'rgba(7,9,18,.6)', backdropFilter: 'blur(10px)' }}>

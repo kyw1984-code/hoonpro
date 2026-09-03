@@ -21,6 +21,43 @@ function emailCodeEnabled(): boolean {
   return Boolean(process.env.RESEND_API_KEY) && !portoneEnabled();
 }
 
+// ── 비밀번호 해시 (scrypt) ──
+// api/auth/login.ts에도 동일 구현이 있다. 서버리스 함수마다 번들이 분리되어
+// 공유 모듈을 두면 라우팅에 영향을 줄 수 있어 의도적으로 중복해 둔다.
+function hashPassword(plain: string): string {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(plain, salt, 64).toString('hex');
+  return `scrypt$${salt}$${hash}`;
+}
+
+// 비밀번호 규칙 — 통과 시 null, 실패 시 사용자에게 보여줄 사유
+function passwordProblem(pw: unknown): string | null {
+  if (typeof pw !== 'string' || pw.length < 8) return '비밀번호는 8자 이상이어야 합니다.';
+  if (pw.length > 72) return '비밀번호가 너무 깁니다. (72자 이하)';
+  if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return '비밀번호는 영문과 숫자를 모두 포함해야 합니다.';
+  return null;
+}
+
+// 브랜드 템플릿 (api/auth/login.ts · api/billing.ts와 동일 디자인)
+function wrapEmail(heading: string, bodyHtml: string): string {
+  return `<div style="margin:0;padding:24px 12px;background:#0b1020;font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;">
+  <div style="max-width:520px;margin:0 auto;background:#141b31;border:1px solid #1c2542;border-radius:18px;overflow:hidden;">
+    <div style="padding:22px 28px 0;">
+      <span style="display:inline-block;width:30px;height:30px;line-height:30px;text-align:center;border-radius:9px;background:linear-gradient(135deg,#7cf5ff,#8b7bff);color:#0b1020;font-weight:800;font-size:14px;">훈</span>
+      <span style="margin-left:9px;font-size:14px;font-weight:600;color:#e8ecf5;vertical-align:middle;">쇼크트리 훈프로 <span style="color:#5a627a;font-weight:500;">AI 자동화</span></span>
+    </div>
+    <div style="padding:18px 28px 26px;">
+      <h1 style="margin:0 0 14px;font-size:19px;line-height:1.4;color:#ffffff;font-weight:700;">${heading}</h1>
+      <div style="font-size:14px;line-height:1.75;color:#b9c0d0;">${bodyHtml}</div>
+    </div>
+    <div style="padding:16px 28px;border-top:1px solid #1c2542;font-size:11.5px;line-height:1.7;color:#5a627a;">
+      본 메일은 발신 전용입니다. 문의는 서비스 내 [훈프로에게 질문]을 이용해주세요.<br>
+      <a href="https://hoonproai.com" style="color:#7cf5ff;text-decoration:none;">hoonproai.com</a>
+    </div>
+  </div>
+</div>`;
+}
+
 function hashCode(email: string, code: string): string {
   return crypto.createHash('sha256').update(`${email}:${code}:${process.env.JWT_SECRET}`).digest('hex');
 }
@@ -34,9 +71,13 @@ async function sendCodeEmail(to: string, code: string): Promise<boolean> {
         from: process.env.EMAIL_FROM || 'no-reply@hoonpro.app',
         to: [to],
         subject: `[훈프로] 가입 인증코드: ${code}`,
-        html: `<p>훈프로 가입 인증코드입니다.</p>` +
-          `<p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p>` +
-          `<p>10분 안에 입력해주세요. 본인이 요청하지 않았다면 이 메일을 무시하세요.</p>`,
+        html: wrapEmail('가입 인증코드',
+          `<p>아래 코드를 입력하면 가입이 완료됩니다.</p>
+           <div style="margin:18px 0;padding:16px;text-align:center;background:#0b1020;border:1px solid #1c2542;border-radius:12px;">
+             <span style="font-size:30px;font-weight:700;letter-spacing:9px;color:#7cf5ff;">${code}</span>
+           </div>
+           <p>코드는 <b style="color:#e8ecf5;">10분</b> 동안 유효합니다.</p>
+           <p style="color:#8a92a6;">본인이 요청하지 않았다면 이 메일을 무시하세요.</p>`),
       }),
     });
     return res.ok;
@@ -114,7 +155,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  const { name, phone, email, impUid, code, ageConfirmed } = req.body ?? {};
+  const { name, phone, email, impUid, code, ageConfirmed, password } = req.body ?? {};
   if (!email) return res.status(400).json({ error: '이메일을 입력해주세요.' });
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -140,6 +181,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       email: normalizedEmail,
       code_hash: hashCode(normalizedEmail, newCode),
       attempts: 0,
+      purpose: 'signup',
       expires_at: new Date(Date.now() + CODE_TTL_MS).toISOString(),
       created_at: new Date().toISOString(),
     });
@@ -202,9 +244,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!code || !/^\d{6}$/.test(String(code))) {
       return res.status(400).json({ error: '이메일로 받은 6자리 인증코드를 입력해주세요.' });
     }
+    const pwProblem = passwordProblem(password);
+    if (pwProblem) return res.status(400).json({ error: pwProblem });
 
     const { data: v } = await supabase.from('email_verifications').select('*').eq('email', normalizedEmail).maybeSingle();
-    if (!v) return res.status(400).json({ error: '인증코드를 먼저 요청해주세요.' });
+    if (!v || (v.purpose && v.purpose !== 'signup')) return res.status(400).json({ error: '인증코드를 먼저 요청해주세요.' });
     if (new Date(v.expires_at).getTime() < Date.now()) {
       return res.status(400).json({ error: '인증코드가 만료됐습니다. 다시 요청해주세요.' });
     }
@@ -220,6 +264,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 관리자가 발급한 쿠폰 코드 자체가 담당한다 (관리자 차단 기능은 유지)
     const { error } = await supabase.from('users').insert({
       name, phone, email: normalizedEmail, status: 'approved',
+      password_hash: hashPassword(String(password)),
     });
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: '이미 등록된 이메일입니다.' });
