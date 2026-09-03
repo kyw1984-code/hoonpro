@@ -37,7 +37,6 @@ const TABS: TabDef[] = [
   { id: 'works', label: '내 작업', icon: FolderOpen },
 ];
 
-// 관리자가 저장한 탭 순서 (app_config.tab_order). 로컬 캐시로 첫 화면 깜빡임을 막는다.
 const TAB_ORDER_KEY = 'hoonpro_tab_order';
 
 const loadCachedTabOrder = (): string[] | null => {
@@ -52,7 +51,6 @@ const loadCachedTabOrder = (): string[] | null => {
 const applyTabOrder = (order: string[] | null): TabDef[] => {
   if (!order || order.length === 0) return TABS;
   const pos = new Map(order.map((id, i) => [id, i]));
-  // 저장 이후 추가된 새 탭은 기본 순서를 유지하며 뒤쪽에 배치
   return [...TABS].sort((a, b) => {
     const ai = pos.has(a.id) ? pos.get(a.id)! : 100 + TABS.findIndex(t => t.id === a.id);
     const bi = pos.has(b.id) ? pos.get(b.id)! : 100 + TABS.findIndex(t => t.id === b.id);
@@ -60,16 +58,17 @@ const applyTabOrder = (order: string[] | null): TabDef[] => {
   });
 };
 
-// 밑줄형 탭 — 개수가 늘어도 줄바꿈으로 무너지지 않고 헤더 높이가 일정하게 유지된다.
+/**
+ * 다크 테크 탭 — 활성 탭에 시안 언더라인 + 상단 미세 글로우
+ */
 const getTabButtonClass = (active: boolean): string => (
-  `relative flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-[13px] transition-colors -mb-px ${
+  `relative flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-[13px] transition-all -mb-px ${
     active
-      ? 'border-ink text-ink font-semibold'
-      : 'border-transparent text-ink-2 font-medium hover:text-ink'
+      ? 'border-accent text-ink font-semibold'
+      : 'border-transparent text-ink-3 font-medium hover:text-ink hover:bg-white/[0.02]'
   }`
 );
 
-// 토스 카드 등록에서 돌아온 리다이렉트는 구독 탭에서 이어서 처리한다
 const initialTab = (): Tab =>
   window.location.search.includes('billingAuth') ? 'billing' : 'home';
 
@@ -77,14 +76,13 @@ export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [remainingCalls, setRemainingCalls] = useState<number | null>(null);
-  // '훈프로에게 질문' 수강생 공개 여부 — OFF면 수강생에게 탭 자체를 숨김 (관리자는 항상 표시)
   const [qaVisible, setQaVisible] = useState(false);
   const [tabOrder, setTabOrder] = useState<string[] | null>(loadCachedTabOrder);
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch('/api/admin?action=config'); // 비관리자에게는 tabOrder만 공개
+        const res = await fetch('/api/admin?action=config');
         const data = await res.json();
         if (res.ok && Array.isArray(data.tabOrder)) {
           setTabOrder(data.tabOrder);
@@ -113,7 +111,6 @@ export default function App() {
     })();
   }, [user]);
 
-  // 유료화 강제(billing_enforced) 시 구독 없는 계정의 기능 잠금
   const [billingLocked, setBillingLocked] = useState(false);
 
   const applyBillingStatus = (s: BillingStatus, u: AuthUser | null) => {
@@ -149,21 +146,28 @@ export default function App() {
     setRemainingCalls(null);
   };
 
-    if (!user) {
-    // AuthGate 내부에서 다크 테마 푸터를 렌더링한다 (사업자 정보·약관 포함)
+  if (!user) {
+    // AuthGate 내부에서 다크 테마 푸터를 렌더링
     return <AuthGate onSuccess={() => setUser(getUser())} />;
   }
 
-
   return (
     <ApiKeyCheck>
-      <div className="min-h-screen bg-paper-2 flex flex-col font-sans">
-        <header className="bg-paper border-b border-line sticky top-0 z-20">
+      <div className="min-h-screen bg-ground flex flex-col font-sans">
+        {/* ─── 다크 테크 헤더 ─── */}
+        <header className="sticky top-0 z-20 backdrop-blur-xl bg-ground/75 border-b border-line">
           {/* 상단 줄 — 브랜드와 계정 */}
           <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-4 px-6">
             <div className="flex shrink-0 items-center gap-2.5">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control bg-ink">
-                <LayoutTemplate className="h-4 w-4 text-paper" />
+              <div
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[13px] font-extrabold"
+                style={{
+                  background: 'linear-gradient(135deg,#7cf5ff 0%,#8b7bff 100%)',
+                  color: '#0b1020',
+                  boxShadow: '0 4px 14px rgba(124,245,255,.25)',
+                }}
+              >
+                훈
               </div>
               <h1 className="truncate text-[15px] font-semibold tracking-tight text-ink">
                 쇼크트리 훈프로 <span className="text-ink-3 font-medium">AI 자동화</span>
@@ -172,15 +176,22 @@ export default function App() {
 
             <div className="flex shrink-0 items-center gap-3">
               {!user.isAdmin && remainingCalls !== null && (
-                <span className="hidden items-center gap-1.5 rounded-full border border-line bg-paper-2 px-2.5 py-1 text-xs text-ink-2 sm:inline-flex">
-                  <Zap className="h-3.5 w-3.5 text-caution" />
-                  <span className="tabular">오늘 {remainingCalls}회</span>
+                <span
+                  className="hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-xs sm:inline-flex tabular"
+                  style={{
+                    background: 'rgba(255,180,84,.08)',
+                    border: '1px solid rgba(255,180,84,.22)',
+                    color: '#ffb454',
+                  }}
+                >
+                  <Zap className="h-3.5 w-3.5" />
+                  <span>오늘 {remainingCalls}회</span>
                 </span>
               )}
               <span className="hidden whitespace-nowrap text-[13px] font-medium text-ink sm:inline">{user.name}</span>
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-1 whitespace-nowrap rounded-control px-2 py-1 text-xs text-ink-3 transition-colors hover:bg-paper-2 hover:text-ink"
+                className="flex items-center gap-1 whitespace-nowrap rounded-control px-2 py-1 text-xs text-ink-3 transition-colors hover:bg-white/5 hover:text-ink"
               >
                 <LogOut className="h-3.5 w-3.5" />로그아웃
               </button>
@@ -222,7 +233,6 @@ export default function App() {
 
         <main className={`flex-grow ${activeTab === 'analyzer' || activeTab === 'sourcing' ? '' : 'py-8'}`}>
           {billingLocked && activeTab !== 'billing' && activeTab !== 'admin' ? (
-            /* 유료화 이후 구독이 없으면 기능 대신 구독 시작 화면을 보여준다 (데이터는 보존됨) */
             <div className="py-8">
               <div className="mx-auto mb-5 flex w-full max-w-[720px] items-start gap-2.5 rounded-panel border border-line bg-paper px-6 py-4">
                 <Lock className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
@@ -235,14 +245,14 @@ export default function App() {
           ) : (
             <>
               {activeTab === 'home' && <HomeDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-          {activeTab === 'thumbnail' && <ThumbnailGenerator />}
+              {activeTab === 'thumbnail' && <ThumbnailGenerator />}
               {activeTab === 'detail' && <DetailPlanner />}
               {activeTab === 'sourcing' && <SourcingFinder />}
               {activeTab === 'ranktracker' && <RankTracker />}
               {activeTab === 'review' && <ReviewAnalyzer />}
               {activeTab === 'analyzer' && <AdAnalyzer />}
               {activeTab === 'works' && <WorksLibrary />}
-          {activeTab === 'qa' && qaVisible && <AskHoonpro />}
+              {activeTab === 'qa' && qaVisible && <AskHoonpro />}
               {activeTab === 'billing' && <SubscriptionPage />}
               {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
             </>
