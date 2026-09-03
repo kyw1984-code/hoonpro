@@ -2,10 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Lock, UserPlus, LogIn, ShieldCheck, ArrowRight, Sparkles, Activity,
   TrendingUp, Image as ImageIcon, LayoutTemplate, ListOrdered, MessageSquareText,
-  BarChart3, MessageCircleQuestion, ChevronRight,
+  BarChart3, MessageCircleQuestion, ChevronRight, Youtube, ExternalLink,
 } from 'lucide-react';
 import { setToken } from '../../lib/auth';
 import { certificationAvailable, requestCertification } from '../../lib/certification';
+import { loadCachedCompany, fetchCompanyInfo, type CompanyInfo } from '../../lib/company';
 
 interface Props {
   onSuccess: () => void;
@@ -94,6 +95,12 @@ export function AuthGate({ onSuccess }: Props) {
         setEmailCodeRequired(Boolean(data.emailCodeRequired));
       })
       .catch(() => { setVerificationRequired(false); setEmailCodeRequired(false); });
+  }, []);
+
+  // 사업자 정보 (전자상거래법 표기용) — 캐시된 값 먼저, 서버 응답으로 갱신
+  const [company, setCompany] = useState<CompanyInfo>(loadCachedCompany);
+  useEffect(() => {
+    fetchCompanyInfo().then(setCompany).catch(() => { /* 기본값 유지 */ });
   }, []);
 
   const handleSendCode = async () => {
@@ -801,6 +808,71 @@ export function AuthGate({ onSuccess }: Props) {
           </div>
         </aside>
       </main>
+
+      {/* 다크 테마 푸터 — 전자상거래법 표기 (미로그인 상태에서도 접근 가능해야 함) */}
+      <footer className="relative z-[5] border-t" style={{ borderColor: '#1c2542', background: 'rgba(7,9,18,.6)', backdropFilter: 'blur(10px)' }}>
+        <div className="mx-auto max-w-[1440px] px-6 py-10 md:px-12">
+          {/* 상단 — 유튜브 / 홈페이지 링크 */}
+          <div className="text-center">
+            <p className="text-[13px] text-[#8a92a6]">
+              이 앱은 <b className="font-semibold text-white">쇼크트리 훈프로</b>에 의해 만들어졌습니다.
+              <span className="mx-1">유튜브 구독 및 훈프로 홈페이지 가입 부탁드려요!</span>
+            </p>
+            <div className="mt-3.5 flex flex-wrap items-center justify-center gap-2">
+              <a
+                href="https://www.youtube.com/@saupsin89"
+                target="_blank"
+                rel="noreferrer"
+                className="hp-chip inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] font-medium transition-all"
+                style={{ background: 'rgba(255,255,255,.03)', borderColor: '#1c2542', color: '#e8ecf5' }}
+              >
+                <Youtube className="h-3.5 w-3.5" style={{ color: '#ff5b5b' }} />
+                유튜브
+              </a>
+              <a
+                href="https://hoonpro.liveklass.com/"
+                target="_blank"
+                rel="noreferrer"
+                className="hp-chip inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] font-medium transition-all"
+                style={{ background: 'rgba(255,255,255,.03)', borderColor: '#1c2542', color: '#e8ecf5' }}
+              >
+                <ExternalLink className="h-3.5 w-3.5" style={{ color: '#7cf5ff' }} />
+                훈프로 홈페이지
+              </a>
+            </div>
+          </div>
+
+          {/* 약관·정책 */}
+          <div className="mt-7 flex flex-wrap justify-center gap-x-4 gap-y-2 text-[13px]">
+            <a href="/terms.html" target="_blank" rel="noreferrer" className="text-[#8a92a6] transition-colors hover:text-white hover:underline">이용약관</a>
+            <span className="text-[#3a4256]">|</span>
+            <a href="/privacy.html" target="_blank" rel="noreferrer" className="font-semibold text-[#e8ecf5] transition-colors hover:text-white hover:underline">개인정보처리방침</a>
+            <span className="text-[#3a4256]">|</span>
+            <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="text-[#8a92a6] transition-colors hover:text-white hover:underline">환불 정책</a>
+          </div>
+
+          {/* 사업자 정보 (전자상거래법 제10조) */}
+          <div className="mt-5 space-y-1 text-center text-[12px] leading-relaxed text-[#5a627a]">
+            <p>
+              상호: <span className="text-[#8a92a6]">{company.name}</span>
+              <span className="mx-2 text-[#3a4256]">·</span>
+              대표: <span className="text-[#8a92a6]">{company.ceo}</span>
+              <span className="mx-2 text-[#3a4256]">·</span>
+              사업자등록번호: <span className="text-[#8a92a6] tabular-nums">{company.bizNumber}</span>
+              <span className="mx-2 text-[#3a4256]">·</span>
+              통신판매업신고: <span className="text-[#8a92a6]">{company.mailOrderNumber}</span>
+            </p>
+            <p>
+              주소: <span className="text-[#8a92a6]">{company.address}</span>
+              <span className="mx-2 text-[#3a4256]">·</span>
+              이메일: <span className="text-[#8a92a6]">{company.email}</span>
+              <span className="mx-2 text-[#3a4256]">·</span>
+              전화: <span className="text-[#8a92a6] tabular-nums">{company.phone}</span>
+            </p>
+            <p className="pt-1">© {new Date().getFullYear()} {company.name}. All rights reserved.</p>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
