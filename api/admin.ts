@@ -275,6 +275,21 @@ const DEFAULTS = { imageModel: 'gpt-image-2', imageQuality: 'high', aiIntegrated
 // 탭 순서 설정에 허용되는 탭 id (App.tsx TABS와 일치해야 함)
 const TAB_IDS = ['home', 'thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'qa', 'works'];
 
+// 사업자 정보 항목 (프론트 src/lib/company.ts CompanyInfo와 일치)
+const COMPANY_KEYS = ['name', 'ceo', 'bizNumber', 'mailOrderNumber', 'address', 'email', 'phone', 'effectiveDate', 'dbRegion'];
+
+function parseCompany(raw: string | undefined): Record<string, string> {
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: Record<string, string> = {};
+    for (const k of COMPANY_KEYS) if (typeof parsed[k] === 'string') out[k] = parsed[k];
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 // app_config 테이블 미존재 오류 판별
 function isMissingTable(error: any): boolean {
   return error?.code === '42P01' || /app_config/.test(error?.message || '');
@@ -287,11 +302,11 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
     const { data, error } = await supabase
       .from('app_config')
       .select('key, value')
-      .in('key', ['image_model', 'image_quality', 'ai_integrated_text_enabled', 'tab_order']);
+      .in('key', ['image_model', 'image_quality', 'ai_integrated_text_enabled', 'tab_order', 'company_info']);
 
     if (error) {
       if (isMissingTable(error)) {
-        return res.status(200).json(isAdmin ? { ...DEFAULTS, tabOrder: null, migrated: false } : { tabOrder: null });
+        return res.status(200).json(isAdmin ? { ...DEFAULTS, tabOrder: null, company: {}, migrated: false } : { tabOrder: null, company: {} });
       }
       return res.status(500).json({ error: '서버 오류' });
     }
@@ -303,9 +318,13 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
       if (Array.isArray(parsed)) tabOrder = parsed.filter((t) => TAB_IDS.includes(t));
     } catch { /* 잘못 저장된 값은 기본 순서로 */ }
 
-    if (!isAdmin) return res.status(200).json({ tabOrder });
+    // 사업자 정보는 법적으로 공개 표기 의무가 있는 값이라 비관리자(푸터·약관 페이지)에도 공개
+    const company = parseCompany(map.company_info);
+
+    if (!isAdmin) return res.status(200).json({ tabOrder, company });
 
     return res.status(200).json({
+      company,
       imageModel: ALLOWED_MODELS.includes(map.image_model) ? map.image_model : DEFAULTS.imageModel,
       imageQuality: ALLOWED_QUALITY.includes(map.image_quality) ? map.image_quality : DEFAULTS.imageQuality,
       aiIntegratedTextEnabled: map.ai_integrated_text_enabled === 'true',
@@ -318,7 +337,7 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
 
   // 설정 변경 — 이미지 설정과 탭 순서를 각각 부분 저장할 수 있다
   if (req.method === 'POST') {
-    const { imageModel, imageQuality, aiIntegratedTextEnabled, tabOrder } = req.body ?? {};
+    const { imageModel, imageQuality, aiIntegratedTextEnabled, tabOrder, company } = req.body ?? {};
     const now = new Date().toISOString();
     const rows: { key: string; value: string; updated_at: string }[] = [];
 
@@ -342,6 +361,22 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
         return res.status(400).json({ error: '올바르지 않은 탭 순서입니다.' });
       }
       rows.push({ key: 'tab_order', value: JSON.stringify(tabOrder), updated_at: now });
+    }
+
+    if (company !== undefined) {
+      if (!company || typeof company !== 'object' || Array.isArray(company)) {
+        return res.status(400).json({ error: '올바르지 않은 사업자 정보입니다.' });
+      }
+      const { data: prev } = await supabase.from('app_config').select('value').eq('key', 'company_info').maybeSingle();
+      const merged = parseCompany(prev?.value);
+      for (const k of COMPANY_KEYS) {
+        if (company[k] === undefined) continue;
+        if (typeof company[k] !== 'string' || company[k].length > 200) {
+          return res.status(400).json({ error: `사업자 정보 항목(${k})이 올바르지 않습니다.` });
+        }
+        merged[k] = company[k].trim();
+      }
+      rows.push({ key: 'company_info', value: JSON.stringify(merged), updated_at: now });
     }
 
     if (rows.length === 0) return res.status(400).json({ error: '변경할 설정이 없습니다.' });

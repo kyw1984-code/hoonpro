@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Building2 } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
 import { BillingAdmin } from './BillingAdmin';
 import { QAManager } from './QAManager';
+import { CompanyInfoConfig } from './CompanyInfoConfig';
 
 interface UserRow {
   id: string;
@@ -31,7 +32,7 @@ const STATUS_COLOR: Record<string, string> = {
 const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'billing' | 'stats' | 'config' | 'taborder' | 'qa'>('users');
+  const [tab, setTab] = useState<'users' | 'billing' | 'stats' | 'config' | 'taborder' | 'company' | 'qa'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -165,6 +166,14 @@ export function AdminPanel() {
           <ListOrdered className="w-4 h-4" /> 탭 순서
         </button>
         <button
+          onClick={() => setTab('company')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'company' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <Building2 className="w-4 h-4" /> 사업자 정보
+        </button>
+        <button
           onClick={() => setTab('qa')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
             tab === 'qa' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
@@ -174,7 +183,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
+      {tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <ImageConfigTab showToast={showToast} />
       ) : tab === 'taborder' ? (
         <TabOrderConfig showToast={showToast} />

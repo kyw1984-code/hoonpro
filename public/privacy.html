@@ -22,7 +22,7 @@
 <body>
 <div class="wrap">
   <h1>개인정보처리방침</h1>
-  <p class="meta">쇼크트리 훈프로 AI 자동화 · 시행일: [2026년 00월 00일]</p>
+  <p class="meta">쇼크트리 훈프로 AI 자동화 · 시행일: <span data-co="effectiveDate">[2026년 00월 00일]</span></p>
 
   <p>주식회사 오브원(이하 "회사")은 개인정보 보호법 등 관련 법령을 준수하며, 이용자의 개인정보를 다음과 같이 처리합니다.</p>
 
@@ -60,7 +60,7 @@
   <table>
     <tr><th>수탁사</th><th>위탁 업무</th><th>처리 국가</th></tr>
     <tr><td>토스페이먼츠(주)</td><td>결제 처리, 카드 정보 보관</td><td>대한민국</td></tr>
-    <tr><td>Supabase Inc.</td><td>데이터베이스 운영(회원·구독·이용 기록 저장)</td><td>국외(클라우드 리전: [싱가포르 등 실제 리전 기재])</td></tr>
+    <tr><td>Supabase Inc.</td><td>데이터베이스 운영(회원·구독·이용 기록 저장)</td><td>국외(클라우드 리전: <span data-co="dbRegion">[싱가포르 등 실제 리전 기재]</span>)</td></tr>
     <tr><td>Vercel Inc.</td><td>서비스 호스팅</td><td>미국 등</td></tr>
     <tr><td>Resend (Plus Five Five, Inc.)</td><td>이메일 발송(인증코드·결제 안내)</td><td>미국</td></tr>
     <tr><td>OpenAI, L.L.C. / Google LLC</td><td>AI 생성·분석 처리(이용자가 입력한 콘텐츠에 한함)</td><td>미국</td></tr>
@@ -85,9 +85,9 @@
 
   <h2>8. 개인정보 보호책임자</h2>
   <table>
-    <tr><th>성명</th><td>[대표자명]</td></tr>
+    <tr><th>성명</th><td><span data-co="ceo">김영욱</span></td></tr>
     <tr><th>직책</th><td>대표</td></tr>
-    <tr><th>연락처</th><td>[contact@example.com] / [00-0000-0000]</td></tr>
+    <tr><th>연락처</th><td><span data-co="email">[contact@example.com]</span> / <span data-co="phone">[00-0000-0000]</span></td></tr>
   </table>
   <p>개인정보 침해에 대한 신고·상담은 개인정보침해신고센터(privacy.kisa.or.kr, 국번 없이 118)에 문의할 수 있습니다.</p>
 
@@ -95,11 +95,21 @@
   <p>이 방침이 변경되는 경우 시행 7일 전부터 서비스 내 공지사항을 통해 고지합니다.</p>
 
   <footer>
-    상호: 주식회사 오브원 · 대표: [대표자명] · 사업자등록번호: [000-00-00000]<br>
-    통신판매업신고: [제0000-서울강남-00000호] · 주소: [사업장 주소]<br>
-    이메일: [contact@example.com] · 전화: [00-0000-0000]<br><br>
+    상호: <span data-co="name">주식회사 오브원</span> · 대표: <span data-co="ceo">김영욱</span> · 사업자등록번호: <span data-co="bizNumber">560-87-02398</span><br>
+    통신판매업신고: <span data-co="mailOrderNumber">[제0000-서울강남-00000호]</span> · 주소: <span data-co="address">경기도 부천시 원미구 조마루로385번길 122, 제비151호(춘의동, 삼보테크노타워)</span><br>
+    이메일: <span data-co="email">[contact@example.com]</span> · 전화: <span data-co="phone">[00-0000-0000]</span><br><br>
     <a href="/terms.html">이용약관</a> · <a href="/">서비스로 돌아가기</a>
   </footer>
 </div>
+<script>
+// 관리자 패널 [사업자 정보]에 저장된 값으로 표기를 채운다 (로그인 없이 공개 조회)
+fetch('/api/admin?action=config').then(function (r) { return r.json(); }).then(function (d) {
+  var c = (d && d.company) || {};
+  document.querySelectorAll('[data-co]').forEach(function (el) {
+    var v = c[el.getAttribute('data-co')];
+    if (typeof v === 'string' && v.trim()) el.textContent = v;
+  });
+}).catch(function () {});
+</script>
 </body>
 </html>
