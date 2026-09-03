@@ -1,5 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Lock, UserPlus, LogIn, ShieldCheck } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Lock, UserPlus, LogIn, ShieldCheck, ArrowRight, Sparkles, Activity,
+  TrendingUp, Image as ImageIcon, LayoutTemplate, ListOrdered, MessageSquareText,
+  BarChart3, MessageCircleQuestion, ChevronRight,
+} from 'lucide-react';
 import { setToken } from '../../lib/auth';
 import { certificationAvailable, requestCertification } from '../../lib/certification';
 
@@ -9,7 +13,59 @@ interface Props {
 
 type Mode = 'login' | 'signup';
 
+/* ────────────────────────────────────────────────────────────────
+ * 로그인 전 랜딩 (다크 테크)
+ * - 미로그인 사용자에게 훈프로의 8가지 AI 도구를 라이브 데모처럼 보여주고
+ *   그대로 로그인/가입까지 진행시킨다.
+ * - 기존 API 호출 로직 100% 유지 (login / send-code / signup / PASS)
+ * ──────────────────────────────────────────────────────────────── */
+
+/* --- 라이브 데모: 소싱AI가 발굴한 상품 롤링 --- */
+const DEMO_PRODUCTS = [
+  { cat: 'SEASONAL · 가전', name: '초음파 대용량 가습기 5.5L',   price: '32,900원', q: '29,940', comp: '중간', trend: '+42%', score: 86 },
+  { cat: 'OUTDOOR · 가방',  name: '경량 등산 백팩 40L 방수',     price: '58,000원', q: '15,280', comp: '낮음', trend: '+28%', score: 78 },
+  { cat: 'HOME · 침구',     name: '극세사 겨울 담요 초대형',     price: '24,900원', q: '13,850', comp: '높음', trend: '+15%', score: 71 },
+  { cat: 'SEASONAL · 가전', name: '전기장판 세탁가능 프리미엄',  price: '79,000원', q: '10,880', comp: '중간', trend: '+51%', score: 88 },
+  { cat: 'OUTDOOR · 의류',  name: '고어텍스 등산복 자켓 방풍',   price: '149,000원', q: '10,010', comp: '높음', trend: '+9%',  score: 64 },
+];
+
+const KEYWORDS = [
+  { t: '가습기',     n: '29,940', tag: 'HOT',      hot: true,  up: true },
+  { t: '등산가방',   n: '15,280', tag: 'TREND',    up: true },
+  { t: '담요',       n: '13,850', tag: 'SEASON' },
+  { t: '전기장판',   n: '10,880', tag: 'HOT',      hot: true,  up: true },
+  { t: '등산복',     n: '10,010', tag: 'TREND',    up: true },
+  { t: '등산배낭',   n: '7,330',  tag: 'CATEGORY' },
+  { t: '히터',       n: '6,610',  tag: 'SEASON',   up: true },
+  { t: '온수매트',   n: '8,140',  tag: 'HOT',      hot: true },
+];
+
+const KEYWORD_SPOTS = [
+  { x: 82, y: 6 }, { x: 92, y: 24 }, { x: 78, y: 44 },
+  { x: 4,  y: 58 }, { x: 88, y: 60 }, { x: 2,  y: 82 },
+  { x: 26, y: 2 }, { x: 52, y: 4 },
+];
+
+const TYPE_PHRASES = [
+  'AI가 먼저 찾습니다',
+  'AI가 자동 발굴합니다',
+  'AI가 대신 분석합니다',
+  'AI가 매일 리포트합니다',
+];
+
+const TOOLS = [
+  { icon: TrendingUp,         label: '훈프로 소싱AI' },
+  { icon: ImageIcon,          label: '썸네일 제작' },
+  { icon: LayoutTemplate,     label: '상세페이지 제작' },
+  { icon: ListOrdered,        label: '순위 추적' },
+  { icon: MessageSquareText,  label: '리뷰 분석' },
+  { icon: BarChart3,          label: '광고 성과 분석' },
+  { icon: MessageCircleQuestion, label: '훈프로에게 질문' },
+];
+
+/* ──────────────── 컴포넌트 ──────────────── */
 export function AuthGate({ onSuccess }: Props) {
+  /* ---------- 로그인/가입 상태 (기존 로직 그대로) ---------- */
   const [mode, setMode] = useState<Mode>('login');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
@@ -19,7 +75,6 @@ export function AuthGate({ onSuccess }: Props) {
   const [signupPhone, setSignupPhone] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
 
-  // 서버 설정에 따라 가입 방식 전환: PASS 본인인증 / 이메일 인증코드 / 기본
   const [verificationRequired, setVerificationRequired] = useState(false);
   const [emailCodeRequired, setEmailCodeRequired] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
@@ -28,7 +83,11 @@ export function AuthGate({ onSuccess }: Props) {
   const [ageChecked, setAgeChecked] = useState(false);
 
   useEffect(() => {
-    fetch('/api/auth/signup?action=config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+    fetch('/api/auth/signup?action=config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
       .then(res => res.json())
       .then(data => {
         setVerificationRequired(Boolean(data.verificationRequired) && certificationAvailable());
@@ -92,7 +151,6 @@ export function AuthGate({ onSuccess }: Props) {
     setLoading(true);
     setMessage(null);
     try {
-      // 본인인증 모드: PASS 인증 → imp_uid를 서버로 보내 CI 검증 후 즉시 가입 완료
       let impUid: string | undefined;
       if (verificationRequired) {
         try {
@@ -125,162 +183,640 @@ export function AuthGate({ onSuccess }: Props) {
     }
   };
 
+  /* ---------- 랜딩 애니메이션 상태 ---------- */
+
+  // 타이핑 헤드라인
+  const [typed, setTyped] = useState('');
+  const typeState = useRef({ idx: 0, char: 0, deleting: false });
+  useEffect(() => {
+    let cancelled = false;
+    // 최초 진입 시 첫 문구를 완성 상태로 보여주고 잠시 뒤 회전 시작
+    setTyped(TYPE_PHRASES[0]);
+    typeState.current = { idx: 0, char: TYPE_PHRASES[0].length, deleting: true };
+    const kick = setTimeout(function step() {
+      if (cancelled) return;
+      const s = typeState.current;
+      const phrase = TYPE_PHRASES[s.idx];
+      s.char += s.deleting ? -1 : 1;
+      setTyped(phrase.slice(0, s.char));
+      let delay = s.deleting ? 40 : 70;
+      if (!s.deleting && s.char === phrase.length) { delay = 2200; s.deleting = true; }
+      else if (s.deleting && s.char === 0) { s.deleting = false; s.idx = (s.idx + 1) % TYPE_PHRASES.length; delay = 400; }
+      setTimeout(step, delay);
+    }, 2500);
+    return () => { cancelled = true; clearTimeout(kick); };
+  }, []);
+
+  // 상품 롤링
+  const [prodIdx, setProdIdx] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setProdIdx(i => (i + 1) % DEMO_PRODUCTS.length), 4200);
+    return () => clearInterval(t);
+  }, []);
+  const prod = DEMO_PRODUCTS[prodIdx];
+
+  // 라이브 카운터 (배지 · 상단)
+  const [scanCount, setScanCount] = useState(142860);
+  const [activeCount, setActiveCount] = useState(1284);
+  useEffect(() => {
+    const t = setInterval(() => {
+      setScanCount(v => v + Math.floor(Math.random() * 7) + 1);
+      setActiveCount(v => v + (Math.random() > 0.5 ? 1 : -1));
+    }, 1800);
+    return () => clearInterval(t);
+  }, []);
+
+  // 커서 글로우
+  const cursorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let cx = window.innerWidth / 2, cy = window.innerHeight / 2, tx = cx, ty = cy;
+    let raf = 0;
+    const move = (e: MouseEvent) => {
+      tx = e.clientX; ty = e.clientY;
+      if (cursorRef.current) cursorRef.current.style.opacity = '1';
+    };
+    const leave = () => { if (cursorRef.current) cursorRef.current.style.opacity = '0'; };
+    const loop = () => {
+      cx += (tx - cx) * 0.12; cy += (ty - cy) * 0.12;
+      if (cursorRef.current) {
+        cursorRef.current.style.left = cx + 'px';
+        cursorRef.current.style.top = cy + 'px';
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseleave', leave);
+    raf = requestAnimationFrame(loop);
+    return () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseleave', leave);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  // 로그인 카드로 스크롤
+  const authRef = useRef<HTMLDivElement>(null);
+  const scrollToAuth = () => {
+    authRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const keywordBubbles = useMemo(() =>
+    KEYWORDS.slice(0, KEYWORD_SPOTS.length).map((k, i) => {
+      const p = KEYWORD_SPOTS[i];
+      return {
+        ...k,
+        left: p.x + '%',
+        top: p.y + '%',
+        dx: (Math.random() * 30 - 15).toFixed(0) + 'px',
+        dy: (Math.random() * 24 - 12).toFixed(0) + 'px',
+        dur: 8 + Math.random() * 6,
+        delay: Math.random() * 3,
+        appearDelay: 300 + i * 140,
+      };
+    }), []);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-ground px-5 py-12">
-      <div className="w-full max-w-[380px]">
-        {/* 브랜드 — 카드 밖에 두어 화면 전체가 하나의 표지처럼 읽히게 */}
-        <div className="mb-7 flex flex-col items-center text-center">
-          <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-card bg-ink">
-            <Lock className="h-5 w-5 text-paper" />
+    <div className="hp-landing relative min-h-screen w-full overflow-x-hidden text-[#e8ecf5]">
+      {/* Scoped styles — 다크 테크 랜딩. 사이트 나머지에는 영향 없음 */}
+      <style>{`
+        .hp-landing {
+          background: #070912;
+          font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        }
+        .hp-landing .hp-bg { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
+        .hp-landing .hp-bg::before {
+          content:""; position:absolute; inset:-1px;
+          background:
+            radial-gradient(1200px 800px at 15% 20%, rgba(124,245,255,.10), transparent 60%),
+            radial-gradient(1000px 700px at 85% 30%, rgba(139,123,255,.12), transparent 60%),
+            radial-gradient(900px 700px at 60% 90%, rgba(62,231,163,.06), transparent 60%),
+            linear-gradient(180deg,#070912 0%,#0a0f1f 50%,#070912 100%);
+        }
+        .hp-landing .hp-grid {
+          position:absolute; inset:-2px;
+          background-image:
+            linear-gradient(to right, rgba(255,255,255,.035) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(255,255,255,.035) 1px, transparent 1px);
+          background-size:56px 56px;
+          -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 40%, black 40%, transparent 100%);
+                  mask-image: radial-gradient(ellipse 90% 70% at 50% 40%, black 40%, transparent 100%);
+          animation: hpGridFloat 24s ease-in-out infinite alternate;
+        }
+        @keyframes hpGridFloat { to { transform: translate3d(-28px,-14px,0); } }
+        .hp-landing .hp-blob { position:absolute; border-radius:50%; filter:blur(80px); opacity:.55; mix-blend-mode:screen; }
+        .hp-landing .hp-b1 { width:520px; height:520px; background:#1a6bff; top:-120px; left:-120px; animation: hpF1 18s ease-in-out infinite alternate; }
+        .hp-landing .hp-b2 { width:600px; height:600px; background:#7c3aed; top:20%; right:-160px; animation: hpF2 22s ease-in-out infinite alternate; }
+        .hp-landing .hp-b3 { width:460px; height:460px; background:#06b6d4; bottom:-160px; left:30%; animation: hpF3 20s ease-in-out infinite alternate; }
+        @keyframes hpF1 { to { transform: translate(120px,60px) scale(1.1); } }
+        @keyframes hpF2 { to { transform: translate(-100px,80px) scale(1.05); } }
+        @keyframes hpF3 { to { transform: translate(80px,-60px) scale(1.15); } }
+        .hp-landing .hp-cursor {
+          position:fixed; width:520px; height:520px; border-radius:50%;
+          background: radial-gradient(circle, rgba(124,245,255,.10), rgba(139,123,255,.05) 40%, transparent 70%);
+          transform: translate(-50%,-50%); pointer-events:none; z-index:1; opacity:0;
+          transition: opacity .3s;
+        }
+        .hp-landing .hp-accent {
+          background: linear-gradient(120deg,#7cf5ff 0%,#8b7bff 60%,#3ee7a3 100%);
+          -webkit-background-clip: text; background-clip: text; color: transparent;
+          background-size: 200% 100%; animation: hpHue 8s linear infinite;
+        }
+        @keyframes hpHue { to { background-position: 200% 0; } }
+        .hp-landing .hp-caret {
+          display:inline-block; width:3px; height:.9em; background:#7cf5ff;
+          vertical-align:-2px; margin-left:4px; animation: hpBlink 1s steps(2) infinite;
+        }
+        @keyframes hpBlink { 50% { opacity:0; } }
+        .hp-landing .hp-dot {
+          width:8px; height:8px; border-radius:50%; background:#3ee7a3;
+          box-shadow: 0 0 0 0 rgba(62,231,163,.7);
+          animation: hpPulse 2s infinite;
+        }
+        @keyframes hpPulse {
+          0%   { box-shadow: 0 0 0 0 rgba(62,231,163,.7); }
+          70%  { box-shadow: 0 0 0 10px rgba(62,231,163,0); }
+          100% { box-shadow: 0 0 0 0 rgba(62,231,163,0); }
+        }
+        .hp-landing .hp-badge-dot {
+          width:6px; height:6px; border-radius:50%; background:#7cf5ff;
+          box-shadow:0 0 12px #7cf5ff; animation: hpBlink 1.6s infinite;
+        }
+        .hp-landing .hp-bubble {
+          position:absolute; padding:9px 14px; border-radius:99px;
+          background: rgba(15,21,38,.8); border:1px solid #1c2542;
+          color:#8a92a6; font-size:12px;
+          backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+          display:flex; align-items:center; gap:8px; white-space:nowrap;
+          box-shadow: 0 8px 24px rgba(0,0,0,.4);
+          opacity:0; transform: translateY(10px);
+          transition: opacity .8s ease, transform .8s ease;
+        }
+        .hp-landing .hp-bubble.hp-in { opacity:1; transform: translateY(0); }
+        .hp-landing .hp-bubble b { color:#fff; font-weight:600; font-variant-numeric: tabular-nums; }
+        .hp-landing .hp-bubble .hp-tag { color:#7cf5ff; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; font-weight:600; }
+        .hp-landing .hp-bubble.hp-hot { border-color: rgba(255,180,84,.3); }
+        .hp-landing .hp-bubble.hp-hot .hp-tag { color:#ffb454; }
+        .hp-landing .hp-bubble.hp-up::after { content:"↑"; color:#3ee7a3; font-weight:700; margin-left:2px; }
+        @keyframes hpDrift {
+          0%   { transform: translate(0,0); }
+          50%  { transform: translate(var(--dx,20px), var(--dy,-14px)); }
+          100% { transform: translate(0,0); }
+        }
+        .hp-landing .hp-scan::after {
+          content:""; position:absolute; inset:0;
+          background: linear-gradient(90deg, transparent, rgba(124,245,255,.15), transparent);
+          transform: translateX(-100%); animation: hpScan 3.6s ease-in-out infinite;
+        }
+        @keyframes hpScan {
+          0%   { transform: translateX(-100%); }
+          50%  { transform: translateX(100%); }
+          100% { transform: translateX(100%); }
+        }
+        .hp-landing .hp-fade {
+          animation: hpFadeIn .35s ease both;
+        }
+        @keyframes hpFadeIn { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: translateY(0); } }
+        .hp-landing .hp-cta:hover .hp-arrow { transform: translateX(4px); }
+        .hp-landing input.hp-input:focus {
+          border-color: #7cf5ff !important;
+          background: rgba(124,245,255,.04) !important;
+          box-shadow: 0 0 0 4px rgba(124,245,255,.10) !important;
+        }
+        .hp-landing .hp-chip:hover {
+          border-color: rgba(124,245,255,.3) !important;
+          color:#e8ecf5 !important;
+          background: rgba(124,245,255,.05) !important;
+          transform: translateY(-1px);
+        }
+        .hp-landing .hp-login-card::before {
+          content:""; position:absolute; inset:-1px; border-radius:22px; padding:1px;
+          background: linear-gradient(135deg, rgba(124,245,255,.4), transparent 40%, transparent 60%, rgba(139,123,255,.3));
+          -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+                  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor; mask-composite: exclude;
+          pointer-events:none; opacity:.6;
+        }
+        .hp-landing .hp-submit {
+          background: linear-gradient(135deg,#7cf5ff 0%,#8b7bff 100%);
+          color:#0a0f1f; font-weight:700;
+          box-shadow: 0 10px 30px -8px rgba(124,245,255,.4);
+          transition: transform .15s, box-shadow .15s, opacity .2s;
+        }
+        .hp-landing .hp-submit:hover:not(:disabled) {
+          transform: translateY(-1px);
+          box-shadow: 0 14px 36px -8px rgba(124,245,255,.55);
+        }
+        .hp-landing .hp-submit:disabled { opacity: .5; cursor: not-allowed; }
+        @media (prefers-reduced-motion: reduce) {
+          .hp-landing *, .hp-landing *::before, .hp-landing *::after {
+            animation-duration: .01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: .01ms !important;
+          }
+        }
+      `}</style>
+
+      {/* 배경 레이어 */}
+      <div className="hp-bg" aria-hidden="true">
+        <div className="hp-grid" />
+        <div className="hp-blob hp-b1" />
+        <div className="hp-blob hp-b2" />
+        <div className="hp-blob hp-b3" />
+      </div>
+      <div className="hp-cursor" ref={cursorRef} aria-hidden="true" />
+
+      {/* 상단 네비 */}
+      <header className="relative z-10 mx-auto flex max-w-[1440px] items-center justify-between px-6 py-5 md:px-12">
+        <div className="flex items-center gap-3">
+          <div
+            className="grid h-9 w-9 place-items-center rounded-[10px] text-[15px] font-extrabold"
+            style={{
+              background: 'linear-gradient(135deg,#7cf5ff 0%,#8b7bff 100%)',
+              color: '#0b1020',
+              boxShadow: '0 8px 28px rgba(124,245,255,.28), inset 0 1px 0 rgba(255,255,255,.4)',
+            }}
+          >훈</div>
+          <div className="leading-tight">
+            <div className="text-[15px] font-semibold tracking-tight">쇼크트리 훈프로</div>
+            <div className="text-[11px] text-[#8a92a6]">Seller AI Automation</div>
           </div>
-          <h1 className="text-[22px] font-semibold tracking-tight text-ink">쇼크트리 훈프로</h1>
-          <p className="mt-1 text-[13px] text-ink-3">셀러를 위한 AI 자동화 도구</p>
         </div>
+        <div className="hidden items-center gap-2 text-[13px] text-[#8a92a6] md:flex">
+          <span className="hp-dot" />
+          <span>지금 <b className="font-semibold text-white tabular-nums">{activeCount.toLocaleString('ko-KR')}</b>명의 셀러가 사용 중</span>
+        </div>
+        <button
+          onClick={scrollToAuth}
+          className="hp-cta group flex items-center gap-2 rounded-full border border-[#1c2542] bg-[#0f1526]/70 px-4 py-2 text-[13px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5 md:hidden"
+        >
+          로그인 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" />
+        </button>
+      </header>
 
-        <div className="rounded-panel border border-line bg-paper p-7">
-          {/* 탭 */}
-          <div className="mb-6 flex gap-1 border-b border-line">
-            <button
-              onClick={() => { setMode('login'); setMessage(null); }}
-              className={`-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 py-2.5 text-[13px] transition-colors ${
-                mode === 'login' ? 'border-ink font-semibold text-ink' : 'border-transparent font-medium text-ink-3 hover:text-ink'
-              }`}
-            >
-              <LogIn className="h-4 w-4" /> 로그인
-            </button>
-            <button
-              onClick={() => { setMode('signup'); setMessage(null); }}
-              className={`-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 py-2.5 text-[13px] transition-colors ${
-                mode === 'signup' ? 'border-ink font-semibold text-ink' : 'border-transparent font-medium text-ink-3 hover:text-ink'
-              }`}
-            >
-              <UserPlus className="h-4 w-4" /> 가입 신청
-            </button>
+      {/* 메인 그리드 */}
+      <main className="relative z-[5] mx-auto grid min-h-[calc(100vh-88px)] max-w-[1440px] grid-cols-1 items-center gap-12 px-6 pb-16 pt-4 md:px-12 lg:grid-cols-[1.35fr_1fr] lg:gap-16">
+        {/* LEFT — 랜딩 */}
+        <section className="relative">
+          {/* 떠다니는 키워드 버블 */}
+          <div className="pointer-events-none absolute inset-0 z-[2]">
+            {keywordBubbles.map((k, i) => (
+              <div
+                key={i}
+                className={`hp-bubble hp-in ${k.hot ? 'hp-hot' : ''} ${k.up ? 'hp-up' : ''}`}
+                style={{
+                  left: k.left,
+                  top: k.top,
+                  animation: `hpDrift ${k.dur}s ease-in-out ${k.delay}s infinite`,
+                  transitionDelay: `${k.appearDelay}ms`,
+                  ['--dx' as any]: k.dx,
+                  ['--dy' as any]: k.dy,
+                }}
+              >
+                <span className="hp-tag">{k.tag}</span>
+                <span>{k.t}</span>
+                <b>{k.n}</b>
+              </div>
+            ))}
           </div>
 
-        {mode === 'login' ? (
-          <div className="w-full space-y-3">
-            <input
-              type="email"
-              value={loginEmail}
-              onChange={e => setLoginEmail(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleLogin()}
-              placeholder="이메일 주소"
-              className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
-              autoFocus
-            />
-            <button
-              onClick={handleLogin}
-              disabled={loading}
-              className="w-full rounded-control bg-ink py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
-            >
-              {loading ? '확인 중...' : '입장하기'}
-            </button>
+          {/* 라이브 배지 */}
+          <span
+            className="relative z-[3] inline-flex items-center gap-2.5 rounded-full border px-3.5 py-2 text-[12.5px] font-medium tracking-wide"
+            style={{ background: 'rgba(124,245,255,.06)', borderColor: 'rgba(124,245,255,.22)', color: '#7cf5ff', backdropFilter: 'blur(8px)' }}
+          >
+            <span className="hp-badge-dot" />
+            AI 소싱엔진 v3.2 · 오늘 <b className="mx-0.5 font-semibold text-white tabular-nums">{scanCount.toLocaleString('ko-KR')}</b>개 상품 분석 완료
+          </span>
+
+          {/* 헤드라인 */}
+          <h1 className="relative z-[3] mt-6 text-[clamp(38px,4.6vw,64px)] font-bold leading-[1.05] tracking-[-0.03em]" style={{ textWrap: 'balance' as any }}>
+            <span className="block">팔릴 상품을,</span>
+            <span className="hp-accent">
+              {typed}
+              <span className="hp-caret" />
+            </span>
+          </h1>
+
+          <p className="relative z-[3] mt-5 max-w-[560px] text-[17px] leading-[1.6] text-[#8a92a6]">
+            키워드 발굴부터 썸네일·상세페이지 제작, 순위·리뷰·광고 분석까지 —
+            셀러의 반복 업무를 <b className="font-semibold text-white">8가지 AI 도구</b>가 한 화면에서 자동화합니다.
+          </p>
+
+          {/* 스탯 */}
+          <div className="relative z-[3] mt-8 flex flex-wrap gap-9">
+            {[
+              { n: '142,860+', l: '누적 분석 상품' },
+              { n: '24시간', l: '주 평균 절감' },
+              { n: '3.4배', l: '평균 매출 성장' },
+            ].map((s, i) => (
+              <div key={i}>
+                <div
+                  className="text-[26px] font-bold tracking-[-0.02em] tabular-nums"
+                  style={{ background: 'linear-gradient(180deg,#fff,#a9b3cd)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}
+                >{s.n}</div>
+                <div className="mt-1 text-[12px] tracking-wide text-[#5a627a]">{s.l}</div>
+              </div>
+            ))}
           </div>
-        ) : (
-          <div className="w-full space-y-3">
-            {!verificationRequired && (
-              <>
-                <input
-                  type="text"
-                  value={signupName}
-                  onChange={e => setSignupName(e.target.value)}
-                  placeholder="성함"
-                  className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
-                  autoFocus
-                />
-                <input
-                  type="tel"
-                  value={signupPhone}
-                  onChange={e => setSignupPhone(e.target.value)}
-                  placeholder="연락처 (예: 010-1234-5678)"
-                  className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
-                />
-              </>
-            )}
-            <div className="flex gap-2">
-              <input
-                type="email"
-                value={signupEmail}
-                onChange={e => { setSignupEmail(e.target.value); setCodeSent(false); setSignupCode(''); }}
-                onKeyDown={e => e.key === 'Enter' && (emailCodeRequired ? handleSendCode() : handleSignup())}
-                placeholder="이메일 주소"
-                className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
-                autoFocus={verificationRequired}
-              />
-              {emailCodeRequired && !verificationRequired && (
-                <button
-                  onClick={handleSendCode}
-                  disabled={sendingCode || !signupEmail.trim()}
-                  className="shrink-0 whitespace-nowrap rounded-control border border-line px-3 py-2.5 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-2 disabled:opacity-40"
-                >
-                  {sendingCode ? '발송 중...' : codeSent ? '재발송' : '인증코드 받기'}
-                </button>
-              )}
+
+          {/* 툴 칩 */}
+          <div className="relative z-[3] mt-9 flex max-w-[560px] flex-wrap gap-2">
+            {TOOLS.map((t, i) => (
+              <span
+                key={i}
+                className="hp-chip inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-[12.5px] transition-all"
+                style={{ background: 'rgba(255,255,255,.03)', borderColor: '#1c2542', color: '#8a92a6' }}
+              >
+                <t.icon className="h-3.5 w-3.5" style={{ color: '#7cf5ff' }} />
+                {t.label}
+              </span>
+            ))}
+          </div>
+
+          {/* 라이브 데모 */}
+          <div
+            className="relative z-[3] mt-11 max-w-[600px] overflow-hidden rounded-[18px] border"
+            style={{
+              background: 'linear-gradient(180deg, rgba(20,27,49,.7), rgba(15,21,38,.7))',
+              borderColor: '#1c2542',
+              backdropFilter: 'blur(14px)',
+              boxShadow: '0 30px 80px -30px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.04)',
+            }}
+          >
+            <div className="flex items-center justify-between border-b px-4 py-3.5" style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.015)' }}>
+              <div className="flex gap-1.5">
+                <i className="block h-2.5 w-2.5 rounded-full" style={{ background: '#ff5f57' }} />
+                <i className="block h-2.5 w-2.5 rounded-full" style={{ background: '#febc2e' }} />
+                <i className="block h-2.5 w-2.5 rounded-full" style={{ background: '#28c840' }} />
+              </div>
+              <div className="text-[12px] tracking-wide text-[#5a627a]">훈프로 소싱AI · 실시간 분석</div>
+              <div className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]" style={{ background: 'rgba(62,231,163,.08)', borderColor: 'rgba(62,231,163,.2)', color: '#3ee7a3' }}>
+                <span className="hp-badge-dot" style={{ background: '#3ee7a3', boxShadow: '0 0 8px #3ee7a3' }} />
+                LIVE
+              </div>
             </div>
-            {emailCodeRequired && !verificationRequired && codeSent && (
-              <>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={signupCode}
-                  onChange={e => setSignupCode(e.target.value.replace(/\D/g, ''))}
-                  onKeyDown={e => e.key === 'Enter' && handleSignup()}
-                  placeholder="인증코드 6자리"
-                  className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-center text-[15px] tracking-[0.4em] outline-none transition-colors placeholder:text-ink-3 placeholder:tracking-normal focus:border-accent focus:bg-paper"
-                />
-                <label className="flex cursor-pointer items-center gap-2 px-1 text-[12.5px] text-ink-2">
-                  <input
-                    type="checkbox"
-                    checked={ageChecked}
-                    onChange={e => setAgeChecked(e.target.checked)}
-                    className="h-3.5 w-3.5 accent-current"
+            <div className="grid gap-5 p-5 sm:grid-cols-2">
+              <div className="flex items-start gap-3.5">
+                <div className="hp-scan relative grid h-[82px] w-[82px] shrink-0 place-items-center overflow-hidden rounded-[12px] border" style={{ background: 'linear-gradient(135deg,#1c2542,#0f1526)', borderColor: '#1c2542' }}>
+                  <Sparkles className="h-9 w-9" style={{ color: '#3a4870' }} />
+                </div>
+                <div key={prodIdx} className="hp-fade">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: '#7cf5ff' }}>{prod.cat}</div>
+                  <div className="mt-1 text-[14px] font-medium leading-[1.4] text-white">{prod.name}</div>
+                  <div className="mt-1.5 text-[13px] text-[#8a92a6]">예상 판매가 <b className="font-bold text-white">{prod.price}</b></div>
+                </div>
+              </div>
+              <div key={`a-${prodIdx}`} className="hp-fade flex flex-col gap-2.5">
+                <AnalysisRow color="#7cf5ff" k="검색량" v={prod.q} />
+                <AnalysisRow color="#8b7bff" k="경쟁강도" v={prod.comp} vClass="text-[#ffb454]" />
+                <AnalysisRow color="#3ee7a3" k="수요 추세" v={`${prod.trend} ↑`} vClass="text-[#3ee7a3]" />
+                <AnalysisRow color="#ffb454" k="기회 점수" v={`${prod.score} / 100`} />
+                <div className="mt-0.5 h-1 overflow-hidden rounded-full" style={{ background: 'rgba(255,255,255,.05)' }}>
+                  <div
+                    className="h-full rounded-full transition-transform duration-[1200ms]"
+                    style={{
+                      background: 'linear-gradient(90deg,#7cf5ff,#8b7bff)',
+                      transformOrigin: 'left',
+                      transform: `scaleX(${prod.score / 100})`,
+                    }}
                   />
-                  만 14세 이상입니다.
-                </label>
-              </>
-            )}
-            <button
-              onClick={handleSignup}
-              disabled={loading}
-              className="flex w-full items-center justify-center gap-1.5 rounded-control bg-ink py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 모바일에서만 보이는 CTA */}
+          <button
+            onClick={scrollToAuth}
+            className="hp-cta group relative z-[3] mt-8 inline-flex items-center gap-2 rounded-full border px-5 py-3 text-[14px] font-semibold text-white transition-colors lg:hidden"
+            style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.03)' }}
+          >
+            지금 시작하기 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" />
+          </button>
+        </section>
+
+        {/* RIGHT — 로그인 카드 (기존 폼) */}
+        <aside className="relative flex justify-center" ref={authRef}>
+          <div
+            className="hp-login-card relative w-full max-w-[420px] rounded-[22px] border p-7 md:p-8"
+            style={{
+              background: 'linear-gradient(180deg, rgba(20,27,49,.85), rgba(11,16,32,.85))',
+              borderColor: '#1c2542',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 40px 100px -30px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.02) inset, 0 1px 0 rgba(255,255,255,.06) inset',
+            }}
+          >
+            {/* 아이콘 */}
+            <div
+              className="mx-auto mb-4 grid h-[52px] w-[52px] place-items-center rounded-[14px] border"
+              style={{ background: 'linear-gradient(135deg,#141b31,#1c2542)', borderColor: '#1c2542', color: '#7cf5ff', boxShadow: '0 6px 24px rgba(124,245,255,.15)' }}
             >
-              {verificationRequired && <ShieldCheck className="h-4 w-4" />}
-              {loading
-                ? (verificationRequired ? '인증 확인 중...' : '신청 중...')
-                : (verificationRequired ? '휴대폰 본인인증하고 가입하기' : '가입 신청하기')}
-            </button>
-            {verificationRequired && (
-              <p className="text-center text-[11px] leading-relaxed text-ink-3">
-                이름·연락처는 PASS 본인인증 결과로 자동 입력됩니다.<br />1인 1계정만 가입할 수 있습니다.
+              <Lock className="h-5 w-5" />
+            </div>
+            <h2 className="text-center text-[22px] font-bold tracking-[-0.02em] text-white">훈프로 시작하기</h2>
+            <p className="mt-1.5 text-center text-[13px] text-[#5a627a]">
+              {verificationRequired
+                ? '휴대폰 인증 한 번으로 셀러 자동화가 켜집니다'
+                : emailCodeRequired
+                  ? '이메일 인증 즉시 모든 AI 도구가 열립니다'
+                  : mode === 'signup'
+                    ? '가입 후 관리자 승인이 완료되면 이용하실 수 있습니다'
+                    : '이메일 한 줄로 셀러 자동화가 켜집니다'}
+            </p>
+
+            {/* 탭 */}
+            <div className="mt-6 flex border-b" style={{ borderColor: '#1c2542' }}>
+              <button
+                onClick={() => { setMode('login'); setMessage(null); }}
+                className="-mb-px flex flex-1 items-center justify-center gap-2 border-b-2 py-3 text-[13.5px] font-medium transition-colors"
+                style={{
+                  borderColor: mode === 'login' ? '#7cf5ff' : 'transparent',
+                  color: mode === 'login' ? '#fff' : '#5a627a',
+                }}
+              >
+                <LogIn className="h-4 w-4" /> 로그인
+              </button>
+              <button
+                onClick={() => { setMode('signup'); setMessage(null); }}
+                className="-mb-px flex flex-1 items-center justify-center gap-2 border-b-2 py-3 text-[13.5px] font-medium transition-colors"
+                style={{
+                  borderColor: mode === 'signup' ? '#7cf5ff' : 'transparent',
+                  color: mode === 'signup' ? '#fff' : '#5a627a',
+                }}
+              >
+                <UserPlus className="h-4 w-4" /> 가입 신청
+              </button>
+            </div>
+
+            {/* 폼 */}
+            {mode === 'login' ? (
+              <div className="mt-5 space-y-3">
+                <input
+                  type="email"
+                  value={loginEmail}
+                  onChange={e => setLoginEmail(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                  placeholder="이메일 주소"
+                  autoFocus
+                  className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                />
+                <button
+                  onClick={handleLogin}
+                  disabled={loading}
+                  className="hp-submit hp-cta group flex w-full items-center justify-center gap-1.5 rounded-[11px] py-3 text-[14px]"
+                >
+                  {loading ? '확인 중...' : (
+                    <>입장하기 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" /></>
+                  )}
+                </button>
+              </div>
+            ) : (
+              <div className="mt-5 space-y-3">
+                {!verificationRequired && (
+                  <>
+                    <input
+                      type="text"
+                      value={signupName}
+                      onChange={e => setSignupName(e.target.value)}
+                      placeholder="성함"
+                      autoFocus
+                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                      style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                    />
+                    <input
+                      type="tel"
+                      value={signupPhone}
+                      onChange={e => setSignupPhone(e.target.value)}
+                      placeholder="연락처 (예: 010-1234-5678)"
+                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                      style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                    />
+                  </>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={signupEmail}
+                    onChange={e => { setSignupEmail(e.target.value); setCodeSent(false); setSignupCode(''); }}
+                    onKeyDown={e => e.key === 'Enter' && (emailCodeRequired ? handleSendCode() : handleSignup())}
+                    placeholder="이메일 주소"
+                    autoFocus={verificationRequired}
+                    className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                    style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                  />
+                  {emailCodeRequired && !verificationRequired && (
+                    <button
+                      onClick={handleSendCode}
+                      disabled={sendingCode || !signupEmail.trim()}
+                      className="shrink-0 whitespace-nowrap rounded-[11px] border px-3 py-3 text-[12.5px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5 disabled:opacity-40"
+                      style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.02)' }}
+                    >
+                      {sendingCode ? '발송 중...' : codeSent ? '재발송' : '인증코드 받기'}
+                    </button>
+                  )}
+                </div>
+                {emailCodeRequired && !verificationRequired && codeSent && (
+                  <>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={signupCode}
+                      onChange={e => setSignupCode(e.target.value.replace(/\D/g, ''))}
+                      onKeyDown={e => e.key === 'Enter' && handleSignup()}
+                      placeholder="인증코드 6자리"
+                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-center text-[15px] tracking-[0.4em] text-white outline-none transition-all placeholder:tracking-normal"
+                      style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                    />
+                    <label className="flex cursor-pointer items-center gap-2 px-1 text-[12.5px] text-[#8a92a6]">
+                      <input
+                        type="checkbox"
+                        checked={ageChecked}
+                        onChange={e => setAgeChecked(e.target.checked)}
+                        className="h-3.5 w-3.5"
+                        style={{ accentColor: '#7cf5ff' }}
+                      />
+                      만 14세 이상입니다.
+                    </label>
+                  </>
+                )}
+                <button
+                  onClick={handleSignup}
+                  disabled={loading}
+                  className="hp-submit hp-cta group flex w-full items-center justify-center gap-1.5 rounded-[11px] py-3 text-[14px]"
+                >
+                  {verificationRequired && <ShieldCheck className="h-4 w-4" />}
+                  {loading
+                    ? (verificationRequired ? '인증 확인 중...' : '신청 중...')
+                    : (
+                      <>
+                        {verificationRequired ? '휴대폰 본인인증하고 가입하기' : '가입 신청하기'}
+                        <ArrowRight className="hp-arrow h-4 w-4 transition-transform" />
+                      </>
+                    )}
+                </button>
+                {verificationRequired && (
+                  <p className="text-center text-[11px] leading-relaxed text-[#5a627a]">
+                    이름·연락처는 PASS 본인인증 결과로 자동 입력됩니다.<br />1인 1계정만 가입할 수 있습니다.
+                  </p>
+                )}
+                <p className="text-center text-[11px] leading-relaxed text-[#5a627a]">
+                  가입하면{' '}
+                  <a href="/terms.html" target="_blank" rel="noreferrer" className="underline hover:text-white">이용약관</a>과{' '}
+                  <a href="/privacy.html" target="_blank" rel="noreferrer" className="underline hover:text-white">개인정보처리방침</a>에 동의하는 것으로 간주됩니다.
+                </p>
+              </div>
+            )}
+
+            {/* 메시지 */}
+            {message && (
+              <p
+                className="mt-4 rounded-[10px] px-3 py-2.5 text-center text-[13px]"
+                style={{
+                  background: message.type === 'error' ? 'rgba(255,80,80,.08)' : 'rgba(62,231,163,.08)',
+                  color: message.type === 'error' ? '#ff8a8a' : '#3ee7a3',
+                  border: `1px solid ${message.type === 'error' ? 'rgba(255,80,80,.2)' : 'rgba(62,231,163,.2)'}`,
+                }}
+              >
+                {message.text}
               </p>
             )}
-            <p className="text-center text-[11px] leading-relaxed text-ink-3">
-              가입하면{' '}
-              <a href="/terms.html" target="_blank" rel="noreferrer" className="underline hover:text-ink">이용약관</a>과{' '}
-              <a href="/privacy.html" target="_blank" rel="noreferrer" className="underline hover:text-ink">개인정보처리방침</a>에 동의하는 것으로 간주됩니다.
-            </p>
+
+            {/* 신뢰 뱃지 */}
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3.5 border-t pt-5 text-[11px] text-[#5a627a]" style={{ borderColor: '#1c2542' }}>
+              <span className="inline-flex items-center gap-1.5">
+                <ShieldCheck className="h-3 w-3" style={{ color: '#3ee7a3' }} />
+                SSL 암호화
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Activity className="h-3 w-3" style={{ color: '#3ee7a3' }} />
+                24시간 무중단
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <ChevronRight className="h-3 w-3" style={{ color: '#3ee7a3' }} />
+                즉시 이용
+              </span>
+            </div>
           </div>
-        )}
+        </aside>
+      </main>
+    </div>
+  );
+}
 
-          {message && (
-            <p className={`mt-4 rounded-control px-3 py-2.5 text-center text-[13px] ${
-              message.type === 'error' ? 'bg-critical-soft text-critical' : 'bg-positive-soft text-positive'
-            }`}>
-              {message.text}
-            </p>
-          )}
-        </div>
-
-        <p className="mt-6 text-center text-xs text-ink-3">
-          {verificationRequired
-            ? '본인인증 완료 즉시 가입되며, 구독 후 모든 기능을 이용할 수 있습니다.'
-            : emailCodeRequired
-              ? '이메일 인증 즉시 가입이 완료되며, 구독 후 모든 기능을 이용할 수 있습니다.'
-              : '가입 신청 후 관리자 승인이 완료되면 이용하실 수 있습니다.'}
-        </p>
-      </div>
+/* 분석 로우 */
+function AnalysisRow({ color, k, v, vClass }: { color: string; k: string; v: string; vClass?: string }) {
+  return (
+    <div
+      className="flex items-center justify-between rounded-[9px] border px-3 py-2 text-[12.5px]"
+      style={{ background: 'rgba(255,255,255,.025)', borderColor: 'rgba(255,255,255,.04)' }}
+    >
+      <span className="flex items-center gap-2 text-[#5a627a]">
+        <span className="inline-block h-[5px] w-[5px] rounded-full" style={{ background: color }} />
+        {k}
+      </span>
+      <span className={`font-semibold text-white tabular-nums ${vClass ?? ''}`}>{v}</span>
     </div>
   );
 }
