@@ -149,15 +149,11 @@ export default function App() {
     setRemainingCalls(null);
   };
 
-  if (!user) {
-    // 로그인 전 화면에도 사업자 정보·약관 표기 (전자상거래법·PG 심사 요건)
-    return (
-      <div className="flex min-h-screen flex-col bg-ground">
-        <AuthGate onSuccess={() => setUser(getUser())} />
-        <Footer />
-      </div>
-    );
+    if (!user) {
+    // AuthGate 내부에서 다크 테마 푸터를 렌더링한다 (사업자 정보·약관 포함)
+    return <AuthGate onSuccess={() => setUser(getUser())} />;
   }
+
 
   return (
     <ApiKeyCheck>
