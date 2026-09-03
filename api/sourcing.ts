@@ -1352,6 +1352,129 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// 1688 이미지 매칭 — 쿠팡 상품 이미지로 1688에서 동일/유사 상품과 도매가를 찾는다.
+// 1688 공식 API는 중국 사업자·ISV 심사가 필요해 국내 개인 셀러가 쓰기 어렵고,
+// 한국 구매대행 툴들이 쓰는 3rd-party 1688 API(OneBound·TMAPI 등)를 어댑터로 붙인다.
+// 응답 구조가 제공사마다 달라 "제목+가격+이미지"를 가진 배열을 찾아 정규화한다.
+// ═══════════════════════════════════════════════════════════════════════════════
+const ONEBOUND_KEY = (process.env.ONEBOUND_KEY || "").trim();
+const ONEBOUND_SECRET = (process.env.ONEBOUND_SECRET || "").trim();
+const TMAPI_TOKEN = (process.env.TMAPI_TOKEN || "").trim();
+
+interface Match1688 {
+  id: string; title: string; priceCny: number; image: string; url: string;
+  sales: number | null; minOrder: number | null;
+}
+
+const pickField = (o: any, keys: string[]): any => {
+  for (const k of keys) if (o[k] !== undefined && o[k] !== null && o[k] !== "") return o[k];
+  return undefined;
+};
+const toNum = (v: any): number => {
+  if (typeof v === "number") return v;
+  const m = String(v ?? "").replace(/,/g, "").match(/[\d.]+/);
+  return m ? parseFloat(m[0]) : 0;
+};
+
+function normalize1688(root: any): Match1688[] {
+  const candidates: any[][] = [];
+  const walk = (node: any, depth: number) => {
+    if (depth > 8 || !node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      const good = node.filter(x => x && typeof x === "object"
+        && pickField(x, ["title", "subject", "name", "product_title"]) !== undefined
+        && pickField(x, ["price", "pic_price", "sale_price", "promotion_price", "priceInfo", "min_price"]) !== undefined);
+      if (good.length >= 1) candidates.push(good);
+      node.forEach(v => walk(v, depth + 1));
+    } else {
+      Object.values(node).forEach(v => walk(v, depth + 1));
+    }
+  };
+  walk(root, 0);
+  if (candidates.length === 0) return [];
+  candidates.sort((a, b) => b.length - a.length);
+  const seen = new Set<string>();
+  const out: Match1688[] = [];
+  for (const it of candidates[0]) {
+    const id = String(pickField(it, ["num_iid", "offerId", "offer_id", "item_id", "itemId", "id"]) ?? "");
+    const title = String(pickField(it, ["title", "subject", "name", "product_title"]) ?? "").trim();
+    const priceRaw = pickField(it, ["price", "pic_price", "sale_price", "promotion_price", "min_price", "priceInfo"]);
+    const priceCny = toNum(typeof priceRaw === "object" ? pickField(priceRaw, ["price", "min", "sale_price"]) : priceRaw);
+    let image = String(pickField(it, ["pic_url", "pic", "image", "img", "imageUrl", "image_url", "imgUrl"]) ?? "");
+    if (image.startsWith("//")) image = `https:${image}`;
+    let url = String(pickField(it, ["detail_url", "url", "link", "product_url", "productUrl"]) ?? "");
+    if (!url && id) url = `https://detail.1688.com/offer/${id}.html`;
+    if (url.startsWith("//")) url = `https:${url}`;
+    const salesRaw = pickField(it, ["sales", "sold", "saleQuantity", "sale_quantity", "month_sold"]);
+    const moqRaw = pickField(it, ["min_num", "minOrderQuantity", "moq", "min_order", "quantity_begin"]);
+    if (!title || priceCny <= 0) continue;
+    const key = id || url || title;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      id, title, priceCny: Math.round(priceCny * 100) / 100, image, url,
+      sales: salesRaw !== undefined ? toNum(salesRaw) : null,
+      minOrder: moqRaw !== undefined ? toNum(moqRaw) : null,
+    });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
+async function handleFind1688(req: VercelRequest, res: VercelResponse, decoded: any) {
+  const productId = typeof req.query.product === "string" ? req.query.product.trim() : "";
+  const image = typeof req.query.image === "string" ? req.query.image.trim() : "";
+  if (!productId || !/^https?:\/\//.test(image)) return res.status(400).json({ error: "상품번호와 이미지 URL이 필요합니다." });
+
+  const provider = ONEBOUND_KEY && ONEBOUND_SECRET ? "onebound" : TMAPI_TOKEN ? "tmapi" : null;
+  if (!provider) {
+    return res.status(500).json({
+      error: "1688 이미지 검색 API가 설정되지 않았습니다. OneBound(ONEBOUND_KEY/ONEBOUND_SECRET) 또는 TMAPI(TMAPI_TOKEN) 키를 Vercel 환경변수에 등록해주세요.",
+      notConfigured: true,
+    });
+  }
+
+  const cacheKey = `f1688:v1:${productId}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached && cached.ageMs < 7 * 24 * 3600 * 1000) return res.status(200).json({ ...cached.payload, cached: true });
+
+  // 외부 API 비용이 드는 신규 조회는 일일 한도에 포함
+  let remaining: number | null = null;
+  if (!decoded?.isAdmin && supabase) {
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const { data, error } = await supabase.rpc("increment_usage", { p_user_id: decoded.userId, p_date: today, p_limit: DAILY_LIMIT });
+      if (!error && data?.exceeded) return res.status(429).json({ error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다.` });
+      if (!error && typeof data?.remaining === "number") remaining = data.remaining;
+    } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
+  }
+
+  const url = provider === "onebound"
+    ? `https://api-gw.onebound.cn/1688/item_search_img/?key=${encodeURIComponent(ONEBOUND_KEY)}&secret=${encodeURIComponent(ONEBOUND_SECRET)}&imgid=${encodeURIComponent(image)}&page=1&lang=ko`
+    : `https://api.tmapi.top/1688/search/image?apiToken=${encodeURIComponent(TMAPI_TOKEN)}&img_url=${encodeURIComponent(image)}&page=1`;
+
+  let raw: any = null;
+  let status = 0;
+  let text = "";
+  try {
+    const r = await fetch(url, { headers: { Accept: "application/json" } });
+    status = r.status;
+    text = await r.text();
+    try { raw = JSON.parse(text); } catch { raw = null; }
+  } catch (e: any) {
+    return res.status(502).json({ error: `1688 API 호출 실패: ${e?.message || e}` });
+  }
+
+  const items = raw ? normalize1688(raw) : [];
+  const diagnostics = items.length === 0
+    ? `provider=${provider}, http=${status}, topKeys=${raw && typeof raw === "object" ? Object.keys(raw).slice(0, 8).join(",") : "-"}, body=${text.slice(0, 300).replace(/\s+/g, " ")}`
+    : "";
+  const payload = { productId, provider, items, ...(diagnostics ? { diagnostics } : {}) };
+  if (items.length > 0) await cacheSet(cacheKey, payload);
+  return res.status(200).json({ ...payload, ...(remaining !== null ? { remaining } : {}) });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // 관심 키워드 (서버 저장 — 크론 자동 추적의 대상)
 // ═══════════════════════════════════════════════════════════════════════════════
 async function handleFavorites(req: VercelRequest, res: VercelResponse, decoded: any) {
@@ -1469,7 +1592,7 @@ async function sendEmail(to: string, subject: string, html: string): Promise<voi
     await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: process.env.EMAIL_FROM || "no-reply@hoonpro.app", to: [to], subject, html }),
+      body: JSON.stringify({ from: process.env.EMAIL_FROM || "no-reply@hoonproai.com", to: [to], subject, html }),
     });
   } catch { /* 발송 실패가 수집을 막지 않도록 */ }
 }
@@ -1713,6 +1836,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (type === "briefing") return handleBriefing(req, res);
   if (type === "products") return handleProducts(req, res, decoded);
   if (type === "reviews") return handleReviews(req, res, decoded);
+  if (type === "find1688") return handleFind1688(req, res, decoded);
   if (type === "favorites") return handleFavorites(req, res, decoded);
   if (type === "rankwatch") return handleRankWatch(req, res, decoded);
   return res.status(400).json({ error: "type=keywords | trend | briefing | products | reviews | favorites | rankwatch 가 필요합니다." });
