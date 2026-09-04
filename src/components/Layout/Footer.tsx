@@ -17,7 +17,7 @@ export const Footer: React.FC = () => {
   return (
     <footer
       className="relative mt-auto border-t border-line"
-      style={{ background: 'rgba(7,9,18,.6)', backdropFilter: 'blur(10px)' }}
+      style={{ background: 'rgba(16,26,46,.72)', backdropFilter: 'blur(10px)' }}
     >
       <div className="mx-auto max-w-[1240px] px-4 py-9 sm:px-6 md:py-10">
         {/* 상단 — 유튜브 / 홈페이지 링크 */}

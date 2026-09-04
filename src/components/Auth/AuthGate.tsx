@@ -404,11 +404,11 @@ export function AuthGate({ onSuccess }: Props) {
     }), []);
 
   return (
-    <div className="hp-landing relative min-h-screen w-full overflow-x-hidden text-[#e8ecf5]">
+    <div className="hp-landing relative min-h-screen w-full overflow-x-hidden text-[#f5f8ff]">
       {/* Scoped styles — 다크 테크 랜딩. 사이트 나머지에는 영향 없음 */}
       <style>{`
         .hp-landing {
-          background: #070912;
+          background: #101a2e;
           font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
         }
         .hp-landing .hp-bg { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
@@ -418,13 +418,13 @@ export function AuthGate({ onSuccess }: Props) {
             radial-gradient(1200px 800px at 15% 20%, rgba(124,245,255,.10), transparent 60%),
             radial-gradient(1000px 700px at 85% 30%, rgba(139,123,255,.12), transparent 60%),
             radial-gradient(900px 700px at 60% 90%, rgba(62,231,163,.06), transparent 60%),
-            linear-gradient(180deg,#070912 0%,#0a0f1f 50%,#070912 100%);
+            linear-gradient(180deg,#101a2e 0%,#152140 50%,#101a2e 100%);
         }
         .hp-landing .hp-grid {
           position:absolute; inset:-2px;
           background-image:
-            linear-gradient(to right, rgba(255,255,255,.035) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(255,255,255,.035) 1px, transparent 1px);
+            linear-gradient(to right, rgba(255,255,255,.06) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(255,255,255,.06) 1px, transparent 1px);
           background-size:56px 56px;
           -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 40%, black 40%, transparent 100%);
                   mask-image: radial-gradient(ellipse 90% 70% at 50% 40%, black 40%, transparent 100%);
@@ -471,8 +471,8 @@ export function AuthGate({ onSuccess }: Props) {
         }
         .hp-landing .hp-bubble {
           position:absolute; padding:9px 14px; border-radius:99px;
-          background: rgba(15,21,38,.8); border:1px solid #1c2542;
-          color:#8a92a6; font-size:12px;
+          background: rgba(27,39,69,.82); border:1px solid #31406b;
+          color:#b9c2d8; font-size:12px;
           backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
           display:flex; align-items:center; gap:8px; white-space:nowrap;
           box-shadow: 0 8px 24px rgba(0,0,0,.4);
@@ -507,12 +507,12 @@ export function AuthGate({ onSuccess }: Props) {
         .hp-landing .hp-cta:hover .hp-arrow { transform: translateX(4px); }
         .hp-landing input.hp-input:focus {
           border-color: #7cf5ff !important;
-          background: rgba(124,245,255,.04) !important;
+          background: rgba(124,245,255,.08) !important;
           box-shadow: 0 0 0 4px rgba(124,245,255,.10) !important;
         }
         .hp-landing .hp-chip:hover {
           border-color: rgba(124,245,255,.3) !important;
-          color:#e8ecf5 !important;
+          color:#f5f8ff !important;
           background: rgba(124,245,255,.05) !important;
           transform: translateY(-1px);
         }
@@ -526,7 +526,7 @@ export function AuthGate({ onSuccess }: Props) {
         }
         .hp-landing .hp-submit {
           background: linear-gradient(135deg,#7cf5ff 0%,#8b7bff 100%);
-          color:#0a0f1f; font-weight:700;
+          color:#152140; font-weight:700;
           box-shadow: 0 10px 30px -8px rgba(124,245,255,.4);
           transition: transform .15s, box-shadow .15s, opacity .2s;
         }
@@ -560,31 +560,31 @@ export function AuthGate({ onSuccess }: Props) {
             className="grid h-9 w-9 place-items-center rounded-[10px] text-[15px] font-extrabold"
             style={{
               background: 'linear-gradient(135deg,#7cf5ff 0%,#8b7bff 100%)',
-              color: '#0b1020',
+              color: '#131d36',
               boxShadow: '0 8px 28px rgba(124,245,255,.28), inset 0 1px 0 rgba(255,255,255,.4)',
             }}
           >훈</div>
           <div className="leading-tight">
             <div className="text-[15px] font-semibold tracking-tight">쇼크트리 훈프로</div>
-            <div className="text-[11px] text-[#8a92a6]">Seller AI Automation</div>
+            <div className="text-[11px] text-[#b9c2d8]">Seller AI Automation</div>
           </div>
         </div>
         <div className="hidden items-center gap-4 md:flex">
           <a
             href="#pricing"
             onClick={e => { e.preventDefault(); document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}
-            className="text-[13px] font-medium text-[#8a92a6] transition-colors hover:text-white"
+            className="text-[13px] font-medium text-[#b9c2d8] transition-colors hover:text-white"
           >
             요금 안내
           </a>
-          <div className="flex items-center gap-2 text-[13px] text-[#8a92a6]">
+          <div className="flex items-center gap-2 text-[13px] text-[#b9c2d8]">
             <span className="hp-dot" />
             <span>지금 <b className="font-semibold text-white tabular-nums">{activeCount.toLocaleString('ko-KR')}</b>명의 셀러가 사용 중</span>
           </div>
         </div>
         <button
           onClick={scrollToAuth}
-          className="hp-cta group flex min-h-[44px] items-center gap-2 rounded-full border border-[#1c2542] bg-[#0f1526]/70 px-4 text-[13px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5 md:hidden"
+          className="hp-cta group flex min-h-[44px] items-center gap-2 rounded-full border border-[#31406b] bg-[#1b2745]/70 px-4 text-[13px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5 md:hidden"
         >
           로그인 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" />
         </button>
@@ -634,7 +634,7 @@ export function AuthGate({ onSuccess }: Props) {
             </span>
           </h1>
 
-          <p className="relative z-[3] mt-5 max-w-[560px] text-[17px] leading-[1.6] text-[#8a92a6]">
+          <p className="relative z-[3] mt-5 max-w-[560px] text-[17px] leading-[1.6] text-[#b9c2d8]">
             키워드 발굴부터 썸네일·상세페이지 제작, 순위·리뷰·광고 분석까지 —
             셀러의 반복 업무를 <b className="font-semibold text-white">8가지 AI 도구</b>가 한 화면에서 자동화합니다.
           </p>
@@ -649,9 +649,9 @@ export function AuthGate({ onSuccess }: Props) {
               <div key={i}>
                 <div
                   className="text-[26px] font-bold tracking-[-0.02em] tabular-nums"
-                  style={{ background: 'linear-gradient(180deg,#fff,#a9b3cd)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}
+                  style={{ background: 'linear-gradient(180deg,#fff,#d2daed)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent' }}
                 >{s.n}</div>
-                <div className="mt-1 text-[12px] tracking-wide text-[#5a627a]">{s.l}</div>
+                <div className="mt-1 text-[12px] tracking-wide text-[#98a3bf]">{s.l}</div>
               </div>
             ))}
           </div>
@@ -662,7 +662,7 @@ export function AuthGate({ onSuccess }: Props) {
               <span
                 key={i}
                 className="hp-chip inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-[12.5px] transition-all"
-                style={{ background: 'rgba(255,255,255,.03)', borderColor: '#1c2542', color: '#8a92a6' }}
+                style={{ background: 'rgba(255,255,255,.055)', borderColor: '#31406b', color: '#b9c2d8' }}
               >
                 <t.icon className="h-3.5 w-3.5" style={{ color: '#7cf5ff' }} />
                 {t.label}
@@ -675,18 +675,18 @@ export function AuthGate({ onSuccess }: Props) {
             className="relative z-[3] mt-11 max-w-[600px] overflow-hidden rounded-[18px] border"
             style={{
               background: 'linear-gradient(180deg, rgba(20,27,49,.7), rgba(15,21,38,.7))',
-              borderColor: '#1c2542',
+              borderColor: '#31406b',
               backdropFilter: 'blur(14px)',
-              boxShadow: '0 30px 80px -30px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.04)',
+              boxShadow: '0 30px 80px -30px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.065)',
             }}
           >
-            <div className="flex items-center justify-between border-b px-4 py-3.5" style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.015)' }}>
+            <div className="flex items-center justify-between border-b px-4 py-3.5" style={{ borderColor: '#31406b', background: 'rgba(255,255,255,.065)' }}>
               <div className="flex gap-1.5">
                 <i className="block h-2.5 w-2.5 rounded-full" style={{ background: '#ff5f57' }} />
                 <i className="block h-2.5 w-2.5 rounded-full" style={{ background: '#febc2e' }} />
                 <i className="block h-2.5 w-2.5 rounded-full" style={{ background: '#28c840' }} />
               </div>
-              <div className="text-[12px] tracking-wide text-[#5a627a]">훈프로 소싱AI · 실시간 분석</div>
+              <div className="text-[12px] tracking-wide text-[#98a3bf]">훈프로 소싱AI · 실시간 분석</div>
               <div className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]" style={{ background: 'rgba(62,231,163,.08)', borderColor: 'rgba(62,231,163,.2)', color: '#3ee7a3' }}>
                 <span className="hp-badge-dot" style={{ background: '#3ee7a3', boxShadow: '0 0 8px #3ee7a3' }} />
                 LIVE
@@ -694,13 +694,13 @@ export function AuthGate({ onSuccess }: Props) {
             </div>
             <div className="grid gap-5 p-5 sm:grid-cols-2">
               <div className="flex items-start gap-3.5">
-                <div className="hp-scan relative grid h-[82px] w-[82px] shrink-0 place-items-center overflow-hidden rounded-[12px] border" style={{ background: 'linear-gradient(135deg,#1c2542,#0f1526)', borderColor: '#1c2542' }}>
-                  <Sparkles className="h-9 w-9" style={{ color: '#3a4870' }} />
+                <div className="hp-scan relative grid h-[82px] w-[82px] shrink-0 place-items-center overflow-hidden rounded-[12px] border" style={{ background: 'linear-gradient(135deg,#31406b,#1b2745)', borderColor: '#31406b' }}>
+                  <Sparkles className="h-9 w-9" style={{ color: '#5d6f9e' }} />
                 </div>
                 <div key={prodIdx} className="hp-fade">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.06em]" style={{ color: '#7cf5ff' }}>{prod.cat}</div>
                   <div className="mt-1 text-[14px] font-medium leading-[1.4] text-white">{prod.name}</div>
-                  <div className="mt-1.5 text-[13px] text-[#8a92a6]">예상 판매가 <b className="font-bold text-white">{prod.price}</b></div>
+                  <div className="mt-1.5 text-[13px] text-[#b9c2d8]">예상 판매가 <b className="font-bold text-white">{prod.price}</b></div>
                 </div>
               </div>
               <div key={`a-${prodIdx}`} className="hp-fade flex flex-col gap-2.5">
@@ -726,7 +726,7 @@ export function AuthGate({ onSuccess }: Props) {
           <button
             onClick={scrollToAuth}
             className="hp-cta group relative z-[3] mt-8 inline-flex items-center gap-2 rounded-full border px-5 py-3 text-[14px] font-semibold text-white transition-colors lg:hidden"
-            style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.03)' }}
+            style={{ borderColor: '#31406b', background: 'rgba(255,255,255,.055)' }}
           >
             지금 시작하기 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" />
           </button>
@@ -737,23 +737,23 @@ export function AuthGate({ onSuccess }: Props) {
           <div
             className="hp-login-card relative w-full max-w-[420px] rounded-[22px] border p-5 sm:p-7 md:p-8"
             style={{
-              background: 'linear-gradient(180deg, rgba(20,27,49,.85), rgba(11,16,32,.85))',
-              borderColor: '#1c2542',
+              background: 'linear-gradient(180deg, rgba(38,52,88,.88), rgba(25,36,66,.9))',
+              borderColor: '#31406b',
               backdropFilter: 'blur(20px)',
-              boxShadow: '0 40px 100px -30px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.02) inset, 0 1px 0 rgba(255,255,255,.06) inset',
+              boxShadow: '0 40px 100px -30px rgba(0,0,0,.7), 0 0 0 1px rgba(255,255,255,.045) inset, 0 1px 0 rgba(255,255,255,.06) inset',
             }}
           >
             {/* 아이콘 */}
             <div
               className="mx-auto mb-4 grid h-[52px] w-[52px] place-items-center rounded-[14px] border"
-              style={{ background: 'linear-gradient(135deg,#141b31,#1c2542)', borderColor: '#1c2542', color: '#7cf5ff', boxShadow: '0 6px 24px rgba(124,245,255,.15)' }}
+              style={{ background: 'linear-gradient(135deg,#212e50,#31406b)', borderColor: '#31406b', color: '#7cf5ff', boxShadow: '0 6px 24px rgba(124,245,255,.15)' }}
             >
               {helper ? <KeyRound className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
             </div>
             <h2 className="text-center text-[22px] font-bold tracking-[-0.02em] text-white">
               {helper === 'find-id' ? '아이디 찾기' : helper === 'reset' ? '비밀번호 찾기' : '훈프로 시작하기'}
             </h2>
-            <p className="mt-1.5 text-center text-[13px] text-[#5a627a]">
+            <p className="mt-1.5 text-center text-[13px] text-[#98a3bf]">
               {helper === 'find-id'
                 ? '이름과 연락처로 가입 이메일을 확인합니다'
                 : helper === 'reset'
@@ -769,13 +769,13 @@ export function AuthGate({ onSuccess }: Props) {
 
             {/* 탭 — 아이디/비밀번호 찾기 중에는 숨김 */}
             {!helper && (
-            <div className="mt-6 flex border-b" style={{ borderColor: '#1c2542' }}>
+            <div className="mt-6 flex border-b" style={{ borderColor: '#31406b' }}>
               <button
                 onClick={() => { setMode('login'); setMessage(null); }}
                 className="-mb-px flex flex-1 items-center justify-center gap-2 border-b-2 py-3 text-[13.5px] font-medium transition-colors"
                 style={{
                   borderColor: mode === 'login' ? '#7cf5ff' : 'transparent',
-                  color: mode === 'login' ? '#fff' : '#5a627a',
+                  color: mode === 'login' ? '#fff' : '#98a3bf',
                 }}
               >
                 <LogIn className="h-4 w-4" /> 로그인
@@ -785,7 +785,7 @@ export function AuthGate({ onSuccess }: Props) {
                 className="-mb-px flex flex-1 items-center justify-center gap-2 border-b-2 py-3 text-[13.5px] font-medium transition-colors"
                 style={{
                   borderColor: mode === 'signup' ? '#7cf5ff' : 'transparent',
-                  color: mode === 'signup' ? '#fff' : '#5a627a',
+                  color: mode === 'signup' ? '#fff' : '#98a3bf',
                 }}
               >
                 <UserPlus className="h-4 w-4" /> 가입 신청
@@ -799,15 +799,15 @@ export function AuthGate({ onSuccess }: Props) {
               <div className="mt-5 space-y-3">
                 <button
                   onClick={closeHelper}
-                  className="mb-1 inline-flex items-center gap-1 text-[12.5px] text-[#8a92a6] transition-colors hover:text-white"
+                  className="mb-1 inline-flex items-center gap-1 text-[12.5px] text-[#b9c2d8] transition-colors hover:text-white"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" /> 로그인으로 돌아가기
                 </button>
 
                 {helper === 'find-id' ? (
                   <>
-                    <p className="text-[13px] leading-relaxed text-[#8a92a6]">
-                      가입 시 입력한 <b className="text-[#e8ecf5]">이름과 연락처</b>로 가입된 이메일을 찾아드립니다.
+                    <p className="text-[13px] leading-relaxed text-[#b9c2d8]">
+                      가입 시 입력한 <b className="text-[#f5f8ff]">이름과 연락처</b>로 가입된 이메일을 찾아드립니다.
                     </p>
                     <input
                       type="text"
@@ -816,7 +816,7 @@ export function AuthGate({ onSuccess }: Props) {
                       placeholder="성함"
                       autoFocus
                       className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                  style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                     />
                     <input
                       type="tel"
@@ -825,7 +825,7 @@ export function AuthGate({ onSuccess }: Props) {
                       onKeyDown={e => e.key === 'Enter' && handleFindId()}
                       placeholder="연락처 (예: 010-1234-5678)"
                       className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                  style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                     />
                     <button
                       onClick={handleFindId}
@@ -843,10 +843,10 @@ export function AuthGate({ onSuccess }: Props) {
                         {foundEmails.map((e, i) => (
                           <div key={i} className="flex items-baseline justify-between py-1 text-[13.5px] text-white">
                             <span className="font-medium tabular">{e.masked}</span>
-                            {e.joinedAt && <span className="text-[11.5px] text-[#5a627a]">{e.joinedAt} 가입</span>}
+                            {e.joinedAt && <span className="text-[11.5px] text-[#98a3bf]">{e.joinedAt} 가입</span>}
                           </div>
                         ))}
-                        <p className="mt-2 text-[11.5px] leading-relaxed text-[#8a92a6]">
+                        <p className="mt-2 text-[11.5px] leading-relaxed text-[#b9c2d8]">
                           개인정보 보호를 위해 일부를 가렸습니다. 전체 주소가 기억나지 않으면 비밀번호 찾기로 재설정해주세요.
                         </p>
                       </div>
@@ -854,8 +854,8 @@ export function AuthGate({ onSuccess }: Props) {
                   </>
                 ) : (
                   <>
-                    <p className="text-[13px] leading-relaxed text-[#8a92a6]">
-                      가입한 이메일로 <b className="text-[#e8ecf5]">인증코드</b>를 보내드립니다. 코드 확인 후 새 비밀번호를 설정하세요.
+                    <p className="text-[13px] leading-relaxed text-[#b9c2d8]">
+                      가입한 이메일로 <b className="text-[#f5f8ff]">인증코드</b>를 보내드립니다. 코드 확인 후 새 비밀번호를 설정하세요.
                     </p>
                     <div className="flex gap-2">
                       <input
@@ -866,13 +866,13 @@ export function AuthGate({ onSuccess }: Props) {
                         placeholder="가입한 이메일 주소"
                         autoFocus
                         className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                  style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                       />
                       <button
                         onClick={handleResetRequest}
                         disabled={loading || !resetEmail.trim()}
                         className="shrink-0 whitespace-nowrap rounded-[11px] border px-3 py-3 text-[12.5px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5 disabled:opacity-40"
-                        style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.02)' }}
+                        style={{ borderColor: '#31406b', background: 'rgba(255,255,255,.045)' }}
                       >
                         {loading && !resetSent ? '발송 중...' : resetSent ? '재발송' : '코드 받기'}
                       </button>
@@ -888,7 +888,7 @@ export function AuthGate({ onSuccess }: Props) {
                           onChange={e => setResetCode(e.target.value.replace(/\D/g, ''))}
                           placeholder="인증코드 6자리"
                           className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-center text-[15px] tracking-[0.4em] text-white outline-none transition-all placeholder:tracking-normal"
-                          style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                          style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                         />
                         <input
                           type="password"
@@ -898,7 +898,7 @@ export function AuthGate({ onSuccess }: Props) {
                           placeholder="새 비밀번호 (영문·숫자 포함 8자 이상)"
                           autoComplete="new-password"
                           className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                  style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                         />
                         <button
                           onClick={handleResetConfirm}
@@ -923,7 +923,7 @@ export function AuthGate({ onSuccess }: Props) {
                   autoComplete="username"
                   autoFocus
                   className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                  style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                 />
                 <input
                   type="password"
@@ -933,7 +933,7 @@ export function AuthGate({ onSuccess }: Props) {
                   placeholder="비밀번호"
                   autoComplete="current-password"
                   className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                  style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                  style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                 />
                 <button
                   onClick={handleLogin}
@@ -946,14 +946,14 @@ export function AuthGate({ onSuccess }: Props) {
                 </button>
 
                 {/* 아이디 / 비밀번호 찾기 */}
-                <div className="flex items-center justify-center text-[13px] text-[#5a627a]">
+                <div className="flex items-center justify-center text-[13px] text-[#98a3bf]">
                   <button
                     onClick={() => { setHelper('find-id'); setMessage(null); setFoundEmails(null); }}
                     className="inline-flex min-h-[44px] items-center gap-1.5 px-3 transition-colors hover:text-white"
                   >
                     <Mail className="h-3.5 w-3.5" /> 아이디 찾기
                   </button>
-                  <span style={{ color: '#1c2542' }}>|</span>
+                  <span style={{ color: '#31406b' }}>|</span>
                   <button
                     onClick={() => { setHelper('reset'); setMessage(null); setResetEmail(loginEmail.trim()); }}
                     className="inline-flex min-h-[44px] items-center gap-1.5 px-3 transition-colors hover:text-white"
@@ -973,7 +973,7 @@ export function AuthGate({ onSuccess }: Props) {
                       placeholder="성함"
                       autoFocus
                       className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                      style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                      style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                     />
                     <input
                       type="tel"
@@ -981,7 +981,7 @@ export function AuthGate({ onSuccess }: Props) {
                       onChange={e => setSignupPhone(e.target.value)}
                       placeholder="연락처 (예: 010-1234-5678)"
                       className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                      style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                      style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                     />
                   </>
                 )}
@@ -994,14 +994,14 @@ export function AuthGate({ onSuccess }: Props) {
                     placeholder="이메일 주소"
                     autoFocus={verificationRequired}
                     className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                    style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                    style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                   />
                   {emailCodeRequired && !verificationRequired && (
                     <button
                       onClick={handleSendCode}
                       disabled={sendingCode || !signupEmail.trim()}
                       className="shrink-0 whitespace-nowrap rounded-[11px] border px-3 py-3 text-[12.5px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5 disabled:opacity-40"
-                      style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.02)' }}
+                      style={{ borderColor: '#31406b', background: 'rgba(255,255,255,.045)' }}
                     >
                       {sendingCode ? '발송 중...' : codeSent ? '재발송' : '인증코드 받기'}
                     </button>
@@ -1018,7 +1018,7 @@ export function AuthGate({ onSuccess }: Props) {
                       onKeyDown={e => e.key === 'Enter' && handleSignup()}
                       placeholder="인증코드 6자리"
                       className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-center text-[15px] tracking-[0.4em] text-white outline-none transition-all placeholder:tracking-normal"
-                      style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                      style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                     />
                     <input
                       type="password"
@@ -1028,9 +1028,9 @@ export function AuthGate({ onSuccess }: Props) {
                       placeholder="비밀번호 (영문·숫자 포함 8자 이상)"
                       autoComplete="new-password"
                       className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                      style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                      style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
                     />
-                    <label className="flex cursor-pointer items-center gap-2 px-1 text-[12.5px] text-[#8a92a6]">
+                    <label className="flex cursor-pointer items-center gap-2 px-1 text-[12.5px] text-[#b9c2d8]">
                       <input
                         type="checkbox"
                         checked={ageChecked}
@@ -1058,11 +1058,11 @@ export function AuthGate({ onSuccess }: Props) {
                     )}
                 </button>
                 {verificationRequired && (
-                  <p className="text-center text-[11px] leading-relaxed text-[#5a627a]">
+                  <p className="text-center text-[11px] leading-relaxed text-[#98a3bf]">
                     이름·연락처는 PASS 본인인증 결과로 자동 입력됩니다.<br />1인 1계정만 가입할 수 있습니다.
                   </p>
                 )}
-                <p className="text-center text-[11px] leading-relaxed text-[#5a627a]">
+                <p className="text-center text-[11px] leading-relaxed text-[#98a3bf]">
                   가입하면{' '}
                   <a href="/terms.html" target="_blank" rel="noreferrer" className="underline hover:text-white">이용약관</a>과{' '}
                   <a href="/privacy.html" target="_blank" rel="noreferrer" className="underline hover:text-white">개인정보처리방침</a>에 동의하는 것으로 간주됩니다.
@@ -1085,7 +1085,7 @@ export function AuthGate({ onSuccess }: Props) {
             )}
 
             {/* 신뢰 뱃지 */}
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3.5 border-t pt-5 text-[11px] text-[#5a627a]" style={{ borderColor: '#1c2542' }}>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3.5 border-t pt-5 text-[11px] text-[#98a3bf]" style={{ borderColor: '#31406b' }}>
               <span className="inline-flex items-center gap-1.5">
                 <ShieldCheck className="h-3 w-3" style={{ color: '#3ee7a3' }} />
                 SSL 암호화
@@ -1104,14 +1104,14 @@ export function AuthGate({ onSuccess }: Props) {
       </main>
 
       {/* ─── 요금 안내 (비회원도 가입 전에 가격을 확인할 수 있어야 한다) ─── */}
-      <section id="pricing" className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#1c2542' }}>
+      <section id="pricing" className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#31406b' }}>
         <div className="mx-auto max-w-[880px]">
           <div className="text-center">
             <p className="text-[11.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: '#7cf5ff' }}>PRICING</p>
             <h2 className="mt-2.5 text-[26px] font-bold tracking-[-0.02em] text-white md:text-[32px]">
               도구 하나 값으로, 팀 하나를 씁니다
             </h2>
-            <p className="mt-3 text-[14px] leading-relaxed text-[#8a92a6]">
+            <p className="mt-3 text-[14px] leading-relaxed text-[#b9c2d8]">
               7가지 AI 도구를 하나의 구독으로. 언제든 해지할 수 있고, 해지해도 남은 기간은 그대로 이용합니다.
             </p>
           </div>
@@ -1122,8 +1122,8 @@ export function AuthGate({ onSuccess }: Props) {
               <div
                 className="hp-login-card relative rounded-[20px] border p-7"
                 style={{
-                  background: 'linear-gradient(180deg, rgba(20,27,49,.9), rgba(11,16,32,.9))',
-                  borderColor: '#1c2542',
+                  background: 'linear-gradient(180deg, rgba(38,52,88,.92), rgba(25,36,66,.94))',
+                  borderColor: '#31406b',
                   boxShadow: '0 30px 70px -30px rgba(0,0,0,.7)',
                 }}
               >
@@ -1132,7 +1132,7 @@ export function AuthGate({ onSuccess }: Props) {
                   {yearlyDiscount > 0 && (
                     <span
                       className="rounded-full px-2.5 py-1 text-[11px] font-bold"
-                      style={{ background: 'linear-gradient(135deg,#7cf5ff,#8b7bff)', color: '#0a0f1f' }}
+                      style={{ background: 'linear-gradient(135deg,#7cf5ff,#8b7bff)', color: '#152140' }}
                     >
                       {yearlyDiscount}% 할인
                     </span>
@@ -1142,9 +1142,9 @@ export function AuthGate({ onSuccess }: Props) {
                   <span className="text-[38px] font-bold tracking-[-0.03em] text-white tabular">
                     {Math.round(yearly.price / 12).toLocaleString()}
                   </span>
-                  <span className="text-[14px] font-medium text-[#8a92a6]">원 / 월</span>
+                  <span className="text-[14px] font-medium text-[#b9c2d8]">원 / 월</span>
                 </div>
-                <p className="mt-1.5 text-[12.5px] text-[#5a627a]">
+                <p className="mt-1.5 text-[12.5px] text-[#98a3bf]">
                   연 {yearly.price.toLocaleString()}원 일시 결제 · 매년 자동갱신
                 </p>
                 {monthly && yearlyDiscount > 0 && (
@@ -1165,20 +1165,20 @@ export function AuthGate({ onSuccess }: Props) {
             {monthly && (
               <div
                 className="rounded-[20px] border p-7"
-                style={{ background: 'rgba(255,255,255,.02)', borderColor: '#1c2542' }}
+                style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
               >
                 <span className="text-[14px] font-semibold text-white">월간 결제</span>
                 <div className="mt-4 flex items-baseline gap-1.5">
                   <span className="text-[38px] font-bold tracking-[-0.03em] text-white tabular">
                     {monthly.price.toLocaleString()}
                   </span>
-                  <span className="text-[14px] font-medium text-[#8a92a6]">원 / 월</span>
+                  <span className="text-[14px] font-medium text-[#b9c2d8]">원 / 월</span>
                 </div>
-                <p className="mt-1.5 text-[12.5px] text-[#5a627a]">매월 자동결제 · 부담 없이 시작</p>
+                <p className="mt-1.5 text-[12.5px] text-[#98a3bf]">매월 자동결제 · 부담 없이 시작</p>
                 <button
                   onClick={scrollToAuth}
                   className="mt-6 w-full rounded-[11px] border py-3 text-[14px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5"
-                  style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.02)' }}
+                  style={{ borderColor: '#31406b', background: 'rgba(255,255,255,.045)' }}
                 >
                   월간으로 시작하기
                 </button>
@@ -1187,23 +1187,23 @@ export function AuthGate({ onSuccess }: Props) {
           </div>
 
           {/* 포함 기능 */}
-          <div className="mt-8 rounded-[16px] border p-6" style={{ borderColor: '#1c2542', background: 'rgba(255,255,255,.02)' }}>
+          <div className="mt-8 rounded-[16px] border p-6" style={{ borderColor: '#31406b', background: 'rgba(255,255,255,.045)' }}>
             <p className="mb-4 text-[12.5px] font-semibold text-white">두 플랜 모두 포함</p>
             <div className="grid gap-2.5 sm:grid-cols-2">
               {TOOLS.map(t => (
-                <div key={t.label} className="flex items-center gap-2 text-[13px] text-[#b9c0d0]">
+                <div key={t.label} className="flex items-center gap-2 text-[13px] text-[#dae1f0]">
                   <Check className="h-3.5 w-3.5 shrink-0" style={{ color: '#3ee7a3' }} />
                   {t.label}
                 </div>
               ))}
-              <div className="flex items-center gap-2 text-[13px] text-[#b9c0d0]">
+              <div className="flex items-center gap-2 text-[13px] text-[#dae1f0]">
                 <Check className="h-3.5 w-3.5 shrink-0" style={{ color: '#3ee7a3' }} />
                 내 작업 저장 · 불러오기
               </div>
             </div>
           </div>
 
-          <p className="mt-5 text-center text-[12px] leading-relaxed text-[#5a627a]">
+          <p className="mt-5 text-center text-[12px] leading-relaxed text-[#98a3bf]">
             표시 금액은 부가세 포함입니다. 결제 후 7일 이내 미사용 시 전액 환불되며,
             그 외에는 <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="underline hover:text-white">환불 정책</a>에 따라 처리됩니다.
             <br />결제일 7일 전 이메일로 미리 안내드립니다.
@@ -1212,11 +1212,11 @@ export function AuthGate({ onSuccess }: Props) {
       </section>
 
       {/* 다크 테마 푸터 — 전자상거래법 표기 (미로그인 상태에서도 접근 가능해야 함) */}
-      <footer className="relative z-[5] border-t" style={{ borderColor: '#1c2542', background: 'rgba(7,9,18,.6)', backdropFilter: 'blur(10px)' }}>
+      <footer className="relative z-[5] border-t" style={{ borderColor: '#31406b', background: 'rgba(7,9,18,.6)', backdropFilter: 'blur(10px)' }}>
         <div className="mx-auto max-w-[1440px] px-4 py-9 sm:px-6 md:px-12 md:py-10">
           {/* 상단 — 유튜브 / 홈페이지 링크 */}
           <div className="text-center">
-            <p className="text-[13px] text-[#8a92a6]">
+            <p className="text-[13px] text-[#b9c2d8]">
               이 앱은 <b className="font-semibold text-white">쇼크트리 훈프로</b>에 의해 만들어졌습니다.
               <span className="mx-1">유튜브 구독 및 훈프로 홈페이지 가입 부탁드려요!</span>
             </p>
@@ -1226,7 +1226,7 @@ export function AuthGate({ onSuccess }: Props) {
                 target="_blank"
                 rel="noreferrer"
                 className="hp-chip inline-flex min-h-[44px] items-center gap-1.5 rounded-full border px-4 text-[12.5px] font-medium transition-all"
-                style={{ background: 'rgba(255,255,255,.03)', borderColor: '#1c2542', color: '#e8ecf5' }}
+                style={{ background: 'rgba(255,255,255,.055)', borderColor: '#31406b', color: '#f5f8ff' }}
               >
                 <Youtube className="h-3.5 w-3.5" style={{ color: '#ff5b5b' }} />
                 유튜브
@@ -1236,7 +1236,7 @@ export function AuthGate({ onSuccess }: Props) {
                 target="_blank"
                 rel="noreferrer"
                 className="hp-chip inline-flex min-h-[44px] items-center gap-1.5 rounded-full border px-4 text-[12.5px] font-medium transition-all"
-                style={{ background: 'rgba(255,255,255,.03)', borderColor: '#1c2542', color: '#e8ecf5' }}
+                style={{ background: 'rgba(255,255,255,.055)', borderColor: '#31406b', color: '#f5f8ff' }}
               >
                 <ExternalLink className="h-3.5 w-3.5" style={{ color: '#7cf5ff' }} />
                 훈프로 홈페이지
@@ -1246,30 +1246,30 @@ export function AuthGate({ onSuccess }: Props) {
 
           {/* 약관·정책 */}
           <div className="mt-7 flex flex-wrap justify-center gap-x-4 gap-y-2 text-[13px]">
-            <a href="/terms.html" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1 text-[#8a92a6] transition-colors hover:text-white hover:underline">이용약관</a>
-            <span className="text-[#3a4256]">|</span>
-            <a href="/privacy.html" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1 font-semibold text-[#e8ecf5] transition-colors hover:text-white hover:underline">개인정보처리방침</a>
-            <span className="text-[#3a4256]">|</span>
-            <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1 text-[#8a92a6] transition-colors hover:text-white hover:underline">환불 정책</a>
+            <a href="/terms.html" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1 text-[#b9c2d8] transition-colors hover:text-white hover:underline">이용약관</a>
+            <span className="text-[#54628a]">|</span>
+            <a href="/privacy.html" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1 font-semibold text-[#f5f8ff] transition-colors hover:text-white hover:underline">개인정보처리방침</a>
+            <span className="text-[#54628a]">|</span>
+            <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="inline-flex min-h-[44px] items-center px-1 text-[#b9c2d8] transition-colors hover:text-white hover:underline">환불 정책</a>
           </div>
 
           {/* 사업자 정보 (전자상거래법 제10조) */}
-          <div className="mt-5 space-y-1 text-center text-[12px] leading-relaxed text-[#5a627a]">
+          <div className="mt-5 space-y-1 text-center text-[12px] leading-relaxed text-[#98a3bf]">
             <p>
-              상호: <span className="text-[#8a92a6]">{company.name}</span>
-              <span className="mx-2 text-[#3a4256]">·</span>
-              대표: <span className="text-[#8a92a6]">{company.ceo}</span>
-              <span className="mx-2 text-[#3a4256]">·</span>
-              사업자등록번호: <span className="text-[#8a92a6] tabular-nums">{company.bizNumber}</span>
-              <span className="mx-2 text-[#3a4256]">·</span>
-              통신판매업신고: <span className="text-[#8a92a6]">{company.mailOrderNumber}</span>
+              상호: <span className="text-[#b9c2d8]">{company.name}</span>
+              <span className="mx-2 text-[#54628a]">·</span>
+              대표: <span className="text-[#b9c2d8]">{company.ceo}</span>
+              <span className="mx-2 text-[#54628a]">·</span>
+              사업자등록번호: <span className="text-[#b9c2d8] tabular-nums">{company.bizNumber}</span>
+              <span className="mx-2 text-[#54628a]">·</span>
+              통신판매업신고: <span className="text-[#b9c2d8]">{company.mailOrderNumber}</span>
             </p>
             <p>
-              주소: <span className="text-[#8a92a6]">{company.address}</span>
-              <span className="mx-2 text-[#3a4256]">·</span>
-              이메일: <span className="text-[#8a92a6]">{company.email}</span>
-              <span className="mx-2 text-[#3a4256]">·</span>
-              전화: <span className="text-[#8a92a6] tabular-nums">{company.phone}</span>
+              주소: <span className="text-[#b9c2d8]">{company.address}</span>
+              <span className="mx-2 text-[#54628a]">·</span>
+              이메일: <span className="text-[#b9c2d8]">{company.email}</span>
+              <span className="mx-2 text-[#54628a]">·</span>
+              전화: <span className="text-[#b9c2d8] tabular-nums">{company.phone}</span>
             </p>
             <p className="pt-1">© {new Date().getFullYear()} {company.name}. All rights reserved.</p>
           </div>
@@ -1284,9 +1284,9 @@ function AnalysisRow({ color, k, v, vClass }: { color: string; k: string; v: str
   return (
     <div
       className="flex items-center justify-between rounded-[9px] border px-3 py-2 text-[12.5px]"
-      style={{ background: 'rgba(255,255,255,.025)', borderColor: 'rgba(255,255,255,.04)' }}
+      style={{ background: 'rgba(255,255,255,.05)', borderColor: 'rgba(255,255,255,.065)' }}
     >
-      <span className="flex items-center gap-2 text-[#5a627a]">
+      <span className="flex items-center gap-2 text-[#98a3bf]">
         <span className="inline-block h-[5px] w-[5px] rounded-full" style={{ background: color }} />
         {k}
       </span>

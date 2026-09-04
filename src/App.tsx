@@ -163,7 +163,7 @@ export default function App() {
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[13px] font-extrabold"
                 style={{
                   background: 'linear-gradient(135deg,#7cf5ff 0%,#8b7bff 100%)',
-                  color: '#0b1020',
+                  color: '#131d36',
                   boxShadow: '0 4px 14px rgba(124,245,255,.25)',
                 }}
               >

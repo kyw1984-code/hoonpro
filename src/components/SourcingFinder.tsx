@@ -852,7 +852,7 @@ export function SourcingFinder() {
                       >
                         <td className="px-3 py-2.5 text-center">
                           <button onClick={() => toggleFavorite(k)} title="관심 키워드" className="rounded-control p-1">
-                            <Star className={`h-4 w-4 transition-colors ${favorites[k.keyword] ? 'fill-caution text-caution' : 'text-ink-3/50 hover:text-caution'}`} />
+                            <Star className={`h-4 w-4 transition-colors ${favorites[k.keyword] ? 'fill-caution text-caution' : 'text-ink-3 hover:text-caution'}`} />
                           </button>
                         </td>
                         <td className="px-3 py-2.5 text-[13px] font-medium text-ink">{k.keyword}</td>
