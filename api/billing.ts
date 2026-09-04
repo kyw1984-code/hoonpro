@@ -725,15 +725,34 @@ async function refund(user: any, res: VercelResponse) {
 
   const approvedAt = new Date(payment.approved_at ?? payment.created_at);
   const within7Days = Date.now() - approvedAt.getTime() <= 7 * 86400000;
-  const { count: usedCalls } = await supabase
-    .from('api_calls')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', user.userId)
-    .gte('created_at', approvedAt.toISOString());
+
+  // 사용 이력 판정 — 과금되는 모든 기능을 포함해야 한다.
+  //  · api_calls  : 썸네일·상세페이지·이미지 분석·QA (모델 호출 로깅)
+  //  · api_usage  : 소싱AI·리뷰 분석·순위 추적 (increment_usage만 호출하고
+  //                 api_calls에는 남기지 않는다 — 여기를 빠뜨리면 원가가 큰
+  //                 소싱 기능만 일주일 쓰고 전액 환불받는 우회가 가능하다)
+  // 조회가 실패하면 "사용함"으로 간주해 전액 환불로 흘러가지 않게 한다.
+  const usedFrom = approvedAt.toISOString();
+  const usedFromDate = usedFrom.slice(0, 10);
+  const [callsRes, usageRes] = await Promise.all([
+    supabase.from('api_calls')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.userId)
+      .gte('created_at', usedFrom),
+    supabase.from('api_usage')
+      .select('call_count')
+      .eq('user_id', user.userId)
+      .gte('date', usedFromDate)
+      .gt('call_count', 0)
+      .limit(1),
+  ]);
+  const unusedConfirmed =
+    !callsRes.error && (callsRes.count ?? 0) === 0 &&
+    !usageRes.error && (usageRes.data?.length ?? 0) === 0;
 
   let refundAmount: number;
   let reason: string;
-  if (within7Days && (usedCalls ?? 0) === 0) {
+  if (within7Days && unusedConfirmed) {
     refundAmount = payment.amount;
     reason = '7일 이내 미사용 전액 환불';
   } else {
