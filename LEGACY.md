@@ -10,3 +10,18 @@
 
 유료 버전(`hoonproai.com`)은 `main` 브랜치입니다. 두 버전은 DB와 배포가 완전히 분리되어 있으므로,
 이 브랜치에 유료 버전의 변경사항을 병합하지 마세요.
+
+## 배포 설정
+
+| 항목 | 값 |
+|---|---|
+| Vercel 프로젝트 | `hoonpro-lecgacy` |
+| Root Directory | `./` — **`sourcing`이 아닙니다** |
+| Production Branch | `legacy-2026-06` |
+| 서비스 주소 | `hoonpro.vercel.app` |
+
+서버리스 함수는 **12개**가 나와야 정상입니다. 5개로 나오면 Root Directory가
+`sourcing`(별개의 소싱 분석기 앱)으로 잘못 잡힌 것입니다.
+
+이 브랜치는 배포하려면 **커밋을 푸시해야** 합니다. Vercel의 Redeploy는 같은 커밋을
+다시 빌드할 뿐이라 브랜치 전환이 반영되지 않습니다.
