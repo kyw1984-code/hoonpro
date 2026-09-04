@@ -411,3 +411,13 @@ alter table users add column if not exists withdrawn_at timestamptz;
 
 -- 인증코드 용도 구분 (signup: 가입 / reset: 비밀번호 재설정)
 alter table email_verifications add column if not exists purpose text default 'signup';
+
+-- ─────────────────────────────────────────────────────────────
+-- 22. 쿠폰 사용 횟수 원자적 증가 (동시 요청에서 max_redemptions 초과 방지)
+-- ─────────────────────────────────────────────────────────────
+create or replace function increment_coupon_redeemed(p_coupon_id uuid)
+returns void
+language sql
+as $$
+  update coupons set redeemed_count = coalesce(redeemed_count, 0) + 1 where id = p_coupon_id;
+$$;

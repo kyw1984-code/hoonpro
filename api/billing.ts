@@ -279,6 +279,20 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
   const orderId = newOrderId();
   const orderName = `${plan.name} 구독`;
 
+  // 청구 전 선점 — 결제 성공 후 갱신 전에 함수가 중단돼도 다음 실행이 다시 청구하지 않도록
+  // next_billing_at을 먼저 미뤄 둔다. (실패 시 아래에서 재시도 일자로 다시 조정)
+  const claimDate = addDays(kstToday(), 1);
+  const { data: claimed } = await supabase
+    .from('subscriptions')
+    .update({ next_billing_at: claimDate, updated_at: new Date().toISOString() })
+    .eq('id', sub.id)
+    .lte('next_billing_at', kstToday())
+    .select('id');
+  if (!claimed || claimed.length === 0) {
+    // 다른 실행이 이미 이 구독을 가져갔다
+    return { ok: false, failReason: 'already-claimed' };
+  }
+
   const billingKey = decryptBillingKey(sub.billing_key_enc);
   const result = await tossCharge(billingKey, sub.customer_key, orderId, amount, orderName, user.email, user.name);
 
@@ -581,13 +595,23 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
 
   // 쿠폰 사용 기록 (CI 기준 1인 1회 어뷰징 차단)
   if (coupon) {
-    await supabase.from('coupon_redemptions').insert({
+    // unique 제약(coupon_id+user_id, coupon_id+ci)이 동시 요청의 중복 사용을 막는다.
+    // 삽입이 실패하면 이미 사용한 쿠폰이므로 사용 횟수를 올리지 않는다.
+    const { error: redeemError } = await supabase.from('coupon_redemptions').insert({
       coupon_id: coupon.id,
       user_id: user.userId,
       ci: userRow?.ci ?? null,
       subscription_id: subId,
     });
-    await supabase.from('coupons').update({ redeemed_count: coupon.redeemed_count + 1 }).eq('id', coupon.id);
+    if (!redeemError) {
+      await supabase.rpc('increment_coupon_redeemed', { p_coupon_id: coupon.id })
+        .then(async ({ error }) => {
+          // RPC가 없는 환경(마이그레이션 전)에서는 기존 방식으로 보정
+          if (error) await supabase.from('coupons').update({ redeemed_count: coupon.redeemed_count + 1 }).eq('id', coupon.id);
+        });
+    } else {
+      console.warn('[billing] coupon redemption already recorded', coupon.id, user.userId);
+    }
   }
 
   return res.status(200).json({ ok: true, status: isTrial ? 'trial' : 'active', nextBillingAt: periodEnd });
@@ -643,9 +667,26 @@ async function changeCard(user: any, req: VercelRequest, res: VercelResponse) {
 
   // 결제 실패로 밀려 있거나 정지 상태면 새 카드로 즉시 재결제 → 성공 시 즉시 복구
   if (sub.status === 'past_due' || sub.status === 'paused') {
-    const fresh = { ...sub, billing_key_enc: encryptBillingKey(billingKey), customer_key: customerKey, fail_count: sub.status === 'paused' ? 0 : sub.fail_count };
+    // fail_count는 유지한 채 청구한다. 리셋하면 정지 계정이 실패해도 past_due(이용 허용)로
+    // 되살아나 카드 변경만 반복해 무료로 쓸 수 있다. 성공 시에는 chargeSubscription이 0으로 되돌린다.
+    const fresh = {
+      ...sub,
+      billing_key_enc: encryptBillingKey(billingKey),
+      customer_key: customerKey,
+      // 즉시 청구를 시도해야 하므로 선점 조건(next_billing_at <= 오늘)을 만족시킨다
+      next_billing_at: kstToday(),
+    };
+    await supabase.from('subscriptions').update({ next_billing_at: kstToday() }).eq('id', sub.id);
     const result = await chargeSubscription(fresh, plan, userRow ?? user);
-    if (!result.ok) return res.status(402).json({ error: `카드는 변경됐지만 결제에 실패했습니다: ${result.failReason}` });
+    if (!result.ok) {
+      // 실패했으면 정지 상태를 유지한다 (이용 재개 금지)
+      if (sub.status === 'paused') {
+        await supabase.from('subscriptions')
+          .update({ status: 'paused', next_billing_at: null, updated_at: new Date().toISOString() })
+          .eq('id', sub.id);
+      }
+      return res.status(402).json({ error: `카드는 변경됐지만 결제에 실패했습니다: ${result.failReason}` });
+    }
     return res.status(200).json({ ok: true, reactivated: true, cardSummary });
   }
 

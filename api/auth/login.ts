@@ -180,18 +180,14 @@ async function login(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: '접근이 거부됐습니다. 관리자에게 문의하세요.' });
   }
 
-  // 비밀번호 도입 이전에 가입한 계정 — 비밀번호 설정을 먼저 안내한다
+  // 비밀번호가 없는 계정(비밀번호 도입 이전 가입 / PASS 가입)은 재설정으로 먼저 설정해야 한다.
+  // 이메일 발송 수단이 없더라도 이메일만으로는 절대 로그인시키지 않는다.
   if (!user.password_hash) {
-    if (emailEnabled()) {
-      return res.status(409).json({
-        error: '비밀번호 설정이 필요합니다. [비밀번호 찾기]로 비밀번호를 설정해주세요.',
-        passwordSetupRequired: true,
-      });
-    }
-    // 이메일 발송 수단이 없으면 기존처럼 이메일만으로 로그인 (개발 환경)
-    return res.status(200).json({
-      token: issueToken(user),
-      user: { id: user.id, name: user.name, email: user.email, isAdmin: user.email === process.env.ADMIN_EMAIL },
+    return res.status(409).json({
+      error: emailEnabled()
+        ? '비밀번호 설정이 필요합니다. [비밀번호 찾기]로 비밀번호를 설정해주세요.'
+        : '비밀번호가 설정되지 않은 계정입니다. 관리자에게 문의해주세요.',
+      passwordSetupRequired: emailEnabled(),
     });
   }
 
@@ -379,7 +375,8 @@ async function withdraw(req: VercelRequest, res: VercelResponse) {
     phone: '',
     email: `withdrawn+${user.id}@deleted.local`,
     password_hash: null,
-    ci: null,
+    // ci는 유지한다 — 지우면 같은 사람이 무제한 재가입해 무료 쿠폰을 반복 사용할 수 있다.
+    // (이름·연락처·이메일이 지워져 그 자체로는 개인을 식별하지 못하는 값)
     status: 'rejected',
     withdrawn_at: new Date().toISOString(),
   }).eq('id', user.id);

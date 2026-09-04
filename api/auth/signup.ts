@@ -203,6 +203,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: e?.message ?? '본인인증에 실패했습니다.' });
     }
 
+    const certPwProblem = passwordProblem(password);
+    if (certPwProblem) return res.status(400).json({ error: certPwProblem });
+
     if (cert.birthday && ageFrom(cert.birthday) < 14) {
       return res.status(403).json({ error: '만 14세 미만은 가입할 수 없습니다.' });
     }
@@ -222,6 +225,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       phone_verified_at: new Date().toISOString(),
       birth_date: cert.birthday,
       status: 'approved', // 본인인증 통과 → 자동 승인 (이용 게이트는 구독 상태가 담당)
+      password_hash: hashPassword(String(password)),
     });
 
     if (error) {

@@ -148,13 +148,31 @@ export function SubscriptionPage() {
       .finally(() => { setProcessing(false); reload(); });
   }, []);
 
+  // 플랜 목록 — 연간 우선. DB 마이그레이션 전에는 기본값으로 표시
+  const plans = status?.plans?.length ? status.plans : [
+    { id: 'yearly', name: '훈프로 연간', price: 357600, interval: 'year' as const },
+    { id: 'standard', name: '훈프로 월간', price: 39800, interval: 'month' as const },
+  ];
+  const yearlyPlan = plans.find(p => p.interval === 'year');
+  const monthlyPlan = plans.find(p => p.interval === 'month');
+  const selectedPlan = plans.find(p => p.id === selectedPlanId) ?? yearlyPlan ?? plans[0];
+  // 연간이 월간 대비 몇 % 저렴한지 (월 환산 기준)
+  const discountPct = yearlyPlan && monthlyPlan
+    ? Math.round((1 - yearlyPlan.price / 12 / monthlyPlan.price) * 100)
+    : 0;
+
+  const selectPlan = (id: string) => {
+    setSelectedPlanId(id);
+    setCouponPreview(null); // 쿠폰 금액은 플랜 기준으로 다시 검증
+  };
+
   const handleCouponCheck = async () => {
     const code = couponCode.trim();
     if (!code) { setCouponPreview(null); return; }
     setBusy(true);
     setMessage(null);
     try {
-      setCouponPreview(await validateCoupon(code, selectedPlanId));
+      setCouponPreview(await validateCoupon(code, selectedPlan.id));
     } catch (e: any) {
       setCouponPreview(null);
       setMessage({ text: e?.message ?? '쿠폰 확인에 실패했습니다.', type: 'error' });
@@ -167,7 +185,7 @@ export function SubscriptionPage() {
     setBusy(true);
     setMessage(null);
     try {
-      await startCardRegistration('subscribe', selectedPlanId, couponPreview ? couponCode.trim() : undefined);
+      await startCardRegistration('subscribe', selectedPlan.id, couponPreview ? couponCode.trim() : undefined);
       // 성공 시 토스 페이지로 이동하므로 이후 코드는 실행되지 않음
     } catch (e: any) {
       setMessage({ text: e?.message ?? '카드 등록을 시작하지 못했습니다.', type: 'error' });
@@ -236,23 +254,6 @@ export function SubscriptionPage() {
   const sub = status?.subscription;
   const hasActiveSub = sub && sub.status !== 'canceled';
 
-  // 플랜 목록 — 연간 우선. DB 마이그레이션 전에는 기본값으로 표시
-  const plans = status?.plans?.length ? status.plans : [
-    { id: 'yearly', name: '훈프로 연간', price: 357600, interval: 'year' as const },
-    { id: 'standard', name: '훈프로 월간', price: 39800, interval: 'month' as const },
-  ];
-  const yearlyPlan = plans.find(p => p.interval === 'year');
-  const monthlyPlan = plans.find(p => p.interval === 'month');
-  const selectedPlan = plans.find(p => p.id === selectedPlanId) ?? yearlyPlan ?? plans[0];
-  // 연간이 월간 대비 몇 % 저렴한지 (월 환산 기준)
-  const discountPct = yearlyPlan && monthlyPlan
-    ? Math.round((1 - yearlyPlan.price / 12 / monthlyPlan.price) * 100)
-    : 0;
-
-  const selectPlan = (id: string) => {
-    setSelectedPlanId(id);
-    setCouponPreview(null); // 쿠폰 금액은 플랜 기준으로 다시 검증
-  };
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-6">

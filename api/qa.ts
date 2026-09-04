@@ -331,17 +331,6 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
     return res.status(400).json({ error: `질문은 ${MAX_QUESTION_LENGTH}자 이내로 입력해주세요.` });
   }
 
-  // 민감 주제는 토큰/사용량 소모 없이 직접 문의 안내
-  const sensitive = SENSITIVE_PATTERNS.find(s => s.pattern.test(question));
-  if (sensitive) {
-    const answer = sensitiveAnswer(sensitive.topic);
-    const { data: log } = await supabase
-      .from('qa_logs')
-      .insert({ user_id: decoded.userId, question, answer, sources: [], matched: false, model: 'rule-sensitive' })
-      .select('id')
-      .single();
-    return res.status(200).json({ answer, sources: [], matched: false, logId: log?.id ?? null });
-  }
 
   // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 사용 불가 (api/usage.ts와 동일 기준)
   if (!decoded.isAdmin) {
@@ -365,6 +354,18 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
     }
   }
 
+  // 민감 주제는 토큰/사용량 소모 없이 직접 문의 안내
+  const sensitive = SENSITIVE_PATTERNS.find(s => s.pattern.test(question));
+  if (sensitive) {
+    const answer = sensitiveAnswer(sensitive.topic);
+    const { data: log } = await supabase
+      .from('qa_logs')
+      .insert({ user_id: decoded.userId, question, answer, sources: [], matched: false, model: 'rule-sensitive' })
+      .select('id')
+      .single();
+    return res.status(200).json({ answer, sources: [], matched: false, logId: log?.id ?? null });
+  }
+
   // 일일 사용량 제한 (관리자 무제한) — 기존 increment_usage RPC 재사용
   if (!decoded.isAdmin) {
     const today = new Date().toISOString().split('T')[0];
@@ -374,7 +375,7 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
       p_limit: DAILY_LIMIT,
     });
     if (usageError) return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-    if (usage.exceeded) {
+    if (usage?.exceeded) {
       return res.status(429).json({ error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다. 내일 다시 이용해주세요.` });
     }
     res.setHeader('X-Remaining-Calls', String(usage.remaining));
