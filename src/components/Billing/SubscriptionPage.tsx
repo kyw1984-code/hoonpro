@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CreditCard, BadgeCheck, AlertTriangle, Ticket, Loader2, CalendarClock, Receipt, Gift } from 'lucide-react';
-import { getToken } from '../../lib/auth';
+import { getToken, removeToken } from '../../lib/auth';
 import {
   fetchBillingStatus, validateCoupon, subscribeWithCard, cancelSubscription, resumeSubscription,
   changeCard, requestRefund, startCardRegistration, consumeBillingReturn, tossConfigured,
@@ -36,6 +36,10 @@ export function SubscriptionPage() {
   const [busy, setBusy] = useState(false);
   const [processing, setProcessing] = useState(false); // 토스에서 돌아와 구독 활성화 중
   const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
+
+  // 회원 탈퇴
+  const [withdrawOpen, setWithdrawOpen] = useState(false);
+  const [withdrawPassword, setWithdrawPassword] = useState('');
 
   const [couponCode, setCouponCode] = useState('');
   const [couponPreview, setCouponPreview] = useState<CouponPreview | null>(null);
@@ -144,13 +148,31 @@ export function SubscriptionPage() {
       .finally(() => { setProcessing(false); reload(); });
   }, []);
 
+  // 플랜 목록 — 연간 우선. DB 마이그레이션 전에는 기본값으로 표시
+  const plans = status?.plans?.length ? status.plans : [
+    { id: 'yearly', name: '훈프로 연간', price: 357600, interval: 'year' as const },
+    { id: 'standard', name: '훈프로 월간', price: 39800, interval: 'month' as const },
+  ];
+  const yearlyPlan = plans.find(p => p.interval === 'year');
+  const monthlyPlan = plans.find(p => p.interval === 'month');
+  const selectedPlan = plans.find(p => p.id === selectedPlanId) ?? yearlyPlan ?? plans[0];
+  // 연간이 월간 대비 몇 % 저렴한지 (월 환산 기준)
+  const discountPct = yearlyPlan && monthlyPlan
+    ? Math.round((1 - yearlyPlan.price / 12 / monthlyPlan.price) * 100)
+    : 0;
+
+  const selectPlan = (id: string) => {
+    setSelectedPlanId(id);
+    setCouponPreview(null); // 쿠폰 금액은 플랜 기준으로 다시 검증
+  };
+
   const handleCouponCheck = async () => {
     const code = couponCode.trim();
     if (!code) { setCouponPreview(null); return; }
     setBusy(true);
     setMessage(null);
     try {
-      setCouponPreview(await validateCoupon(code, selectedPlanId));
+      setCouponPreview(await validateCoupon(code, selectedPlan.id));
     } catch (e: any) {
       setCouponPreview(null);
       setMessage({ text: e?.message ?? '쿠폰 확인에 실패했습니다.', type: 'error' });
@@ -163,7 +185,7 @@ export function SubscriptionPage() {
     setBusy(true);
     setMessage(null);
     try {
-      await startCardRegistration('subscribe', selectedPlanId, couponPreview ? couponCode.trim() : undefined);
+      await startCardRegistration('subscribe', selectedPlan.id, couponPreview ? couponCode.trim() : undefined);
       // 성공 시 토스 페이지로 이동하므로 이후 코드는 실행되지 않음
     } catch (e: any) {
       setMessage({ text: e?.message ?? '카드 등록을 시작하지 못했습니다.', type: 'error' });
@@ -196,6 +218,29 @@ export function SubscriptionPage() {
     }
   };
 
+  // 탈퇴 — 구독이 남아 있으면 서버가 막고 해지를 먼저 안내한다
+  const handleWithdraw = async () => {
+    if (!window.confirm('정말 탈퇴하시겠습니까?\n\n계정과 개인정보가 삭제되며 되돌릴 수 없습니다.\n(결제 기록은 법령에 따라 5년간 보존 후 파기됩니다)')) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/auth/login?action=withdraw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ password: withdrawPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) return setMessage({ text: data.error, type: 'error' });
+      window.alert(data.message);
+      removeToken();
+      window.location.href = '/';
+    } catch {
+      setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading || processing) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-24 text-ink-3">
@@ -209,23 +254,6 @@ export function SubscriptionPage() {
   const sub = status?.subscription;
   const hasActiveSub = sub && sub.status !== 'canceled';
 
-  // 플랜 목록 — 연간 우선. DB 마이그레이션 전에는 기본값으로 표시
-  const plans = status?.plans?.length ? status.plans : [
-    { id: 'yearly', name: '훈프로 연간', price: 357600, interval: 'year' as const },
-    { id: 'standard', name: '훈프로 월간', price: 39800, interval: 'month' as const },
-  ];
-  const yearlyPlan = plans.find(p => p.interval === 'year');
-  const monthlyPlan = plans.find(p => p.interval === 'month');
-  const selectedPlan = plans.find(p => p.id === selectedPlanId) ?? yearlyPlan ?? plans[0];
-  // 연간이 월간 대비 몇 % 저렴한지 (월 환산 기준)
-  const discountPct = yearlyPlan && monthlyPlan
-    ? Math.round((1 - yearlyPlan.price / 12 / monthlyPlan.price) * 100)
-    : 0;
-
-  const selectPlan = (id: string) => {
-    setSelectedPlanId(id);
-    setCouponPreview(null); // 쿠폰 금액은 플랜 기준으로 다시 검증
-  };
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-6">
@@ -534,6 +562,60 @@ export function SubscriptionPage() {
           </button>
         </div>
       )}
+
+      {/* 회원 탈퇴 (개인정보보호법 — 이용자가 직접 삭제를 요청할 수 있어야 한다) */}
+      <div className="rounded-panel border border-line bg-paper p-6">
+        {!withdrawOpen ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-[15px] font-semibold text-ink">회원 탈퇴</h3>
+              <p className="mt-1 text-[12.5px] text-ink-2">
+                계정과 개인정보를 삭제합니다. 되돌릴 수 없습니다.
+              </p>
+            </div>
+            <button
+              onClick={() => { setWithdrawOpen(true); setMessage(null); }}
+              className="shrink-0 rounded-control border border-line px-4 py-2 text-[13px] font-medium text-ink-3 transition-colors hover:border-critical/40 hover:text-critical"
+            >
+              탈퇴하기
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <h3 className="text-[15px] font-semibold text-ink">정말 탈퇴하시겠습니까?</h3>
+            <ul className="space-y-1 text-[12.5px] leading-relaxed text-ink-2">
+              <li>· 계정 정보(이름·연락처·이메일)가 삭제되고 <b className="text-ink">복구할 수 없습니다.</b></li>
+              <li>· 관심 키워드, 순위 추적 이력, 저장한 작업물이 모두 삭제됩니다.</li>
+              <li>· 결제 기록은 전자상거래법에 따라 5년간 보존된 뒤 파기됩니다.</li>
+              <li>· 이용 중인 구독이 있다면 먼저 해지 또는 환불을 진행해야 합니다.</li>
+            </ul>
+            <input
+              type="password"
+              value={withdrawPassword}
+              onChange={e => setWithdrawPassword(e.target.value)}
+              placeholder="본인 확인을 위해 비밀번호를 입력해주세요"
+              autoComplete="current-password"
+              className="w-full rounded-control border border-line bg-paper-2 px-3.5 py-2.5 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleWithdraw}
+                disabled={busy}
+                className="rounded-control bg-critical px-4 py-2 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
+              >
+                {busy ? '처리 중...' : '탈퇴 확인'}
+              </button>
+              <button
+                onClick={() => { setWithdrawOpen(false); setWithdrawPassword(''); }}
+                disabled={busy}
+                className="rounded-control border border-line px-4 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-paper-2 disabled:opacity-40"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

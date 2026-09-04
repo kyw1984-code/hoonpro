@@ -220,7 +220,7 @@ export function HomeDashboard({ onNavigate }: Props) {
             className="flex h-6 w-6 items-center justify-center rounded-md"
             style={{
               background: 'linear-gradient(135deg,#7cf5ff,#8b7bff)',
-              color: '#0a0f1f',
+              color: '#152140',
             }}
           >
             <Zap className="h-3.5 w-3.5" strokeWidth={2.5} />

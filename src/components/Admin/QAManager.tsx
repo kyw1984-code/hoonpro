@@ -336,7 +336,8 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
           </div>
         ) : (
           <div className="overflow-hidden rounded-panel border border-line bg-paper">
-            <table className="w-full text-[13px]">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-[13px]">
               <thead className="border-b border-line bg-paper-2">
                 <tr>
                   {['제목', '유형', '청크', '글자 수', '등록일', ''].map((h, i) => (
@@ -382,6 +383,7 @@ function DocsSection({ showToast }: { showToast: (msg: string) => void }) {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </div>

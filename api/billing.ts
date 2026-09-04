@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 
 // 구독 결제 통합 엔드포인트 (서버리스 함수 1개로 통합 — Vercel 함수 한도 대응)
 //   subscribe        카드 등록(빌링키 발급) + 첫 결제 → 구독 활성화
+//   plans            공개 요금표 (로그인 전 랜딩용)
 //   status           내 구독 상태 + 결제 이력
 //   coupon-validate  쿠폰 코드 검증 (CI 기준 1인 1회)
 //   cancel / resume  기간 만료 해지 예약 / 예약 취소
@@ -100,6 +101,31 @@ function verifyAuth(req: VercelRequest): { userId: string; email: string; name: 
   } catch {
     return null;
   }
+}
+
+// 브랜드 이메일 템플릿 (api/auth/login.ts · api/auth/signup.ts와 동일 디자인)
+function wrapEmail(heading: string, bodyHtml: string): string {
+  return `<div style="margin:0;padding:24px 12px;background:#0b1020;font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;">
+  <div style="max-width:520px;margin:0 auto;background:#141b31;border:1px solid #1c2542;border-radius:18px;overflow:hidden;">
+    <div style="padding:22px 28px 0;">
+      <span style="display:inline-block;width:30px;height:30px;line-height:30px;text-align:center;border-radius:9px;background:linear-gradient(135deg,#7cf5ff,#8b7bff);color:#0b1020;font-weight:800;font-size:14px;">훈</span>
+      <span style="margin-left:9px;font-size:14px;font-weight:600;color:#e8ecf5;vertical-align:middle;">쇼크트리 훈프로 <span style="color:#5a627a;font-weight:500;">AI 자동화</span></span>
+    </div>
+    <div style="padding:18px 28px 26px;">
+      <h1 style="margin:0 0 14px;font-size:19px;line-height:1.4;color:#ffffff;font-weight:700;">${heading}</h1>
+      <div style="font-size:14px;line-height:1.75;color:#b9c0d0;">${bodyHtml}</div>
+    </div>
+    <div style="padding:16px 28px;border-top:1px solid #1c2542;font-size:11.5px;line-height:1.7;color:#5a627a;">
+      본 메일은 발신 전용입니다. 결제 관련 문의는 서비스 내 [구독 관리]에서 확인해주세요.<br>
+      <a href="https://hoonproai.com" style="color:#7cf5ff;text-decoration:none;">hoonproai.com</a>
+    </div>
+  </div>
+</div>`;
+}
+
+// 본문 안에서 쓰는 버튼 (구독 관리로 유도)
+function emailButton(label: string, href = 'https://hoonproai.com'): string {
+  return `<div style="margin:20px 0 4px;"><a href="${href}" style="display:inline-block;padding:11px 20px;border-radius:10px;background:linear-gradient(135deg,#7cf5ff,#8b7bff);color:#0a0f1f;font-weight:700;font-size:13.5px;text-decoration:none;">${label}</a></div>`;
 }
 
 // 이메일 발송 (Resend) — 키가 없으면 조용히 스킵 (개발 환경)
@@ -253,6 +279,20 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
   const orderId = newOrderId();
   const orderName = `${plan.name} 구독`;
 
+  // 청구 전 선점 — 결제 성공 후 갱신 전에 함수가 중단돼도 다음 실행이 다시 청구하지 않도록
+  // next_billing_at을 먼저 미뤄 둔다. (실패 시 아래에서 재시도 일자로 다시 조정)
+  const claimDate = addDays(kstToday(), 1);
+  const { data: claimed } = await supabase
+    .from('subscriptions')
+    .update({ next_billing_at: claimDate, updated_at: new Date().toISOString() })
+    .eq('id', sub.id)
+    .lte('next_billing_at', kstToday())
+    .select('id');
+  if (!claimed || claimed.length === 0) {
+    // 다른 실행이 이미 이 구독을 가져갔다
+    return { ok: false, failReason: 'already-claimed' };
+  }
+
   const billingKey = decryptBillingKey(sub.billing_key_enc);
   const result = await tossCharge(billingKey, sub.customer_key, orderId, amount, orderName, user.email, user.name);
 
@@ -285,10 +325,11 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
       updated_at: new Date().toISOString(),
     }).eq('id', sub.id);
 
-    await sendEmail(user.email, `[훈프로] 결제 완료 — ${won(amount)}`,
-      `<p>${user.name}님, ${orderName} ${won(amount)} 결제가 완료됐습니다.</p>` +
-      `<p>다음 결제 예정일: ${nextBilling}</p>` +
-      (result.receiptUrl ? `<p><a href="${result.receiptUrl}">영수증 보기</a></p>` : ''));
+    await sendEmail(user.email, `[훈프로] 결제 완료 — ${won(amount)}`, wrapEmail(
+      `결제가 완료됐습니다`,
+      `<p>${user.name}님, ${orderName} <b style="color:#e8ecf5;">${won(amount)}</b> 결제가 완료됐습니다.</p>` +
+      `<p>다음 결제 예정일: <b style="color:#e8ecf5;">${nextBilling}</b></p>` +
+      (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('구독 관리 열기'))));
     return { ok: true };
   }
 
@@ -298,17 +339,23 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
     await supabase.from('subscriptions').update({
       status: 'paused', fail_count: failCount, next_billing_at: null, updated_at: new Date().toISOString(),
     }).eq('id', sub.id);
-    await sendEmail(user.email, '[훈프로] 구독이 정지됐습니다',
-      `<p>${user.name}님, 결제가 3회 실패해 구독이 정지됐습니다. (사유: ${result.failReason})</p>` +
-      `<p>데이터는 그대로 보존됩니다. 마이페이지에서 카드를 다시 등록하면 즉시 복구됩니다.</p>`);
+    await sendEmail(user.email, '[훈프로] 구독이 정지됐습니다', wrapEmail(
+      '구독이 정지됐습니다',
+      `<p>${user.name}님, 결제가 3회 실패해 구독이 정지됐습니다.</p>` +
+      `<p style="color:#8a92a6;">사유: ${result.failReason}</p>` +
+      `<p>관심 키워드·순위 추적 이력 등 데이터는 그대로 보존됩니다. 카드를 다시 등록하면 즉시 복구됩니다.</p>` +
+      emailButton('카드 다시 등록하기')));
   } else {
     const retryDate = addDays(today, RETRY_SCHEDULE_DAYS[failCount - 1] ?? 2);
     await supabase.from('subscriptions').update({
       status: 'past_due', fail_count: failCount, next_billing_at: retryDate, updated_at: new Date().toISOString(),
     }).eq('id', sub.id);
-    await sendEmail(user.email, '[훈프로] 결제 실패 안내',
-      `<p>${user.name}님, ${orderName} 결제가 실패했습니다. (사유: ${result.failReason})</p>` +
-      `<p>${retryDate}에 다시 시도합니다. 카드 한도·유효기간을 확인하시거나 마이페이지에서 카드를 변경해주세요.</p>`);
+    await sendEmail(user.email, '[훈프로] 결제 실패 안내', wrapEmail(
+      '결제가 실패했습니다',
+      `<p>${user.name}님, ${orderName} 결제가 실패했습니다.</p>` +
+      `<p style="color:#8a92a6;">사유: ${result.failReason}</p>` +
+      `<p><b style="color:#e8ecf5;">${retryDate}</b>에 다시 시도합니다. 카드 한도·유효기간을 확인하시거나 카드를 변경해주세요.</p>` +
+      emailButton('카드 변경하기')));
   }
   return { ok: false, failReason: result.failReason };
 }
@@ -329,6 +376,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── 토스 웹훅 (서명 없음 → paymentKey 재조회로 검증) ──
     if (action === 'webhook') return await tossWebhook(req, res);
+
+    // ── 공개 요금표 (로그인 전 랜딩에서 가격을 보여주기 위해 인증 없이 제공) ──
+    if (action === 'plans') {
+      const { data } = await supabase
+        .from('plans').select('id, name, price, interval')
+        .eq('active', true).order('price', { ascending: false });
+      return res.status(200).json({
+        plans: (data ?? []).map(p => ({ ...p, interval: p.interval ?? 'month' })),
+      });
+    }
 
     // 이하 전부 로그인 필요
     const user = verifyAuth(req);
@@ -523,25 +580,38 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
       return res.status(402).json({ error: `결제에 실패했습니다: ${result.failReason}` });
     }
 
-    await sendEmail(userRow?.email ?? user.email, `[훈프로] 구독 시작 — ${won(amount)} 결제 완료`,
-      `<p>${userRow?.name ?? user.name}님, ${orderName} 구독이 시작됐습니다.</p>` +
-      `<p>결제 금액: ${won(amount)}${discount > 0 ? ` (쿠폰 할인 ${won(discount)})` : ''} · 다음 결제일: ${periodEnd}</p>` +
-      (result.receiptUrl ? `<p><a href="${result.receiptUrl}">영수증 보기</a></p>` : ''));
+    await sendEmail(userRow?.email ?? user.email, `[훈프로] 구독 시작 — ${won(amount)} 결제 완료`, wrapEmail(
+      '구독이 시작됐습니다',
+      `<p>${userRow?.name ?? user.name}님, ${orderName} 구독이 시작됐습니다. 이제 모든 AI 도구를 이용할 수 있습니다.</p>` +
+      `<p>결제 금액: <b style="color:#e8ecf5;">${won(amount)}</b>${discount > 0 ? ` (쿠폰 할인 ${won(discount)})` : ''}<br>다음 결제일: <b style="color:#e8ecf5;">${periodEnd}</b></p>` +
+      (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('훈프로 열기'))));
   } else {
-    await sendEmail(userRow?.email ?? user.email, `[훈프로] 무료 이용 시작 (${coupon!.value}일)`,
-      `<p>${userRow?.name ?? user.name}님, 무료 이용이 시작됐습니다.</p>` +
-      `<p>무료 기간 종료일(${periodEnd})부터 ${won(plan.price)}/${plan.interval === 'year' ? '연' : '월'}이 등록하신 카드로 자동결제됩니다. 그 전에 언제든 해지할 수 있습니다.</p>`);
+    await sendEmail(userRow?.email ?? user.email, `[훈프로] 무료 이용 시작 (${coupon!.value}일)`, wrapEmail(
+      '무료 이용이 시작됐습니다',
+      `<p>${userRow?.name ?? user.name}님, 지금부터 모든 AI 도구를 무료로 이용할 수 있습니다.</p>` +
+      `<p>무료 기간 종료일 <b style="color:#e8ecf5;">${periodEnd}</b>부터 ${won(plan.price)}/${plan.interval === 'year' ? '연' : '월'}이 등록하신 카드로 자동결제됩니다.<br>그 전에 언제든 해지하실 수 있고, 해지하면 결제되지 않습니다.</p>` +
+      emailButton('훈프로 열기')));
   }
 
   // 쿠폰 사용 기록 (CI 기준 1인 1회 어뷰징 차단)
   if (coupon) {
-    await supabase.from('coupon_redemptions').insert({
+    // unique 제약(coupon_id+user_id, coupon_id+ci)이 동시 요청의 중복 사용을 막는다.
+    // 삽입이 실패하면 이미 사용한 쿠폰이므로 사용 횟수를 올리지 않는다.
+    const { error: redeemError } = await supabase.from('coupon_redemptions').insert({
       coupon_id: coupon.id,
       user_id: user.userId,
       ci: userRow?.ci ?? null,
       subscription_id: subId,
     });
-    await supabase.from('coupons').update({ redeemed_count: coupon.redeemed_count + 1 }).eq('id', coupon.id);
+    if (!redeemError) {
+      await supabase.rpc('increment_coupon_redeemed', { p_coupon_id: coupon.id })
+        .then(async ({ error }) => {
+          // RPC가 없는 환경(마이그레이션 전)에서는 기존 방식으로 보정
+          if (error) await supabase.from('coupons').update({ redeemed_count: coupon.redeemed_count + 1 }).eq('id', coupon.id);
+        });
+    } else {
+      console.warn('[billing] coupon redemption already recorded', coupon.id, user.userId);
+    }
   }
 
   return res.status(200).json({ ok: true, status: isTrial ? 'trial' : 'active', nextBillingAt: periodEnd });
@@ -597,9 +667,26 @@ async function changeCard(user: any, req: VercelRequest, res: VercelResponse) {
 
   // 결제 실패로 밀려 있거나 정지 상태면 새 카드로 즉시 재결제 → 성공 시 즉시 복구
   if (sub.status === 'past_due' || sub.status === 'paused') {
-    const fresh = { ...sub, billing_key_enc: encryptBillingKey(billingKey), customer_key: customerKey, fail_count: sub.status === 'paused' ? 0 : sub.fail_count };
+    // fail_count는 유지한 채 청구한다. 리셋하면 정지 계정이 실패해도 past_due(이용 허용)로
+    // 되살아나 카드 변경만 반복해 무료로 쓸 수 있다. 성공 시에는 chargeSubscription이 0으로 되돌린다.
+    const fresh = {
+      ...sub,
+      billing_key_enc: encryptBillingKey(billingKey),
+      customer_key: customerKey,
+      // 즉시 청구를 시도해야 하므로 선점 조건(next_billing_at <= 오늘)을 만족시킨다
+      next_billing_at: kstToday(),
+    };
+    await supabase.from('subscriptions').update({ next_billing_at: kstToday() }).eq('id', sub.id);
     const result = await chargeSubscription(fresh, plan, userRow ?? user);
-    if (!result.ok) return res.status(402).json({ error: `카드는 변경됐지만 결제에 실패했습니다: ${result.failReason}` });
+    if (!result.ok) {
+      // 실패했으면 정지 상태를 유지한다 (이용 재개 금지)
+      if (sub.status === 'paused') {
+        await supabase.from('subscriptions')
+          .update({ status: 'paused', next_billing_at: null, updated_at: new Date().toISOString() })
+          .eq('id', sub.id);
+      }
+      return res.status(402).json({ error: `카드는 변경됐지만 결제에 실패했습니다: ${result.failReason}` });
+    }
     return res.status(200).json({ ok: true, reactivated: true, cardSummary });
   }
 
@@ -638,15 +725,34 @@ async function refund(user: any, res: VercelResponse) {
 
   const approvedAt = new Date(payment.approved_at ?? payment.created_at);
   const within7Days = Date.now() - approvedAt.getTime() <= 7 * 86400000;
-  const { count: usedCalls } = await supabase
-    .from('api_calls')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', user.userId)
-    .gte('created_at', approvedAt.toISOString());
+
+  // 사용 이력 판정 — 과금되는 모든 기능을 포함해야 한다.
+  //  · api_calls  : 썸네일·상세페이지·이미지 분석·QA (모델 호출 로깅)
+  //  · api_usage  : 소싱AI·리뷰 분석·순위 추적 (increment_usage만 호출하고
+  //                 api_calls에는 남기지 않는다 — 여기를 빠뜨리면 원가가 큰
+  //                 소싱 기능만 일주일 쓰고 전액 환불받는 우회가 가능하다)
+  // 조회가 실패하면 "사용함"으로 간주해 전액 환불로 흘러가지 않게 한다.
+  const usedFrom = approvedAt.toISOString();
+  const usedFromDate = usedFrom.slice(0, 10);
+  const [callsRes, usageRes] = await Promise.all([
+    supabase.from('api_calls')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.userId)
+      .gte('created_at', usedFrom),
+    supabase.from('api_usage')
+      .select('call_count')
+      .eq('user_id', user.userId)
+      .gte('date', usedFromDate)
+      .gt('call_count', 0)
+      .limit(1),
+  ]);
+  const unusedConfirmed =
+    !callsRes.error && (callsRes.count ?? 0) === 0 &&
+    !usageRes.error && (usageRes.data?.length ?? 0) === 0;
 
   let refundAmount: number;
   let reason: string;
-  if (within7Days && (usedCalls ?? 0) === 0) {
+  if (within7Days && unusedConfirmed) {
     refundAmount = payment.amount;
     reason = '7일 이내 미사용 전액 환불';
   } else {
@@ -684,8 +790,11 @@ async function refund(user: any, res: VercelResponse) {
   }
 
   await supabase.from('subscriptions').update(endNow).eq('id', sub.id);
-  await sendEmail(user.email, '[훈프로] 환불 및 해지 완료',
-    `<p>${user.name}님, 구독이 해지됐습니다.</p><p>환불 금액: ${won(refundAmount)} (${reason})</p>`);
+  await sendEmail(user.email, '[훈프로] 환불 및 해지 완료', wrapEmail(
+    '환불 및 해지가 완료됐습니다',
+    `<p>${user.name}님, 구독이 해지됐습니다.</p>` +
+    `<p>환불 금액: <b style="color:#e8ecf5;">${won(refundAmount)}</b><br><span style="color:#8a92a6;">${reason}</span></p>` +
+    `<p style="color:#8a92a6;">카드사 사정에 따라 환불 반영까지 3~7영업일이 소요될 수 있습니다.</p>`));
   return res.status(200).json({ ok: true, refunded: refundAmount, message: reason });
 }
 
@@ -745,9 +854,11 @@ async function chargeDue(req: VercelRequest, res: VercelResponse) {
   for (const sub of upcoming ?? []) {
     const u = (sub as any).users, p = (sub as any).plans;
     if (!u?.email) continue;
-    await sendEmail(u.email, `[훈프로] ${noticeDate} 정기결제 예정 안내`,
-      `<p>${u.name}님, ${noticeDate}에 ${p?.name ?? '훈프로'} 구독 요금이 등록하신 카드(${sub.card_summary ?? ''})로 자동결제될 예정입니다.</p>` +
-      `<p>결제를 원치 않으시면 그 전에 마이페이지에서 해지해주세요. 해지 시 남은 기간까지는 그대로 이용할 수 있습니다.</p>`);
+    await sendEmail(u.email, `[훈프로] ${noticeDate} 정기결제 예정 안내`, wrapEmail(
+      '정기결제 예정 안내',
+      `<p>${u.name}님, <b style="color:#e8ecf5;">${noticeDate}</b>에 ${p?.name ?? '훈프로'} 구독 요금 <b style="color:#e8ecf5;">${won(p?.price ?? 0)}</b>이 등록하신 카드(${sub.card_summary ?? ''})로 자동결제될 예정입니다.</p>` +
+      `<p>결제를 원치 않으시면 그 전에 해지해주세요. 해지해도 남은 기간까지는 그대로 이용할 수 있습니다.</p>` +
+      emailButton('구독 관리 열기')));
     summary.notified++;
   }
 

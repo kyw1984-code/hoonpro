@@ -173,7 +173,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (error) return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
 
-  if (data.exceeded) {
+  if (data?.exceeded) {
     return res.status(429).json({
       error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다. 내일 다시 이용해주세요.`,
     });

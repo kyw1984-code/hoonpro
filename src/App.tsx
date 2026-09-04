@@ -157,20 +157,20 @@ export default function App() {
         {/* ─── 다크 테크 헤더 ─── */}
         <header className="sticky top-0 z-20 backdrop-blur-xl bg-ground/75 border-b border-line">
           {/* 상단 줄 — 브랜드와 계정 */}
-          <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-4 px-6">
-            <div className="flex shrink-0 items-center gap-2.5">
+          <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-2 px-4 sm:gap-4 sm:px-6">
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <div
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[13px] font-extrabold"
                 style={{
                   background: 'linear-gradient(135deg,#7cf5ff 0%,#8b7bff 100%)',
-                  color: '#0b1020',
+                  color: '#131d36',
                   boxShadow: '0 4px 14px rgba(124,245,255,.25)',
                 }}
               >
                 훈
               </div>
               <h1 className="truncate text-[15px] font-semibold tracking-tight text-ink">
-                쇼크트리 훈프로 <span className="text-ink-3 font-medium">AI 자동화</span>
+                쇼크트리 훈프로 <span className="hidden text-ink-3 font-medium sm:inline">AI 자동화</span>
               </h1>
             </div>
 
@@ -200,7 +200,7 @@ export default function App() {
 
           {/* 아래 줄 — 탭 */}
           <div className="border-t border-line">
-            <nav className="mx-auto flex max-w-[1240px] gap-1 overflow-x-auto px-6" aria-label="주요 기능">
+            <nav className="mx-auto flex max-w-[1240px] gap-1 overflow-x-auto px-4 sm:px-6" aria-label="주요 기능">
               {applyTabOrder(tabOrder).filter(tab => tab.id !== 'qa' || qaVisible).map(tab => (
                 <button
                   key={tab.id}

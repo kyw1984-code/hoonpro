@@ -1,9 +1,20 @@
 {
   "crons": [
-    { "path": "/api/sourcing?type=cron", "schedule": "0 18 * * *" },
-    { "path": "/api/billing?action=charge-due", "schedule": "0 19 * * *" }
+    {
+      "path": "/api/sourcing?type=cron",
+      "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/billing?action=charge-due",
+      "schedule": "0 19 * * *"
+    }
   ],
   "functions": {
-    "api/qa.ts": { "maxDuration": 60 }
+    "api/qa.ts": {
+      "maxDuration": 60
+    },
+    "api/billing.ts": {
+      "maxDuration": 300
+    }
   }
 }

@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* ──────────────────────────────────────────────────────────────
-   훈프로 디자인 토큰 — 다크 테크 버전
+   훈프로 디자인 토큰 — 다크 테크 버전 (밝기·대비 상향)
    기존 유틸리티(bg-ground, border-line 등) 이름은 유지하고
    값만 다크로 전환하여, 모든 컴포넌트가 자동으로 다크가 됨.
    시안·보라·민트 액센트로 데이터 시각화 톤을 담당.
@@ -12,30 +12,30 @@
     system-ui, "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
 
   /* 표면 — 다크 네이비. bg-ground가 가장 어둡고, bg-paper가 카드 표면 */
-  --color-ground: #070912;         /* 앱 전체 배경 (본래 밝은 크림) */
-  --color-paper: #0f1526;          /* 카드/시트 (본래 흰색) */
-  --color-paper-2: #0b1020;        /* 미세 대비 표면 (본래 크림-화이트) */
-  --color-line: #1c2542;           /* 기본 보더 */
-  --color-line-strong: #263256;    /* 호버·강조 보더 */
+  --color-ground: #101a2e;         /* 앱 전체 배경 (본래 밝은 크림) */
+  --color-paper: #1b2745;          /* 카드/시트 (본래 흰색) */
+  --color-paper-2: #131d36;        /* 미세 대비 표면 (본래 크림-화이트) */
+  --color-line: #31406b;           /* 기본 보더 */
+  --color-line-strong: #455684;    /* 호버·강조 보더 */
 
   /* 텍스트 — 밝은 잉크 계열 반전 */
-  --color-ink: #f0f3fa;            /* 본문·제목 */
-  --color-ink-2: #a9b3cd;          /* 보조 */
-  --color-ink-3: #6b7590;          /* 힌트·플레이스홀더 */
+  --color-ink: #f8fbff;            /* 본문·제목 */
+  --color-ink-2: #d2daed;          /* 보조 */
+  --color-ink-3: #9daabf;          /* 힌트·플레이스홀더 */
 
   /* 강조 — 활성 상태·링크·데이터 강조 (시안) */
   --color-accent: #7cf5ff;
   --color-accent-hover: #a8f9ff;
-  --color-accent-soft: rgba(124, 245, 255, 0.08);
-  --color-accent-line: rgba(124, 245, 255, 0.28);
+  --color-accent-soft: rgba(124, 245, 255, 0.13);
+  --color-accent-line: rgba(124, 245, 255, 0.38);
 
   /* 상태 — 다크 배경에서 잘 보이도록 명도 올림 */
   --color-positive: #3ee7a3;
-  --color-positive-soft: rgba(62, 231, 163, 0.10);
+  --color-positive-soft: rgba(62, 231, 163, 0.15);
   --color-caution: #ffb454;
-  --color-caution-soft: rgba(255, 180, 84, 0.10);
+  --color-caution-soft: rgba(255, 180, 84, 0.15);
   --color-critical: #ff6b6b;
-  --color-critical-soft: rgba(255, 107, 107, 0.10);
+  --color-critical-soft: rgba(255, 107, 107, 0.15);
 
   /* 모서리 — 3단계로 고정 (기존 유지) */
   --radius-control: 8px;
@@ -51,8 +51,8 @@
 html {
   background: var(--color-ground);
   background-image:
-    radial-gradient(1200px 800px at 15% 0%, rgba(124, 245, 255, 0.06), transparent 60%),
-    radial-gradient(1000px 700px at 100% 30%, rgba(139, 123, 255, 0.06), transparent 60%),
+    radial-gradient(1200px 800px at 15% 0%, rgba(124, 245, 255, 0.05), transparent 60%),
+    radial-gradient(1000px 700px at 100% 30%, rgba(139, 123, 255, 0.05), transparent 60%),
     radial-gradient(800px 600px at 50% 100%, rgba(62, 231, 163, 0.03), transparent 60%);
   background-attachment: fixed;
   -webkit-text-size-adjust: 100%;
@@ -61,9 +61,17 @@ html {
 body {
   font-family: var(--font-sans);
   color: var(--color-ink);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* 어두운 배경에서 antialiased는 글자를 얇게 만들어 흐려 보이게 한다.
+     기본(서브픽셀) 렌더링을 써야 밝은 글씨가 또렷하다. */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   background: transparent;
+}
+
+/* 작은 글씨가 흐려 보이지 않도록 보조 텍스트의 최소 두께를 올린다 */
+.text-ink-2,
+.text-ink-3 {
+  font-weight: 500;
 }
 
 /* 숫자가 세로로 정렬되도록 */
@@ -104,12 +112,12 @@ img { color-scheme: dark; }
 /* 카드 표면에 미묘한 광택 — 기존 border-line + bg-paper 조합에 자동 적용 */
 [class*="bg-paper"] {
   background-image:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 40%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 45%);
 }
 
 /* placeholder 색 — 다크에서 너무 밝지 않게 */
 ::placeholder {
-  color: rgba(107, 117, 144, 0.7) !important;
+  color: rgba(157, 170, 191, 0.8) !important;
 }
 
 /* 체크박스 강조색 */

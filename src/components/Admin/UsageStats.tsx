@@ -204,7 +204,8 @@ function BreakdownTable({ title, columns, rows }: { title: string; columns: stri
       {rows.length === 0 ? (
         <div className="text-center py-8 text-ink-3 text-sm">데이터가 없습니다.</div>
       ) : (
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[560px] text-sm">
           <thead className="bg-paper-2 border-b border-line">
             <tr>
               {columns.map(c => (
@@ -222,6 +223,7 @@ function BreakdownTable({ title, columns, rows }: { title: string; columns: stri
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
