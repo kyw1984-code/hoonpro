@@ -40,7 +40,11 @@ export function SettlementCalendar() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="앞으로 7일 입금" value={won(data.totals.in7)} />
         <Stat label="앞으로 30일 입금" value={won(data.totals.in30)} />
-        <Stat label="주간 평균 입금" value={won(data.totals.weeklyAverage)} sub="최근 8주 기준" />
+        <Stat
+          label="주간 평균 입금"
+          value={won(data.totals.weeklyAverage)}
+          sub={data.totals.weeksObserved > 0 ? `최근 ${data.totals.weeksObserved}주 기준` : '기록 없음'}
+        />
         <Stat label="일정 미배정" value={won(data.totals.unscheduled)} sub="지급일이 아직 안 잡힌 정산예정액" />
       </div>
 

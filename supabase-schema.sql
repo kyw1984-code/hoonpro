@@ -533,11 +533,19 @@ create table if not exists coupang_accounts (
   last_sync_at timestamptz,
   last_sync_error text,
   sync_shard smallint not null default 0, -- 크론 분산 슬롯 (0~9)
+  -- 첫 전체 수집(백필)이 끝났는지. 시간 예산에 걸려 중간에 끊긴 회차와
+  -- 정상적으로 끝난 회차를 구분해야, 큰 판매자가 매 시간 처음부터 다시
+  -- 시작하며 다른 사용자의 수집을 굶기는 일을 막을 수 있다.
+  backfill_done boolean not null default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
 
 create index if not exists idx_cpa_shard on coupang_accounts(sync_shard, status);
+
+-- 이미 13번 절을 한 번 실행한 프로젝트를 위해 나중에 추가된 칼럼을 따로 보강한다
+alter table coupang_accounts add column if not exists backfill_done boolean not null default false;
+
 alter table coupang_accounts disable row level security;
 
 -- 상품(옵션) 마스터 — 원가 입력과 재고 예측의 단위

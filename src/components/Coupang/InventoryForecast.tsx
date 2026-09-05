@@ -97,7 +97,7 @@ export function InventoryForecast() {
           발주 권장 수량은 리드타임과 목표 기간을 합친 만큼을 채우는 수량입니다.
         </p>
         <label className="flex items-center gap-2 text-[12.5px] text-ink-2">
-          <input type="checkbox" checked={onlyRisk} onChange={e => setOnlyRisk(e.target.checked)} className="h-4 w-4 accent-current" />
+          <input type="checkbox" checked={onlyRisk} onChange={e => setOnlyRisk(e.target.checked)} className="h-4 w-4" />
           부족한 것만 보기
         </label>
       </div>

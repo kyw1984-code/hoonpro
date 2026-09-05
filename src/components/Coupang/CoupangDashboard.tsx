@@ -271,6 +271,8 @@ function describeSync(s: SyncSummary): string {
     `반품 ${s.returns}`,
     `문의 ${s.inquiries}`,
   ];
-  const base = `수집 완료 — ${parts.join(' · ')}건`;
+  const base = s.truncated
+    ? `수집 진행 중 — ${parts.join(' · ')}건까지 받았습니다. 나머지는 자동으로 이어받습니다`
+    : `수집 완료 — ${parts.join(' · ')}건`;
   return s.errors?.length ? `${base} (일부 실패: ${s.errors.slice(0, 2).join(' / ')})` : base;
 }

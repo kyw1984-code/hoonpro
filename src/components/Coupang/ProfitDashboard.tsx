@@ -8,7 +8,7 @@
  * 광고비는 상품 단위로 알 수 없어(윙 API에 광고 데이터가 없다) 기간 총액으로만
  * 반영한다. 저장된 광고 보고서가 있으면 그 값을 기본값으로 채워 준다.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpRight, Loader2, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { coupangApi, pct, won, type ProfitResponse } from '../../lib/coupang';
 
@@ -28,21 +28,23 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [adCost, setAdCost] = useState<number>(0);
-  const [adTouched, setAdTouched] = useState(false);
+  // 사용자가 광고비를 손댔는지는 조회 조건이 아니다. 상태로 두면 처음 수정하는
+  // 순간 load의 정체성이 바뀌어 쓸데없는 재조회가 한 번 더 나간다.
+  const adTouched = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const d = await coupangApi.profit(days);
       setData(d);
-      if (!adTouched) setAdCost(Math.round(d.adCostHint ?? 0));
+      if (!adTouched.current) setAdCost(Math.round(d.adCostHint ?? 0));
       setError(null);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [days, adTouched]);
+  }, [days]);
 
   useEffect(() => {
     load();
@@ -143,7 +145,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               min={0}
               value={adCost}
               onChange={e => {
-                setAdTouched(true);
+                adTouched.current = true;
                 setAdCost(Math.max(0, Number(e.target.value) || 0));
               }}
               className="w-40 rounded-control border border-line bg-paper px-3 py-2 text-right text-[13px] tabular-nums outline-none focus:ring-2 focus:ring-accent"

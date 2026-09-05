@@ -25,6 +25,7 @@ export interface SyncSummary {
   returns: number;
   inquiries: number;
   errors: string[];
+  truncated?: boolean;
 }
 
 async function request<T>(action: string, init?: { method?: 'GET' | 'POST'; body?: Record<string, unknown> }): Promise<T> {
@@ -116,6 +117,7 @@ export interface SettlementResponse {
     in30: number;
     unscheduled: number;
     weeklyAverage: number;
+    weeksObserved: number;
   };
   weekly: Array<{ weekStart: string; amount: number }>;
 }

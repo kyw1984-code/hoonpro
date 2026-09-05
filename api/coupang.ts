@@ -326,10 +326,22 @@ export interface SyncSummary {
   inquiries: number;
   errors: string[];
   authFailed: boolean;
+  /** 시간 예산에 걸려 중간에 멈췄다. 남은 몫은 다음 회차가 이어받는다. */
+  truncated: boolean;
 }
 
 function emptySummary(): SyncSummary {
-  return { items: 0, orders: 0, sales: 0, settlements: 0, returns: 0, inquiries: 0, errors: [], authFailed: false };
+  return {
+    items: 0, orders: 0, sales: 0, settlements: 0, returns: 0, inquiries: 0,
+    errors: [], authFailed: false, truncated: false,
+  };
+}
+
+/** 남은 시간이 없으면 true. 각 수집 단계와 페이지 루프가 이 값을 본다. */
+function outOfTime(deadline: number, sum: SyncSummary): boolean {
+  if (Date.now() < deadline) return false;
+  sum.truncated = true;
+  return true;
 }
 
 /** 조회 구간을 chunkDays 단위로 쪼갠다 (쿠팡은 대부분 31일 이내만 허용) */
@@ -372,12 +384,13 @@ async function upsertChunked(table: string, rows: any[], onConflict: string): Pr
 // ── 상품(옵션) 동기화 ─────────────────────────────────────────
 // 목록 조회로 등록상품을 훑고, 상세는 회차당 상한만큼만 가져온다.
 // 상세를 오래 못 받은 상품부터 채우므로 몇 회차 안에 전체가 최신화된다.
-async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary): Promise<void> {
+async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
 
   const sellerProductIds: Array<{ id: string; name: string; status: string }> = [];
   let nextToken = '';
   for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
+    if (outOfTime(deadline, sum)) return;
     const query = `vendorId=${creds.vendorId}&maxPerPage=100${nextToken ? `&nextToken=${nextToken}` : ''}`;
     const r = await coupangCall(creds, 'GET', EP.sellerProducts, query);
     if (!r.ok) {
@@ -412,6 +425,12 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary):
 
   const rows: any[] = [];
   for (const sp of ordered.slice(0, LIMITS.itemDetailPerRun)) {
+    // 상세는 건당 1호출이라 여기서 시간이 가장 많이 든다. 예산이 끝나면
+    // 지금까지 받은 것만 저장하고 나머지는 다음 회차가 이어받는다.
+    if (Date.now() >= deadline) {
+      sum.truncated = true;
+      break;
+    }
     const r = await coupangCall(creds, 'GET', EP.sellerProduct(sp.id), '');
     if (!r.ok) {
       if (r.authFailed) {
@@ -448,7 +467,7 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary):
 // ── 주문 동기화 (발주서) ──────────────────────────────────────
 // 상태별로 나눠 조회하므로 같은 주문이 여러 번 잡힌다. orderId+옵션ID로
 // 중복을 걷어낸 뒤 날짜별로 합산하고, 구간 전체를 통째로 덮어써 멱등하게 만든다.
-async function syncOrders(userId: string, creds: CoupangCreds, from: string, to: string, sum: SyncSummary): Promise<void> {
+async function syncOrders(userId: string, creds: CoupangCreds, from: string, to: string, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
 
   const seen = new Set<string>();
@@ -459,6 +478,10 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
     for (const status of ORDER_STATUSES) {
       let nextToken = '';
       for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
+        if (outOfTime(deadline, sum)) {
+          failedThisRun = true; // 불완전한 결과로 구간을 덮어쓰지 않는다
+          break;
+        }
         const query =
           `createdAtFrom=${cFrom}&createdAtTo=${cTo}&status=${status}&maxPerPage=50` +
           (nextToken ? `&nextToken=${nextToken}` : '');
@@ -527,7 +550,7 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
 // ── 매출 동기화 (매출내역) ────────────────────────────────────
 // 매출인식일(구매확정 또는 배송완료+3일) 기준이라 주문일보다 늦다.
 // 수수료·정산예정액이 여기에만 있어 순이익 계산의 근거가 된다.
-async function syncSales(userId: string, creds: CoupangCreds, from: string, to: string, sum: SyncSummary): Promise<void> {
+async function syncSales(userId: string, creds: CoupangCreds, from: string, to: string, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
 
   const agg = new Map<string, any>();
@@ -536,6 +559,10 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
   for (const [cFrom, cTo] of dateChunks(from, to)) {
     let token = '';
     for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
+      if (outOfTime(deadline, sum)) {
+        failedThisRun = true; // 불완전한 결과로 구간을 덮어쓰지 않는다
+        break;
+      }
       const query =
         `vendorId=${creds.vendorId}&recognitionDateFrom=${cFrom}&recognitionDateTo=${cTo}&maxPerPage=100` +
         (token ? `&token=${token}` : '');
@@ -604,7 +631,7 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
 }
 
 // ── 지급내역 동기화 (캐시플로) ────────────────────────────────
-async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSummary): Promise<void> {
+async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
 
   const today = kstToday();
@@ -612,7 +639,18 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
   const to = addDays(today, 60); // 지급 예정분까지 본다
 
   const rows: any[] = [];
+  // 같은 (지급일·유형·인식월)로 여러 건이 지급되는 일이 흔하므로 조회 순서를
+  // 키에 섞는다. 원본 내용을 키에 넣으면 안 된다. 지급 상태가 '예정'에서
+  // '지급완료'로 바뀌는 순간 키가 달라져 같은 지급이 두 행이 되고, 캐시플로
+  // 금액이 영구히 두 배로 잡힌다.
+  const ordinal = new Map<string, number>();
+  let failedThisRun = false;
+
   for (const [cFrom, cTo] of dateChunks(from, to)) {
+    if (outOfTime(deadline, sum)) {
+      failedThisRun = true;
+      break;
+    }
     const query = `vendorId=${creds.vendorId}&revenueRecognitionDateFrom=${cFrom}&revenueRecognitionDateTo=${cTo}`;
     const r = await coupangCall(creds, 'GET', EP.settlementHistories, query);
     if (!r.ok) {
@@ -621,25 +659,25 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
         return;
       }
       sum.errors.push(`지급내역: ${r.error}`);
+      failedThisRun = true;
       continue;
     }
     for (const s of listOf(r.data)) {
       const date = pickDate(s, ['settlementDate', 'paymentDate', 'expectedSettlementDate', 'settlementCompleteDate']);
       if (!date) continue;
       const type = pickStr(s, ['settlementType', 'settlementTypeName', 'paymentType'], '정산');
-      const month = pickStr(s, ['recognitionMonth', 'revenueRecognitionDate', 'salesMonth'], date.slice(0, 7));
-      // 같은 날 같은 유형으로 여러 건이 지급되는 일이 흔하다. 날짜·유형·인식월만
-      // 키로 쓰면 서로 다른 지급이 하나로 뭉개져 금액이 사라진다. 원본까지 포함해
-      // 해시하면 진짜 같은 건(다시 조회된 것)만 합쳐진다.
+      const month = pickStr(s, ['recognitionMonth', 'revenueRecognitionDate', 'salesMonth'], date.slice(0, 7)).slice(0, 7);
+
+      const group = `${date}|${type}|${month}`;
+      const seq = ordinal.get(group) ?? 0;
+      ordinal.set(group, seq + 1);
+
       rows.push({
         user_id: userId,
-        settlement_key: crypto
-          .createHash('md5')
-          .update(`${date}|${type}|${month}|${JSON.stringify(s)}`)
-          .digest('hex'),
+        settlement_key: crypto.createHash('md5').update(`${group}|${seq}`).digest('hex'),
         settlement_date: date,
         settlement_type: type,
-        recognition_month: month.slice(0, 7),
+        recognition_month: month,
         amount: pickNum(s, ['settlementAmount', 'amount', 'finalAmount', 'paymentAmount'], 0),
         status: pickStr(s, ['settlementStatus', 'status', 'statusName']),
         raw: s,
@@ -648,19 +686,31 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
     }
   }
 
+  // 주문·매출과 같은 방식으로 구간을 통째로 다시 쓴다. 순번 기반 키는 조회
+  // 결과가 줄었을 때 꼬리 행이 남을 수 있어 덧쓰기만으로는 정합이 깨진다.
+  if (!failedThisRun) {
+    await supabase
+      .from('coupang_settlements')
+      .delete()
+      .eq('user_id', userId)
+      .gte('settlement_date', from)
+      .lte('settlement_date', to);
+  }
+
   const err = await upsertChunked('coupang_settlements', rows, 'user_id,settlement_key');
   if (err) sum.errors.push(err);
   sum.settlements = rows.length;
 }
 
 // ── 반품·교환 동기화 ──────────────────────────────────────────
-async function syncReturns(userId: string, creds: CoupangCreds, from: string, to: string, sum: SyncSummary): Promise<void> {
+async function syncReturns(userId: string, creds: CoupangCreds, from: string, to: string, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
 
   const rows: any[] = [];
   for (const [cFrom, cTo] of dateChunks(from, to)) {
     let nextToken = '';
     for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
+      if (outOfTime(deadline, sum)) break;
       const query =
         `createdAtFrom=${cFrom}&createdAtTo=${cTo}&maxPerPage=50` + (nextToken ? `&nextToken=${nextToken}` : '');
       const r = await coupangCallVersioned(
@@ -708,7 +758,7 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
 
 // ── 고객문의 동기화 ───────────────────────────────────────────
 // 조회 구간이 최대 7일이라 짧게 끊어 돈다. 미답변만 받아 온다.
-async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSummary): Promise<void> {
+async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
 
   const today = kstToday();
@@ -716,6 +766,7 @@ async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSumma
   const rows: any[] = [];
 
   for (let pageNum = 1; pageNum <= 10; pageNum++) {
+    if (outOfTime(deadline, sum)) break;
     const query =
       `vendorId=${creds.vendorId}&inquiryStartAt=${from}&inquiryEndAt=${today}` +
       `&answeredType=NOANSWER&pageNum=${pageNum}&pageSize=50`;
@@ -759,27 +810,39 @@ async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSumma
   sum.inquiries = rows.length;
 }
 
-/** 사용자 1명 전체 동기화 */
-async function syncUser(userId: string, creds: CoupangCreds, full: boolean): Promise<SyncSummary> {
+/**
+ * 사용자 1명 전체 동기화.
+ *
+ * deadline을 단계마다 확인한다. 상품이 많은 판매자는 첫 수집이 함수 제한
+ * 시간을 넘길 수 있는데, 그때 아무것도 기록하지 않고 죽으면 매 시간 처음부터
+ * 다시 시작하면서 다른 사용자의 수집까지 굶긴다. 예산이 끝나면 지금까지 받은
+ * 것을 저장하고 truncated로 표시해 다음 회차가 이어받게 한다.
+ */
+async function syncUser(
+  userId: string,
+  creds: CoupangCreds,
+  full: boolean,
+  deadline: number = Date.now() + 240_000,
+): Promise<SyncSummary> {
   const sum = emptySummary();
   const today = kstToday();
 
-  await syncItems(userId, creds, sum);
+  await syncItems(userId, creds, sum, deadline);
   if (sum.authFailed) return sum;
 
-  await syncOrders(userId, creds, addDays(today, -(full ? LIMITS.ordersDaysFull : LIMITS.ordersDaysIncr)), today, sum);
+  await syncOrders(userId, creds, addDays(today, -(full ? LIMITS.ordersDaysFull : LIMITS.ordersDaysIncr)), today, sum, deadline);
   if (sum.authFailed) return sum;
 
-  await syncSales(userId, creds, addDays(today, -(full ? LIMITS.salesDaysFull : LIMITS.salesDaysIncr)), today, sum);
+  await syncSales(userId, creds, addDays(today, -(full ? LIMITS.salesDaysFull : LIMITS.salesDaysIncr)), today, sum, deadline);
   if (sum.authFailed) return sum;
 
-  await syncSettlements(userId, creds, sum);
+  await syncSettlements(userId, creds, sum, deadline);
   if (sum.authFailed) return sum;
 
-  await syncReturns(userId, creds, addDays(today, -(full ? LIMITS.returnsDaysFull : LIMITS.returnsDaysIncr)), today, sum);
+  await syncReturns(userId, creds, addDays(today, -(full ? LIMITS.returnsDaysFull : LIMITS.returnsDaysIncr)), today, sum, deadline);
   if (sum.authFailed) return sum;
 
-  await syncInquiries(userId, creds, sum);
+  await syncInquiries(userId, creds, sum, deadline);
   return sum;
 }
 
@@ -797,6 +860,7 @@ interface AccountRow {
   expiry_notified_at: string | null;
   last_sync_at: string | null;
   last_sync_error: string | null;
+  backfill_done: boolean;
 }
 
 async function loadAccount(userId: string): Promise<AccountRow | null> {
@@ -887,6 +951,9 @@ async function cronSync(res: VercelResponse) {
   if (!supabase) return res.status(200).json({ ok: false, reason: 'supabase 미설정' });
 
   const budgetMs = 240_000; // maxDuration 300초 안에서 여유를 남긴다
+  // 한 사용자가 예산 전체를 먹지 않도록 1인당 상한을 따로 둔다. 상품이 많은
+  // 판매자의 첫 수집은 몇 회차에 나눠 끝나고, 그동안 다른 사용자도 돈다.
+  const perUserMs = 100_000;
   const startedAt = Date.now();
   const staleBefore = new Date(Date.now() - 20 * 3600_000).toISOString();
 
@@ -898,30 +965,42 @@ async function cronSync(res: VercelResponse) {
     .order('last_sync_at', { ascending: true, nullsFirst: true })
     .limit(50);
 
-  const result = { processed: 0, skipped: 0, authFailed: 0, errors: [] as string[] };
+  const result = { processed: 0, truncated: 0, skipped: 0, authFailed: 0, errors: [] as string[] };
 
   for (const acc of (accounts ?? []) as AccountRow[]) {
-    if (Date.now() - startedAt > budgetMs) {
+    const remaining = budgetMs - (Date.now() - startedAt);
+    if (remaining <= 10_000) {
       result.skipped++;
       continue;
     }
     try {
-      const first = !acc.last_sync_at;
-      const sum = await syncUser(acc.user_id, credsOf(acc), first);
+      // 백필이 끝나지 않았으면 계속 넓은 구간으로 받는다. '한 번이라도 돌았는지'가
+      // 아니라 '전부 받았는지'를 기준으로 삼아야, 중간에 끊긴 첫 수집이 완성된다.
+      const needsBackfill = !acc.backfill_done;
+      const sum = await syncUser(
+        acc.user_id,
+        credsOf(acc),
+        needsBackfill,
+        Date.now() + Math.min(perUserMs, remaining - 5_000),
+      );
       if (sum.authFailed) {
         await setAccountStatus(acc.user_id, 'invalid', '쿠팡이 키를 거부했습니다. 키 또는 등록 IP를 확인해주세요.');
         result.authFailed++;
         continue;
       }
+      // 중간에 끊겼어도 last_sync_at은 갱신한다. 그래야 이 계정이 대기열 맨 앞에
+      // 계속 머물며 다른 사용자를 막지 않는다.
       await supabase
         .from('coupang_accounts')
         .update({
           last_sync_at: new Date().toISOString(),
           last_sync_error: sum.errors.length ? sum.errors.slice(0, 3).join(' / ') : null,
+          backfill_done: acc.backfill_done || (needsBackfill && !sum.truncated),
           updated_at: new Date().toISOString(),
         })
         .eq('user_id', acc.user_id);
-      result.processed++;
+      if (sum.truncated) result.truncated++;
+      else result.processed++;
     } catch (e: any) {
       result.errors.push(`${acc.user_id}: ${e?.message ?? 'sync failed'}`);
     }
@@ -955,8 +1034,16 @@ async function cronDaily(res: VercelResponse) {
       result.expired++;
     }
 
-    // 14일 전부터 알리되 같은 만료 건으로 두 번 보내지 않는다
-    if (left > 0 && left <= 14 && acc.expiry_notified_at !== today) {
+    // 14일 전에 한 번, 3일 전에 한 번만 보낸다.
+    // 이전 조건은 '오늘 보낸 적 없으면 보낸다'였는데, 크론이 하루 한 번 도니까
+    // 조건이 늘 참이 되어 14일 내내 매일 메일이 나갔다.
+    // expiry_notified_at은 키를 새로 저장할 때 비워지므로 발급 주기마다 초기화된다.
+    const notifiedAt = acc.expiry_notified_at ? String(acc.expiry_notified_at).slice(0, 10) : null;
+    const daysSinceNotice = notifiedAt ? daysBetween(notifiedAt, today) : null;
+    const firstNotice = notifiedAt === null && left <= 14;
+    const finalNotice = notifiedAt !== null && left <= 3 && (daysSinceNotice ?? 0) >= 7;
+
+    if (left > 0 && (firstNotice || finalNotice)) {
       const email = acc.users?.email;
       const name = acc.users?.name ?? '';
       if (email) {
@@ -1156,6 +1243,7 @@ async function handleKeySave(userId: string, req: VercelRequest, res: VercelResp
       expiry_notified_at: null,
       last_verified_at: new Date().toISOString(),
       last_sync_error: null,
+      backfill_done: false,
       sync_shard: shard,
       updated_at: new Date().toISOString(),
     },
@@ -1176,8 +1264,8 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
   const acc = await loadAccount(userId);
   if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
 
-  const full = req.body?.full === true || String(req.query.full) === 'true' || !acc.last_sync_at;
-  const sum = await syncUser(userId, credsOf(acc), full);
+  const full = req.body?.full === true || String(req.query.full) === 'true' || !acc.backfill_done;
+  const sum = await syncUser(userId, credsOf(acc), full, Date.now() + 240_000);
 
   if (sum.authFailed) {
     await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다. 키 또는 등록 IP를 확인해주세요.');
@@ -1191,6 +1279,7 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
     .update({
       last_sync_at: new Date().toISOString(),
       last_sync_error: sum.errors.length ? sum.errors.slice(0, 3).join(' / ') : null,
+      backfill_done: acc.backfill_done || (full && !sum.truncated),
       status: 'active',
       updated_at: new Date().toISOString(),
     })
@@ -1506,13 +1595,20 @@ async function handleSettlement(userId: string, res: VercelResponse) {
       amount: days.filter(d => d.date >= start && d.date <= end).reduce((n, d) => n + d.amount, 0),
     });
   }
-  const past = weekly.filter(w => w.amount > 0);
-  const weeklyAverage = past.length > 0 ? past.reduce((n, w) => n + w.amount, 0) / past.length : 0;
+  // 입금이 있었던 주로만 나누면 안 된다. 월정산 판매자는 8주 중 두 주만
+  // 입금되므로 평균이 네 배로 부풀고, 화면은 그 값을 '다음 주 예상의 근거'로
+  // 보여준다. 계좌가 관측된 기간만큼(최대 8주)으로 나눈다.
+  const firstSeen = days.length > 0 ? days[0].date : null;
+  const weeksObserved = firstSeen
+    ? Math.min(weekly.length, Math.max(1, Math.ceil((daysBetween(firstSeen, today) + 1) / 7)))
+    : 0;
+  const weeklyAverage =
+    weeksObserved > 0 ? weekly.reduce((n, w) => n + w.amount, 0) / weeksObserved : 0;
 
   return res.status(200).json({
     today,
     days,
-    totals: { paid, upcoming, in7, in30, unscheduled, weeklyAverage },
+    totals: { paid, upcoming, in7, in30, unscheduled, weeklyAverage, weeksObserved },
     weekly,
   });
 }
@@ -2331,6 +2427,17 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
   const productOfVendorItem = new Map<string, string>();
   for (const [pid, vids] of vendorItemsByProduct) for (const v of vids) productOfVendorItem.set(v, pid);
 
+  // 주문 수집이 실제로 닿은 첫날. 순위는 90일치가 있는데 주문은 30일치뿐이라,
+  // 그 앞 구간의 '주문 없음'을 판매 0으로 읽으면 상관이 통째로 거짓이 된다.
+  // 갓 연동한 사용자일수록 과거 순위가 나빴으므로, 없는 데이터가 "순위가
+  // 좋아져서 팔렸다"는 결론을 만들어 낸다. 판매 0으로 셀 수 있는 날은
+  // 주문 수집이 닿은 구간 안쪽뿐이다.
+  let orderCoverageStart: string | null = null;
+  for (const o of orderRes.data ?? []) {
+    const d = String(o.order_date);
+    if (orderCoverageStart === null || d < orderCoverageStart) orderCoverageStart = d;
+  }
+
   for (const o of orderRes.data ?? []) {
     const pid = productOfVendorItem.get(String(o.vendor_item_id));
     if (!pid) continue;
@@ -2348,7 +2455,9 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
     const rankDays = rankByKey.get(key) ?? new Map();
     const orderDays = ordersByProduct.get(String(w.product_id)) ?? new Map();
 
-    const days = [...new Set([...rankDays.keys(), ...orderDays.keys()])].sort();
+    const days = [...new Set([...rankDays.keys(), ...orderDays.keys()])]
+      .filter(d => orderCoverageStart === null || d >= orderCoverageStart)
+      .sort();
     const series = days.map(d => {
       const r = rankDays.get(d);
       const o = orderDays.get(d);
@@ -2360,8 +2469,10 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
       };
     });
 
-    // 상관은 순위와 판매가 둘 다 있는 날만 쓴다
-    const paired = series.filter(p => p.rank !== null);
+    // 상관은 순위가 있고, 주문 수집이 닿은 구간 안쪽인 날만 쓴다
+    const paired = series.filter(
+      p => p.rank !== null && orderCoverageStart !== null && p.date >= orderCoverageStart,
+    );
     const xs = paired.map(p => p.rank as number);
     const ys = paired.map(p => p.quantity);
 
