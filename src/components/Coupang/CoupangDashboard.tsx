@@ -10,12 +10,14 @@ import { ProfitDashboard } from './ProfitDashboard';
 import { CostEditor } from './CostEditor';
 import { SettlementCalendar } from './SettlementCalendar';
 import { WeeklyReports } from './WeeklyReports';
+import { InventoryForecast } from './InventoryForecast';
 
-type View = 'profit' | 'settlement' | 'costs' | 'settings';
+type View = 'profit' | 'settlement' | 'inventory' | 'costs' | 'settings';
 
 const VIEWS: Array<{ id: View; label: string }> = [
   { id: 'profit', label: '순이익' },
   { id: 'settlement', label: '정산 캘린더' },
+  { id: 'inventory', label: '재고 예측' },
   { id: 'costs', label: '원가 입력' },
   { id: 'settings', label: '연동 설정' },
 ];
@@ -131,6 +133,7 @@ export function CoupangDashboard() {
 
       {view === 'profit' && <ProfitDashboard onEditCosts={() => setView('costs')} />}
       {view === 'settlement' && <SettlementCalendar />}
+      {view === 'inventory' && <InventoryForecast />}
       {view === 'costs' && <CostEditor onSaved={() => undefined} />}
 
       {view === 'settings' && (

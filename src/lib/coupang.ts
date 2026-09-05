@@ -137,6 +137,28 @@ export interface WeeklyReport {
   };
 }
 
+export type StockRisk = 'out' | 'urgent' | 'watch' | 'ok' | 'idle' | 'excess';
+
+export interface InventoryRow {
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  stock: number;
+  sold7: number;
+  sold28: number;
+  velocity: number;
+  daysLeft: number | null;
+  reorderQty: number;
+  risk: StockRisk;
+}
+
+export interface InventoryResponse {
+  rows: InventoryRow[];
+  counts: Partial<Record<StockRisk, number>>;
+  leadTimeDays: number;
+  coverDays: number;
+}
+
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
   saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyIssuedAt?: string }) =>
@@ -149,6 +171,8 @@ export const coupangApi = {
     request<{ ok: true; saved: number }>('cost-save', { method: 'POST', body: { items } }),
   settlement: () => request<SettlementResponse>('settlement'),
   reports: () => request<{ reports: WeeklyReport[] }>('reports'),
+  inventory: (leadTime: number, cover: number) =>
+    request<InventoryResponse>(`inventory&leadTime=${leadTime}&cover=${cover}`),
 };
 
 // ── 표시 헬퍼 ─────────────────────────────────────────────────

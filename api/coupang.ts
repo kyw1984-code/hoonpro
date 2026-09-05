@@ -998,6 +998,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'cost-save': return await handleCostSave(userId, req, res);
       case 'settlement': return await handleSettlement(userId, res);
       case 'reports': return await handleReports(userId, res);
+      case 'inventory': return await handleInventory(userId, req, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -1523,6 +1524,10 @@ async function sendWeeklyReport(
 
   const incoming = (settleRes.data ?? []).reduce((n, s) => n + (Number(s.amount) || 0), 0);
 
+  // 품절 임박 — 지난주 성과보다 이게 더 급한 주도 있다
+  const { rows: inventory } = await computeInventory(userId);
+  const atRisk = inventory.filter(r => r.risk === 'out' || r.risk === 'urgent').slice(0, 5);
+
   const summary = {
     quantity: cur.totals.quantity,
     salesAmount: cur.totals.salesAmount,
@@ -1533,6 +1538,7 @@ async function sendWeeklyReport(
     prevProfit: prev.totals.profit,
     incoming,
     missingCost: cur.missingCost,
+    atRiskCount: atRisk.length,
   };
 
   const costWarning =
@@ -1563,6 +1569,7 @@ async function sendWeeklyReport(
         `</table>` +
         rowsTable('많이 남은 상품', best) +
         rowsTable('적자가 난 상품', worst) +
+        stockTable(atRisk) +
         costWarning +
         emailButtonLink('훈프로에서 자세히 보기'),
     ),
@@ -1628,4 +1635,131 @@ async function handleReports(userId: string, res: VercelResponse) {
     .order('period_start', { ascending: false })
     .limit(12);
   return res.status(200).json({ reports: data ?? [] });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [4] 재고 소진 예측과 품절 알림
+//
+// 품절은 매출을 잃을 뿐 아니라 검색 순위까지 떨어뜨린다. 되돌리는 데
+// 몇 주가 걸리므로 '며칠 남았는지'를 미리 아는 것이 중요하다.
+//
+// 판매 속도는 매출내역이 아니라 주문 기준으로 계산한다. 매출인식일은 배송완료
+// 이후라 최대 열흘 늦어, 그 숫자로 재고를 예측하면 이미 품절난 뒤에 알게 된다.
+//
+// 한계를 분명히 해 둔다. 품절이었던 기간에는 팔리지 않으므로 판매 속도가
+// 실제 수요보다 낮게 잡힌다. 즉 이 예측은 보수적이지 않고 낙관적이다.
+// ═══════════════════════════════════════════════════════════════
+
+export interface InventoryRow {
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  stock: number;
+  sold7: number;
+  sold28: number;
+  velocity: number;        // 하루 평균 판매량
+  daysLeft: number | null; // 판매가 없으면 null
+  reorderQty: number;      // 리드타임 + 목표 커버 기간을 채우는 데 필요한 수량
+  risk: 'out' | 'urgent' | 'watch' | 'ok' | 'idle' | 'excess';
+}
+
+const RISK_ORDER: Record<InventoryRow['risk'], number> = {
+  out: 0, urgent: 1, watch: 2, excess: 3, ok: 4, idle: 5,
+};
+
+async function computeInventory(
+  userId: string,
+  leadTimeDays = 14,
+  coverDays = 30,
+): Promise<{ rows: InventoryRow[]; counts: Record<string, number> }> {
+  if (!supabase) return { rows: [], counts: {} };
+
+  const today = kstToday();
+  const [itemRes, orderRes] = await Promise.all([
+    supabase.from('coupang_items').select('vendor_item_id, product_name, option_name, stock, status').eq('user_id', userId),
+    supabase
+      .from('coupang_orders_daily')
+      .select('vendor_item_id, order_date, quantity')
+      .eq('user_id', userId)
+      .gte('order_date', addDays(today, -27)),
+  ]);
+
+  const sold7 = new Map<string, number>();
+  const sold28 = new Map<string, number>();
+  const since7 = addDays(today, -6);
+  for (const o of orderRes.data ?? []) {
+    const id = String(o.vendor_item_id);
+    const qty = Number(o.quantity) || 0;
+    sold28.set(id, (sold28.get(id) ?? 0) + qty);
+    if (String(o.order_date) >= since7) sold7.set(id, (sold7.get(id) ?? 0) + qty);
+  }
+
+  const rows: InventoryRow[] = [];
+  for (const it of itemRes.data ?? []) {
+    const id = String(it.vendor_item_id);
+    const stock = Number(it.stock) || 0;
+    const s28 = sold28.get(id) ?? 0;
+    const s7 = sold7.get(id) ?? 0;
+
+    // 28일 판매가 없으면 최근 7일로 본다. 신상품은 28일 평균이 실제보다 낮다.
+    const velocity = s28 > 0 ? s28 / 28 : s7 > 0 ? s7 / 7 : 0;
+    const daysLeft = velocity > 0 ? stock / velocity : null;
+
+    let risk: InventoryRow['risk'];
+    if (velocity === 0) risk = stock > 0 ? 'idle' : 'ok';
+    else if (stock <= 0) risk = 'out';
+    else if (daysLeft! <= 7) risk = 'urgent';
+    else if (daysLeft! <= 14) risk = 'watch';
+    else if (daysLeft! > 90) risk = 'excess';
+    else risk = 'ok';
+
+    const reorderQty = velocity > 0 ? Math.max(0, Math.ceil(velocity * (leadTimeDays + coverDays) - stock)) : 0;
+
+    rows.push({
+      vendorItemId: id,
+      productName: it.product_name ?? '',
+      optionName: it.option_name ?? '',
+      stock,
+      sold7: s7,
+      sold28: s28,
+      velocity,
+      daysLeft,
+      reorderQty,
+      risk,
+    });
+  }
+
+  rows.sort((a, b) => {
+    const d = RISK_ORDER[a.risk] - RISK_ORDER[b.risk];
+    if (d !== 0) return d;
+    return (a.daysLeft ?? 9999) - (b.daysLeft ?? 9999);
+  });
+
+  const counts: Record<string, number> = {};
+  for (const r of rows) counts[r.risk] = (counts[r.risk] ?? 0) + 1;
+
+  return { rows, counts };
+}
+
+async function handleInventory(userId: string, req: VercelRequest, res: VercelResponse) {
+  const leadTimeDays = Math.min(120, Math.max(0, Number(req.query.leadTime ?? 14) || 14));
+  const coverDays = Math.min(180, Math.max(1, Number(req.query.cover ?? 30) || 30));
+  const { rows, counts } = await computeInventory(userId, leadTimeDays, coverDays);
+  return res.status(200).json({ rows, counts, leadTimeDays, coverDays });
+}
+
+/** 주간 리포트에 붙일 품절 임박 목록 */
+function stockTable(rows: InventoryRow[]): string {
+  if (rows.length === 0) return '';
+  const body = rows
+    .map(r => {
+      const left = r.risk === 'out' ? '품절' : `${Math.floor(r.daysLeft ?? 0)}일치`;
+      return (
+        `<tr><td style="padding:6px 0;color:#a8b3c9;font-size:12.5px;">${escapeHtml(r.productName).slice(0, 40)}</td>` +
+        `<td style="padding:6px 0;text-align:right;color:#ffb454;font-size:12.5px;font-weight:600;">` +
+        `${left}${r.reorderQty > 0 ? ` · ${r.reorderQty}개 발주 권장` : ''}</td></tr>`
+      );
+    })
+    .join('');
+  return `<p style="margin:18px 0 4px;color:#e8ecf5;font-size:13px;font-weight:600;">재고 부족</p><table style="width:100%;border-collapse:collapse;">${body}</table>`;
 }
