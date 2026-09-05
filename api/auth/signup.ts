@@ -278,12 +278,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(201).json({ message: '가입이 완료됐습니다. 바로 로그인해주세요.' });
   }
 
-  // ── 기존 플로우 (인증 미설정 — 관리자 수동 승인) ──
+  // ── 인증 수단이 없는 경우 (RESEND·PASS 모두 미설정) — 관리자 수동 승인 ──
+  // 비밀번호는 여기서도 반드시 받는다. 로그인은 어떤 모드에서든 비밀번호를
+  // 요구하므로, 비밀번호 없이 계정을 만들면 그 계정은 영영 로그인할 수 없다.
   if (!name || !phone) {
     return res.status(400).json({ error: '이름, 연락처, 이메일을 모두 입력해주세요.' });
   }
+  const basicPwProblem = passwordProblem(password);
+  if (basicPwProblem) return res.status(400).json({ error: basicPwProblem });
 
-  const { error } = await supabase.from('users').insert({ name, phone, email });
+  const { error } = await supabase.from('users').insert({
+    name, phone, email: normalizedEmail,
+    password_hash: hashPassword(String(password)),
+  });
 
   if (error) {
     if (error.code === '23505') {

@@ -285,12 +285,15 @@ export function AuthGate({ onSuccess }: Props) {
     } else if (!signupName.trim() || !signupPhone.trim() || !signupEmail.trim()) {
       return setMessage({ text: '모든 항목을 입력해주세요.', type: 'error' });
     }
-    if (emailCodeRequired && !verificationRequired) {
-      if (!/^\d{6}$/.test(signupCode.trim())) return setMessage({ text: '이메일로 받은 6자리 인증코드를 입력해주세요.', type: 'error' });
-      if (signupPassword.length < 8 || !/[A-Za-z]/.test(signupPassword) || !/[0-9]/.test(signupPassword)) {
-        return setMessage({ text: '비밀번호는 영문·숫자를 포함해 8자 이상이어야 합니다.', type: 'error' });
-      }
-      if (!ageChecked) return setMessage({ text: '만 14세 이상 확인에 동의해주세요.', type: 'error' });
+    if (emailCodeRequired && !verificationRequired && !/^\d{6}$/.test(signupCode.trim())) {
+      return setMessage({ text: '이메일로 받은 6자리 인증코드를 입력해주세요.', type: 'error' });
+    }
+    // 비밀번호는 가입 방식과 무관하게 필수 — 로그인이 항상 비밀번호를 요구한다
+    if (signupPassword.length < 8 || !/[A-Za-z]/.test(signupPassword) || !/[0-9]/.test(signupPassword)) {
+      return setMessage({ text: '비밀번호는 영문·숫자를 포함해 8자 이상이어야 합니다.', type: 'error' });
+    }
+    if (emailCodeRequired && !verificationRequired && !ageChecked) {
+      return setMessage({ text: '만 14세 이상 확인에 동의해주세요.', type: 'error' });
     }
     setLoading(true);
     setMessage(null);
@@ -1059,40 +1062,45 @@ export function AuthGate({ onSuccess }: Props) {
                     </button>
                   )}
                 </div>
+                {/* 인증코드 — 발송한 뒤에만 필요 */}
                 {emailCodeRequired && !verificationRequired && codeSent && (
-                  <>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={signupCode}
+                    onChange={e => setSignupCode(e.target.value.replace(/\D/g, ''))}
+                    onKeyDown={e => e.key === 'Enter' && handleSignup()}
+                    placeholder="인증코드 6자리"
+                    className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-center text-[15px] tracking-[0.4em] text-white outline-none transition-all placeholder:tracking-normal"
+                    style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
+                  />
+                )}
+
+                {/* 비밀번호는 어떤 가입 방식에서도 필요하다. 인증코드 발송 여부와
+                    무관하게 항상 보여줘야 '비밀번호를 안 받는다'는 오해가 없다. */}
+                <input
+                  type="password"
+                  value={signupPassword}
+                  onChange={e => setSignupPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSignup()}
+                  placeholder="비밀번호 (영문·숫자 8자 이상)"
+                  autoComplete="new-password"
+                  className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                  style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
+                />
+
+                {emailCodeRequired && !verificationRequired && (
+                  <label className="flex min-h-[36px] cursor-pointer items-center gap-2 px-1 text-[12.5px] text-[#b9c2d8]">
                     <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={signupCode}
-                      onChange={e => setSignupCode(e.target.value.replace(/\D/g, ''))}
-                      onKeyDown={e => e.key === 'Enter' && handleSignup()}
-                      placeholder="인증코드 6자리"
-                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-center text-[15px] tracking-[0.4em] text-white outline-none transition-all placeholder:tracking-normal"
-                      style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
+                      type="checkbox"
+                      checked={ageChecked}
+                      onChange={e => setAgeChecked(e.target.checked)}
+                      className="h-3.5 w-3.5"
+                      style={{ accentColor: '#7cf5ff' }}
                     />
-                    <input
-                      type="password"
-                      value={signupPassword}
-                      onChange={e => setSignupPassword(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleSignup()}
-                      placeholder="비밀번호 (영문·숫자 포함 8자 이상)"
-                      autoComplete="new-password"
-                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                      style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
-                    />
-                    <label className="flex cursor-pointer items-center gap-2 px-1 text-[12.5px] text-[#b9c2d8]">
-                      <input
-                        type="checkbox"
-                        checked={ageChecked}
-                        onChange={e => setAgeChecked(e.target.checked)}
-                        className="h-3.5 w-3.5"
-                        style={{ accentColor: '#7cf5ff' }}
-                      />
-                      만 14세 이상입니다.
-                    </label>
-                  </>
+                    만 14세 이상입니다.
+                  </label>
                 )}
                 <button
                   onClick={handleSignup}
