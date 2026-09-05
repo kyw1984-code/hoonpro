@@ -223,6 +223,37 @@ export interface RankRevenueItem {
   series: RankSeriesPoint[];
 }
 
+export interface PriceRow {
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  currentPrice: number | null;
+  unitCost: number;
+  commissionRate: number;
+  floorPrice: number | null;
+  marketPrice: number | null;
+  suggestedPrice: number | null;
+  reason: string;
+  belowFloor: boolean;
+  enabled: boolean;
+  autoApply: boolean;
+  minMarginRate: number;
+  minPrice: number | null;
+  maxPrice: number | null;
+  targetKeyword: string | null;
+  costEntered: boolean;
+}
+
+export interface PriceLog {
+  vendor_item_id: string;
+  old_price: number | null;
+  new_price: number | null;
+  reason: string | null;
+  applied: boolean;
+  error: string | null;
+  created_at: string;
+}
+
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
   saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyIssuedAt?: string }) =>
@@ -245,6 +276,12 @@ export const coupangApi = {
     request<{ ok: true }>('inquiry-reply', { method: 'POST', body: { inquiryId, content } }),
   rankRevenue: () =>
     request<{ items: RankRevenueItem[]; minPairs: number; hint?: string }>('rank-revenue'),
+  priceRules: () =>
+    request<{ rows: PriceRow[]; logs: PriceLog[]; autoApplyMaxChangePct: number }>('price-rules'),
+  savePriceRules: (items: Array<Partial<PriceRow> & { vendorItemId: string }>) =>
+    request<{ ok: true; saved: number }>('price-rule-save', { method: 'POST', body: { items } }),
+  applyPrice: (vendorItemId: string, price: number) =>
+    request<{ ok: true }>('price-apply', { method: 'POST', body: { vendorItemId, price } }),
 };
 
 // ── 표시 헬퍼 ─────────────────────────────────────────────────

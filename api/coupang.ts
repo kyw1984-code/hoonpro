@@ -923,6 +923,21 @@ async function cronDaily(res: VercelResponse) {
     }
   }
 
+  // 자동 가격 반영 — 옵션별로 따로 켠 것만 움직인다
+  const { data: autoAccounts } = await supabase
+    .from('coupang_accounts')
+    .select('*')
+    .eq('status', 'active');
+  let priceApplied = 0;
+  for (const acc of (autoAccounts ?? []) as AccountRow[]) {
+    try {
+      const r = await runAutoPricing(acc.user_id, credsOf(acc));
+      priceApplied += r.applied;
+    } catch {
+      /* 한 사용자의 실패가 나머지를 막지 않게 */
+    }
+  }
+
   // 저장공간 관리 — 원본을 오래 들고 있을 이유가 없다
   const { count } = await supabase
     .from('coupang_returns')
@@ -932,7 +947,7 @@ async function cronDaily(res: VercelResponse) {
   await supabase.from('coupang_inquiries').delete().eq('answered', true).lt('inquired_at', addDays(today, -90));
   await supabase.from('coupang_price_logs').delete().lt('created_at', addDays(today, -180));
 
-  return res.status(200).json({ ok: true, ...result });
+  return res.status(200).json({ ok: true, ...result, priceApplied });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1004,6 +1019,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'inquiry-draft': return await handleInquiryDraft(userId, req, res);
       case 'inquiry-reply': return await handleInquiryReply(userId, req, res);
       case 'rank-revenue': return await handleRankRevenue(userId, res);
+      case 'price-rules': return await handlePriceRules(userId, res);
+      case 'price-rule-save': return await handlePriceRuleSave(userId, req, res);
+      case 'price-apply': return await handlePriceApply(userId, req, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -2326,4 +2344,332 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
   results.sort((a, b) => Math.abs(b.correlation ?? 0) - Math.abs(a.correlation ?? 0));
 
   return res.status(200).json({ items: results, minPairs: MIN_PAIRS_FOR_CORRELATION });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [9] 마진 하한 가격 조정
+//
+// 판매자 돈이 직접 움직이는 기능이라 설계 원칙이 다르다.
+//  · 기본은 '제안'이다. 자동 반영은 옵션별로 따로 켜야 한다.
+//  · 어떤 경우에도 마진 하한 아래로는 내리지 않는다. 하한은 원가와 그 상품의
+//    실제 수수료율에서 역산한다. 고정 수수료율을 가정하면 카테고리에 따라
+//    적자를 낸다.
+//  · 자동 반영은 하루 변동폭을 제한한다. 잘못된 경쟁가 한 번이 가격을
+//    무너뜨리지 않게 하기 위해서다.
+//
+// 경쟁가는 새로 긁지 않는다. 소싱AI가 이미 모아 둔 관측치(sourcing_product_obs)의
+// 중앙값을 쓴다. 여기서 Bright Data를 다시 호출하면 사용자당 월 비용이 붙는다.
+// ═══════════════════════════════════════════════════════════════
+
+const DEFAULT_COMMISSION_RATE = 10.8; // 그 상품의 실적으로 못 구할 때만 쓰는 대략치
+const AUTO_APPLY_MAX_CHANGE_PCT = 10; // 자동 반영 시 하루 변동 한도
+
+function median(nums: number[]): number | null {
+  const xs = nums.filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
+  if (xs.length === 0) return null;
+  const mid = Math.floor(xs.length / 2);
+  return xs.length % 2 ? xs[mid] : Math.round((xs[mid - 1] + xs[mid]) / 2);
+}
+
+/** 원가와 수수료율을 지키면서 목표 이익률을 내는 최저 판매가 */
+function floorPriceFor(unitCost: number, commissionRate: number, targetMarginRate: number): number | null {
+  // price × (1 − 수수료율 − 목표이익률) = 원가
+  const denom = 1 - commissionRate / 100 - targetMarginRate / 100;
+  if (denom <= 0) return null; // 수수료와 목표 이익률만으로 100%를 넘으면 성립하지 않는다
+  return Math.ceil(unitCost / denom);
+}
+
+interface PriceSuggestion {
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  currentPrice: number | null;
+  unitCost: number;
+  commissionRate: number;
+  floorPrice: number | null;
+  marketPrice: number | null;
+  suggestedPrice: number | null;
+  reason: string;
+  belowFloor: boolean;
+  enabled: boolean;
+  autoApply: boolean;
+  minMarginRate: number;
+  minPrice: number | null;
+  maxPrice: number | null;
+  targetKeyword: string | null;
+  costEntered: boolean;
+}
+
+async function buildPriceSuggestions(userId: string): Promise<PriceSuggestion[]> {
+  if (!supabase) return [];
+
+  const today = kstToday();
+  const [itemRes, costRes, ruleRes, salesRes] = await Promise.all([
+    supabase.from('coupang_items').select('vendor_item_id, product_name, option_name, sale_price').eq('user_id', userId),
+    supabase.from('coupang_costs').select('*').eq('user_id', userId),
+    supabase.from('coupang_price_rules').select('*').eq('user_id', userId),
+    supabase
+      .from('coupang_sales_daily')
+      .select('vendor_item_id, sales_amount, commission')
+      .eq('user_id', userId)
+      .gte('sale_date', addDays(today, -30)),
+  ]);
+
+  const costs = new Map<string, any>();
+  for (const c of costRes.data ?? []) costs.set(String(c.vendor_item_id), c);
+  const rules = new Map<string, any>();
+  for (const r of ruleRes.data ?? []) rules.set(String(r.vendor_item_id), r);
+
+  // 상품별 실제 수수료율 — 카테고리마다 달라 고정값을 쓰면 적자가 난다
+  const feeAgg = new Map<string, { sales: number; fee: number }>();
+  for (const s of salesRes.data ?? []) {
+    const id = String(s.vendor_item_id);
+    const cur = feeAgg.get(id) ?? { sales: 0, fee: 0 };
+    cur.sales += Number(s.sales_amount) || 0;
+    cur.fee += Number(s.commission) || 0;
+    feeAgg.set(id, cur);
+  }
+
+  // 규칙에 걸린 키워드들의 시장가를 한 번에 모은다
+  const keywords = [...new Set((ruleRes.data ?? []).map(r => String(r.target_keyword ?? '')).filter(Boolean))];
+  const marketByKeyword = new Map<string, number>();
+  if (keywords.length > 0) {
+    const { data: obs } = await supabase
+      .from('sourcing_product_obs')
+      .select('keyword, price')
+      .in('keyword', keywords)
+      .gte('captured_at', `${addDays(today, -14)}T00:00:00Z`);
+    const grouped = new Map<string, number[]>();
+    for (const o of obs ?? []) {
+      const k = String(o.keyword);
+      const list = grouped.get(k) ?? [];
+      list.push(Number(o.price) || 0);
+      grouped.set(k, list);
+    }
+    for (const [k, prices] of grouped) {
+      const m = median(prices);
+      if (m !== null) marketByKeyword.set(k, m);
+    }
+  }
+
+  const out: PriceSuggestion[] = [];
+  for (const it of itemRes.data ?? []) {
+    const id = String(it.vendor_item_id);
+    const rule = rules.get(id);
+    const cost = costs.get(id);
+    const unitCost =
+      (Number(cost?.unit_cost) || 0) + (Number(cost?.packaging_cost) || 0) + (Number(cost?.shipping_cost) || 0);
+    const costEntered = unitCost > 0;
+
+    const fee = feeAgg.get(id);
+    const commissionRate =
+      fee && fee.sales > 0 ? Math.min(40, (fee.fee / fee.sales) * 100) : DEFAULT_COMMISSION_RATE;
+
+    const minMarginRate = Number(rule?.min_margin_rate ?? 10);
+    const floor = costEntered ? floorPriceFor(unitCost, commissionRate, minMarginRate) : null;
+    const currentPrice = it.sale_price === null || it.sale_price === undefined ? null : Number(it.sale_price);
+    const keyword = rule?.target_keyword ? String(rule.target_keyword) : null;
+    const marketPrice = keyword ? marketByKeyword.get(keyword) ?? null : null;
+
+    const minPrice = rule?.min_price === null || rule?.min_price === undefined ? null : Number(rule.min_price);
+    const maxPrice = rule?.max_price === null || rule?.max_price === undefined ? null : Number(rule.max_price);
+
+    let suggested: number | null = null;
+    let reason = '';
+    const belowFloor = Boolean(floor && currentPrice !== null && currentPrice < floor);
+
+    if (!costEntered) {
+      reason = '원가를 입력해야 하한가를 계산할 수 있습니다.';
+    } else if (currentPrice === null) {
+      reason = '현재 판매가를 아직 수집하지 못했습니다.';
+    } else if (belowFloor) {
+      suggested = floor;
+      reason = `현재가가 마진 하한(${minMarginRate}%)을 못 지킵니다. 지금은 팔수록 손해입니다.`;
+    } else if (marketPrice !== null && floor !== null) {
+      // 시장가보다 비싸면 시장가까지 내려 보되 하한은 절대 안 넘는다
+      const target = Math.max(floor, marketPrice);
+      if (currentPrice > marketPrice && target < currentPrice) {
+        suggested = target;
+        reason = `시장 중앙값(${won(marketPrice)})보다 높습니다. 하한을 지키는 선까지 내릴 수 있습니다.`;
+      } else if (currentPrice < marketPrice * 0.9) {
+        suggested = Math.min(maxPrice ?? Number.MAX_SAFE_INTEGER, Math.round(marketPrice * 0.95));
+        reason = `시장 중앙값(${won(marketPrice)})보다 크게 쌉니다. 올려도 팔릴 여지가 있습니다.`;
+      } else {
+        reason = '시장가와 하한 사이에 있습니다. 바꿀 이유가 없습니다.';
+      }
+    } else {
+      reason = keyword ? '이 키워드의 시장가 관측치가 아직 없습니다.' : '비교할 키워드를 지정하면 시장가와 견줍니다.';
+    }
+
+    // 사용자가 정한 절대 상·하한을 마지막에 다시 씌운다
+    if (suggested !== null) {
+      if (minPrice !== null) suggested = Math.max(suggested, minPrice);
+      if (maxPrice !== null) suggested = Math.min(suggested, maxPrice);
+      if (floor !== null) suggested = Math.max(suggested, floor);
+      if (suggested === currentPrice) suggested = null;
+    }
+
+    out.push({
+      vendorItemId: id,
+      productName: it.product_name ?? '',
+      optionName: it.option_name ?? '',
+      currentPrice,
+      unitCost,
+      commissionRate,
+      floorPrice: floor,
+      marketPrice,
+      suggestedPrice: suggested,
+      reason,
+      belowFloor,
+      enabled: rule ? Boolean(rule.enabled) : true,
+      autoApply: Boolean(rule?.auto_apply),
+      minMarginRate,
+      minPrice,
+      maxPrice,
+      targetKeyword: keyword,
+      costEntered,
+    });
+  }
+
+  // 적자 판매 중인 것부터, 그다음 제안이 있는 것
+  out.sort((a, b) => {
+    if (a.belowFloor !== b.belowFloor) return a.belowFloor ? -1 : 1;
+    const as = a.suggestedPrice === null ? 1 : 0;
+    const bs = b.suggestedPrice === null ? 1 : 0;
+    return as - bs;
+  });
+
+  return out;
+}
+
+async function handlePriceRules(userId: string, res: VercelResponse) {
+  const suggestions = await buildPriceSuggestions(userId);
+  const { data: logs } = await supabase!
+    .from('coupang_price_logs')
+    .select('vendor_item_id, old_price, new_price, reason, applied, error, created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(30);
+  return res.status(200).json({
+    rows: suggestions,
+    logs: logs ?? [],
+    autoApplyMaxChangePct: AUTO_APPLY_MAX_CHANGE_PCT,
+  });
+}
+
+async function handlePriceRuleSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length === 0) return res.status(400).json({ error: '저장할 규칙이 없습니다.' });
+  if (items.length > 1000) return res.status(400).json({ error: '한 번에 1000건까지 저장할 수 있습니다.' });
+
+  const rows = items
+    .filter((it: any) => it?.vendorItemId)
+    .map((it: any) => ({
+      user_id: userId,
+      vendor_item_id: String(it.vendorItemId),
+      enabled: it.enabled !== false,
+      auto_apply: it.autoApply === true,
+      min_margin_rate: Math.min(90, Math.max(0, Number(it.minMarginRate) || 0)),
+      min_price: it.minPrice === null || it.minPrice === undefined || it.minPrice === '' ? null : Math.max(0, Math.round(Number(it.minPrice) || 0)),
+      max_price: it.maxPrice === null || it.maxPrice === undefined || it.maxPrice === '' ? null : Math.max(0, Math.round(Number(it.maxPrice) || 0)),
+      target_keyword: typeof it.targetKeyword === 'string' && it.targetKeyword.trim() ? it.targetKeyword.trim().slice(0, 60) : null,
+      updated_at: new Date().toISOString(),
+    }));
+
+  const err = await upsertChunked('coupang_price_rules', rows, 'user_id,vendor_item_id');
+  if (err) return res.status(500).json({ error: `저장 실패: ${err}` });
+  return res.status(200).json({ ok: true, saved: rows.length });
+}
+
+/** 실제 가격 반영 — 하한을 서버에서 다시 검증한 뒤에만 쿠팡으로 보낸다 */
+async function applyPrice(
+  userId: string,
+  creds: CoupangCreds,
+  vendorItemId: string,
+  newPrice: number,
+  reason: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const suggestions = await buildPriceSuggestions(userId);
+  const target = suggestions.find(s => s.vendorItemId === vendorItemId);
+  if (!target) return { ok: false, error: '상품을 찾을 수 없습니다.' };
+
+  // 화면이 보낸 값을 그대로 믿지 않는다. 하한 검증을 서버에서 다시 한다.
+  if (target.floorPrice !== null && newPrice < target.floorPrice) {
+    return { ok: false, error: `마진 하한가(${won(target.floorPrice)}) 아래로는 변경할 수 없습니다.` };
+  }
+  if (target.minPrice !== null && newPrice < target.minPrice) {
+    return { ok: false, error: `설정한 하한가(${won(target.minPrice)}) 아래입니다.` };
+  }
+  if (target.maxPrice !== null && newPrice > target.maxPrice) {
+    return { ok: false, error: `설정한 상한가(${won(target.maxPrice)}) 위입니다.` };
+  }
+
+  const r = await coupangCall(creds, 'PUT', EP.vendorItemPrice(vendorItemId, Math.round(newPrice)), '');
+
+  await supabase!.from('coupang_price_logs').insert({
+    user_id: userId,
+    vendor_item_id: vendorItemId,
+    old_price: target.currentPrice,
+    new_price: Math.round(newPrice),
+    reason,
+    applied: r.ok,
+    error: r.ok ? null : String(r.error ?? '').slice(0, 300),
+  });
+
+  if (!r.ok) {
+    if (r.authFailed) await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다.');
+    return { ok: false, error: r.error };
+  }
+
+  // 화면이 바로 새 가격을 보도록 로컬 값도 갱신한다
+  await supabase!
+    .from('coupang_items')
+    .update({ sale_price: Math.round(newPrice) })
+    .eq('user_id', userId)
+    .eq('vendor_item_id', vendorItemId);
+  await supabase!
+    .from('coupang_price_rules')
+    .update({ last_applied_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('vendor_item_id', vendorItemId);
+
+  return { ok: true };
+}
+
+async function handlePriceApply(userId: string, req: VercelRequest, res: VercelResponse) {
+  const vendorItemId = String(req.body?.vendorItemId ?? '').trim();
+  const price = Math.round(Number(req.body?.price) || 0);
+  if (!vendorItemId || price <= 0) return res.status(400).json({ error: '상품과 가격이 필요합니다.' });
+
+  const acc = await loadAccount(userId);
+  if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
+
+  const result = await applyPrice(userId, credsOf(acc), vendorItemId, price, '수동 반영');
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  return res.status(200).json({ ok: true });
+}
+
+/**
+ * 자동 반영 — 옵션별로 따로 켠 것만, 하루 변동폭 안에서만 움직인다.
+ * 잘못된 경쟁가 한 번이 가격을 무너뜨리지 않게 하기 위한 제동장치다.
+ */
+async function runAutoPricing(userId: string, creds: CoupangCreds): Promise<{ applied: number; skipped: number }> {
+  const suggestions = await buildPriceSuggestions(userId);
+  let applied = 0;
+  let skipped = 0;
+
+  for (const s of suggestions) {
+    if (!s.autoApply || !s.enabled || s.suggestedPrice === null || s.currentPrice === null) continue;
+
+    const changePct = Math.abs((s.suggestedPrice - s.currentPrice) / s.currentPrice) * 100;
+    if (changePct > AUTO_APPLY_MAX_CHANGE_PCT) {
+      skipped++;
+      continue;
+    }
+    const r = await applyPrice(userId, creds, s.vendorItemId, s.suggestedPrice, `자동 반영 · ${s.reason}`);
+    if (r.ok) applied++;
+    else skipped++;
+  }
+
+  return { applied, skipped };
 }
