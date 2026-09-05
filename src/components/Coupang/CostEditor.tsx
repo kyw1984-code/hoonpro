@@ -5,9 +5,50 @@
  * 많이 팔리는데 원가가 비어 있는 옵션을 맨 위로 올려, 몇 개만 채워도
  * 순이익 숫자가 곧바로 쓸모 있어지게 만든다.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, Save, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Loader2, Save, Search, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { coupangApi, won, type CostRow } from '../../lib/coupang';
+
+// 엑셀 헤더 — 내려받는 양식과 올릴 때 인식하는 이름을 한곳에서 맞춘다
+const SHEET_COLUMNS = {
+  vendorItemId: '옵션ID',
+  productName: '상품명',
+  optionName: '옵션명',
+  unitCost: '매입원가',
+  packagingCost: '부자재',
+  shippingCost: '출고배송',
+  returnShippingCost: '반품배송',
+} as const;
+
+function parseSheet(file: File): Promise<Array<Partial<CostRow> & { vendorItemId: string }>> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('파일을 읽지 못했습니다.'));
+    reader.onload = () => {
+      try {
+        const wb = XLSX.read(reader.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const num = (v: unknown) => Math.max(0, Math.round(Number(String(v ?? '').replace(/[^0-9.-]/g, '')) || 0));
+        const out = rows
+          .map(r => ({
+            vendorItemId: String(r[SHEET_COLUMNS.vendorItemId] ?? r['vendorItemId'] ?? '').trim(),
+            unitCost: num(r[SHEET_COLUMNS.unitCost]),
+            packagingCost: num(r[SHEET_COLUMNS.packagingCost]),
+            shippingCost: num(r[SHEET_COLUMNS.shippingCost]),
+            returnShippingCost: num(r[SHEET_COLUMNS.returnShippingCost]),
+          }))
+          .filter(r => r.vendorItemId);
+        if (out.length === 0) reject(new Error(`'${SHEET_COLUMNS.vendorItemId}' 열이 있는 행을 찾지 못했습니다. 양식을 내려받아 그 형식으로 올려주세요.`));
+        else resolve(out);
+      } catch (e: any) {
+        reject(new Error(`엑셀을 해석하지 못했습니다: ${e?.message ?? e}`));
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
 
 type Draft = Record<string, Partial<CostRow>>;
 
@@ -25,6 +66,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -78,6 +120,48 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
     }
   };
 
+  // 옵션이 수백 개인 판매자는 하나씩 타이핑하지 않는다. 현재 상품 목록을
+  // 양식으로 내려주고, 채워서 올리면 옵션ID로 맞춰 한 번에 저장한다.
+  const downloadTemplate = () => {
+    if (!rows) return;
+    const data = rows.map(r => ({
+      [SHEET_COLUMNS.vendorItemId]: r.vendorItemId,
+      [SHEET_COLUMNS.productName]: r.productName,
+      [SHEET_COLUMNS.optionName]: r.optionName,
+      [SHEET_COLUMNS.unitCost]: r.unitCost,
+      [SHEET_COLUMNS.packagingCost]: r.packagingCost,
+      [SHEET_COLUMNS.shippingCost]: r.shippingCost,
+      [SHEET_COLUMNS.returnShippingCost]: r.returnShippingCost,
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '원가');
+    XLSX.writeFile(wb, `훈프로_원가_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const uploadSheet = async (file: File | null) => {
+    if (!file || !rows || saving) return;
+    setSaving(true);
+    setMsg(null);
+    try {
+      const parsed = await parseSheet(file);
+      const known = new Set(rows.map(r => r.vendorItemId));
+      const items = parsed.filter(r => known.has(r.vendorItemId));
+      const unknown = parsed.length - items.length;
+      if (items.length === 0) throw new Error('올린 파일의 옵션ID가 수집된 상품과 하나도 맞지 않습니다.');
+      const { saved } = await coupangApi.saveCosts(items);
+      setDraft({});
+      setMsg(`${saved}개 저장했습니다.${unknown > 0 ? ` 수집된 상품에 없는 옵션ID ${unknown}건은 건너뛰었습니다.` : ''}`);
+      await load();
+      onSaved?.();
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setSaving(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
   const filtered = useMemo(() => {
     if (!rows) return [];
     const needle = q.trim().toLowerCase();
@@ -117,6 +201,31 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
             className="w-full rounded-control border border-line bg-paper py-2 pl-9 pr-3 text-[13px] outline-none focus:ring-2 focus:ring-accent"
           />
         </div>
+        <button
+          onClick={downloadTemplate}
+          disabled={!rows || rows.length === 0}
+          title="현재 상품 목록을 엑셀 양식으로 내려받습니다"
+          className="flex items-center gap-1.5 rounded-control border border-line px-3 py-2 text-[12.5px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+        >
+          <Download className="h-3.5 w-3.5" />
+          양식 내려받기
+        </button>
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={!rows || saving}
+          title="채운 양식을 올리면 옵션ID로 맞춰 한 번에 저장합니다"
+          className="flex items-center gap-1.5 rounded-control border border-line px-3 py-2 text-[12.5px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+        >
+          <Upload className="h-3.5 w-3.5" />
+          엑셀로 올리기
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          hidden
+          onChange={e => uploadSheet(e.target.files?.[0] ?? null)}
+        />
         <button
           onClick={save}
           disabled={dirtyCount === 0 || saving}

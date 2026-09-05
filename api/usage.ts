@@ -162,7 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 그래서 기존 사용자에게는 처음부터 완료 상태로 보이고, 카드가 뜨지 않는다.
   if (action === 'onboarding') {
     const since90 = new Date(Date.now() - 90 * 86400_000).toISOString();
-    const [favRes, watchRes, thumbRes, userRes] = await Promise.all([
+    const [favRes, watchRes, thumbRes, userRes, coupangRes] = await Promise.all([
       supabase.from('sourcing_favorites').select('keyword', { count: 'exact', head: true })
         .eq('user_id', decoded.userId),
       supabase.from('sourcing_rank_watch').select('product_id', { count: 'exact', head: true })
@@ -170,14 +170,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabase.from('api_calls').select('id', { count: 'exact', head: true })
         .eq('user_id', decoded.userId).like('feature', '%thumbnail%').gte('created_at', since90),
       supabase.from('users').select('onboarding_dismissed_at').eq('id', decoded.userId).maybeSingle(),
+      // 쿠팡 연동은 가장 가치가 큰 단계라 온보딩에 넣는다. 키가 등록돼 있으면 완료다.
+      supabase.from('coupang_accounts').select('user_id', { count: 'exact', head: true })
+        .eq('user_id', decoded.userId),
     ]);
 
     const steps = {
       sourcing: (favRes.count ?? 0) > 0,
       rank: (watchRes.count ?? 0) > 0,
       thumbnail: (thumbRes.count ?? 0) > 0,
+      coupang: (coupangRes.count ?? 0) > 0,
     };
-    const done = steps.sourcing && steps.rank && steps.thumbnail;
+    const done = steps.sourcing && steps.rank && steps.thumbnail && steps.coupang;
 
     return res.status(200).json({
       steps,

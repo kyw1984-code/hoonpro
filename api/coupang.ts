@@ -82,12 +82,12 @@ function decryptSecret(enc: string): string {
 //   signature = HMAC-SHA256(secretKey, message) 를 hex로
 //   signed-date 형식은 yyMMdd'T'HHmmss'Z' (UTC)
 // ═══════════════════════════════════════════════════════════════
-function signedDate(): string {
+export function signedDate(): string {
   // 2026-09-05T12:34:56.789Z → 260905T123456Z
   return new Date().toISOString().slice(2, 19).replace(/[-:]/g, '') + 'Z';
 }
 
-function authorization(method: string, path: string, query: string, accessKey: string, secretKey: string): string {
+export function authorization(method: string, path: string, query: string, accessKey: string, secretKey: string): string {
   const datetime = signedDate();
   const message = datetime + method + path + query;
   const signature = crypto.createHmac('sha256', secretKey).update(message).digest('hex');
@@ -256,12 +256,14 @@ function pickDate(obj: any, keys: string[]): string | null {
  * 그대로 timestamptz 컬럼에 넣었다가 파싱이 안 되면 그 배치 전체가 실패한다.
  * 해석이 되면 ISO로 통일하고, 안 되면 null로 떨어뜨려 나머지 값이라도 저장한다.
  */
-function toIso(v: any): string | null {
+export function toIso(v: any): string | null {
   if (!v) return null;
   const raw = String(v).trim();
   if (!raw) return null;
   // 공백으로 날짜와 시각을 나눈 형식을 ISO로 맞춘다
   let normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw) ? raw.replace(' ', 'T') : raw;
+  // 날짜만 온 값은 Date.parse가 UTC 자정으로 읽어 버린다. 한국 자정으로 못 박는다.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) normalized += 'T00:00:00';
   // 시간대 표기가 없으면 한국 시각이다. 그대로 두면 서버(UTC)가 9시간 뒤로 해석해
   // 오후 2시 문의가 오후 11시로 보이고, 저녁 반품이 다음 날로 넘어간다.
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(normalized) && !/(Z|[+-]\d{2}:?\d{2})$/.test(normalized)) {
@@ -360,7 +362,7 @@ function outOfTime(deadline: number, sum: SyncSummary): boolean {
 }
 
 /** 조회 구간을 chunkDays 단위로 쪼갠다 (쿠팡은 대부분 31일 이내만 허용) */
-function dateChunks(from: string, to: string, size = LIMITS.chunkDays): Array<[string, string]> {
+export function dateChunks(from: string, to: string, size = LIMITS.chunkDays): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   let cur = from;
   while (daysBetween(cur, to) >= 0) {
@@ -742,7 +744,7 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
 }
 
 /** 취소·철회된 접수는 손실로 세지 않는다. 상태 원문은 엔드포인트마다 달라 부분 일치로 본다. */
-function isActiveReturn(status: any): boolean {
+export function isActiveReturn(status: any): boolean {
   const s = String(status ?? '').toUpperCase();
   return !(s.includes('CANCEL') || s.includes('WITHDRAW') || s.includes('취소') || s.includes('철회'));
 }
@@ -1337,6 +1339,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'price-rules': return await handlePriceRules(userId, res);
       case 'price-rule-save': return await handlePriceRuleSave(userId, req, res);
       case 'price-apply': return await handlePriceApply(userId, req, res);
+      case 'admin-overview': return await handleAdminOverview(decoded, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -1689,7 +1692,7 @@ async function handleCostSave(userId: string, req: VercelRequest, res: VercelRes
       packaging_cost: clamp(it.packagingCost),
       shipping_cost: clamp(it.shippingCost),
       return_shipping_cost: clamp(it.returnShippingCost),
-      memo: typeof it.memo === 'string' ? it.memo.slice(0, 200) : null,
+      ...(typeof it.memo === 'string' ? { memo: it.memo.slice(0, 200) } : {}),
       updated_at: new Date().toISOString(),
     }));
 
@@ -1807,7 +1810,7 @@ async function handleSettlement(userId: string, res: VercelResponse) {
 // ═══════════════════════════════════════════════════════════════
 
 /** 지난주(월~일) 구간 — 월요일 아침에 실행되는 기준 */
-function lastWeekRange(today: string): { start: string; end: string } {
+export function lastWeekRange(today: string): { start: string; end: string } {
   const d = new Date(`${today}T00:00:00Z`);
   const dow = d.getUTCDay(); // 0=일
   const daysSinceMonday = (dow + 6) % 7;
@@ -2525,7 +2528,7 @@ async function handleInquiryReply(userId: string, req: VercelRequest, res: Verce
 
 const MIN_PAIRS_FOR_CORRELATION = 10;
 
-function pearson(xs: number[], ys: number[]): number | null {
+export function pearson(xs: number[], ys: number[]): number | null {
   const n = xs.length;
   if (n < 2) return null;
   const mx = xs.reduce((a, b) => a + b, 0) / n;
@@ -2543,7 +2546,7 @@ function pearson(xs: number[], ys: number[]): number | null {
 }
 
 /** ys = a + b·xs 의 기울기 b */
-function slope(xs: number[], ys: number[]): number | null {
+export function slope(xs: number[], ys: number[]): number | null {
   const n = xs.length;
   if (n < 2) return null;
   const mx = xs.reduce((a, b) => a + b, 0) / n;
@@ -2753,7 +2756,7 @@ async function fetchLivePrice(creds: CoupangCreds, vendorItemId: string): Promis
   return price > 0 ? price : null;
 }
 
-function median(nums: number[]): number | null {
+export function median(nums: number[]): number | null {
   const xs = nums.filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
   if (xs.length === 0) return null;
   const mid = Math.floor(xs.length / 2);
@@ -2761,7 +2764,7 @@ function median(nums: number[]): number | null {
 }
 
 /** 원가와 수수료율을 지키면서 목표 이익률을 내는 최저 판매가 */
-function floorPriceFor(unitCost: number, commissionRate: number, targetMarginRate: number): number | null {
+export function floorPriceFor(unitCost: number, commissionRate: number, targetMarginRate: number): number | null {
   // price × (1 − 수수료율 − 목표이익률) = 원가
   const denom = 1 - commissionRate / 100 - targetMarginRate / 100;
   if (denom <= 0) return null; // 수수료와 목표 이익률만으로 100%를 넘으면 성립하지 않는다
@@ -3115,4 +3118,62 @@ async function runAutoPricing(userId: string, creds: CoupangCreds): Promise<{ ap
   }
 
   return { applied, skipped };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 관리자: 연동 현황
+//
+// 몇 명이 연결했고 누구 수집이 멈춰 있는지 볼 곳이 없으면 문의가 와야 안다.
+// 계정 상태별 인원, 최근 실패, 오래 안 돈 계정을 한 화면에 모은다.
+// ═══════════════════════════════════════════════════════════════
+async function handleAdminOverview(decoded: any, res: VercelResponse) {
+  if (!decoded?.isAdmin) return res.status(403).json({ error: '관리자만 볼 수 있습니다.' });
+
+  const { data: accounts } = await supabase!
+    .from('coupang_accounts')
+    .select('user_id, vendor_id, status, last_sync_at, last_sync_error, backfill_done, key_issued_at, created_at, users(name, email)')
+    .order('last_sync_at', { ascending: true, nullsFirst: true });
+
+  const rows = (accounts ?? []) as any[];
+  const now = Date.now();
+  const staleMs = 26 * 3600_000; // 매시 크론이 20시간 기준으로 도니, 26시간 넘게 안 돌았으면 이상하다
+
+  const counts = { total: rows.length, active: 0, invalid: 0, expired: 0, stale: 0, backfilling: 0, expiringSoon: 0 };
+  const list = rows.map(a => {
+    const lastSync = a.last_sync_at ? new Date(a.last_sync_at).getTime() : null;
+    const stale = a.status === 'active' && (lastSync === null || now - lastSync > staleMs);
+    const left = daysToExpiry(a.key_issued_at);
+    if (a.status === 'active') counts.active++;
+    if (a.status === 'invalid') counts.invalid++;
+    if (a.status === 'expired') counts.expired++;
+    if (stale) counts.stale++;
+    if (a.status === 'active' && !a.backfill_done) counts.backfilling++;
+    if (left !== null && left <= 14) counts.expiringSoon++;
+    return {
+      userId: a.user_id,
+      name: a.users?.name ?? '',
+      email: a.users?.email ?? '',
+      vendorId: a.vendor_id,
+      status: a.status,
+      lastSyncAt: a.last_sync_at,
+      lastSyncError: a.last_sync_error,
+      backfillDone: Boolean(a.backfill_done),
+      daysToExpiry: left,
+      stale,
+      connectedAt: a.created_at,
+    };
+  });
+
+  // 문제 있는 계정이 위로 오게
+  list.sort((x, y) => {
+    const score = (r: typeof x) => (r.status !== 'active' ? 0 : r.stale ? 1 : r.lastSyncError ? 2 : 3);
+    return score(x) - score(y);
+  });
+
+  return res.status(200).json({
+    counts,
+    accounts: list,
+    relayConfigured: Boolean(RELAY_URL),
+    relayIp: process.env.COUPANG_RELAY_IP || null,
+  });
 }
