@@ -6,17 +6,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Link2, Loader2, RefreshCw, ShoppingBag, Trash2 } from 'lucide-react';
 import { coupangApi, sinceText, type CoupangStatus, type SyncSummary } from '../../lib/coupang';
 import { KeySetup } from './KeySetup';
+import { ProfitDashboard } from './ProfitDashboard';
+import { CostEditor } from './CostEditor';
 
-type View = 'settings';
+type View = 'profit' | 'costs' | 'settings';
 
 const VIEWS: Array<{ id: View; label: string }> = [
+  { id: 'profit', label: '순이익' },
+  { id: 'costs', label: '원가 입력' },
   { id: 'settings', label: '연동 설정' },
 ];
 
 export function CoupangDashboard() {
   const [status, setStatus] = useState<CoupangStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<View>('settings');
+  const [view, setView] = useState<View>('profit');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -121,6 +125,9 @@ export function CoupangDashboard() {
           ))}
         </nav>
       )}
+
+      {view === 'profit' && <ProfitDashboard onEditCosts={() => setView('costs')} />}
+      {view === 'costs' && <CostEditor onSaved={() => undefined} />}
 
       {view === 'settings' && (
         <div className="rounded-panel border border-line bg-paper p-6">

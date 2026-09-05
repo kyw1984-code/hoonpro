@@ -46,12 +46,70 @@ async function request<T>(action: string, init?: { method?: 'GET' | 'POST'; body
   return data as T;
 }
 
+export interface ProfitRow {
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  quantity: number;
+  salesAmount: number;
+  commission: number;
+  settlementAmount: number;
+  unitCostTotal: number;
+  returnCount: number;
+  returnCost: number;
+  profit: number;
+  marginRate: number;
+  costEntered: boolean;
+  stock: number | null;
+  salePrice: number | null;
+}
+
+export interface ProfitResponse {
+  from: string;
+  to: string;
+  rows: ProfitRow[];
+  totals: {
+    quantity: number;
+    salesAmount: number;
+    commission: number;
+    settlementAmount: number;
+    unitCostTotal: number;
+    returnCount: number;
+    returnCost: number;
+    profit: number;
+    marginRate: number;
+  };
+  missingCost: number;
+  costCoverage: number;
+  adCostHint: number | null;
+  adReportAt: string | null;
+}
+
+export interface CostRow {
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  salePrice: number | null;
+  stock: number | null;
+  status: string;
+  soldLast30: number;
+  unitCost: number;
+  packagingCost: number;
+  shippingCost: number;
+  returnShippingCost: number;
+  memo: string;
+}
+
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
   saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyIssuedAt?: string }) =>
     request<{ ok: true; message: string }>('key-save', { method: 'POST', body }),
   deleteKey: () => request<{ ok: true }>('key-delete', { method: 'POST' }),
   sync: (full = false) => request<{ ok: true; summary: SyncSummary }>('sync', { method: 'POST', body: { full } }),
+  profit: (days: number) => request<ProfitResponse>(`profit&days=${days}`),
+  costs: () => request<{ rows: CostRow[] }>('costs'),
+  saveCosts: (items: Array<Partial<CostRow> & { vendorItemId: string }>) =>
+    request<{ ok: true; saved: number }>('cost-save', { method: 'POST', body: { items } }),
 };
 
 // ── 표시 헬퍼 ─────────────────────────────────────────────────

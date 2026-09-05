@@ -993,6 +993,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'key-save': return await handleKeySave(userId, req, res);
       case 'key-delete': return await handleKeyDelete(userId, res);
       case 'sync': return await handleSync(userId, req, res);
+      case 'profit': return await handleProfit(userId, req, res);
+      case 'costs': return await handleCosts(userId, res);
+      case 'cost-save': return await handleCostSave(userId, req, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -1112,4 +1115,239 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
 // 주간 리포트는 3번 기능에서 구현한다 (아래에서 채운다).
 async function cronWeeklyReport(res: VercelResponse) {
   return res.status(200).json({ ok: true, skipped: '주간 리포트는 아직 준비 중입니다.' });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [1] 상품별 순이익 대시보드
+//
+// 순이익 = 정산예정액 − (매입원가 + 부자재 + 출고배송비) × 판매수량 − 반품 배송비
+// 정산예정액은 이미 쿠팡 수수료가 빠진 금액이라 수수료를 또 빼면 안 된다.
+//
+// 광고비는 상품 단위로 가져올 방법이 없다. 쿠팡 광고 데이터는 윙 API가 아니라
+// 광고센터에 있고 일반 셀러에게 열려 있지 않다. 그래서 광고비는 기간 총액으로만
+// 반영하고, 저장된 광고 보고서가 있으면 그 값을 기본값으로 제안한다.
+// ═══════════════════════════════════════════════════════════════
+
+interface ProfitRow {
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  quantity: number;
+  salesAmount: number;
+  commission: number;
+  settlementAmount: number;
+  unitCostTotal: number;
+  returnCount: number;
+  returnCost: number;
+  profit: number;
+  marginRate: number;
+  costEntered: boolean;
+  stock: number | null;
+  salePrice: number | null;
+}
+
+function rangeFromQuery(req: VercelRequest): { from: string; to: string } {
+  const today = kstToday();
+  const days = Math.min(365, Math.max(1, Number(req.query.days ?? 30) || 30));
+  const from = String(req.query.from ?? '') || addDays(today, -(days - 1));
+  const to = String(req.query.to ?? '') || today;
+  return { from, to };
+}
+
+async function handleProfit(userId: string, req: VercelRequest, res: VercelResponse) {
+  const { from, to } = rangeFromQuery(req);
+
+  const [salesRes, costRes, itemRes, returnRes, adRes] = await Promise.all([
+    supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId).gte('sale_date', from).lte('sale_date', to),
+    supabase!.from('coupang_costs').select('*').eq('user_id', userId),
+    supabase!.from('coupang_items').select('vendor_item_id, product_name, option_name, sale_price, stock').eq('user_id', userId),
+    supabase!
+      .from('coupang_returns')
+      .select('vendor_item_id, quantity, requested_at')
+      .eq('user_id', userId)
+      .gte('requested_at', `${from}T00:00:00Z`)
+      .lte('requested_at', `${to}T23:59:59Z`),
+    // 저장된 광고 보고서가 있으면 기간 광고비의 기본값으로 제안한다
+    supabase!.from('ad_reports').select('summary, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1),
+  ]);
+
+  const costs = new Map<string, any>();
+  for (const c of costRes.data ?? []) costs.set(String(c.vendor_item_id), c);
+
+  const items = new Map<string, any>();
+  for (const it of itemRes.data ?? []) items.set(String(it.vendor_item_id), it);
+
+  const returnAgg = new Map<string, number>();
+  for (const r of returnRes.data ?? []) {
+    const id = String(r.vendor_item_id ?? '');
+    if (!id) continue;
+    returnAgg.set(id, (returnAgg.get(id) ?? 0) + (Number(r.quantity) || 1));
+  }
+
+  const agg = new Map<string, ProfitRow>();
+  for (const s of salesRes.data ?? []) {
+    const id = String(s.vendor_item_id);
+    const item = items.get(id);
+    const cur =
+      agg.get(id) ??
+      ({
+        vendorItemId: id,
+        productName: s.product_name || item?.product_name || '(상품명 미확인)',
+        optionName: item?.option_name ?? '',
+        quantity: 0,
+        salesAmount: 0,
+        commission: 0,
+        settlementAmount: 0,
+        unitCostTotal: 0,
+        returnCount: 0,
+        returnCost: 0,
+        profit: 0,
+        marginRate: 0,
+        costEntered: false,
+        stock: item?.stock ?? null,
+        salePrice: item?.sale_price ?? null,
+      } as ProfitRow);
+    cur.quantity += Number(s.quantity) || 0;
+    cur.salesAmount += Number(s.sales_amount) || 0;
+    cur.commission += Number(s.commission) || 0;
+    cur.settlementAmount += Number(s.settlement_amount) || 0;
+    agg.set(id, cur);
+  }
+
+  // 판매는 없었지만 반품만 발생한 옵션도 손실로 잡아야 한다
+  for (const [id, count] of returnAgg) {
+    if (agg.has(id)) continue;
+    const item = items.get(id);
+    agg.set(id, {
+      vendorItemId: id,
+      productName: item?.product_name ?? '(상품명 미확인)',
+      optionName: item?.option_name ?? '',
+      quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0,
+      unitCostTotal: 0, returnCount: count, returnCost: 0, profit: 0, marginRate: 0,
+      costEntered: false, stock: item?.stock ?? null, salePrice: item?.sale_price ?? null,
+    });
+  }
+
+  const rows: ProfitRow[] = [];
+  for (const row of agg.values()) {
+    const c = costs.get(row.vendorItemId);
+    const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) : 0;
+    row.costEntered = Boolean(c) && perUnit > 0;
+    row.unitCostTotal = perUnit * row.quantity;
+    row.returnCount = returnAgg.get(row.vendorItemId) ?? 0;
+    row.returnCost = row.returnCount * (c ? Number(c.return_shipping_cost) || 0 : 0);
+    row.profit = row.settlementAmount - row.unitCostTotal - row.returnCost;
+    row.marginRate = row.salesAmount > 0 ? (row.profit / row.salesAmount) * 100 : 0;
+    rows.push(row);
+  }
+
+  rows.sort((a, b) => b.profit - a.profit);
+
+  const totals = rows.reduce(
+    (t, r) => {
+      t.quantity += r.quantity;
+      t.salesAmount += r.salesAmount;
+      t.commission += r.commission;
+      t.settlementAmount += r.settlementAmount;
+      t.unitCostTotal += r.unitCostTotal;
+      t.returnCount += r.returnCount;
+      t.returnCost += r.returnCost;
+      t.profit += r.profit;
+      return t;
+    },
+    { quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, unitCostTotal: 0, returnCount: 0, returnCost: 0, profit: 0 },
+  );
+
+  const missingCost = rows.filter(r => r.quantity > 0 && !r.costEntered).length;
+  const adReport = (adRes.data ?? [])[0];
+
+  return res.status(200).json({
+    from,
+    to,
+    rows,
+    totals: {
+      ...totals,
+      marginRate: totals.salesAmount > 0 ? (totals.profit / totals.salesAmount) * 100 : 0,
+    },
+    missingCost,
+    // 원가를 하나도 안 넣었으면 순이익이 매출과 같아 보여 오해를 부른다. 화면에서 경고한다.
+    costCoverage: rows.length > 0 ? ((rows.length - missingCost) / rows.length) * 100 : 0,
+    adCostHint: adReport?.summary?.totalCost ?? null,
+    adReportAt: adReport?.created_at ?? null,
+  });
+}
+
+// ── 원가 조회·입력 ────────────────────────────────────────────
+async function handleCosts(userId: string, res: VercelResponse) {
+  const [itemRes, costRes, soldRes] = await Promise.all([
+    supabase!.from('coupang_items').select('*').eq('user_id', userId).order('product_name'),
+    supabase!.from('coupang_costs').select('*').eq('user_id', userId),
+    // 최근 30일 판매수량 — 원가를 어디부터 채워야 효과가 큰지 보여준다
+    supabase!
+      .from('coupang_sales_daily')
+      .select('vendor_item_id, quantity')
+      .eq('user_id', userId)
+      .gte('sale_date', addDays(kstToday(), -30)),
+  ]);
+
+  const costs = new Map<string, any>();
+  for (const c of costRes.data ?? []) costs.set(String(c.vendor_item_id), c);
+
+  const sold = new Map<string, number>();
+  for (const s of soldRes.data ?? []) {
+    const id = String(s.vendor_item_id);
+    sold.set(id, (sold.get(id) ?? 0) + (Number(s.quantity) || 0));
+  }
+
+  const rows = (itemRes.data ?? []).map((it: any) => {
+    const c = costs.get(String(it.vendor_item_id));
+    return {
+      vendorItemId: String(it.vendor_item_id),
+      productName: it.product_name ?? '',
+      optionName: it.option_name ?? '',
+      salePrice: it.sale_price ?? null,
+      stock: it.stock ?? null,
+      status: it.status ?? '',
+      soldLast30: sold.get(String(it.vendor_item_id)) ?? 0,
+      unitCost: c?.unit_cost ?? 0,
+      packagingCost: c?.packaging_cost ?? 0,
+      shippingCost: c?.shipping_cost ?? 0,
+      returnShippingCost: c?.return_shipping_cost ?? 0,
+      memo: c?.memo ?? '',
+    };
+  });
+
+  // 많이 팔리는데 원가가 비어 있는 것부터 위로 올린다
+  rows.sort((a, b) => {
+    const aMissing = a.unitCost === 0 ? 1 : 0;
+    const bMissing = b.unitCost === 0 ? 1 : 0;
+    if (aMissing !== bMissing) return bMissing - aMissing;
+    return b.soldLast30 - a.soldLast30;
+  });
+
+  return res.status(200).json({ rows });
+}
+
+async function handleCostSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (items.length === 0) return res.status(400).json({ error: '저장할 원가가 없습니다.' });
+  if (items.length > 1000) return res.status(400).json({ error: '한 번에 1000건까지 저장할 수 있습니다.' });
+
+  const clamp = (v: any) => Math.max(0, Math.min(100_000_000, Math.round(Number(v) || 0)));
+  const rows = items
+    .filter((it: any) => it?.vendorItemId)
+    .map((it: any) => ({
+      user_id: userId,
+      vendor_item_id: String(it.vendorItemId),
+      unit_cost: clamp(it.unitCost),
+      packaging_cost: clamp(it.packagingCost),
+      shipping_cost: clamp(it.shippingCost),
+      return_shipping_cost: clamp(it.returnShippingCost),
+      memo: typeof it.memo === 'string' ? it.memo.slice(0, 200) : null,
+      updated_at: new Date().toISOString(),
+    }));
+
+  const err = await upsertChunked('coupang_costs', rows, 'user_id,vendor_item_id');
+  if (err) return res.status(500).json({ error: `저장 실패: ${err}` });
+  return res.status(200).json({ ok: true, saved: rows.length });
 }
