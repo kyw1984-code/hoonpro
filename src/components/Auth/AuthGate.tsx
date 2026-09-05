@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Lock, UserPlus, LogIn, ShieldCheck, ArrowRight, Sparkles, Activity,
   TrendingUp, Image as ImageIcon, LayoutTemplate, ListOrdered, MessageSquareText,
@@ -31,23 +31,6 @@ const DEMO_PRODUCTS = [
   { cat: 'OUTDOOR · 의류',  name: '고어텍스 등산복 자켓 방풍',   price: '149,000원', q: '10,010', comp: '높음', trend: '+9%',  score: 64 },
 ];
 
-const KEYWORDS = [
-  { t: '가습기',     n: '29,940', tag: 'HOT',      hot: true,  up: true },
-  { t: '등산가방',   n: '15,280', tag: 'TREND',    up: true },
-  { t: '담요',       n: '13,850', tag: 'SEASON' },
-  { t: '전기장판',   n: '10,880', tag: 'HOT',      hot: true,  up: true },
-  { t: '등산복',     n: '10,010', tag: 'TREND',    up: true },
-  { t: '등산배낭',   n: '7,330',  tag: 'CATEGORY' },
-  { t: '히터',       n: '6,610',  tag: 'SEASON',   up: true },
-  { t: '온수매트',   n: '8,140',  tag: 'HOT',      hot: true },
-];
-
-const KEYWORD_SPOTS = [
-  { x: 82, y: 6 }, { x: 92, y: 24 }, { x: 78, y: 44 },
-  { x: 4,  y: 58 }, { x: 88, y: 60 }, { x: 2,  y: 82 },
-  { x: 26, y: 2 }, { x: 52, y: 4 },
-];
-
 const TYPE_PHRASES = [
   'AI가 먼저 찾습니다',
   'AI가 자동 발굴합니다',
@@ -66,6 +49,8 @@ const TOOLS = [
 ];
 
 /* 코칭AI 데모 대화 — 실제 답변 톤. 광고·마진처럼 검색해도 안 나오는 실무 질문. */
+const COACH_HEADLINE = '훈프로가 실시간으로 답변드립니다';
+
 const COACH_TALKS = [
   {
     q: '검색 영역 광고수익률이 높은데 목표수익률을 어떻게 바꿔야 하나요?',
@@ -354,6 +339,29 @@ export function AuthGate({ onSuccess }: Props) {
     return () => { cancelled = true; clearTimeout(kick); };
   }, []);
 
+  // 코칭 섹션 헤드라인 — 뒷줄만 타이핑된다 ('막히는 지점마다,'는 고정)
+  const [coachLine, setCoachLine] = useState('');
+  useEffect(() => {
+    const phrase = COACH_HEADLINE;
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setCoachLine(phrase);
+      return;
+    }
+    let char = 0, deleting = false, cancelled = false;
+    let timer = 0;
+    const step = () => {
+      if (cancelled) return;
+      char += deleting ? -1 : 1;
+      setCoachLine(phrase.slice(0, char));
+      let delay = deleting ? 35 : 70;
+      if (!deleting && char === phrase.length) { delay = 2600; deleting = true; }
+      else if (deleting && char === 0) { delay = 500; deleting = false; }
+      timer = window.setTimeout(step, delay);
+    };
+    timer = window.setTimeout(step, 500);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, []);
+
   // 코칭AI 데모 — 질문이 뜨고 답변이 타이핑된 뒤 다음 대화로 넘어간다
   const [talkIdx, setTalkIdx] = useState(0);
   const [talkTyped, setTalkTyped] = useState('');
@@ -454,21 +462,6 @@ export function AuthGate({ onSuccess }: Props) {
     scrollToAuth();
   };
 
-  const keywordBubbles = useMemo(() =>
-    KEYWORDS.slice(0, KEYWORD_SPOTS.length).map((k, i) => {
-      const p = KEYWORD_SPOTS[i];
-      return {
-        ...k,
-        left: p.x + '%',
-        top: p.y + '%',
-        dx: (Math.random() * 30 - 15).toFixed(0) + 'px',
-        dy: (Math.random() * 24 - 12).toFixed(0) + 'px',
-        dur: 8 + Math.random() * 6,
-        delay: Math.random() * 3,
-        appearDelay: 300 + i * 140,
-      };
-    }), []);
-
   return (
     <div className="hp-landing relative min-h-screen w-full overflow-x-hidden text-[#f5f8ff]">
       {/* Scoped styles — 다크 테크 랜딩. 사이트 나머지에는 영향 없음 */}
@@ -534,27 +527,6 @@ export function AuthGate({ onSuccess }: Props) {
         .hp-landing .hp-badge-dot {
           width:6px; height:6px; border-radius:50%; background:#7cf5ff;
           box-shadow:0 0 12px #7cf5ff; animation: hpBlink 1.6s infinite;
-        }
-        .hp-landing .hp-bubble {
-          position:absolute; padding:9px 14px; border-radius:99px;
-          background: rgba(27,39,69,.82); border:1px solid #31406b;
-          color:#b9c2d8; font-size:12px;
-          backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-          display:flex; align-items:center; gap:8px; white-space:nowrap;
-          box-shadow: 0 8px 24px rgba(0,0,0,.4);
-          opacity:0; transform: translateY(10px);
-          transition: opacity .8s ease, transform .8s ease;
-        }
-        .hp-landing .hp-bubble.hp-in { opacity:1; transform: translateY(0); }
-        .hp-landing .hp-bubble b { color:#fff; font-weight:600; font-variant-numeric: tabular-nums; }
-        .hp-landing .hp-bubble .hp-tag { color:#7cf5ff; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; font-weight:600; }
-        .hp-landing .hp-bubble.hp-hot { border-color: rgba(255,180,84,.3); }
-        .hp-landing .hp-bubble.hp-hot .hp-tag { color:#ffb454; }
-        .hp-landing .hp-bubble.hp-up::after { content:"↑"; color:#3ee7a3; font-weight:700; margin-left:2px; }
-        @keyframes hpDrift {
-          0%   { transform: translate(0,0); }
-          50%  { transform: translate(var(--dx,20px), var(--dy,-14px)); }
-          100% { transform: translate(0,0); }
         }
         .hp-landing .hp-scan::after {
           content:""; position:absolute; inset:0;
@@ -661,26 +633,7 @@ export function AuthGate({ onSuccess }: Props) {
         {/* LEFT — 랜딩 */}
         <section className="relative">
           {/* 떠다니는 키워드 버블 */}
-          <div className="pointer-events-none absolute inset-0 z-[2] hidden lg:block">
-            {keywordBubbles.map((k, i) => (
-              <div
-                key={i}
-                className={`hp-bubble hp-in ${k.hot ? 'hp-hot' : ''} ${k.up ? 'hp-up' : ''}`}
-                style={{
-                  left: k.left,
-                  top: k.top,
-                  animation: `hpDrift ${k.dur}s ease-in-out ${k.delay}s infinite`,
-                  transitionDelay: `${k.appearDelay}ms`,
-                  ['--dx' as any]: k.dx,
-                  ['--dy' as any]: k.dy,
-                }}
-              >
-                <span className="hp-tag">{k.tag}</span>
-                <span>{k.t}</span>
-                <b>{k.n}</b>
-              </div>
-            ))}
-          </div>
+          
 
           {/* 라이브 배지 */}
           <span
@@ -1172,13 +1125,21 @@ export function AuthGate({ onSuccess }: Props) {
       {/* ─── 요금 안내 (비회원도 가입 전에 가격을 확인할 수 있어야 한다) ─── */}
       {/* ─── 훈프로 코칭AI ─── */}
       <section className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#31406b' }}>
-        <div className="mx-auto grid max-w-[1000px] items-center gap-10 md:grid-cols-2">
+        <div className="mx-auto grid max-w-[1120px] items-center gap-10 md:grid-cols-[1.15fr_1fr]">
           <div>
             <p className="text-[11.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: '#7cf5ff' }}>
               COACHING AI
             </p>
-            <h2 className="mt-2.5 text-[26px] font-bold leading-tight tracking-[-0.02em] text-white md:text-[30px]">
-              훈프로가 <span className="hp-accent">실시간</span>으로<br />대답해드립니다
+            <h2
+              className="mt-2.5 text-[clamp(38px,4.6vw,64px)] font-bold leading-[1.05] tracking-[-0.03em] text-white"
+              // keep-all: 한글이 '실시간으/로'처럼 어절 중간에서 끊기지 않게
+              style={{ wordBreak: 'keep-all', minHeight: '3.15em' }}
+            >
+              <span className="block">막히는 지점마다,</span>
+              <span className="hp-accent">
+                {coachLine}
+                <span className="hp-caret" />
+              </span>
             </h2>
             <p className="mt-4 text-[14px] leading-relaxed text-[#b9c2d8]">
               검색해도 안 나오고, 물어볼 데도 없는 질문이 있습니다.
