@@ -532,7 +532,6 @@ create table if not exists coupang_accounts (
   last_verified_at timestamptz,
   last_sync_at timestamptz,
   last_sync_error text,
-  sync_shard smallint not null default 0, -- 크론 분산 슬롯 (0~9)
   -- 첫 전체 수집(백필)이 끝났는지. 시간 예산에 걸려 중간에 끊긴 회차와
   -- 정상적으로 끝난 회차를 구분해야, 큰 판매자가 매 시간 처음부터 다시
   -- 시작하며 다른 사용자의 수집을 굶기는 일을 막을 수 있다.
@@ -545,6 +544,10 @@ create index if not exists idx_cpa_shard on coupang_accounts(sync_shard, status)
 
 -- 이미 13번 절을 한 번 실행한 프로젝트를 위해 나중에 추가된 칼럼을 따로 보강한다
 alter table coupang_accounts add column if not exists backfill_done boolean not null default false;
+-- 키 거부·만료를 이메일로 알린 시각. 같은 사고로 매일 보내지 않기 위해 기록한다.
+alter table coupang_accounts add column if not exists status_notified_at timestamptz;
+-- 크론 분산 슬롯은 쓰지 않는다. 수집은 마지막 수집 시각 기준으로 오래된 계정부터 돈다.
+alter table coupang_accounts drop column if exists sync_shard;
 
 alter table coupang_accounts disable row level security;
 

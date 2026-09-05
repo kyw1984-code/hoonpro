@@ -14,10 +14,11 @@ const LABEL: Record<string, { name: string; hint: string }> = {
   reviews:  { name: '리뷰 수집·요약',   hint: '상품 1개당 1회' },
   rank:     { name: '순위 확인',        hint: '조회 1회당 1회' },
   analyze:  { name: '경쟁상품 분석',    hint: '분석 1회당 1회' },
+  inquiry:  { name: '쿠팡 문의 답변 초안', hint: '문의 1건당 1회' },
   general:  { name: '기타 AI 작업',     hint: '기획안·문구 생성, 이미지 검수 등' },
 };
 
-const ORDER = ['image', 'qa', 'sourcing', 'reviews', 'rank', 'analyze', 'general'];
+const ORDER = ['image', 'qa', 'sourcing', 'reviews', 'rank', 'analyze', 'inquiry', 'general'];
 
 interface FeatureLimit {
   feature: string;

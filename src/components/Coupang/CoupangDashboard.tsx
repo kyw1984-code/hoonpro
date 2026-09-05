@@ -36,6 +36,9 @@ export function CoupangDashboard() {
   const [view, setView] = useState<View>('profit');
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  // 수집이 끝나면 값을 올려 하위 화면을 다시 만든다. 상단 바만 "수집 완료"라
+  // 하고 아래 표는 옛 숫자면 사용자는 어느 쪽을 믿어야 할지 모른다.
+  const [refreshKey, setRefreshKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -62,6 +65,7 @@ export function CoupangDashboard() {
       const { summary } = await coupangApi.sync(full);
       setSyncMsg(describeSync(summary));
       await load();
+      setRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncMsg(e.message);
     } finally {
@@ -105,7 +109,14 @@ export function CoupangDashboard() {
             원가만 한 번 입력하면 상품별 진짜 순이익이 나옵니다.
           </p>
         </header>
-        <KeySetup status={status ?? { connected: false }} onSaved={load} />
+        <KeySetup
+          status={status ?? { connected: false }}
+          onSaved={async () => {
+            await load();
+            // 크론을 기다리면 최대 한 시간 동안 빈 화면이다. 바로 첫 수집을 건다.
+            runSync(true);
+          }}
+        />
       </div>
     );
   }
@@ -139,6 +150,7 @@ export function CoupangDashboard() {
         </nav>
       )}
 
+      <div key={refreshKey} className="contents">
       {view === 'profit' && <ProfitDashboard onEditCosts={() => setView('costs')} />}
       {view === 'settlement' && <SettlementCalendar />}
       {view === 'inventory' && <InventoryForecast />}
@@ -147,6 +159,7 @@ export function CoupangDashboard() {
       {view === 'rank' && <RankRevenue />}
       {view === 'price' && <PriceRules onEditCosts={() => setView('costs')} />}
       {view === 'costs' && <CostEditor onSaved={() => undefined} />}
+      </div>
 
       {view === 'settings' && (
         <div className="flex flex-col gap-5">

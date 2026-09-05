@@ -1001,10 +1001,39 @@ async function verifyCreds(creds: CoupangCreds): Promise<{ ok: boolean; error?: 
 
 async function setAccountStatus(userId: string, status: string, error: string | null): Promise<void> {
   if (!supabase) return;
+  const { data: before } = await supabase
+    .from('coupang_accounts')
+    .select('status, status_notified_at, users(email, name)')
+    .eq('user_id', userId)
+    .maybeSingle();
+
   await supabase
     .from('coupang_accounts')
     .update({ status, last_sync_error: error, updated_at: new Date().toISOString() })
     .eq('user_id', userId);
+
+  // 수집이 멈춘 걸 사용자가 탭을 열어야 안다면 그동안 데이터가 비고 이유도 모른다.
+  // 정상에서 거부·만료로 바뀌는 순간 한 번만 알린다.
+  const broke = (status === 'invalid' || status === 'expired') && before?.status === 'active';
+  const email = (before as any)?.users?.email;
+  if (broke && email && !before?.status_notified_at) {
+    await sendEmail(
+      email,
+      status === 'expired' ? '[훈프로] 쿠팡 API 키가 만료됐습니다' : '[훈프로] 쿠팡 수집이 멈췄습니다',
+      wrapEmail(
+        status === 'expired' ? '쿠팡 API 키 만료' : '쿠팡 연동 확인 필요',
+        `<p>${escapeHtml(String((before as any)?.users?.name ?? ''))}님, 쿠팡 매출·정산 자동 수집이 멈췄습니다.</p>` +
+          `<p style="color:#ffb454;">${escapeHtml(error ?? '')}</p>` +
+          `<p>윙에서 키와 등록 IP를 확인한 뒤 훈프로의 [쿠팡 매출·정산 → 연동 설정]에서 다시 등록해주세요. ` +
+          `이미 다른 주문수집 프로그램을 쓰신다면 키를 새로 발급하지 말고 기존 키를 그대로 넣어야 그쪽 연동이 끊기지 않습니다.</p>` +
+          emailButtonLink('연동 설정 열기'),
+      ),
+    );
+    await supabase
+      .from('coupang_accounts')
+      .update({ status_notified_at: new Date().toISOString() })
+      .eq('user_id', userId);
+  }
 }
 
 /** 키 만료(발급 후 6개월)까지 남은 일수 — 발급일을 모르면 null */
@@ -1369,9 +1398,6 @@ async function handleKeySave(userId: string, req: VercelRequest, res: VercelResp
   const check = await verifyCreds({ vendorId, accessKey, secretKey });
   if (!check.ok) return res.status(400).json({ error: check.error });
 
-  // 크론 분산 슬롯은 사용자 ID를 해시해 고르게 나눈다
-  const shard = parseInt(crypto.createHash('md5').update(userId).digest('hex').slice(0, 2), 16) % 10;
-
   const { error } = await supabase!.from('coupang_accounts').upsert(
     {
       user_id: userId,
@@ -1384,7 +1410,7 @@ async function handleKeySave(userId: string, req: VercelRequest, res: VercelResp
       last_verified_at: new Date().toISOString(),
       last_sync_error: null,
       backfill_done: false,
-      sync_shard: shard,
+      status_notified_at: null,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id' },
@@ -1405,7 +1431,9 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
   if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
 
   const full = req.body?.full === true || String(req.query.full) === 'true' || !acc.backfill_done;
-  const sum = await syncUser(userId, credsOf(acc), full, Date.now() + 240_000);
+  // 화면이 기다리는 요청이다. 4분 동안 스피너만 보여주지 않도록 90초에서 끊고,
+  // 못 받은 몫은 truncated로 표시해 크론이 이어받게 한다.
+  const sum = await syncUser(userId, credsOf(acc), full, Date.now() + 90_000);
 
   if (sum.authFailed) {
     await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다. 키 또는 등록 IP를 확인해주세요.');
@@ -1721,10 +1749,24 @@ async function handleSettlement(userId: string, res: VercelResponse) {
   const in7 = days.filter(d => d.date >= today && d.date <= addDays(today, 7)).reduce((n, d) => n + d.amount, 0);
   const in30 = days.filter(d => d.date >= today && d.date <= addDays(today, 30)).reduce((n, d) => n + d.amount, 0);
 
-  // 지급 일정이 잡힌 총액과 매출 기준 정산예정액의 차이 = 아직 일정 미배정
-  const totalSettlementPlanned = (setRes.data ?? []).reduce((n, s) => n + (Number(s.amount) || 0), 0);
-  const totalSalesSettlement = (salesRes.data ?? []).reduce((n, s) => n + (Number(s.settlement_amount) || 0), 0);
-  const unscheduled = Math.max(0, totalSalesSettlement - totalSettlementPlanned);
+  // '일정 미배정' = 매출은 인식됐는데 그 인식월에 대한 지급 일정이 아직 없는 몫.
+  // 예전에는 90일 매출 총액에서 ±90일 지급 총액을 뺐는데, 두 구간이 서로 다른
+  // 매출을 가리켜 거의 항상 0으로 눌렸다. 인식월끼리 맞춰 비교한다.
+  const salesByMonth = new Map<string, number>();
+  for (const s of salesRes.data ?? []) {
+    const m = String(s.sale_date).slice(0, 7);
+    salesByMonth.set(m, (salesByMonth.get(m) ?? 0) + (Number(s.settlement_amount) || 0));
+  }
+  const plannedByMonth = new Map<string, number>();
+  for (const s of setRes.data ?? []) {
+    const m = String(s.recognition_month ?? '').slice(0, 7);
+    if (!m) continue;
+    plannedByMonth.set(m, (plannedByMonth.get(m) ?? 0) + (Number(s.amount) || 0));
+  }
+  let unscheduled = 0;
+  for (const [m, expected] of salesByMonth) {
+    unscheduled += Math.max(0, expected - (plannedByMonth.get(m) ?? 0));
+  }
 
   // 최근 8주 주간 입금 추이 — 다음 주 예상의 근거로 쓴다
   const weekly: Array<{ weekStart: string; amount: number }> = [];

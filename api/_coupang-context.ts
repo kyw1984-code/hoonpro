@@ -29,7 +29,26 @@ function won(n: number): string {
  * 질문자의 최근 30일 판매 요약. 연동이 없거나 데이터가 없으면 null을 돌려
  * 호출부가 아무것도 붙이지 않게 한다.
  */
+// 질문마다 순이익·재고를 다시 계산하면 쿼리 7개가 붙는다. 하루 안에 숫자가
+// 크게 바뀌지 않으므로 10분 동안은 같은 요약을 재사용한다. 서버리스 인스턴스가
+// 바뀌면 캐시도 비지만, 그때는 한 번 더 계산하면 될 뿐이다.
+const CONTEXT_TTL_MS = 10 * 60_000;
+const contextCache = new Map<string, { at: number; value: string | null }>();
+
 export async function buildSellerContext(userId: string): Promise<string | null> {
+  const hit = contextCache.get(userId);
+  if (hit && Date.now() - hit.at < CONTEXT_TTL_MS) return hit.value;
+  const value = await computeSellerContext(userId);
+  contextCache.set(userId, { at: Date.now(), value });
+  if (contextCache.size > 500) {
+    // 오래된 것부터 버린다 — 메모리를 무한정 먹지 않게
+    const oldest = [...contextCache.entries()].sort((a, b) => a[1].at - b[1].at).slice(0, 100);
+    for (const [k] of oldest) contextCache.delete(k);
+  }
+  return value;
+}
+
+async function computeSellerContext(userId: string): Promise<string | null> {
   if (!supabase) return null;
 
   try {

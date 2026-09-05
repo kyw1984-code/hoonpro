@@ -7,7 +7,7 @@
  * 판매 속도는 주문일 기준이다. 매출인식일은 배송완료 이후라 열흘까지 늦어,
  * 그 숫자로 재고를 보면 이미 품절난 뒤에 알게 된다.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Boxes, Loader2, PackageX } from 'lucide-react';
 import { coupangApi, type InventoryResponse, type StockRisk } from '../../lib/coupang';
 
@@ -27,17 +27,26 @@ export function InventoryForecast() {
   const [error, setError] = useState<string | null>(null);
   const [onlyRisk, setOnlyRisk] = useState(true);
 
+  // 입력 한 글자마다 요청이 나가면 '14'를 '21'로 고치는 동안 세 번 조회되고,
+  // 늦게 온 응답이 마지막에 도착하면 입력과 다른 값이 표에 남는다.
+  // 입력이 멈춘 뒤 한 번만 부르고, 순번이 뒤처진 응답은 버린다.
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     try {
-      setData(await coupangApi.inventory(leadTime, cover));
+      const d = await coupangApi.inventory(leadTime, cover);
+      if (mine !== seq.current) return;
+      setData(d);
       setError(null);
     } catch (e: any) {
+      if (mine !== seq.current) return;
       setError(e.message);
     }
   }, [leadTime, cover]);
 
   useEffect(() => {
-    load();
+    const t = setTimeout(load, 400);
+    return () => clearTimeout(t);
   }, [load]);
 
   if (error) {
