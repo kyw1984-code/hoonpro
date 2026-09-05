@@ -982,11 +982,12 @@ async function checkRankNow(keyword: string, productId: string, decoded: any): P
     // 신규 수집은 쿠팡 분석과 동일하게 일일 한도에 포함
     if (!decoded?.isAdmin && supabase) {
       try {
-        const today = new Date().toISOString().split("T")[0];
+        const today = kstToday();
+        const limit = (await loadLimits()).rank;
         const { data, error } = await supabase.rpc("increment_feature_usage", {
-          p_user_id: decoded.userId, p_date: today, p_feature: "rank", p_limit: FEATURE_LIMITS.rank,
+          p_user_id: decoded.userId, p_date: today, p_feature: "rank", p_limit: limit,
         });
-        if (!error && data?.exceeded) return { rankChecked: false, error: `순위 확인은 하루 ${FEATURE_LIMITS.rank}회까지입니다. 내일 새벽 자동 수집 시 기록됩니다.` };
+        if (!error && data?.exceeded) return { rankChecked: false, error: `순위 확인은 하루 ${limit}회까지입니다. 내일 새벽 자동 수집 시 기록됩니다.` };
         if (!error && typeof data?.remaining === "number") remaining = data.remaining;
       } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
     }
@@ -1195,16 +1196,36 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
   return { products: scored, market };
 }
 
-// 기능별 일일 한도 — 원가 편차가 커서 하나로 합치면 관리가 안 된다.
-// 소싱·리뷰는 Bright Data 건당 과금, 순위 추적은 상대적으로 가볍다.
-// 실제 원가 데이터를 2~4주 본 뒤 조정한다 (관리자 → 원가 현황).
-const FEATURE_LIMITS: Record<string, number> = {
-  sourcing: Number(process.env.LIMIT_SOURCING || 40),   // 키워드 상품 수집
-  reviews: Number(process.env.LIMIT_REVIEWS || 20),     // 리뷰 수집 + GPT 요약
-  rank: Number(process.env.LIMIT_RANK || 60),           // 순위 확인
+// 기능별 일일 한도 — 관리자 화면에서 조정한다 (app_config.feature_limits).
+// 기본값은 api/usage.ts와 같은 값을 쓴다. 번들이 분리되어 공유 모듈 대신 중복해 둔다.
+const DEFAULT_FEATURE_LIMITS: Record<string, number> = {
+  image: 40, qa: 100, sourcing: 60, reviews: 20, rank: 40, analyze: 40, general: 200,
 };
 
-const DAILY_LIMIT = 40; // api/usage.ts와 동일한 일일 한도 (레거시 참조용)
+let limitCache: { at: number; value: Record<string, number> } | null = null;
+
+async function loadLimits(): Promise<Record<string, number>> {
+  if (limitCache && Date.now() - limitCache.at < 60_000) return limitCache.value;
+  if (!supabase) return DEFAULT_FEATURE_LIMITS;
+  try {
+    const { data } = await supabase
+      .from("app_config").select("value").eq("key", "feature_limits").maybeSingle();
+    const parsed = data?.value ? JSON.parse(data.value) : {};
+    const merged = { ...DEFAULT_FEATURE_LIMITS };
+    for (const [k, v] of Object.entries(parsed)) {
+      if (k in merged && Number.isFinite(Number(v))) merged[k] = Math.max(0, Math.round(Number(v)));
+    }
+    limitCache = { at: Date.now(), value: merged };
+    return merged;
+  } catch {
+    return DEFAULT_FEATURE_LIMITS;
+  }
+}
+
+// 한도는 KST 자정에 초기화된다
+function kstToday(): string {
+  return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+}
 
 async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: any) {
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
@@ -1231,15 +1252,16 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
     // 신규 수집(외부 비용 발생)만 일일 사용 한도에 포함 — 캐시 조회는 무료
     if (!decoded?.isAdmin && supabase) {
       try {
-        const today = new Date().toISOString().split("T")[0];
+        const today = kstToday();
+        const limit = (await loadLimits()).sourcing;
         const { data, error } = await supabase.rpc("increment_feature_usage", {
           p_user_id: decoded.userId,
           p_date: today,
           p_feature: "sourcing",
-          p_limit: FEATURE_LIMITS.sourcing,
+          p_limit: limit,
         });
         if (!error && data?.exceeded) {
-          return res.status(429).json({ error: `소싱 분석은 하루 ${FEATURE_LIMITS.sourcing}회까지입니다. 내일 다시 이용해주세요. (이미 분석했던 키워드는 캐시로 계속 조회됩니다)` });
+          return res.status(429).json({ error: `소싱 분석은 하루 ${limit}회까지입니다. 내일 다시 이용해주세요. (이미 분석했던 키워드는 캐시로 계속 조회됩니다)` });
         }
         if (!error && typeof data?.remaining === "number") remaining = data.remaining;
       } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
@@ -1374,11 +1396,12 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   let remaining: number | null = null;
   if (!decoded?.isAdmin && supabase) {
     try {
-      const today = new Date().toISOString().split("T")[0];
+      const today = kstToday();
+      const limit = (await loadLimits()).reviews;
       const { data, error } = await supabase.rpc("increment_feature_usage", {
-        p_user_id: decoded.userId, p_date: today, p_feature: "reviews", p_limit: FEATURE_LIMITS.reviews,
+        p_user_id: decoded.userId, p_date: today, p_feature: "reviews", p_limit: limit,
       });
-      if (!error && data?.exceeded) return res.status(429).json({ error: `리뷰 분석은 하루 ${FEATURE_LIMITS.reviews}회까지입니다.` });
+      if (!error && data?.exceeded) return res.status(429).json({ error: `리뷰 분석은 하루 ${limit}회까지입니다.` });
       if (!error && typeof data?.remaining === "number") remaining = data.remaining;
     } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
   }

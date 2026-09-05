@@ -9,6 +9,7 @@ import {
   LayoutTemplate, BarChart3, MessageSquareText, Loader2, Check, X,
 } from 'lucide-react';
 import { getToken, getUser } from '../../lib/auth';
+import { UsageLimits } from './UsageLimits';
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -337,6 +338,9 @@ export function HomeDashboard({ onNavigate }: Props) {
           </div>
         )}
       </div>
+
+      {/* 오늘 남은 사용량 — 기능별 한도·잔여·초기화 시각 */}
+      <UsageLimits />
 
       <div className="rounded-card border border-line bg-paper px-4 py-3 text-[12px] text-ink-2">
         <MessageSquareText className="mr-1.5 inline h-3.5 w-3.5 align-[-2px] text-accent" />

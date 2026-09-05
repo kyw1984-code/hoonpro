@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Building2, Wallet } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Building2, Wallet, SlidersHorizontal } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
 import { BillingAdmin } from './BillingAdmin';
+import { LimitsAdmin } from './LimitsAdmin';
 import { CostsAdmin } from './CostsAdmin';
 import { QAManager } from './QAManager';
 import { CompanyInfoConfig } from './CompanyInfoConfig';
@@ -33,7 +34,7 @@ const STATUS_COLOR: Record<string, string> = {
 const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'stats' | 'config' | 'taborder' | 'company' | 'qa'>('users');
+  const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'limits' | 'stats' | 'config' | 'taborder' | 'company' | 'qa'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -154,6 +155,14 @@ export function AdminPanel() {
           <Wallet className="w-4 h-4" /> 원가 현황
         </button>
         <button
+          onClick={() => setTab('limits')}
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'limits' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <SlidersHorizontal className="w-4 h-4" /> 사용 한도
+        </button>
+        <button
           onClick={() => setTab('stats')}
           className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
             tab === 'stats' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
@@ -195,7 +204,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
+      {tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <ImageConfigTab showToast={showToast} />
       ) : tab === 'taborder' ? (
         <TabOrderConfig showToast={showToast} />

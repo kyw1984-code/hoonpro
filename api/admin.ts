@@ -7,6 +7,8 @@ import jwt from 'jsonwebtoken';
 //   action=user-action  (POST)     승인/거절/일괄승인/사용량 리셋 (세부 동작은 body.action)
 //   action=stats        (GET)      API 사용량 통계 (period=today|7d|30d|all)
 //   action=config       (GET/POST) 이미지 모델/품질 설정
+//   action=costs        (GET/POST) 원가 현황 / 고정비 저장
+//   action=limits       (GET/POST) 기능별 일일 한도 조회·저장
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -42,6 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'user-action') return await handleUserAction(req, res);
     if (action === 'stats') return await handleStats(req, res);
     if (action === 'costs') return await handleCosts(req, res);
+    if (action === 'limits') return await handleLimits(req, res);
     return res.status(400).json({ error: '알 수 없는 action입니다.' });
   } catch (e) {
     console.error('[admin]', action, e);
@@ -509,5 +512,125 @@ async function handleCosts(req: VercelRequest, res: VercelResponse) {
     // 구독자 1명당 이번 달 변동비 — 39,800원과 비교할 기준선
     perSubscriberKrw: subscribers > 0 ? Math.round(monthVariableKrw / subscribers) : 0,
     totalMonthKrw: monthVariableKrw + fixedTotalKrw,
+  });
+}
+
+// ── 기능별 일일 한도 ──────────────────────────────────────
+// 한도 값 자체는 app_config.feature_limits에 저장하고, api/usage.ts와
+// api/sourcing.ts가 60초 캐시로 읽어 간다. (키는 세 곳이 동일해야 한다)
+//
+// 이 화면의 목적은 "한도 × 실측 단가 = 최악의 경우 월 원가"를 요금(39,800원)과
+// 나란히 보여주는 것이다. 단가는 추정이 아니라 api_calls 30일치 실측으로 뽑는다.
+
+const PRICE_KRW = 39800;
+
+const LIMIT_META: {
+  key: string; label: string; hint: string; fallbackKrw: number; calls: string[];
+}[] = [
+  { key: 'image', label: '이미지 생성', hint: '썸네일·상세페이지 이미지 1장', fallbackKrw: 7,
+    calls: ['thumbnail-image', 'detail-image'] },
+  { key: 'qa', label: '훈프로 코칭AI', hint: '질문 1건', fallbackKrw: 5,
+    calls: ['qa-ask'] },
+  { key: 'sourcing', label: '소싱AI 상품 수집', hint: '키워드 수집 1회', fallbackKrw: 3,
+    calls: ['sourcing-products', 'sourcing-cron'] },
+  { key: 'reviews', label: '리뷰 수집·요약', hint: '상품 1개', fallbackKrw: 12,
+    calls: ['sourcing-reviews', 'sourcing-review-summary'] },
+  { key: 'rank', label: '순위 확인', hint: '조회 1회', fallbackKrw: 3,
+    calls: ['rank-check'] },
+  { key: 'analyze', label: '경쟁상품 분석', hint: '분석 1회', fallbackKrw: 3,
+    calls: ['competitor-analyze', 'competitor-estimate'] },
+  // 나머지 호출(기획·문구 생성, 이미지 검수 등)은 전부 여기로 모인다
+  { key: 'general', label: '기타 AI 작업', hint: '기획·문구·이미지 검수 등', fallbackKrw: 1, calls: [] },
+];
+
+const LIMIT_DEFAULTS: Record<string, number> = {
+  image: 40, qa: 100, sourcing: 60, reviews: 20, rank: 40, analyze: 40, general: 200,
+};
+
+/** api_calls.feature → 한도 키 (매핑이 없으면 general) */
+function limitKeyOfCall(feature: string): string {
+  for (const m of LIMIT_META) {
+    if (m.calls.includes(feature)) return m.key;
+  }
+  return 'general';
+}
+
+async function handleLimits(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'POST') {
+    const input = req.body?.limits;
+    if (!input || typeof input !== 'object') {
+      return res.status(400).json({ error: '한도 값이 필요합니다.' });
+    }
+    const saved: Record<string, number> = {};
+    for (const m of LIMIT_META) {
+      const raw = (input as any)[m.key];
+      const n = Number(raw);
+      // 0 = 무제한. 값이 없으면 기본값을 그대로 저장해 화면과 DB가 어긋나지 않게 한다.
+      saved[m.key] = Number.isFinite(n) ? Math.min(100000, Math.max(0, Math.round(n))) : LIMIT_DEFAULTS[m.key];
+    }
+    const { error } = await supabase.from('app_config').upsert({
+      key: 'feature_limits', value: JSON.stringify(saved), updated_at: new Date().toISOString(),
+    });
+    if (error) return res.status(500).json({ error: '저장에 실패했습니다.' });
+    return res.status(200).json({ ok: true, limits: saved });
+  }
+
+  const usdKrw = Math.max(1, Number(req.query.usdKrw) || Number(process.env.USD_KRW) || 1380);
+  const since = new Date(Date.now() - 30 * 86400_000).toISOString();
+  const sinceDate = new Date(Date.now() - 30 * 86400_000 + 9 * 3600_000).toISOString().slice(0, 10);
+
+  const [{ data: cfg }, { data: calls }, { data: usage }] = await Promise.all([
+    supabase.from('app_config').select('value').eq('key', 'feature_limits').maybeSingle(),
+    supabase.from('api_calls').select('feature, cost_usd').gte('created_at', since),
+    supabase.from('feature_usage').select('feature, call_count').gte('date', sinceDate),
+  ]);
+
+  let stored: Record<string, any> = {};
+  try { stored = JSON.parse(cfg?.value || '{}'); } catch { stored = {}; }
+
+  // 실측 단가 = (해당 기능이 30일간 쓴 비용) ÷ (같은 기간 소모한 한도 횟수)
+  const costUsd: Record<string, number> = {};
+  for (const c of calls ?? []) {
+    const k = limitKeyOfCall(c.feature || '');
+    costUsd[k] = (costUsd[k] || 0) + Number(c.cost_usd || 0);
+  }
+  const units: Record<string, number> = {};
+  for (const u of usage ?? []) {
+    units[u.feature] = (units[u.feature] || 0) + (Number(u.call_count) || 0);
+  }
+
+  const features = LIMIT_META.map((m) => {
+    const limit = Number.isFinite(Number(stored[m.key]))
+      ? Math.max(0, Math.round(Number(stored[m.key])))
+      : LIMIT_DEFAULTS[m.key];
+    const unit = units[m.key] || 0;
+    const krw30d = (costUsd[m.key] || 0) * usdKrw;
+    // 표본이 너무 적으면 실측을 믿지 않고 초기 추정치를 쓴다
+    const measured = unit >= 20;
+    const unitKrw = measured ? krw30d / unit : m.fallbackKrw;
+    return {
+      key: m.key,
+      label: m.label,
+      hint: m.hint,
+      limit,
+      defaultLimit: LIMIT_DEFAULTS[m.key],
+      unitKrw: Math.round(unitKrw * 10) / 10,
+      measured,
+      units30d: unit,
+      cost30dKrw: Math.round(krw30d),
+      // 한 사람이 한도를 매일 다 쓴다고 가정한 월 원가
+      worstCaseKrw: Math.round(limit * 30 * unitKrw),
+    };
+  });
+
+  const worstCaseTotalKrw = features.reduce((s, f) => s + f.worstCaseKrw, 0);
+
+  return res.status(200).json({
+    usdKrw,
+    priceKrw: PRICE_KRW,
+    resetLabel: '매일 0시 (KST)',
+    features,
+    worstCaseTotalKrw,
+    worstCasePct: Math.round((worstCaseTotalKrw / PRICE_KRW) * 100),
   });
 }

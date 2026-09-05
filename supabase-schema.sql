@@ -501,3 +501,8 @@ begin
   return json_build_object('exceeded', false, 'remaining', p_limit - v_count - 1);
 end;
 $$;
+
+-- 기능별 한도 기본값 (관리자 화면에서 조정. 0 = 무제한)
+insert into app_config (key, value) values
+  ('feature_limits', '{"image":40,"qa":100,"sourcing":60,"reviews":20,"rank":40,"analyze":40,"general":200}')
+on conflict (key) do nothing;

@@ -20,7 +20,6 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-const DAILY_LIMIT = 40; // api/usage.ts 와 동일한 일일 한도 공유
 const EMBEDDING_MODEL = 'text-embedding-3-small';
 const TEXT_MODEL = process.env.OPENAI_TEXT_MODEL || 'gpt-4.1-mini';
 const MATCH_COUNT = 6;
@@ -370,13 +369,24 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
   // 노하우에 대한 의존이 깊어져 이탈이 줄어든다. 다만 사용량은 남겨
   // 관리자 원가 현황에서 볼 수 있게 한다 (한도 0 = 무제한).
   if (!decoded.isAdmin) {
-    const today = new Date().toISOString().split('T')[0];
-    await supabase.rpc('increment_feature_usage', {
+    const today = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10); // KST 자정 기준
+    let qaLimit = 100;
+    try {
+      const { data: cfg } = await supabase
+        .from('app_config').select('value').eq('key', 'feature_limits').maybeSingle();
+      const parsed = cfg?.value ? JSON.parse(cfg.value) : {};
+      if (Number.isFinite(Number(parsed.qa))) qaLimit = Math.max(0, Math.round(Number(parsed.qa)));
+    } catch { /* 설정 조회 실패 시 기본값 */ }
+
+    const { data: usage } = await supabase.rpc('increment_feature_usage', {
       p_user_id: decoded.userId,
       p_date: today,
       p_feature: 'qa',
-      p_limit: 0,
+      p_limit: qaLimit,
     });
+    if (usage?.exceeded) {
+      return res.status(429).json({ error: `코칭AI는 하루 ${qaLimit}회까지 이용할 수 있습니다. 내일 다시 이용해주세요.` });
+    }
   }
 
   // 1) 하이브리드 검색: 벡터 유사도 + 키워드 정확 일치를 병행해 합친다
