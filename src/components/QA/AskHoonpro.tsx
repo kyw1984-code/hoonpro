@@ -88,10 +88,10 @@ export const AskHoonpro: React.FC = () => {
           <div className="flex h-9 w-9 items-center justify-center rounded-control bg-ink">
             <MessageCircleQuestion className="h-5 w-5 text-paper" />
           </div>
-          <h2 className="text-xl font-semibold text-ink">훈프로에게 질문</h2>
+          <h2 className="text-xl font-semibold text-ink">훈프로 코칭AI</h2>
         </div>
         <p className="mb-6 text-[13px] text-ink-2">
-          쿠팡 판매 관련 궁금한 점을 물어보세요. <span className="font-semibold text-ink">훈프로의 생각을 학습한 AI</span>에 의해 답변합니다.
+          쿠팡 판매, 막히는 지점을 물어보세요. <span className="font-semibold text-ink">훈프로의 노하우를 학습한 AI</span>가 답합니다.
         </p>
 
         {/* 질문 입력 */}
@@ -153,7 +153,7 @@ export const AskHoonpro: React.FC = () => {
         {items.length === 0 && !loading && (
           <div className="py-12 text-center text-[13px] text-ink-3">
             <Sparkles className="mx-auto mb-2 h-6 w-6 text-line-strong" />
-            아직 질문이 없습니다. 위에서 궁금한 점을 물어보세요!
+            아직 질문이 없습니다. 위에서 막히는 지점을 물어보세요!
           </div>
         )}
         {items.map(item => (

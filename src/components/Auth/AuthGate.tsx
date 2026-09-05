@@ -62,7 +62,7 @@ const TOOLS = [
   { icon: ListOrdered,        label: '순위 추적' },
   { icon: MessageSquareText,  label: '리뷰 분석' },
   { icon: BarChart3,          label: '광고 성과 분석' },
-  { icon: MessageCircleQuestion, label: '훈프로에게 질문' },
+  { icon: MessageCircleQuestion, label: '훈프로 코칭AI' },
 ];
 
 /* ──────────────── 컴포넌트 ──────────────── */

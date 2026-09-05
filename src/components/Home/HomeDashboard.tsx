@@ -253,7 +253,7 @@ export function HomeDashboard({ onNavigate }: Props) {
 
       <div className="rounded-card border border-line bg-paper px-4 py-3 text-[12px] text-ink-2">
         <MessageSquareText className="mr-1.5 inline h-3.5 w-3.5 align-[-2px] text-accent" />
-        소싱→입고→판매까지 <b className="text-ink font-semibold">1~2개월</b> — 항상 다음 달 팔릴 상품을 준비하세요. 궁금한 건 <b className="text-ink font-semibold">[훈프로에게 질문]</b>에서 물어볼 수 있습니다.
+        소싱→입고→판매까지 <b className="text-ink font-semibold">1~2개월</b> — 항상 다음 달 팔릴 상품을 준비하세요. 막히는 건 <b className="text-ink font-semibold">[훈프로 코칭AI]</b>에서 물어볼 수 있습니다.
       </div>
     </div>
   );
