@@ -65,6 +65,25 @@ const TOOLS = [
   { icon: MessageCircleQuestion, label: '훈프로 코칭AI' },
 ];
 
+/* 코칭AI 데모 대화 — 실제 답변 톤. 광고·마진처럼 검색해도 안 나오는 실무 질문. */
+const COACH_TALKS = [
+  {
+    q: '검색 영역 광고수익률이 높은데 목표수익률을 어떻게 바꿔야 하나요?',
+    a: '목표수익률을 낮추면 클릭당 비용이 올라가면서 검색 광고 순위가 올라갑니다. 600%에서 550% 정도로 낮춰 검색 비중을 키워보세요.',
+    flow: '목표수익률 ↓ → CPC ↑ → 광고 순위 ↑ → 검색 비중 ↑',
+  },
+  {
+    q: '광고 예산은 처음에 얼마로 잡는 게 좋나요?',
+    a: '하루 1만원으로 2주간 데이터부터 모으세요. 전환이 붙는 키워드가 보이면 그때 그 키워드에 예산을 몰아주는 순서입니다.',
+    flow: '소액 테스트 → 전환 키워드 확인 → 예산 집중',
+  },
+  {
+    q: '마진 15%면 괜찮은 편인가요?',
+    a: '수수료와 반품까지 빼고 남는 15%라면 나쁘지 않지만 광고를 돌릴 여력이 부족합니다. 원가를 3~5%만 낮춰도 광고 확장 여지가 생깁니다.',
+    flow: '원가 −3% → 광고 예산 확보 → 노출 확대',
+  },
+];
+
 /* ──────────────── 컴포넌트 ──────────────── */
 export function AuthGate({ onSuccess }: Props) {
   /* ---------- 로그인/가입 상태 (기존 로직 그대로) ---------- */
@@ -334,6 +353,39 @@ export function AuthGate({ onSuccess }: Props) {
     }, 2500);
     return () => { cancelled = true; clearTimeout(kick); };
   }, []);
+
+  // 코칭AI 데모 — 질문이 뜨고 답변이 타이핑된 뒤 다음 대화로 넘어간다
+  const [talkIdx, setTalkIdx] = useState(0);
+  const [talkTyped, setTalkTyped] = useState('');
+  const [talkDone, setTalkDone] = useState(false);
+  useEffect(() => {
+    const reduce = typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const full = COACH_TALKS[talkIdx].a;
+    if (reduce) {
+      setTalkTyped(full);
+      setTalkDone(true);
+      const hold = setTimeout(() => setTalkIdx(i => (i + 1) % COACH_TALKS.length), 6000);
+      return () => clearTimeout(hold);
+    }
+
+    let char = 0;
+    setTalkTyped('');
+    setTalkDone(false);
+    const timers: number[] = [];
+    const tick = () => {
+      char += 1;
+      setTalkTyped(full.slice(0, char));
+      if (char < full.length) {
+        timers.push(window.setTimeout(tick, 28));
+      } else {
+        setTalkDone(true);
+        timers.push(window.setTimeout(() => setTalkIdx(i => (i + 1) % COACH_TALKS.length), 3400));
+      }
+    };
+    timers.push(window.setTimeout(tick, 700));
+    return () => timers.forEach(clearTimeout);
+  }, [talkIdx]);
 
   // 상품 롤링
   const [prodIdx, setProdIdx] = useState(0);
@@ -1126,11 +1178,11 @@ export function AuthGate({ onSuccess }: Props) {
               COACHING AI
             </p>
             <h2 className="mt-2.5 text-[26px] font-bold leading-tight tracking-[-0.02em] text-white md:text-[30px]">
-              막히는 지점마다,<br />훈프로가 옆에 있습니다
+              훈프로가 <span className="hp-accent">실시간</span>으로<br />대답해드립니다
             </h2>
             <p className="mt-4 text-[14px] leading-relaxed text-[#b9c2d8]">
               검색해도 안 나오고, 물어볼 데도 없는 질문이 있습니다.
-              언제 광고를 켜야 하는지, 이 마진이 정상인지, 리뷰가 안 붙을 땐 뭘 해야 하는지.
+              목표수익률을 얼마로 잡아야 하는지, 광고 예산은 어디서 시작하는지, 이 마진이 정상인지.
               <b className="text-white"> 훈프로의 노하우를 학습한 AI</b>가 답합니다.
             </p>
 
@@ -1163,28 +1215,45 @@ export function AuthGate({ onSuccess }: Props) {
               <span className="text-[13px] font-semibold text-white">훈프로 코칭AI</span>
             </div>
 
-            <div className="flex flex-col gap-3">
-              <div className="ml-auto max-w-[85%] rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-white"
+            <div key={talkIdx} className="hp-fade flex min-h-[184px] flex-col gap-3">
+              <div className="ml-auto max-w-[88%] rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-white"
                    style={{ background: 'rgba(124,245,255,.13)', border: '1px solid rgba(124,245,255,.28)' }}>
-                쿠팡 광고는 언제부터 돌리는 게 좋나요?
+                {COACH_TALKS[talkIdx].q}
               </div>
-              <div className="max-w-[92%] rounded-[14px] rounded-bl-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-[#dae1f0]"
-                   style={{ background: 'rgba(255,255,255,.05)', border: '1px solid #31406b' }}>
-                리뷰 <b className="text-white">10개 · 평점 4.5 이상</b>이 붙기 전엔 광고비가 그냥 나갑니다.
-                유입은 늘어도 전환이 안 붙거든요. 먼저 체험단이나 지인 구매로 리뷰를 쌓고,
-                그다음 <b className="text-white">전환율 3%</b>가 확인되면 그때 켜세요.
-              </div>
-              <div className="ml-auto max-w-[85%] rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-white"
-                   style={{ background: 'rgba(124,245,255,.13)', border: '1px solid rgba(124,245,255,.28)' }}>
-                마진 15%면 괜찮은 편인가요?
-              </div>
-              <div className="flex items-center gap-1.5 px-1 text-[12px] text-[#98a3bf]">
-                <span className="hp-dot" style={{ width: 6, height: 6 }} />
-                답변을 작성하고 있습니다…
-              </div>
+
+              {talkTyped ? (
+                <div className="max-w-[94%] rounded-[14px] rounded-bl-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-[#dae1f0]"
+                     style={{ background: 'rgba(255,255,255,.05)', border: '1px solid #31406b' }}>
+                  {talkTyped}
+                  {!talkDone && <span className="hp-caret" />}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-1 text-[12px] text-[#98a3bf]">
+                  <span className="hp-dot" style={{ width: 6, height: 6 }} />
+                  훈프로 코칭AI가 답변을 작성하고 있습니다…
+                </div>
+              )}
+
+              {talkDone && (
+                <div className="hp-fade flex items-center gap-2 rounded-[11px] px-3 py-2 text-[12.5px] font-semibold tracking-tight"
+                     style={{ background: 'rgba(124,245,255,.08)', border: '1px solid rgba(124,245,255,.24)', color: '#7cf5ff' }}>
+                  {COACH_TALKS[talkIdx].flow}
+                </div>
+              )}
             </div>
 
-            <p className="mt-4 border-t pt-3 text-[11.5px] text-[#98a3bf]" style={{ borderColor: '#31406b' }}>
+            {/* 진행 표시 — 지금 몇 번째 대화인지 */}
+            <div className="mt-4 flex gap-1.5" aria-hidden="true">
+              {COACH_TALKS.map((_, i) => (
+                <span
+                  key={i}
+                  className="h-1 flex-1 rounded-full transition-colors"
+                  style={{ background: i === talkIdx ? '#7cf5ff' : '#31406b' }}
+                />
+              ))}
+            </div>
+
+            <p className="mt-3 border-t pt-3 text-[11.5px] text-[#98a3bf]" style={{ borderColor: '#31406b' }}>
               실제 답변 예시입니다. 질문 내용에 따라 답은 달라집니다.
             </p>
           </div>
