@@ -31,9 +31,10 @@
 | 방법 | 월 비용 | 비고 |
 |---|---|---|
 | Vercel Static IPs | 약 $100 (14만원) + 전송량 | **쓰지 않는다.** 아래 방법과 결과가 같은데 값이 20배다 |
-| AWS Lightsail 최소 인스턴스 | $5 (약 7천원) | 고정 IP 포함, 전송 1TB 포함. 가장 무난 |
-| Vultr · Hetzner 최소 인스턴스 | $4~5 (약 6~7천원) | 같은 수준 |
-| 오라클 클라우드 Always Free | 0원 | 평생 무료지만 인스턴스 확보가 어렵고 2026년 8월 한도가 줄었다. 되면 좋고 안 되면 위로 |
+| **AWS Lightsail 서울** | **$5 (약 7천원)** | **이걸 쓴다.** 고정 IP·전송 1TB 포함 |
+| Vultr 서울 | $5 (약 7천원) | 같은 수준의 대안 |
+| Hetzner | $4~5 | 싸지만 아시아 리전이 없어 쿠팡 호출이 멀다 |
+| 오라클 클라우드 Always Free | 0원 | 권하지 않는다. 인스턴스가 회수되면 전체 수집이 멈춘다 |
 
 중계 서버가 하는 일은 요청을 그대로 넘기는 것뿐이라 가장 싼 인스턴스로 충분하다.
 CPU도 메모리도 거의 쓰지 않는다.
@@ -48,20 +49,112 @@ CPU도 메모리도 거의 쓰지 않는다.
 
 ## 2. 중계 서버 띄우기
 
-고정 IP가 있는 서버(라이트세일, 오라클 무료 티어, 국내 VPS 등 무엇이든)에서:
+### 무엇에 가입해야 하나
+
+**AWS Lightsail, 서울 리전, 월 $5 플랜.** 이유는 셋이다.
+
+- 고정 IP가 요금에 포함돼 있고 별도 설정이 없다
+- 서울 리전이 있어 쿠팡 호출이 가장 빠르다
+- 전송량 1TB가 포함이라 초과 걱정이 없다
+
+**오라클 무료 티어는 권하지 않는다.** 공짜지만 인스턴스 확보가 어렵고, 정책이 바뀌거나
+인스턴스가 회수되면 **모든 판매자의 수집이 한꺼번에 멈춘다**. 서비스 전체가 이 서버 하나에
+매달려 있는데 7천원을 아끼려고 걸 위험이 아니다.
+
+Vultr 서울 리전도 같은 가격대로 무난하다. Hetzner는 싸지만 아시아 리전이 없어 쿠팡 호출이 멀다.
+
+### 만드는 순서
+
+1. Lightsail 콘솔에서 인스턴스 생성
+   - 리전: **서울 (ap-northeast-2)**
+   - 이미지: Linux/Unix → OS 전용 → **Ubuntu 24.04 LTS**
+   - 플랜: **$5/월** (2 vCPU · 512MB · 1TB 전송)
+2. 인스턴스 생성 후 [네트워킹] 탭에서 **고정 IP 연결**
+   (기본 IP는 재부팅 시 바뀐다. 반드시 고정 IP를 붙일 것)
+3. 같은 탭의 방화벽에서 **80, 443 포트 열기**
+4. 도메인에 서브도메인을 하나 만들어 그 고정 IP로 A 레코드를 건다
+   (예: `relay.hoonproai.com`)
+
+### 설치
+
+SSH로 접속한 뒤:
 
 ```bash
-# Node 18 이상
-RELAY_SECRET="충분히-긴-랜덤-문자열" PORT=8080 node scripts/coupang-relay.mjs
+# Node 22
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Caddy — 우분투 기본 저장소에 없어 공식 저장소를 먼저 등록한다
+sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+  | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+  | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt-get update && sudo apt-get install -y caddy
+
+# 비밀키 만들기 — 이 값을 Vercel에도 그대로 넣는다
+openssl rand -hex 32
 ```
 
-앞단에 HTTPS를 붙인다(Caddy·nginx 등). **평문 HTTP로 열지 말 것** — 요청에 쿠팡 서명 헤더가
-실려 나간다.
+중계 서버 파일은 로컬에서 올린다.
+
+```bash
+scp -i 키.pem scripts/coupang-relay.mjs ubuntu@고정IP:~/
+```
+
+서비스로 등록해 재부팅에도 살아 있게 한다.
+
+```bash
+sudo tee /etc/systemd/system/coupang-relay.service > /dev/null <<'EOF'
+[Unit]
+Description=Coupang API relay
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/node /home/ubuntu/coupang-relay.mjs
+Environment=PORT=8080
+Environment=RELAY_SECRET=여기에-위에서-만든-값
+Restart=always
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable --now coupang-relay
+```
+
+HTTPS를 붙인다. Caddy가 인증서를 자동으로 받아 준다.
+
+```bash
+sudo tee /etc/caddy/Caddyfile > /dev/null <<'EOF'
+relay.hoonproai.com {
+  reverse_proxy localhost:8080
+}
+EOF
+
+sudo systemctl restart caddy
+```
+
+**평문 HTTP로 열지 말 것.** 요청에 쿠팡 서명 헤더가 실려 나간다.
+
+### 확인
+
+```bash
+curl https://relay.hoonproai.com/health
+# {"ok":true}
+```
+
+이제 Vercel 환경변수에 아래 셋을 넣으면 끝이다.
+
+```
+COUPANG_RELAY_URL=https://relay.hoonproai.com/relay
+COUPANG_RELAY_SECRET=위에서 만든 값
+COUPANG_RELAY_IP=Lightsail 고정 IP
+```
 
 중계 서버는 목적지를 `api-gateway.coupang.com`으로 고정하고 공유 비밀키가 맞을 때만 응답한다.
-서명은 훈프로 서버에서 이미 끝난 상태로 오므로 중계는 키를 모른다.
-
-`GET /health`로 살아 있는지 확인할 수 있다.
+서명은 훈프로 서버에서 이미 끝난 상태로 오므로 중계는 판매자의 키를 모른다.
 
 ---
 
