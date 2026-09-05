@@ -388,6 +388,20 @@ export function AuthGate({ onSuccess }: Props) {
     authRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
+  // 요금 카드에서 고른 플랜 — 가입 후 구독 화면이 이 값을 그대로 선택해준다
+  const [pickedInterval, setPickedInterval] = useState<'year' | 'month'>('year');
+
+  const startSignup = (interval: 'year' | 'month') => {
+    setPickedInterval(interval);
+    try {
+      sessionStorage.setItem('hoonpro_plan_intent', interval);
+    } catch { /* 저장 실패해도 가입은 진행된다 */ }
+    setHelper(null);
+    setMode('signup');
+    setMessage(null);
+    scrollToAuth();
+  };
+
   const keywordBubbles = useMemo(() =>
     KEYWORDS.slice(0, KEYWORD_SPOTS.length).map((k, i) => {
       const p = KEYWORD_SPOTS[i];
@@ -763,7 +777,7 @@ export function AuthGate({ onSuccess }: Props) {
                 : emailCodeRequired
                   ? '이메일 인증 즉시 모든 AI 도구가 열립니다'
                   : mode === 'signup'
-                    ? '가입 후 관리자 승인이 완료되면 이용하실 수 있습니다'
+                    ? '가입 즉시 모든 AI 도구를 이용할 수 있습니다'
                     : '이메일과 비밀번호로 로그인하세요'}
             </p>
 
@@ -1104,6 +1118,79 @@ export function AuthGate({ onSuccess }: Props) {
       </main>
 
       {/* ─── 요금 안내 (비회원도 가입 전에 가격을 확인할 수 있어야 한다) ─── */}
+      {/* ─── 훈프로 코칭AI ─── */}
+      <section className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#31406b' }}>
+        <div className="mx-auto grid max-w-[1000px] items-center gap-10 md:grid-cols-2">
+          <div>
+            <p className="text-[11.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: '#7cf5ff' }}>
+              COACHING AI
+            </p>
+            <h2 className="mt-2.5 text-[26px] font-bold leading-tight tracking-[-0.02em] text-white md:text-[30px]">
+              막히는 지점마다,<br />훈프로가 옆에 있습니다
+            </h2>
+            <p className="mt-4 text-[14px] leading-relaxed text-[#b9c2d8]">
+              검색해도 안 나오고, 물어볼 데도 없는 질문이 있습니다.
+              언제 광고를 켜야 하는지, 이 마진이 정상인지, 리뷰가 안 붙을 땐 뭘 해야 하는지.
+              <b className="text-white"> 훈프로의 노하우를 학습한 AI</b>가 답합니다.
+            </p>
+
+            <ul className="mt-6 flex flex-col gap-2.5">
+              {[
+                '쿠팡 판매 실무에 맞춘 답 — 일반 AI의 원론적인 답변이 아닙니다',
+                '새벽에도 즉시 답변, 질문 횟수 제한 없음',
+                '이전 질문과 답변이 남아 다시 찾아볼 수 있습니다',
+              ].map(t => (
+                <li key={t} className="flex items-start gap-2 text-[13.5px] leading-relaxed text-[#dae1f0]">
+                  <Check className="mt-[3px] h-3.5 w-3.5 shrink-0" style={{ color: '#3ee7a3' }} />
+                  {t}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* 대화 예시 */}
+          <div
+            className="rounded-[20px] border p-5 sm:p-6"
+            style={{ background: 'rgba(38,52,88,.55)', borderColor: '#31406b', backdropFilter: 'blur(10px)' }}
+          >
+            <div className="mb-4 flex items-center gap-2">
+              <div
+                className="flex h-7 w-7 items-center justify-center rounded-[9px]"
+                style={{ background: 'linear-gradient(135deg,#7cf5ff,#8b7bff)' }}
+              >
+                <MessageCircleQuestion className="h-4 w-4" style={{ color: '#101a2e' }} />
+              </div>
+              <span className="text-[13px] font-semibold text-white">훈프로 코칭AI</span>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div className="ml-auto max-w-[85%] rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-white"
+                   style={{ background: 'rgba(124,245,255,.13)', border: '1px solid rgba(124,245,255,.28)' }}>
+                쿠팡 광고는 언제부터 돌리는 게 좋나요?
+              </div>
+              <div className="max-w-[92%] rounded-[14px] rounded-bl-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-[#dae1f0]"
+                   style={{ background: 'rgba(255,255,255,.05)', border: '1px solid #31406b' }}>
+                리뷰 <b className="text-white">10개 · 평점 4.5 이상</b>이 붙기 전엔 광고비가 그냥 나갑니다.
+                유입은 늘어도 전환이 안 붙거든요. 먼저 체험단이나 지인 구매로 리뷰를 쌓고,
+                그다음 <b className="text-white">전환율 3%</b>가 확인되면 그때 켜세요.
+              </div>
+              <div className="ml-auto max-w-[85%] rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-white"
+                   style={{ background: 'rgba(124,245,255,.13)', border: '1px solid rgba(124,245,255,.28)' }}>
+                마진 15%면 괜찮은 편인가요?
+              </div>
+              <div className="flex items-center gap-1.5 px-1 text-[12px] text-[#98a3bf]">
+                <span className="hp-dot" style={{ width: 6, height: 6 }} />
+                답변을 작성하고 있습니다…
+              </div>
+            </div>
+
+            <p className="mt-4 border-t pt-3 text-[11.5px] text-[#98a3bf]" style={{ borderColor: '#31406b' }}>
+              실제 답변 예시입니다. 질문 내용에 따라 답은 달라집니다.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section id="pricing" className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#31406b' }}>
         <div className="mx-auto max-w-[880px]">
           <div className="text-center">
@@ -1112,7 +1199,7 @@ export function AuthGate({ onSuccess }: Props) {
               도구 하나 값으로, 팀 하나를 씁니다
             </h2>
             <p className="mt-3 text-[14px] leading-relaxed text-[#b9c2d8]">
-              7가지 AI 도구를 하나의 구독으로. 언제든 해지할 수 있고, 해지해도 남은 기간은 그대로 이용합니다.
+              훈프로 코칭AI를 포함한 8가지 도구를 하나의 구독으로. 언제든 해지할 수 있고, 해지해도 남은 기간은 그대로 이용합니다.
             </p>
           </div>
 
@@ -1120,15 +1207,33 @@ export function AuthGate({ onSuccess }: Props) {
             {/* 연간 — 추천 */}
             {yearly && (
               <div
-                className="hp-login-card relative rounded-[20px] border p-7"
+                role="radio"
+                aria-checked={pickedInterval === 'year'}
+                tabIndex={0}
+                onClick={() => setPickedInterval('year')}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPickedInterval('year'); } }}
+                className="hp-login-card hp-plan relative cursor-pointer rounded-[20px] border p-7 transition-all"
                 style={{
                   background: 'linear-gradient(180deg, rgba(38,52,88,.92), rgba(25,36,66,.94))',
-                  borderColor: '#31406b',
-                  boxShadow: '0 30px 70px -30px rgba(0,0,0,.7)',
+                  borderColor: pickedInterval === 'year' ? '#7cf5ff' : '#31406b',
+                  boxShadow: pickedInterval === 'year'
+                    ? '0 30px 70px -30px rgba(0,0,0,.7), 0 0 0 3px rgba(124,245,255,.18)'
+                    : '0 30px 70px -30px rgba(0,0,0,.7)',
                 }}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[14px] font-semibold text-white">연간 결제</span>
+                  <span className="flex items-center gap-2 text-[14px] font-semibold text-white">
+                    <span
+                      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
+                      style={{
+                        borderColor: pickedInterval === 'year' ? '#7cf5ff' : '#54628a',
+                        background: pickedInterval === 'year' ? '#7cf5ff' : 'transparent',
+                      }}
+                    >
+                      {pickedInterval === 'year' && <Check className="h-3 w-3" strokeWidth={3} style={{ color: '#101a2e' }} />}
+                    </span>
+                    연간 결제
+                  </span>
                   {yearlyDiscount > 0 && (
                     <span
                       className="rounded-full px-2.5 py-1 text-[11px] font-bold"
@@ -1153,8 +1258,8 @@ export function AuthGate({ onSuccess }: Props) {
                   </p>
                 )}
                 <button
-                  onClick={scrollToAuth}
-                  className="hp-submit hp-cta group mt-6 flex w-full items-center justify-center gap-1.5 rounded-[11px] py-3 text-[14px]"
+                  onClick={e => { e.stopPropagation(); startSignup('year'); }}
+                  className="hp-submit hp-cta group mt-6 flex w-full min-h-[48px] items-center justify-center gap-1.5 rounded-[11px] py-3 text-[14px]"
                 >
                   연간으로 시작하기 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" />
                 </button>
@@ -1164,10 +1269,30 @@ export function AuthGate({ onSuccess }: Props) {
             {/* 월간 */}
             {monthly && (
               <div
-                className="rounded-[20px] border p-7"
-                style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
+                role="radio"
+                aria-checked={pickedInterval === 'month'}
+                tabIndex={0}
+                onClick={() => setPickedInterval('month')}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPickedInterval('month'); } }}
+                className="hp-plan cursor-pointer rounded-[20px] border p-7 transition-all"
+                style={{
+                  background: 'rgba(255,255,255,.045)',
+                  borderColor: pickedInterval === 'month' ? '#7cf5ff' : '#31406b',
+                  boxShadow: pickedInterval === 'month' ? '0 0 0 3px rgba(124,245,255,.18)' : 'none',
+                }}
               >
-                <span className="text-[14px] font-semibold text-white">월간 결제</span>
+                <span className="flex items-center gap-2 text-[14px] font-semibold text-white">
+                  <span
+                    className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
+                    style={{
+                      borderColor: pickedInterval === 'month' ? '#7cf5ff' : '#54628a',
+                      background: pickedInterval === 'month' ? '#7cf5ff' : 'transparent',
+                    }}
+                  >
+                    {pickedInterval === 'month' && <Check className="h-3 w-3" strokeWidth={3} style={{ color: '#101a2e' }} />}
+                  </span>
+                  월간 결제
+                </span>
                 <div className="mt-4 flex items-baseline gap-1.5">
                   <span className="text-[38px] font-bold tracking-[-0.03em] text-white tabular">
                     {monthly.price.toLocaleString()}
@@ -1176,8 +1301,8 @@ export function AuthGate({ onSuccess }: Props) {
                 </div>
                 <p className="mt-1.5 text-[12.5px] text-[#98a3bf]">매월 자동결제 · 부담 없이 시작</p>
                 <button
-                  onClick={scrollToAuth}
-                  className="mt-6 w-full rounded-[11px] border py-3 text-[14px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5"
+                  onClick={e => { e.stopPropagation(); startSignup('month'); }}
+                  className="mt-6 min-h-[48px] w-full rounded-[11px] border py-3 text-[14px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5"
                   style={{ borderColor: '#31406b', background: 'rgba(255,255,255,.045)' }}
                 >
                   월간으로 시작하기
@@ -1204,7 +1329,11 @@ export function AuthGate({ onSuccess }: Props) {
           </div>
 
           <p className="mt-5 text-center text-[12px] leading-relaxed text-[#98a3bf]">
-            표시 금액은 부가세 포함입니다. 결제 후 7일 이내 미사용 시 전액 환불되며,
+            <b className="text-[#dae1f0]">
+              {pickedInterval === 'year' ? '연간 결제' : '월간 결제'}를 선택하셨습니다.
+            </b>{' '}
+            [시작하기]를 누르면 가입 화면으로 이동하고, 가입 후 이 플랜이 자동으로 선택됩니다.
+            <br />표시 금액은 부가세 포함입니다. 결제 후 7일 이내 미사용 시 전액 환불되며,
             그 외에는 <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="underline hover:text-white">환불 정책</a>에 따라 처리됩니다.
             <br />결제일 7일 전 이메일로 미리 안내드립니다.
           </p>
