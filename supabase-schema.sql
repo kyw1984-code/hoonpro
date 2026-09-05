@@ -432,3 +432,14 @@ alter table subscriptions add column if not exists cancel_reason_detail text;
 
 -- 온보딩 카드를 닫은 시각 (완료 여부는 실제 사용 데이터로 판정하므로 별도 저장하지 않는다)
 alter table users add column if not exists onboarding_dismissed_at timestamptz;
+
+-- ─────────────────────────────────────────────────────────────
+-- 24. 매출 집계 — 환불액 기록
+-- ─────────────────────────────────────────────────────────────
+-- 기존에는 환불 시 status만 바꿔서 부분 환불 금액을 알 수 없었고,
+-- 그래서 순매출(결제액 − 환불액)을 계산할 수 없었다.
+alter table payments add column if not exists refunded_amount int default 0;
+alter table payments add column if not exists refunded_at timestamptz;
+
+-- 월별 매출 집계용
+create index if not exists idx_payments_created on payments(created_at);

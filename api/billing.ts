@@ -408,6 +408,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action.startsWith('admin-')) {
       if (!user.isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
       if (action === 'admin-stats') return await adminStats(res);
+      if (action === 'admin-revenue') return await adminRevenue(res);
       if (action === 'admin-coupons') return await adminCoupons(res);
       if (action === 'admin-coupon-create') return await adminCouponCreate(req, res);
       if (action === 'admin-coupon-update') return await adminCouponUpdate(req, res);
@@ -795,6 +796,8 @@ async function refund(user: any, res: VercelResponse) {
     if (!cancel.ok) return res.status(502).json({ error: `환불 처리에 실패했습니다: ${cancel.message}` });
     await supabase.from('payments').update({
       status: refundAmount === payment.amount ? 'refunded' : 'partial_refund',
+      refunded_amount: refundAmount,
+      refunded_at: new Date().toISOString(),
     }).eq('id', payment.id);
   }
 
@@ -828,11 +831,17 @@ async function tossWebhook(req: VercelRequest, res: VercelResponse) {
   };
   const mapped = statusMap[payment.status];
   if (mapped && payment.orderId) {
+    // 토스 관리자 화면에서 취소하면 앱을 거치지 않으므로 환불액이 남지 않는다.
+    // 총액 − 잔액으로 역산해 기록해야 순매출 집계가 맞는다.
+    const refundedAmount = Math.max(0, Number(payment.totalAmount ?? 0) - Number(payment.balanceAmount ?? 0));
+    const isRefund = mapped === 'refunded' || mapped === 'partial_refund';
+
     await supabase.from('payments').update({
       status: mapped,
       payment_key: payment.paymentKey,
       receipt_url: payment.receipt?.url ?? null,
       approved_at: payment.approvedAt ?? null,
+      ...(isRefund ? { refunded_amount: refundedAmount, refunded_at: new Date().toISOString() } : {}),
     }).eq('order_id', payment.orderId);
 
     // 앱이 아닌 토스 관리자 화면에서 전액 취소했거나 카드사 이의제기가 들어온 경우.
@@ -1057,6 +1066,118 @@ async function getReferralCode(user: { userId: string }, res: VercelResponse) {
 }
 
 // 수익 요약 — 구독자 수(상태별)·MRR 추정·최근 30일 결제액·해지 수
+// ── 매출 집계 ──────────────────────────────────────────────
+// 순매출 = 결제액 − 환불액. 환불은 결제가 일어난 달이 아니라
+// 환불이 일어난 달에서 빼야 그 달의 실제 입금액과 맞는다.
+async function adminRevenue(res: VercelResponse) {
+  const MONTHS = 12;
+  const from = new Date();
+  from.setUTCMonth(from.getUTCMonth() - (MONTHS - 1), 1);
+  from.setUTCHours(0, 0, 0, 0);
+
+  const [{ data: pays }, { data: planRows }] = await Promise.all([
+    supabase
+      .from('payments')
+      .select('amount, status, refunded_amount, refunded_at, created_at, user_id, subscriptions(plan_id)')
+      .in('status', ['paid', 'refunded', 'partial_refund']),
+    supabase.from('plans').select('id, name, interval'),
+  ]);
+
+  const planMap = new Map((planRows ?? []).map(p => [p.id, p]));
+  const monthKey = (iso: string) => {
+    const d = new Date(iso);
+    // KST 기준으로 월을 가른다 (자정 직후 결제가 전날 달로 잡히지 않게)
+    const kst = new Date(d.getTime() + 9 * 3600_000);
+    return `${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}`;
+  };
+
+  // 최근 12개월 축 (결제가 없는 달도 빈칸으로 남긴다)
+  const months: string[] = [];
+  for (let i = MONTHS - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setUTCMonth(d.getUTCMonth() - i, 1);
+    const kst = new Date(d.getTime() + 9 * 3600_000);
+    months.push(`${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}`);
+  }
+
+  type Bucket = { gross: number; refund: number; count: number; payers: Set<string> };
+  const buckets = new Map<string, Bucket>(
+    months.map(m => [m, { gross: 0, refund: 0, count: 0, payers: new Set<string>() }]),
+  );
+
+  const totals = { gross: 0, refund: 0, count: 0 };
+  const allPayers = new Set<string>();
+  const byPlan = new Map<string, { name: string; interval: string; net: number; count: number }>();
+
+  for (const p of pays ?? []) {
+    const amount = Number(p.amount || 0);
+    const refunded = Number(p.refunded_amount || 0);
+
+    totals.gross += amount;
+    totals.refund += refunded;
+    totals.count += 1;
+    if (p.user_id) allPayers.add(p.user_id);
+
+    const mk = monthKey(p.created_at);
+    const b = buckets.get(mk);
+    if (b) {
+      b.gross += amount;
+      b.count += 1;
+      if (p.user_id) b.payers.add(p.user_id);
+    }
+
+    // 환불은 환불 시점의 달에서 차감
+    if (refunded > 0) {
+      const rk = monthKey(p.refunded_at || p.created_at);
+      const rb = buckets.get(rk);
+      if (rb) rb.refund += refunded;
+    }
+
+    const planId = (p as any).subscriptions?.plan_id;
+    const plan = planId ? planMap.get(planId) : null;
+    const key = plan?.id ?? 'unknown';
+    const cur = byPlan.get(key) ?? {
+      name: plan?.name ?? '(플랜 정보 없음)',
+      interval: plan?.interval ?? 'month',
+      net: 0, count: 0,
+    };
+    cur.net += amount - refunded;
+    cur.count += 1;
+    byPlan.set(key, cur);
+  }
+
+  const monthly = months.map(m => {
+    const b = buckets.get(m)!;
+    return {
+      month: m,
+      gross: b.gross,
+      refund: b.refund,
+      net: b.gross - b.refund,
+      count: b.count,
+      payers: b.payers.size,
+    };
+  });
+
+  const thisMonth = monthly[monthly.length - 1];
+  const lastMonth = monthly[monthly.length - 2];
+
+  return res.status(200).json({
+    totals: {
+      gross: totals.gross,
+      refund: totals.refund,
+      net: totals.gross - totals.refund,
+      count: totals.count,
+      payers: allPayers.size,
+    },
+    thisMonth,
+    lastMonth: lastMonth ?? null,
+    // 결제자 1명당 이번 달 순매출
+    arpu: thisMonth.payers > 0 ? Math.round(thisMonth.net / thisMonth.payers) : 0,
+    monthly,
+    byPlan: [...byPlan.values()].sort((a, b) => b.net - a.net),
+  });
+}
+
 async function adminStats(res: VercelResponse) {
   const monthAgo = new Date(Date.now() - 30 * 86400000).toISOString();
   const [{ data: subs }, { data: planRows }, { data: pays }] = await Promise.all([
