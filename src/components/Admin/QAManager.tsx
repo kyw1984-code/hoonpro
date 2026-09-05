@@ -45,8 +45,8 @@ export function QAManager({ showToast }: { showToast: (msg: string) => void }) {
   const handleToggle = async () => {
     if (enabled === null || toggling) return;
     const next = !enabled;
-    if (!next && !confirm('수강생의 "훈프로에게 질문" 사용을 중지하시겠습니까?\n수강생 화면에서 탭이 숨겨집니다. (관리자는 계속 사용 가능)')) return;
-    if (next && !confirm('수강생에게 "훈프로에게 질문" 탭을 공개하시겠습니까?')) return;
+    if (!next && !confirm('수강생의 "훈프로 코칭AI" 사용을 중지하시겠습니까?\n수강생 화면에서 탭이 숨겨집니다. (관리자는 계속 사용 가능)')) return;
+    if (next && !confirm('수강생에게 "훈프로 코칭AI" 탭을 공개하시겠습니까?')) return;
     setToggling(true);
     try {
       const res = await fetch('/api/qa?action=toggle', {
@@ -69,7 +69,7 @@ export function QAManager({ showToast }: { showToast: (msg: string) => void }) {
     <div>
       <div className="mb-2 flex items-center gap-2">
         <BookOpen className="h-5 w-5 text-accent" />
-        <h2 className="text-lg font-semibold text-ink">훈프로에게 질문 — 지식 관리</h2>
+        <h2 className="text-lg font-semibold text-ink">훈프로 코칭AI — 지식 관리</h2>
       </div>
       <p className="mb-5 text-[13px] text-ink-2">
         강의 정리본을 업로드하면 자동으로 청크 분할·임베딩되어 수강생 질문 답변의 근거 자료로 사용됩니다.

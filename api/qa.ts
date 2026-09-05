@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 
-// "훈프로에게 질문" RAG 챗봇 통합 API
+// "훈프로 코칭AI" RAG 챗봇 통합 API
 // Vercel Hobby 함수 개수 제한(12개) 때문에 action 파라미터로 통합
 //  - action=ask      (수강생) 질문 → 지식 검색 → 훈프로 말투 답변
 //  - action=feedback (수강생) 답변 👍👎 피드백

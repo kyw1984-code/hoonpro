@@ -51,7 +51,7 @@ function wrapEmail(heading: string, bodyHtml: string): string {
       <div style="font-size:14px;line-height:1.75;color:#b9c0d0;">${bodyHtml}</div>
     </div>
     <div style="padding:16px 28px;border-top:1px solid #1c2542;font-size:11.5px;line-height:1.7;color:#5a627a;">
-      본 메일은 발신 전용입니다. 문의는 서비스 내 [훈프로에게 질문]을 이용해주세요.<br>
+      본 메일은 발신 전용입니다. 문의는 서비스 내 [훈프로 코칭AI]를 이용해주세요.<br>
       <a href="https://hoonproai.com" style="color:#7cf5ff;text-decoration:none;">hoonproai.com</a>
     </div>
   </div>

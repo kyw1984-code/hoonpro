@@ -382,7 +382,7 @@ const TAB_LABELS: { id: string; label: string }[] = [
   { id: 'ranktracker', label: '순위 추적' },
   { id: 'review', label: '리뷰 분석' },
   { id: 'analyzer', label: '광고 성과 분석' },
-  { id: 'qa', label: '훈프로에게 질문' },
+  { id: 'qa', label: '훈프로 코칭AI' },
   { id: 'works', label: '내 작업' },
 ];
 
@@ -441,7 +441,7 @@ function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
         <h2 className="text-lg font-semibold text-ink">탭 순서 설정</h2>
       </div>
       <p className="text-sm text-ink-2 mb-5">
-        상단 탭이 <b>모든 사용자</b>에게 이 순서로 표시됩니다. '훈프로에게 질문'은 공개 OFF 상태면 수강생에게 숨겨진 채 순서만 유지됩니다.
+        상단 탭이 <b>모든 사용자</b>에게 이 순서로 표시됩니다. '훈프로 코칭AI'는 공개 OFF 상태면 수강생에게 숨겨진 채 순서만 유지됩니다.
       </p>
       <div className="bg-paper rounded-card border border-line overflow-hidden">
         {order.map((id, idx) => {

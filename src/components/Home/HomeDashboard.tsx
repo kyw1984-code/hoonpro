@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import {
   TrendingUp, ListOrdered, Zap, ChevronRight, Image as ImageIcon,
-  LayoutTemplate, BarChart3, MessageSquareText, Loader2,
+  LayoutTemplate, BarChart3, MessageSquareText, Loader2, Check, X,
 } from 'lucide-react';
 import { getToken, getUser } from '../../lib/auth';
 
@@ -29,11 +29,44 @@ const ACTION_ACCENTS = [
   { bg: 'rgba(255,180,84,.08)',  border: 'rgba(255,180,84,.22)',  color: '#ffb454' }, // 앰버
 ];
 
+// 온보딩 3단계 — 실제 사용 데이터로 완료를 판정하므로 기존 사용자에게는 뜨지 않는다.
+// 순서는 '핵심 가치 → 재방문 이유 → 즉각적인 결과물' 로 잡았다.
+const ONBOARDING_STEPS = [
+  { key: 'sourcing',  tab: 'sourcing',    title: '팔 상품 찾기',   desc: '소싱AI에서 키워드를 ★로 저장해보세요' },
+  { key: 'rank',      tab: 'ranktracker', title: '내 상품 등록',   desc: '순위 추적에 등록하면 매일 순위가 갱신됩니다' },
+  { key: 'thumbnail', tab: 'thumbnail',   title: '썸네일 만들기',  desc: 'AI로 썸네일 이미지를 하나 생성해보세요' },
+] as const;
+
+interface Onboarding {
+  steps: Record<string, boolean>;
+  done: boolean;
+  dismissed: boolean;
+}
+
 export function HomeDashboard({ onNavigate }: Props) {
+  const [onboarding, setOnboarding] = useState<Onboarding | null>(null);
   const [watches, setWatches] = useState<any[] | null>(null);
   const [report, setReport] = useState<any[] | null>(null);
   const [briefing, setBriefing] = useState<any | null>(null);
   const userName = getUser()?.name || '';
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/usage?action=onboarding', {
+          method: 'POST', headers: authHeaders(),
+        });
+        if (res.ok) setOnboarding(await res.json());
+      } catch { /* 온보딩 실패는 화면을 막지 않는다 */ }
+    })();
+  }, []);
+
+  const dismissOnboarding = async () => {
+    setOnboarding(o => (o ? { ...o, dismissed: true } : o));
+    try {
+      await fetch('/api/usage?action=onboarding-dismiss', { method: 'POST', headers: authHeaders() });
+    } catch { /* 실패해도 이번 세션에서는 숨긴 상태를 유지한다 */ }
+  };
 
   useEffect(() => {
     (async () => {
@@ -106,6 +139,60 @@ export function HomeDashboard({ onNavigate }: Props) {
       <style>{`
         @keyframes hp-blink { 50% { opacity: .35; } }
       `}</style>
+
+      {/* 시작 안내 — 3단계를 다 끝내거나 닫으면 사라진다 */}
+      {onboarding && !onboarding.done && !onboarding.dismissed && (() => {
+        const doneCount = ONBOARDING_STEPS.filter(s => onboarding.steps[s.key]).length;
+        return (
+          <div className="rounded-card border border-accent-line bg-accent-soft p-5">
+            <div className="mb-4 flex items-center gap-3">
+              <h3 className="text-[15px] font-bold text-ink">훈프로 시작하기</h3>
+              <span className="text-[12px] font-semibold tabular-nums text-accent">
+                {doneCount}/{ONBOARDING_STEPS.length} 완료
+              </span>
+              <button
+                type="button"
+                onClick={dismissOnboarding}
+                aria-label="시작 안내 닫기"
+                className="ml-auto flex h-8 w-8 items-center justify-center rounded-control text-ink-3 transition-colors hover:text-ink"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <ul className="flex flex-col gap-2">
+              {ONBOARDING_STEPS.map(step => {
+                const isDone = onboarding.steps[step.key];
+                return (
+                  <li key={step.key} className="flex items-center gap-3 rounded-control border border-line bg-paper px-3.5 py-3">
+                    <span
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
+                        isDone ? 'border-positive bg-positive-soft text-positive' : 'border-line-strong text-transparent'
+                      }`}
+                    >
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[13.5px] font-semibold ${isDone ? 'text-ink-3 line-through' : 'text-ink'}`}>
+                        {step.title}
+                      </p>
+                      {!isDone && <p className="mt-0.5 text-[12px] text-ink-2">{step.desc}</p>}
+                    </div>
+                    {!isDone && (
+                      <button
+                        type="button"
+                        onClick={() => onNavigate(step.tab)}
+                        className="min-h-[36px] shrink-0 rounded-control border border-accent-line px-3 text-[12.5px] font-semibold text-accent transition-colors hover:bg-accent-soft"
+                      >
+                        바로가기
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })()}
 
       {/* 빠른 시작 — 다크 컬러 코딩 */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -185,7 +272,7 @@ export function HomeDashboard({ onNavigate }: Props) {
             <div className="flex items-center gap-2 py-6 text-ink-3"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-[12px]">불러오는 중...</span></div>
           ) : movers.length === 0 ? (
             <p className="py-4 text-[13px] text-ink-2 leading-relaxed">
-              아직 감지된 상품이 없습니다. 소싱AI에서 <span style={{ color: '#ffb454' }}>★</span>로 키워드를 저장하면 매일 자동 수집되고, 리뷰가 빠르게 느는(≒<b className="text-ink font-medium">잘 팔리는</b>) 상품이 여기 표시됩니다.
+              아직 감지된 상품이 없습니다. <button onClick={() => onNavigate('sourcing')} className="font-semibold text-accent hover:underline">소싱AI</button>에서 <span style={{ color: '#ffb454' }}>★</span>로 키워드를 저장하면 매일 자동 수집되고, 리뷰가 빠르게 느는(≒<b className="text-ink font-medium">잘 팔리는</b>) 상품이 여기 표시됩니다.
             </p>
           ) : (
             <div className="flex flex-col gap-2">
@@ -253,7 +340,7 @@ export function HomeDashboard({ onNavigate }: Props) {
 
       <div className="rounded-card border border-line bg-paper px-4 py-3 text-[12px] text-ink-2">
         <MessageSquareText className="mr-1.5 inline h-3.5 w-3.5 align-[-2px] text-accent" />
-        소싱→입고→판매까지 <b className="text-ink font-semibold">1~2개월</b> — 항상 다음 달 팔릴 상품을 준비하세요. 궁금한 건 <b className="text-ink font-semibold">[훈프로에게 질문]</b>에서 물어볼 수 있습니다.
+        소싱→입고→판매까지 <b className="text-ink font-semibold">1~2개월</b> — 항상 다음 달 팔릴 상품을 준비하세요. 막히는 건 <b className="text-ink font-semibold">[훈프로 코칭AI]</b>에서 물어볼 수 있습니다.
       </div>
     </div>
   );

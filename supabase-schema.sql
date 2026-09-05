@@ -421,3 +421,14 @@ language sql
 as $$
   update coupons set redeemed_count = coalesce(redeemed_count, 0) + 1 where id = p_coupon_id;
 $$;
+
+-- ─────────────────────────────────────────────────────────────
+-- 23. 해지 사유 수집 · 온보딩
+-- ─────────────────────────────────────────────────────────────
+
+-- 해지 시 사유 (개선 지점을 찾기 위한 수집. 선택 입력)
+alter table subscriptions add column if not exists cancel_reason text;
+alter table subscriptions add column if not exists cancel_reason_detail text;
+
+-- 온보딩 카드를 닫은 시각 (완료 여부는 실제 사용 데이터로 판정하므로 별도 저장하지 않는다)
+alter table users add column if not exists onboarding_dismissed_at timestamptz;
