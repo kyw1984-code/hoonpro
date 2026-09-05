@@ -17,7 +17,7 @@ const STATUS_TEXT: Record<RankRevenueItem['status'], string> = {
   ok: '',
   'few-days': '순위와 판매가 함께 기록된 날이 아직 적어 관계를 계산하지 않았습니다. 며칠 더 쌓이면 자동으로 나옵니다.',
   'flat-rank': '이 기간 순위가 거의 변하지 않아 영향을 가늠할 수 없습니다. 순위가 움직이면 계산됩니다.',
-  'no-orders': '이 상품의 주문 데이터를 찾지 못했습니다. 쿠팡 수집이 한 번 돌아야 연결됩니다.',
+  'no-orders': '이 상품의 주문을 아직 찾지 못했습니다. 최근 90일에 주문이 없었거나, 상품 정보 수집이 아직 이 상품까지 닿지 않은 것입니다.',
 };
 
 function strengthLabel(r: number): string {

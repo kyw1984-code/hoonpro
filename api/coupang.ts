@@ -403,6 +403,7 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
   if (!supabase) return;
 
   const sellerProductIds: Array<{ id: string; name: string; status: string }> = [];
+  let listingComplete = false;
   let nextToken = '';
   for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
     if (outOfTime(deadline, sum)) return;
@@ -423,7 +424,10 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
       });
     }
     nextToken = nextTokenOf(r.data);
-    if (!nextToken) break;
+    if (!nextToken) {
+      listingComplete = true;
+      break;
+    }
   }
 
   // 상세를 가져올 대상 — 아직 한 번도 못 받았거나 가장 오래된 것 우선
@@ -477,6 +481,26 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
   const err = await upsertChunked('coupang_items', rows, 'user_id,vendor_item_id');
   if (err) sum.errors.push(err);
   sum.items = rows.length;
+
+  // 목록에서 사라진 등록상품은 삭제됐거나 단종된 것이다. 남겨 두면 재고 화면과
+  // 가격 규칙에 계속 등장하고, 자동 반영이 없는 상품에 매일 가격을 넣으려다
+  // 실패 로그를 쌓는다. 목록을 끝까지 받은 회차에만 정리한다 — 중간에 끊긴
+  // 목록으로 지우면 멀쩡한 상품이 사라진다.
+  if (listingComplete && sellerProductIds.length > 0) {
+    const keep = new Set(sellerProductIds.map(sp => sp.id));
+    const { data: existing } = await supabase
+      .from('coupang_items')
+      .select('vendor_item_id, seller_product_id')
+      .eq('user_id', userId);
+    const gone = (existing ?? [])
+      .filter(e => e.seller_product_id && !keep.has(String(e.seller_product_id)))
+      .map(e => String(e.vendor_item_id));
+    for (let i = 0; i < gone.length; i += 200) {
+      const slice = gone.slice(i, i + 200);
+      await supabase.from('coupang_items').delete().eq('user_id', userId).in('vendor_item_id', slice);
+      await supabase.from('coupang_price_rules').delete().eq('user_id', userId).in('vendor_item_id', slice);
+    }
+  }
 }
 
 // ── 주문 동기화 (발주서) ──────────────────────────────────────
@@ -1303,10 +1327,12 @@ async function handleStatus(userId: string, res: VercelResponse) {
     });
   }
 
-  const [{ count: itemCount }, { count: salesDays }] = await Promise.all([
+  const [{ count: itemCount }, salesDatesRes] = await Promise.all([
     supabase!.from('coupang_items').select('vendor_item_id', { count: 'exact', head: true }).eq('user_id', userId),
-    supabase!.from('coupang_sales_daily').select('sale_date', { count: 'exact', head: true }).eq('user_id', userId),
+    // 행 수는 날짜 × 옵션이라 '일치'가 아니다. 날짜를 세야 한다.
+    supabase!.from('coupang_sales_daily').select('sale_date').eq('user_id', userId),
   ]);
+  const salesDays = new Set((salesDatesRes.data ?? []).map(r => String(r.sale_date))).size;
 
   return res.status(200).json({
     connected: true,
@@ -1318,7 +1344,7 @@ async function handleStatus(userId: string, res: VercelResponse) {
     keyIssuedAt: acc.key_issued_at,
     daysToExpiry: daysToExpiry(acc.key_issued_at),
     itemCount: itemCount ?? 0,
-    salesDays: salesDays ?? 0,
+    salesDays,
     relayIp: process.env.COUPANG_RELAY_IP || null,
   });
 }
@@ -2000,9 +2026,14 @@ export async function computeInventory(
     const velocity = s28 > 0 ? s28 / 28 : s7 > 0 ? s7 / 7 : 0;
     const daysLeft = velocity > 0 ? stock / velocity : null;
 
+    // 재고 0은 판매 속도와 무관하게 품절이다. 오래 품절된 상품일수록 최근 판매가
+    // 없어 속도가 0인데, 그걸 '위험 없음'으로 읽으면 기능이 잡아야 할 것을 숨긴다.
+    // 판매자가 스스로 판매를 멈춘 옵션만 따로 뺀다.
+    const stopped = /STOP|중지|SUSPEND|종료/i.test(String(it.status ?? ''));
     let risk: InventoryRow['risk'];
-    if (velocity === 0) risk = stock > 0 ? 'idle' : 'ok';
+    if (stopped) risk = 'idle';
     else if (stock <= 0) risk = 'out';
+    else if (velocity === 0) risk = 'idle';
     else if (daysLeft! <= 7) risk = 'urgent';
     else if (daysLeft! <= 14) risk = 'watch';
     else if (daysLeft! > 90) risk = 'excess';
@@ -2506,14 +2537,24 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
     .eq('user_id', userId)
     .in('product_id', productIds);
 
+  // 상품 상세에 노출상품ID가 없거나 아직 못 받았어도, 발주서에는 주문마다
+  // 노출상품ID가 실려 온다. 두 경로를 합쳐야 연결이 끊기지 않는다.
+  const { data: orderLinks } = await supabase!
+    .from('coupang_orders_daily')
+    .select('vendor_item_id, product_id')
+    .eq('user_id', userId)
+    .in('product_id', productIds)
+    .gte('order_date', from);
+
   const vendorItemsByProduct = new Map<string, string[]>();
-  for (const it of items ?? []) {
-    const pid = String(it.product_id ?? '');
-    if (!pid) continue;
+  const addLink = (pid: string, vid: string) => {
+    if (!pid || !vid) return;
     const list = vendorItemsByProduct.get(pid) ?? [];
-    list.push(String(it.vendor_item_id));
+    if (!list.includes(vid)) list.push(vid);
     vendorItemsByProduct.set(pid, list);
-  }
+  };
+  for (const it of items ?? []) addLink(String(it.product_id ?? ''), String(it.vendor_item_id));
+  for (const o of orderLinks ?? []) addLink(String(o.product_id ?? ''), String(o.vendor_item_id));
 
   const allVendorItems = [...vendorItemsByProduct.values()].flat();
 
