@@ -9,7 +9,7 @@
  * 구간은 계산하지 않고 왜 못 하는지 그대로 말한다.
  */
 import { useEffect, useState } from 'react';
-import { Loader2, ListOrdered, Info } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, ListOrdered, Loader2 } from 'lucide-react';
 import { coupangApi, won, type RankRevenueItem } from '../../lib/coupang';
 import { RankRevenueChart } from './RankRevenueChart';
 
@@ -25,6 +25,25 @@ function strengthLabel(r: number): string {
   if (a >= 0.7) return '뚜렷함';
   if (a >= 0.4) return '어느 정도';
   return '약함';
+}
+
+/**
+ * 목표 순위 후보를 고른다.
+ *
+ * 1계단당 효과를 곱해 3위까지 늘려 보여주고 싶은 유혹이 있지만, 40위에서 3위로
+ * 가는 구간은 관측된 적이 없다. 실제로 겪어 본 순위 구간 안에서만 제안한다.
+ * 그 밖은 추정이 아니라 창작이다.
+ */
+function targetRanks(current: number, observedBest: number): number[] {
+  const candidates = [current - 3, current - 5, current - 10, observedBest];
+  const seen = new Set<number>();
+  return candidates
+    .map(n => Math.round(n))
+    // 한 계단짜리 제안은 바로 위 문장을 그대로 반복할 뿐이라 뺀다.
+    // 두 계단 이상 움직이는 경우만 새로운 정보가 된다.
+    .filter(n => n >= observedBest && n >= 1 && current - n >= 2 && !seen.has(n) && (seen.add(n), true))
+    .sort((a, b) => b - a)
+    .slice(0, 3);
 }
 
 export function RankRevenue() {
@@ -89,53 +108,113 @@ export function RankRevenue() {
           </header>
 
           {item.status === 'ok' && item.correlation !== null ? (
-            <>
-              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                <Stat
-                  label="순위 1계단 개선 시"
-                  value={
-                    item.perStepQty === null
-                      ? '-'
-                      : `하루 ${item.perStepQty >= 0 ? '+' : ''}${item.perStepQty.toFixed(2)}개`
-                  }
-                />
-                <Stat
-                  label="주간 매출 환산"
-                  value={item.weeklyRevenuePerStep === null ? '-' : won(item.weeklyRevenuePerStep)}
-                  sub={`평균 판매가 ${won(item.avgPrice)} 기준`}
-                />
-                <Stat
-                  label="관계의 뚜렷함"
-                  value={strengthLabel(item.correlation)}
-                  sub={`상관계수 ${item.correlation.toFixed(2)} · ${item.days}일치`}
-                />
-              </div>
-              <RankRevenueChart series={item.series} />
-            </>
+            <Verdict item={item} />
           ) : (
-            <>
-              <p className="rounded-card border border-line bg-paper-2 px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-2">
-                {STATUS_TEXT[item.status]}
-              </p>
-              {item.series.length > 1 && (
-                <div className="mt-4">
-                  <RankRevenueChart series={item.series} />
-                </div>
-              )}
-            </>
+            <p className="rounded-card border border-line bg-paper-2 px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-2">
+              {STATUS_TEXT[item.status]}
+            </p>
           )}
+
+          {item.series.length > 1 && <ChartToggle item={item} />}
         </article>
       ))}
     </div>
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+/**
+ * 결론을 문장으로 먼저 말한다.
+ *
+ * "상관계수 0.62"는 셀러가 오늘 무엇을 할지 알려주지 않는다. "지금 12위인데
+ * 7위로 올리면 주간 매출이 약 32만원 늘어난다"는 알려준다. 계수와 표본 일수는
+ * 결론을 얼마나 믿을지 판단할 근거로 아래에 작게 남긴다.
+ */
+export function Verdict({ item }: { item: RankRevenueItem }) {
+  const ranks = item.series.map(p => p.rank).filter((r): r is number => r !== null);
+  const observedBest = ranks.length > 0 ? Math.min(...ranks) : null;
+  const current = item.latestRank;
+  const perStep = item.weeklyRevenuePerStep;
+
+  const targets =
+    current !== null && observedBest !== null && perStep !== null && perStep > 0
+      ? targetRanks(current, observedBest)
+      : [];
+
+  // 숫자를 아예 안 보여준 경우에는 "이 숫자는 참고용"이라는 단서가 가리킬 대상이 없다
+  const showsEstimate = perStep !== null && perStep > 0;
+  const weak = showsEstimate && Math.abs(item.correlation ?? 0) < 0.4;
+
   return (
-    <div className="rounded-card border border-line bg-paper-2 px-3 py-3">
-      <p className="text-[11px] text-ink-3">{label}</p>
-      <p className="mt-0.5 text-[16px] font-semibold tabular-nums text-ink">{value}</p>
-      {sub && <p className="mt-0.5 text-[10.5px] leading-tight text-ink-3">{sub}</p>}
+    <div className="flex flex-col gap-3">
+      <p className="text-[14px] leading-relaxed text-ink">
+        {current === null ? (
+          '현재 순위를 아직 확인하지 못했습니다.'
+        ) : perStep === null || perStep <= 0 ? (
+          <>
+            이 키워드에서는 순위가 올라간다고 판매가 늘지는 않았습니다. 순위보다 상세페이지나 가격을 먼저 보는 편이 낫습니다.
+          </>
+        ) : (
+          <>
+            지금 <b className="font-semibold">{current}위</b>입니다. 한 계단 올릴 때마다 주간 매출이 약{' '}
+            <b className="font-semibold">{won(perStep)}</b> 늘어난 것으로 보입니다.
+          </>
+        )}
+      </p>
+
+      {targets.length === 0 && current !== null && observedBest !== null && perStep !== null && perStep > 0 && (
+        <p className="rounded-card border border-line bg-paper-2 px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-2">
+          {current <= observedBest
+            ? '최근 기록 중 가장 높은 순위입니다. 여기서 더 올라가면 어떻게 될지는 아직 겪어 본 적이 없어 계산하지 않았습니다.'
+            : '겪어 본 최고 순위와 차이가 크지 않아 따로 제안할 구간이 없습니다.'}
+        </p>
+      )}
+
+      {targets.length > 0 && (
+        <ul className="flex flex-col gap-1.5">
+          {targets.map(t => (
+            <li
+              key={t}
+              className="flex items-center gap-3 rounded-card border border-line bg-paper-2 px-3 py-2.5 text-[13px]"
+            >
+              <span className="text-ink-2">
+                {current}위 <span className="text-ink-3">→</span> <b className="font-semibold text-ink">{t}위</b>
+              </span>
+              <span className="ml-auto font-semibold tabular-nums text-positive">
+                주간 +{won((current! - t) * perStep!)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className="text-[11.5px] leading-relaxed text-ink-3">
+        {weak && '다만 순위와 판매가 함께 움직인 정도가 약해 이 숫자는 참고용입니다. '}
+        {targets.length > 0 && `실제로 겪어 본 ${observedBest}위까지만 계산했습니다. `}
+        평균 판매가 {won(item.avgPrice)} · {item.days}일치 기록 · 관계의 뚜렷함 {strengthLabel(item.correlation ?? 0)}
+        (상관계수 {(item.correlation ?? 0).toFixed(2)})
+      </p>
+    </div>
+  );
+}
+
+/** 추이는 결론을 의심할 때 보는 것이라 기본은 접어 둔다 */
+function ChartToggle({ item }: { item: RankRevenueItem }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3">
+      <button
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        className="flex items-center gap-1 text-[12px] font-medium text-ink-3 transition-colors hover:text-ink"
+      >
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        순위와 판매 추이 보기
+      </button>
+      {open && (
+        <div className="mt-2">
+          <RankRevenueChart series={item.series} />
+        </div>
+      )}
     </div>
   );
 }
