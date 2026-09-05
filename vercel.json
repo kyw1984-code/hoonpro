@@ -7,6 +7,18 @@
     {
       "path": "/api/billing?action=charge-due",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/coupang?action=cron&type=sync",
+      "schedule": "30 * * * *"
+    },
+    {
+      "path": "/api/coupang?action=cron&type=daily",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/coupang?action=cron&type=weekly",
+      "schedule": "0 23 * * 0"
     }
   ],
   "functions": {
@@ -14,6 +26,9 @@
       "maxDuration": 60
     },
     "api/billing.ts": {
+      "maxDuration": 300
+    },
+    "api/coupang.ts": {
       "maxDuration": 300
     }
   }
