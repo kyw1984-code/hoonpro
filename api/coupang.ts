@@ -415,6 +415,7 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
 
   const seen = new Set<string>();
   const agg = new Map<string, any>();
+  let failedThisRun = false;
 
   for (const [cFrom, cTo] of dateChunks(from, to)) {
     for (const status of ORDER_STATUSES) {
@@ -430,6 +431,7 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
             return;
           }
           sum.errors.push(`발주서(${status}): ${r.error}`);
+          failedThisRun = true;
           break;
         }
         for (const sheet of listOf(r.data)) {
@@ -467,13 +469,18 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
   }
 
   const rows = [...agg.values()].map(r => ({ ...r, updated_at: new Date().toISOString() }));
-  // 구간을 통째로 다시 계산했으므로 기존 구간 데이터를 지우고 새로 넣는다.
-  await supabase
-    .from('coupang_orders_daily')
-    .delete()
-    .eq('user_id', userId)
-    .gte('order_date', from)
-    .lte('order_date', to);
+
+  // 구간을 통째로 다시 계산했을 때만 기존 구간을 지우고 새로 넣는다.
+  // 중간에 한 번이라도 실패했으면 지금 모은 값은 불완전하다. 그걸로 덮으면
+  // 멀쩡하던 과거 데이터까지 날아가므로, 실패한 회차에는 지우지 않고 덧쓰기만 한다.
+  if (!failedThisRun) {
+    await supabase
+      .from('coupang_orders_daily')
+      .delete()
+      .eq('user_id', userId)
+      .gte('order_date', from)
+      .lte('order_date', to);
+  }
   const err = await upsertChunked('coupang_orders_daily', rows, 'user_id,order_date,vendor_item_id');
   if (err) sum.errors.push(err);
   sum.orders = rows.length;
@@ -486,6 +493,7 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
   if (!supabase) return;
 
   const agg = new Map<string, any>();
+  let failedThisRun = false;
 
   for (const [cFrom, cTo] of dateChunks(from, to)) {
     let token = '';
@@ -500,6 +508,7 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
           return;
         }
         sum.errors.push(`매출내역: ${r.error}`);
+        failedThisRun = true;
         break;
       }
       for (const entry of listOf(r.data)) {
@@ -542,12 +551,15 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
     updated_at: new Date().toISOString(),
   }));
 
-  await supabase
-    .from('coupang_sales_daily')
-    .delete()
-    .eq('user_id', userId)
-    .gte('sale_date', from)
-    .lte('sale_date', to);
+  // 주문과 같은 이유로, 실패한 회차에는 기존 구간을 지우지 않는다
+  if (!failedThisRun) {
+    await supabase
+      .from('coupang_sales_daily')
+      .delete()
+      .eq('user_id', userId)
+      .gte('sale_date', from)
+      .lte('sale_date', to);
+  }
   const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id');
   if (err) sum.errors.push(err);
   sum.sales = rows.length;
@@ -923,13 +935,18 @@ async function cronDaily(res: VercelResponse) {
     }
   }
 
-  // 자동 가격 반영 — 옵션별로 따로 켠 것만 움직인다
+  // 자동 가격 반영 — 옵션별로 따로 켠 것만 움직인다.
+  // 사용자 수에 비례해 길어지므로 시간 예산을 두고, 남은 사용자는 내일 이어받는다.
+  // (반영을 못 한 것은 손해가 아니지만 함수가 타임아웃되면 뒤의 정리까지 못 돈다)
+  const priceStartedAt = Date.now();
+  const priceBudgetMs = 180_000;
   const { data: autoAccounts } = await supabase
     .from('coupang_accounts')
     .select('*')
     .eq('status', 'active');
   let priceApplied = 0;
   for (const acc of (autoAccounts ?? []) as AccountRow[]) {
+    if (Date.now() - priceStartedAt > priceBudgetMs) break;
     try {
       const r = await runAutoPricing(acc.user_id, credsOf(acc));
       priceApplied += r.applied;
@@ -2588,9 +2605,12 @@ async function applyPrice(
   vendorItemId: string,
   newPrice: number,
   reason: string,
+  /** 자동 반영처럼 방금 계산한 제안이 있으면 넘겨 재계산을 피한다.
+      수동 경로는 넘기지 않아 서버가 직접 다시 계산·검증한다. */
+  precomputed?: PriceSuggestion,
 ): Promise<{ ok: boolean; error?: string }> {
-  const suggestions = await buildPriceSuggestions(userId);
-  const target = suggestions.find(s => s.vendorItemId === vendorItemId);
+  const target =
+    precomputed ?? (await buildPriceSuggestions(userId)).find(s => s.vendorItemId === vendorItemId);
   if (!target) return { ok: false, error: '상품을 찾을 수 없습니다.' };
 
   // 화면이 보낸 값을 그대로 믿지 않는다. 하한 검증을 서버에서 다시 한다.
@@ -2666,7 +2686,7 @@ async function runAutoPricing(userId: string, creds: CoupangCreds): Promise<{ ap
       skipped++;
       continue;
     }
-    const r = await applyPrice(userId, creds, s.vendorItemId, s.suggestedPrice, `자동 반영 · ${s.reason}`);
+    const r = await applyPrice(userId, creds, s.vendorItemId, s.suggestedPrice, `자동 반영 · ${s.reason}`, s);
     if (r.ok) applied++;
     else skipped++;
   }
