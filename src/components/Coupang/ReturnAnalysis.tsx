@@ -71,7 +71,11 @@ export function ReturnAnalysis({ onEditCosts }: { onEditCosts: () => void }) {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label="반품 건수" value={`${data.totals.count.toLocaleString('ko-KR')}건`} sub={`${data.totals.quantity.toLocaleString('ko-KR')}개`} />
+            <Stat
+              label="반품·교환 건수"
+              value={`${data.totals.count.toLocaleString('ko-KR')}건`}
+              sub={`교환 ${data.totals.exchangeCount}건 포함 · 취소된 접수 ${data.totals.cancelledCount}건 제외`}
+            />
             <Stat label="반품률" value={pct(data.totals.returnRate)} sub={`판매 ${data.totals.soldQuantity.toLocaleString('ko-KR')}개 대비`} />
             <Stat label="배송비 손실" value={won(data.totals.shippingLoss)} tone="critical" />
             <Stat label="판매자 귀책" value={`${data.totals.sellerFaultCount}건`} sub="왕복 배송비를 판매자가 부담" />

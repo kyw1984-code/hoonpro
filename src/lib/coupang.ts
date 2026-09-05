@@ -187,6 +187,8 @@ export interface ReturnsResponse {
     returnRate: number;
     shippingLoss: number;
     sellerFaultCount: number;
+    exchangeCount: number;
+    cancelledCount: number;
   };
   missingReturnCost: number;
 }
@@ -282,8 +284,11 @@ export const coupangApi = {
     request<{ rows: PriceRow[]; logs: PriceLog[]; autoApplyMaxChangePct: number }>('price-rules'),
   savePriceRules: (items: Array<Partial<PriceRow> & { vendorItemId: string }>) =>
     request<{ ok: true; saved: number }>('price-rule-save', { method: 'POST', body: { items } }),
-  applyPrice: (vendorItemId: string, price: number) =>
-    request<{ ok: true }>('price-apply', { method: 'POST', body: { vendorItemId, price } }),
+  applyPrice: (vendorItemId: string, price: number, expectedCurrentPrice: number | null) =>
+    request<{ ok: true }>('price-apply', {
+      method: 'POST',
+      body: { vendorItemId, price, expectedCurrentPrice: expectedCurrentPrice ?? undefined },
+    }),
 };
 
 // ── 표시 헬퍼 ─────────────────────────────────────────────────

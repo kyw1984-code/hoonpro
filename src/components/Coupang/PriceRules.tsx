@@ -89,7 +89,7 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
     setBusy(row.vendorItemId);
     setMsg(null);
     try {
-      await coupangApi.applyPrice(row.vendorItemId, row.suggestedPrice);
+      await coupangApi.applyPrice(row.vendorItemId, row.suggestedPrice, row.currentPrice);
       setMsg('가격을 반영했습니다.');
       await load();
     } catch (e: any) {
@@ -131,7 +131,7 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
         <p className="text-[12.5px] leading-relaxed text-ink-2">
           하한가는 원가와 <b>그 상품의 실제 수수료율</b>로 역산합니다. 어떤 경우에도 하한 아래로는 내려가지 않습니다.
           경쟁가는 소싱AI가 이미 모아 둔 관측치의 중앙값을 쓰므로 추가 수집 비용이 들지 않습니다.
-          자동 반영을 켜면 매일 새벽에 하루 <b>{maxChange}%</b> 이내로만 조정합니다.
+          자동 반영을 켜면 매일 오전 9시에 하루 <b>{maxChange}%</b>, 7일 누적 20% 이내로만 조정합니다. 반영 직전에 쿠팡의 현재가를 다시 읽어 그 기준으로 검사합니다.
         </p>
       </div>
 
@@ -177,7 +177,7 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
 
       <div className="rounded-panel border border-line bg-paper">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] text-[12.5px]">
+          <table className="w-full min-w-[1200px] text-[12.5px]">
             <thead>
               <tr className="border-b border-line text-[11.5px] text-ink-3">
                 <th className="px-4 py-2.5 text-left font-medium">상품</th>
@@ -188,6 +188,14 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                   <span className="block text-[10px] font-normal">하한가 기준</span>
                 </th>
                 <th className="px-3 py-2.5 text-right font-medium">하한가</th>
+                <th className="px-3 py-2.5 text-right font-medium">
+                  절대 하한
+                  <span className="block text-[10px] font-normal">선택</span>
+                </th>
+                <th className="px-3 py-2.5 text-right font-medium">
+                  절대 상한
+                  <span className="block text-[10px] font-normal">선택</span>
+                </th>
                 <th className="px-3 py-2.5 text-left font-medium">비교 키워드</th>
                 <th className="px-3 py-2.5 text-right font-medium">시장가</th>
                 <th className="px-3 py-2.5 text-center font-medium">자동</th>
@@ -216,6 +224,26 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                   <td className={`px-3 py-2 text-right font-semibold tabular-nums ${r.belowFloor ? 'text-critical' : 'text-ink'}`}>
                     {r.floorPrice ? won(r.floorPrice) : '-'}
                   </td>
+                  <td className="px-3 py-2 text-right">
+                    <input
+                      type="number"
+                      min={0}
+                      value={valueOf(r, 'minPrice') ?? ''}
+                      onChange={e => edit(r.vendorItemId, { minPrice: e.target.value === '' ? null : Math.max(0, Number(e.target.value) || 0) })}
+                      placeholder="없음"
+                      className="w-[84px] rounded-control border border-line bg-paper-2 px-2 py-1.5 text-right text-[12px] tabular-nums outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <input
+                      type="number"
+                      min={0}
+                      value={valueOf(r, 'maxPrice') ?? ''}
+                      onChange={e => edit(r.vendorItemId, { maxPrice: e.target.value === '' ? null : Math.max(0, Number(e.target.value) || 0) })}
+                      placeholder="없음"
+                      className="w-[84px] rounded-control border border-line bg-paper-2 px-2 py-1.5 text-right text-[12px] tabular-nums outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </td>
                   <td className="px-3 py-2">
                     <input
                       value={valueOf(r, 'targetKeyword') ?? ''}
@@ -231,7 +259,7 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                       checked={Boolean(valueOf(r, 'autoApply'))}
                       onChange={e => edit(r.vendorItemId, { autoApply: e.target.checked })}
                       disabled={!r.costEntered}
-                      title={r.costEntered ? '매일 새벽 자동 반영' : '원가를 먼저 입력해야 합니다'}
+                      title={r.costEntered ? '매일 오전 9시 자동 반영' : '원가를 먼저 입력해야 합니다'}
                       className="h-4 w-4 disabled:opacity-30"
                     />
                   </td>

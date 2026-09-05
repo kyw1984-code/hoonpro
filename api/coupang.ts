@@ -261,13 +261,18 @@ function toIso(v: any): string | null {
   const raw = String(v).trim();
   if (!raw) return null;
   // 공백으로 날짜와 시각을 나눈 형식을 ISO로 맞춘다
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw) ? raw.replace(' ', 'T') : raw;
+  let normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw) ? raw.replace(' ', 'T') : raw;
+  // 시간대 표기가 없으면 한국 시각이다. 그대로 두면 서버(UTC)가 9시간 뒤로 해석해
+  // 오후 2시 문의가 오후 11시로 보이고, 저녁 반품이 다음 날로 넘어간다.
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(normalized) && !/(Z|[+-]\d{2}:?\d{2})$/.test(normalized)) {
+    normalized += '+09:00';
+  }
   const t = Date.parse(normalized);
   if (Number.isFinite(t)) return new Date(t).toISOString();
   // 날짜만 온 경우
   const m = raw.match(/\d{4}-\d{2}-\d{2}/);
   if (m) {
-    const t2 = Date.parse(`${m[0]}T00:00:00Z`);
+    const t2 = Date.parse(`${m[0]}T00:00:00+09:00`);
     if (Number.isFinite(t2)) return new Date(t2).toISOString();
   }
   return null;
@@ -298,6 +303,9 @@ const EP = {
   sellerProduct: (id: string) => `/v2/providers/seller_api/apis/api/v1/marketplace/seller-products/${id}`,
   vendorItemPrice: (vendorItemId: string, price: number) =>
     `/v2/providers/seller_api/apis/api/v1/marketplace/vendor-items/${vendorItemId}/prices/${price}`,
+  vendorItemInventory: (vendorItemId: string) =>
+    `/v2/providers/seller_api/apis/api/v1/marketplace/vendor-items/${vendorItemId}/inventories`,
+  exchangeRequests: (vendorId: string) => `/v2/providers/openapi/apis/api/v1/vendors/${vendorId}/exchangeRequests`,
   ordersheets: (vendorId: string) => `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/ordersheets`,
   revenueHistory: '/v2/providers/openapi/apis/api/v1/revenue-history',
   settlementHistories: '/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories',
@@ -709,6 +717,12 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
   sum.settlements = rows.length;
 }
 
+/** 취소·철회된 접수는 손실로 세지 않는다. 상태 원문은 엔드포인트마다 달라 부분 일치로 본다. */
+function isActiveReturn(status: any): boolean {
+  const s = String(status ?? '').toUpperCase();
+  return !(s.includes('CANCEL') || s.includes('WITHDRAW') || s.includes('취소') || s.includes('철회'));
+}
+
 // ── 반품·교환 동기화 ──────────────────────────────────────────
 async function syncReturns(userId: string, creds: CoupangCreds, from: string, to: string, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
@@ -750,6 +764,49 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
           status: pickStr(rr, ['receiptStatus', 'status', 'receiptStatusName']),
           requested_at: toIso(pickRaw(rr, ['createdAt', 'receiptInsertDate', 'requestedAt'])),
           raw: rr,
+          updated_at: new Date().toISOString(),
+        });
+      }
+      nextToken = nextTokenOf(r.data);
+      if (!nextToken) break;
+    }
+  }
+
+  // 교환 — 판매자 귀책이면 반품과 마찬가지로 왕복 배송비가 나간다
+  for (const [cFrom, cTo] of dateChunks(from, to)) {
+    if (outOfTime(deadline, sum)) break;
+    let nextToken = '';
+    for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
+      if (outOfTime(deadline, sum)) break;
+      const query =
+        `createdAtFrom=${cFrom}&createdAtTo=${cTo}&maxPerPage=50` + (nextToken ? `&nextToken=${nextToken}` : '');
+      const r = await coupangCall(creds, 'GET', EP.exchangeRequests(creds.vendorId), query);
+      if (!r.ok) {
+        if (r.authFailed) {
+          sum.authFailed = true;
+          return;
+        }
+        sum.errors.push(`교환요청: ${r.error}`);
+        break;
+      }
+      for (const ex of listOf(r.data)) {
+        const exchangeId = pickStr(ex, ['exchangeId', 'exchangeID', 'receiptId']);
+        if (!exchangeId) continue;
+        const items = Array.isArray(ex?.exchangeItemDtoV1s) ? ex.exchangeItemDtoV1s
+          : Array.isArray(ex?.exchangeItems) ? ex.exchangeItems : [ex];
+        const first = items[0] ?? {};
+        rows.push({
+          user_id: userId,
+          receipt_id: `X${exchangeId}`, // 반품 접수번호와 겹치지 않게 접두어를 붙인다
+          kind: 'exchange',
+          vendor_item_id: pickStr(first, ['vendorItemId', 'vendorItemID']) || null,
+          product_name: pickStr(first, ['vendorItemName', 'sellerProductName', 'productName']),
+          quantity: items.reduce((n: number, it: any) => n + pickNum(it, ['quantity', 'exchangeQuantity'], 1), 0),
+          reason: pickStr(ex, ['reasonCodeText', 'exchangeReason', 'reason']),
+          fault: pickStr(ex, ['faultByType', 'faultBy']),
+          status: pickStr(ex, ['exchangeStatus', 'status', 'statusName']),
+          requested_at: toIso(pickRaw(ex, ['createdAt', 'requestedAt'])),
+          raw: ex,
           updated_at: new Date().toISOString(),
         });
       }
@@ -815,6 +872,28 @@ async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSumma
   const err = await upsertChunked('coupang_inquiries', rows, 'user_id,inquiry_id');
   if (err) sum.errors.push(err);
   sum.inquiries = rows.length;
+
+  // 정합: 이번 조회 구간 안에 있는데 미답변 목록에 없는 문의는 윙에서 직접
+  // 답변된 것이다. 그대로 두면 영원히 미답변으로 남아 건수가 틀리고, 이미 답한
+  // 문의에 초안을 만들어 한도를 쓰거나 두 번째 답변을 보내는 일이 생긴다.
+  // 구간 조회가 끊기거나 실패했으면 목록이 불완전하므로 정합을 건너뛴다.
+  if (!err && !sum.truncated && !sum.errors.some(e => e.startsWith('고객문의'))) {
+    const stillOpen = new Set(rows.map(r => String(r.inquiry_id)));
+    const { data: local } = await supabase
+      .from('coupang_inquiries')
+      .select('inquiry_id')
+      .eq('user_id', userId)
+      .eq('answered', false)
+      .gte('inquired_at', `${from}T00:00:00+09:00`);
+    const answeredElsewhere = (local ?? []).map(l => String(l.inquiry_id)).filter(id => !stillOpen.has(id));
+    for (let i = 0; i < answeredElsewhere.length; i += 200) {
+      await supabase
+        .from('coupang_inquiries')
+        .update({ answered: true, updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .in('inquiry_id', answeredElsewhere.slice(i, i + 200));
+    }
+  }
 }
 
 /**
@@ -1127,7 +1206,7 @@ async function cronDaily(res: VercelResponse) {
     .delete({ count: 'exact' })
     .lt('requested_at', addDays(today, -365));
   result.purged = count ?? 0;
-  await supabase.from('coupang_inquiries').delete().eq('answered', true).lt('inquired_at', addDays(today, -90));
+  await supabase.from('coupang_inquiries').delete().lt('inquired_at', addDays(today, -90));
   await supabase.from('coupang_price_logs').delete().lt('created_at', addDays(today, -180));
 
   return res.status(200).json({ ok: true, ...result, priceApplied });
@@ -1370,7 +1449,7 @@ export async function computeProfit(userId: string, from: string, to: string) {
     supabase!.from('coupang_items').select('vendor_item_id, product_name, option_name, sale_price, stock').eq('user_id', userId),
     supabase!
       .from('coupang_returns')
-      .select('vendor_item_id, quantity, requested_at')
+      .select('vendor_item_id, quantity, requested_at, status')
       .eq('user_id', userId)
       .gte('requested_at', `${from}T00:00:00Z`)
       .lte('requested_at', `${to}T23:59:59Z`),
@@ -1386,6 +1465,7 @@ export async function computeProfit(userId: string, from: string, to: string) {
 
   const returnAgg = new Map<string, number>();
   for (const r of returnRes.data ?? []) {
+    if (!isActiveReturn(r.status)) continue;
     const id = String(r.vendor_item_id ?? '');
     if (!id) continue;
     returnAgg.set(id, (returnAgg.get(id) ?? 0) + (Number(r.quantity) || 1));
@@ -1996,7 +2076,7 @@ async function handleReturns(userId: string, req: VercelRequest, res: VercelResp
   const [returnRes, salesRes, costRes, itemRes] = await Promise.all([
     supabase!
       .from('coupang_returns')
-      .select('receipt_id, vendor_item_id, product_name, quantity, reason, fault, status, requested_at')
+      .select('receipt_id, kind, vendor_item_id, product_name, quantity, reason, fault, status, requested_at')
       .eq('user_id', userId)
       .gte('requested_at', `${from}T00:00:00Z`)
       .lte('requested_at', `${to}T23:59:59Z`),
@@ -2038,7 +2118,14 @@ async function handleReturns(userId: string, req: VercelRequest, res: VercelResp
   const reasonTotals = new Map<string, number>();
   let sellerFaultTotal = 0;
 
+  let cancelledCount = 0;
+  let exchangeCount = 0;
   for (const r of returnRes.data ?? []) {
+    if (!isActiveReturn(r.status)) {
+      cancelledCount++;
+      continue;
+    }
+    if (r.kind === 'exchange') exchangeCount++;
     const id = String(r.vendor_item_id ?? '(미확인)');
     const item = items.get(id);
     const cur =
@@ -2120,6 +2207,8 @@ async function handleReturns(userId: string, req: VercelRequest, res: VercelResp
       returnRate: totalSold > 0 ? (totalQuantity / totalSold) * 100 : 0,
       shippingLoss: totalLoss,
       sellerFaultCount: sellerFaultTotal,
+      exchangeCount,
+      cancelledCount,
     },
     missingReturnCost: rows.filter(r => !r.costEntered).length,
   });
@@ -2569,7 +2658,17 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
 // ═══════════════════════════════════════════════════════════════
 
 const DEFAULT_COMMISSION_RATE = 10.8; // 그 상품의 실적으로 못 구할 때만 쓰는 대략치
-const AUTO_APPLY_MAX_CHANGE_PCT = 10; // 자동 반영 시 하루 변동 한도
+const AUTO_APPLY_MAX_CHANGE_PCT = 10;      // 자동 반영 시 하루 변동 한도
+const AUTO_APPLY_MAX_WEEKLY_PCT = 20;      // 자동 반영 7일 누적 한도 — 틀린 시장가가 며칠 이어져도 여기서 멈춘다
+
+/** 쿠팡에서 지금 이 순간의 판매가를 읽는다. 로컬 사본은 며칠 묵었을 수 있다. */
+async function fetchLivePrice(creds: CoupangCreds, vendorItemId: string): Promise<number | null> {
+  const r = await coupangCall(creds, 'GET', EP.vendorItemInventory(vendorItemId), '');
+  if (!r.ok) return null;
+  const d = (r.data as any)?.data ?? r.data;
+  const price = pickNum(d, ['salePrice', 'price'], 0);
+  return price > 0 ? price : null;
+}
 
 function median(nums: number[]): number | null {
   const xs = nums.filter(n => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
@@ -2798,10 +2897,56 @@ async function applyPrice(
   /** 자동 반영처럼 방금 계산한 제안이 있으면 넘겨 재계산을 피한다.
       수동 경로는 넘기지 않아 서버가 직접 다시 계산·검증한다. */
   precomputed?: PriceSuggestion,
+  opts: { auto?: boolean; expectedCurrentPrice?: number } = {},
 ): Promise<{ ok: boolean; error?: string }> {
   const target =
     precomputed ?? (await buildPriceSuggestions(userId)).find(s => s.vendorItemId === vendorItemId);
   if (!target) return { ok: false, error: '상품을 찾을 수 없습니다.' };
+
+  // 반영 직전에 쿠팡에서 현재가를 다시 읽는다. 로컬 사본은 상세를 마지막으로
+  // 받은 시점의 값이라 며칠 묵었을 수 있고, 그 사이 판매자가 윙에서 직접 올린
+  // 가격을 기준으로 '5% 변동'이라 계산해 실제로는 30% 인하를 내보낼 수 있다.
+  const livePrice = await fetchLivePrice(creds, vendorItemId);
+  if (livePrice === null) {
+    return { ok: false, error: '쿠팡에서 현재 판매가를 확인하지 못해 변경하지 않았습니다. 잠시 후 다시 시도해주세요.' };
+  }
+  if (livePrice !== target.currentPrice) {
+    await supabase!
+      .from('coupang_items')
+      .update({ sale_price: livePrice })
+      .eq('user_id', userId)
+      .eq('vendor_item_id', vendorItemId);
+  }
+  // 화면이 알고 있던 현재가와 다르면 사용자가 본 제안이 더는 유효하지 않다
+  if (opts.expectedCurrentPrice !== undefined && opts.expectedCurrentPrice !== livePrice) {
+    return {
+      ok: false,
+      error: `현재가가 ${won(livePrice)}로 바뀌어 있습니다. 화면을 새로고침한 뒤 다시 확인해주세요.`,
+    };
+  }
+  const changePct = Math.abs((newPrice - livePrice) / livePrice) * 100;
+  if (opts.auto) {
+    if (changePct > AUTO_APPLY_MAX_CHANGE_PCT) {
+      return { ok: false, error: `하루 변동 한도(${AUTO_APPLY_MAX_CHANGE_PCT}%)를 넘어 자동 반영하지 않았습니다.` };
+    }
+    // 7일 누적 — 잘못된 시장가 하나가 아니라, 잘못된 시장가가 일주일 이어지는 경우를 막는다
+    const { data: recent } = await supabase!
+      .from('coupang_price_logs')
+      .select('old_price, created_at')
+      .eq('user_id', userId)
+      .eq('vendor_item_id', vendorItemId)
+      .eq('applied', true)
+      .like('reason', '자동 반영%')
+      .gte('created_at', new Date(Date.now() - 7 * 86400_000).toISOString())
+      .order('created_at', { ascending: true })
+      .limit(1);
+    const base = Number(recent?.[0]?.old_price) || livePrice;
+    if (Math.abs((newPrice - base) / base) * 100 > AUTO_APPLY_MAX_WEEKLY_PCT) {
+      return { ok: false, error: `7일 누적 변동 한도(${AUTO_APPLY_MAX_WEEKLY_PCT}%)를 넘어 자동 반영하지 않았습니다.` };
+    }
+  }
+  if (newPrice === livePrice) return { ok: true };
+  target.currentPrice = livePrice;
 
   // 화면이 보낸 값을 그대로 믿지 않는다. 하한 검증을 서버에서 다시 한다.
   if (target.floorPrice !== null && newPrice < target.floorPrice) {
@@ -2814,7 +2959,13 @@ async function applyPrice(
     return { ok: false, error: `설정한 상한가(${won(target.maxPrice)}) 위입니다.` };
   }
 
-  const r = await coupangCall(creds, 'PUT', EP.vendorItemPrice(vendorItemId, Math.round(newPrice)), '');
+  // 쿠팡은 변동 비율이 크면 기본적으로 거부한다. 사람이 확인하고 누른 수동 반영은
+  // 강제 플래그를 붙여 통과시키고, 자동 반영은 한도 안에서만 움직이므로 붙이지 않는다.
+  const r = await coupangCall(
+    creds, 'PUT',
+    EP.vendorItemPrice(vendorItemId, Math.round(newPrice)),
+    opts.auto ? '' : 'forceSalePriceUpdate=true',
+  );
 
   await supabase!.from('coupang_price_logs').insert({
     user_id: userId,
@@ -2854,7 +3005,10 @@ async function handlePriceApply(userId: string, req: VercelRequest, res: VercelR
   const acc = await loadAccount(userId);
   if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
 
-  const result = await applyPrice(userId, credsOf(acc), vendorItemId, price, '수동 반영');
+  const expected = req.body?.expectedCurrentPrice;
+  const result = await applyPrice(userId, credsOf(acc), vendorItemId, price, '수동 반영', undefined, {
+    expectedCurrentPrice: Number.isFinite(Number(expected)) ? Math.round(Number(expected)) : undefined,
+  });
   if (!result.ok) return res.status(400).json({ error: result.error });
   return res.status(200).json({ ok: true });
 }
@@ -2871,12 +3025,8 @@ async function runAutoPricing(userId: string, creds: CoupangCreds): Promise<{ ap
   for (const s of suggestions) {
     if (!s.autoApply || !s.enabled || s.suggestedPrice === null || s.currentPrice === null) continue;
 
-    const changePct = Math.abs((s.suggestedPrice - s.currentPrice) / s.currentPrice) * 100;
-    if (changePct > AUTO_APPLY_MAX_CHANGE_PCT) {
-      skipped++;
-      continue;
-    }
-    const r = await applyPrice(userId, creds, s.vendorItemId, s.suggestedPrice, `자동 반영 · ${s.reason}`, s);
+    // 변동폭 검사는 applyPrice가 쿠팡에서 읽은 실시간 가격으로 한다
+    const r = await applyPrice(userId, creds, s.vendorItemId, s.suggestedPrice, `자동 반영 · ${s.reason}`, s, { auto: true });
     if (r.ok) applied++;
     else skipped++;
   }
