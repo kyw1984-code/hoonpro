@@ -20,8 +20,9 @@ export const config = { maxDuration: 300 };
 //
 // ⚠ IP 화이트리스트 (설계상 가장 중요한 제약)
 //   쿠팡은 '자체개발(직접입력)' 연동에 등록된 IP에서만 호출을 허용한다.
-//   Vercel 서버리스는 고정 아웃바운드 IP가 없다(Static IPs는 프로젝트당 월 $100).
-//   그래서 모든 쿠팡 호출은 고정 IP를 가진 중계 서버를 거칠 수 있게 만들었다.
+//   Vercel 서버리스는 고정 아웃바운드 IP가 없다. Vercel의 Static IPs 기능은
+//   프로젝트당 월 $100라 쓰지 않고, 월 몇 천원짜리 VPS에 중계 서버를 띄워
+//   모든 쿠팡 호출이 그 고정 IP를 거치게 했다.
 //     · COUPANG_RELAY_URL  이 설정되면 그 중계 서버로 요청을 넘긴다
 //     · 미설정이면 Vercel에서 직접 호출한다 (개발·테스트용)
 //   중계 서버 구현은 scripts/coupang-relay.mjs 에 있다. 아무 VPS에나 띄우고

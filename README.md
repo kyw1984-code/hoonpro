@@ -44,3 +44,4 @@ View your app in AI Studio: https://ai.studio/apps/a17ce62f-04f4-4186-982d-2862e
   연동이 끊깁니다. 기존 키를 그대로 등록하게 안내합니다.
 - **쿠팡은 등록된 IP에서만 호출을 받습니다.** Vercel은 고정 IP가 없으므로
   `scripts/coupang-relay.mjs`를 고정 IP 서버에 띄우고 그 IP를 윙에 등록해야 합니다.
+  월 5달러짜리 최소 VPS면 충분하고, 이 비용은 사용자 수와 무관하게 한 번만 듭니다.
