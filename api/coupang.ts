@@ -321,11 +321,26 @@ function dateChunks(from: string, to: string, size = LIMITS.chunkDays): Array<[s
   return out;
 }
 
-/** 대량 upsert — Supabase 요청 크기를 넘기지 않도록 잘라서 넣는다 */
+/**
+ * 대량 upsert — Supabase 요청 크기를 넘기지 않도록 잘라서 넣는다.
+ *
+ * 넣기 전에 기본키로 중복을 걷어낸다. Postgres는 한 번의 upsert 안에 같은 키가
+ * 두 번 들어오면 "cannot affect row a second time"으로 그 배치 전체를 거부한다.
+ * 쿠팡 응답은 조회 구간이 겹치거나 페이지가 되풀이될 때 같은 건이 두 번 오므로
+ * 이 방어가 없으면 수집이 통째로 실패한다. 뒤에 온 값을 남긴다(더 최신).
+ */
 async function upsertChunked(table: string, rows: any[], onConflict: string): Promise<string | null> {
   if (!supabase || rows.length === 0) return null;
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabase.from(table).upsert(rows.slice(i, i + 500), { onConflict });
+
+  const keyCols = onConflict.split(',').map(c => c.trim()).filter(Boolean);
+  const deduped = new Map<string, any>();
+  for (const row of rows) {
+    deduped.set(keyCols.map(c => String(row[c] ?? '')).join('\u0000'), row);
+  }
+  const unique = [...deduped.values()];
+
+  for (let i = 0; i < unique.length; i += 500) {
+    const { error } = await supabase.from(table).upsert(unique.slice(i, i + 500), { onConflict });
     if (error) return `${table}: ${error.message}`;
   }
   return null;
@@ -590,9 +605,15 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
       if (!date) continue;
       const type = pickStr(s, ['settlementType', 'settlementTypeName', 'paymentType'], '정산');
       const month = pickStr(s, ['recognitionMonth', 'revenueRecognitionDate', 'salesMonth'], date.slice(0, 7));
+      // 같은 날 같은 유형으로 여러 건이 지급되는 일이 흔하다. 날짜·유형·인식월만
+      // 키로 쓰면 서로 다른 지급이 하나로 뭉개져 금액이 사라진다. 원본까지 포함해
+      // 해시하면 진짜 같은 건(다시 조회된 것)만 합쳐진다.
       rows.push({
         user_id: userId,
-        settlement_key: crypto.createHash('md5').update(`${date}|${type}|${month}`).digest('hex'),
+        settlement_key: crypto
+          .createHash('md5')
+          .update(`${date}|${type}|${month}|${JSON.stringify(s)}`)
+          .digest('hex'),
         settlement_date: date,
         settlement_type: type,
         recognition_month: month.slice(0, 7),
