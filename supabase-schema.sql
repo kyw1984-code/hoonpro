@@ -504,7 +504,7 @@ $$;
 
 -- 기능별 한도 기본값 (관리자 화면에서 조정. 0 = 무제한)
 insert into app_config (key, value) values
-  ('feature_limits', '{"image":40,"qa":100,"sourcing":60,"reviews":20,"rank":40,"analyze":40,"general":200}')
+  ('feature_limits', '{"image":40,"qa":100,"sourcing":60,"reviews":20,"rank":40,"analyze":40,"inquiry":60,"general":200}')
 on conflict (key) do nothing;
 
 -- ═════════════════════════════════════════════════════════════

@@ -539,12 +539,14 @@ const LIMIT_META: {
     calls: ['rank-check'] },
   { key: 'analyze', label: '경쟁상품 분석', hint: '분석 1회', fallbackKrw: 3,
     calls: ['competitor-analyze', 'competitor-estimate'] },
+  { key: 'inquiry', label: '고객문의 답변 초안', hint: '문의 1건', fallbackKrw: 2,
+    calls: ['coupang-inquiry-draft'] },
   // 나머지 호출(기획·문구 생성, 이미지 검수 등)은 전부 여기로 모인다
   { key: 'general', label: '기타 AI 작업', hint: '기획·문구·이미지 검수 등', fallbackKrw: 1, calls: [] },
 ];
 
 const LIMIT_DEFAULTS: Record<string, number> = {
-  image: 40, qa: 100, sourcing: 60, reviews: 20, rank: 40, analyze: 40, general: 200,
+  image: 40, qa: 100, sourcing: 60, reviews: 20, rank: 40, analyze: 40, inquiry: 60, general: 200,
 };
 
 /** api_calls.feature → 한도 키 (매핑이 없으면 general) */

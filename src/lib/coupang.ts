@@ -189,6 +189,19 @@ export interface ReturnsResponse {
   missingReturnCost: number;
 }
 
+export interface Inquiry {
+  inquiryId: string;
+  vendorItemId: string | null;
+  productName: string;
+  content: string;
+  customerName: string;
+  inquiredAt: string | null;
+  answered: boolean;
+  draft: string | null;
+  draftAt: string | null;
+  repliedAt: string | null;
+}
+
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
   saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyIssuedAt?: string }) =>
@@ -204,6 +217,11 @@ export const coupangApi = {
   inventory: (leadTime: number, cover: number) =>
     request<InventoryResponse>(`inventory&leadTime=${leadTime}&cover=${cover}`),
   returns: (days: number) => request<ReturnsResponse>(`returns&days=${days}`),
+  inquiries: (all = false) => request<{ inquiries: Inquiry[] }>(`inquiries&all=${all}`),
+  inquiryDraft: (inquiryId: string) =>
+    request<{ ok: true; draft: string; remaining: number }>('inquiry-draft', { method: 'POST', body: { inquiryId } }),
+  inquiryReply: (inquiryId: string, content: string) =>
+    request<{ ok: true }>('inquiry-reply', { method: 'POST', body: { inquiryId, content } }),
 };
 
 // ── 표시 헬퍼 ─────────────────────────────────────────────────

@@ -18,6 +18,7 @@ export const DEFAULT_FEATURE_LIMITS: Record<string, number> = {
   reviews: 20,   // 리뷰 수집 + GPT 요약
   rank: 40,      // 순위 확인
   analyze: 40,   // 경쟁상품·이미지 분석
+  inquiry: 60,   // 쿠팡 고객문의 답변 초안 (건당 약 2원)
   general: 200,  // 기획·문구 생성, 이미지 검수 등 내부 호출 (한 건 처리에 수십 번 쓰인다)
 };
 

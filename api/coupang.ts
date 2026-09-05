@@ -1000,6 +1000,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'reports': return await handleReports(userId, res);
       case 'inventory': return await handleInventory(userId, req, res);
       case 'returns': return await handleReturns(userId, req, res);
+      case 'inquiries': return await handleInquiries(userId, req, res);
+      case 'inquiry-draft': return await handleInquiryDraft(userId, req, res);
+      case 'inquiry-reply': return await handleInquiryReply(userId, req, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -1909,4 +1912,228 @@ async function handleReturns(userId: string, req: VercelRequest, res: VercelResp
     },
     missingReturnCost: rows.filter(r => !r.costEntered).length,
   });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [6] 고객문의 AI 답변 초안
+//
+// 쿠팡은 문의 응답 시간을 판매자 점수에 반영한다. 그런데 문의 대부분은
+// 배송·사이즈·재입고처럼 답이 정해진 것들이라 매번 처음부터 쓰는 게 낭비다.
+//
+// 원칙은 하나다 — 모델이 사실을 지어내지 않게 한다. 배송일·재고·정책처럼
+// 우리가 모르는 값은 [대괄호] 자리표시자로 남기고 판매자가 채우게 한다.
+// 초안은 저장만 하고, 실제 전송은 판매자가 확인한 뒤에만 일어난다.
+// ═══════════════════════════════════════════════════════════════
+
+const INQUIRY_MODEL = process.env.OPENAI_TEXT_MODEL || 'gpt-4.1-mini';
+
+const INQUIRY_SYSTEM_PROMPT = `당신은 쿠팡 판매자의 고객문의 답변을 대신 작성하는 CS 담당자입니다.
+
+작성 규칙
+1. 한국어 존댓말. 3~5문장. 인사와 마무리를 포함하되 장황하지 않게.
+2. 확인되지 않은 사실을 절대 지어내지 마세요. 배송 예정일, 재고 수량, 교환·환불
+   정책, 입고일처럼 주어지지 않은 정보는 [출고 예정일]처럼 대괄호 자리표시자로
+   남기세요. 판매자가 채웁니다.
+3. 사과가 필요한 상황이면 먼저 사과하고, 다음에 무엇을 할지 한 문장으로 말하세요.
+4. 쿠팡 정책상 외부 연락처, 개인정보 요구, 다른 판매 채널 안내는 쓰지 마세요.
+5. 답변 본문만 출력하세요. 제목이나 설명, 따옴표를 붙이지 마세요.`;
+
+async function generateInquiryDraft(
+  userId: string,
+  productName: string,
+  content: string,
+): Promise<{ ok: boolean; draft?: string; error?: string }> {
+  const apiKey = (process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY || '').trim();
+  if (!apiKey) return { ok: false, error: 'OPENAIAPIKEY가 설정되지 않았습니다.' };
+
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: INQUIRY_MODEL,
+        messages: [
+          { role: 'system', content: INQUIRY_SYSTEM_PROMPT },
+          { role: 'user', content: `[상품명]\n${productName || '(상품명 미확인)'}\n\n[고객 문의]\n${content}` },
+        ],
+        temperature: 0.4,
+        max_tokens: 500,
+      }),
+    });
+    const data: any = await r.json();
+    if (!r.ok) return { ok: false, error: data?.error?.message || `초안 생성 실패 (HTTP ${r.status})` };
+
+    const draft = String(data?.choices?.[0]?.message?.content ?? '').trim();
+    if (!draft) return { ok: false, error: '초안이 비어 있습니다. 다시 시도해주세요.' };
+
+    await logCoupangCost(userId, 'coupang-inquiry-draft', INQUIRY_MODEL, {
+      inputTokens: data?.usage?.prompt_tokens,
+      outputTokens: data?.usage?.completion_tokens,
+    });
+    return { ok: true, draft };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || '초안 생성 실패' };
+  }
+}
+
+/** AI 호출 원가 기록 — 관리자 비용 현황에 함께 집계된다 */
+const INQUIRY_TOKEN_PRICING: Record<string, { input: number; output: number }> = {
+  'gpt-4.1-mini': { input: 0.4, output: 1.6 },
+  'gpt-4.1': { input: 2.0, output: 8.0 },
+  'gpt-4o-mini': { input: 0.15, output: 0.6 },
+  'gpt-4o': { input: 2.5, output: 10.0 },
+};
+
+async function logCoupangCost(
+  userId: string,
+  feature: string,
+  model: string,
+  opts: { inputTokens?: number; outputTokens?: number },
+): Promise<void> {
+  if (!supabase) return;
+  const price = INQUIRY_TOKEN_PRICING[model];
+  const inTok = Math.max(0, Number(opts.inputTokens) || 0);
+  const outTok = Math.max(0, Number(opts.outputTokens) || 0);
+  const cost = price ? (inTok * price.input + outTok * price.output) / 1_000_000 : 0;
+  try {
+    await supabase.from('api_calls').insert({
+      user_id: userId,
+      feature,
+      model,
+      input_tokens: inTok,
+      output_tokens: outTok,
+      cost_usd: cost,
+    });
+  } catch {
+    /* 원가 기록 실패가 기능을 막지 않도록 */
+  }
+}
+
+/** 기능별 일일 한도 — 다른 API와 같은 app_config를 읽는다 */
+async function consumeQuota(userId: string, feature: string, fallback: number): Promise<{ ok: boolean; remaining: number; limit: number }> {
+  if (!supabase) return { ok: true, remaining: -1, limit: 0 };
+  let limit = fallback;
+  try {
+    const { data } = await supabase.from('app_config').select('value').eq('key', 'feature_limits').maybeSingle();
+    const parsed = data?.value ? JSON.parse(data.value) : {};
+    if (Number.isFinite(Number(parsed?.[feature]))) limit = Math.max(0, Math.round(Number(parsed[feature])));
+  } catch {
+    /* 설정을 못 읽으면 기본값으로 간다 */
+  }
+  try {
+    const { data, error } = await supabase.rpc('increment_feature_usage', {
+      p_user_id: userId, p_date: kstToday(), p_feature: feature, p_limit: limit,
+    });
+    if (error) return { ok: true, remaining: -1, limit };
+    return { ok: !data?.exceeded, remaining: Number(data?.remaining ?? -1), limit };
+  } catch {
+    return { ok: true, remaining: -1, limit };
+  }
+}
+
+// ── 문의 목록 ─────────────────────────────────────────────────
+async function handleInquiries(userId: string, req: VercelRequest, res: VercelResponse) {
+  const includeAnswered = String(req.query.all ?? '') === 'true';
+  let query = supabase!
+    .from('coupang_inquiries')
+    .select('inquiry_id, vendor_item_id, product_name, content, customer_name, inquired_at, answered, draft, draft_at, replied_at')
+    .eq('user_id', userId)
+    .order('inquired_at', { ascending: false })
+    .limit(200);
+  if (!includeAnswered) query = query.eq('answered', false);
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+
+  return res.status(200).json({
+    inquiries: (data ?? []).map(q => ({
+      inquiryId: String(q.inquiry_id),
+      vendorItemId: q.vendor_item_id,
+      productName: q.product_name ?? '',
+      content: q.content ?? '',
+      customerName: q.customer_name ?? '',
+      inquiredAt: q.inquired_at,
+      answered: Boolean(q.answered),
+      draft: q.draft ?? null,
+      draftAt: q.draft_at,
+      repliedAt: q.replied_at,
+    })),
+  });
+}
+
+// ── 초안 생성 ─────────────────────────────────────────────────
+async function handleInquiryDraft(userId: string, req: VercelRequest, res: VercelResponse) {
+  const inquiryId = String(req.body?.inquiryId ?? '').trim();
+  if (!inquiryId) return res.status(400).json({ error: '문의를 선택해주세요.' });
+
+  const { data: q } = await supabase!
+    .from('coupang_inquiries')
+    .select('inquiry_id, product_name, content, answered')
+    .eq('user_id', userId)
+    .eq('inquiry_id', inquiryId)
+    .maybeSingle();
+  if (!q) return res.status(404).json({ error: '문의를 찾을 수 없습니다.' });
+  if (q.answered) return res.status(400).json({ error: '이미 답변한 문의입니다.' });
+
+  const quota = await consumeQuota(userId, 'inquiry', 60);
+  if (!quota.ok) {
+    return res.status(429).json({ error: `답변 초안은 하루 ${quota.limit}건까지입니다. 내일 다시 이용해주세요.` });
+  }
+
+  const result = await generateInquiryDraft(userId, String(q.product_name ?? ''), String(q.content ?? ''));
+  if (!result.ok) return res.status(502).json({ error: result.error });
+
+  await supabase!
+    .from('coupang_inquiries')
+    .update({ draft: result.draft, draft_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('inquiry_id', inquiryId);
+
+  return res.status(200).json({ ok: true, draft: result.draft, remaining: quota.remaining });
+}
+
+// ── 답변 전송 ─────────────────────────────────────────────────
+// 판매자가 초안을 확인·수정한 뒤에만 호출된다. 고객에게 나가는 글이라
+// AI가 만든 문장을 사람 확인 없이 보내지 않는다.
+async function handleInquiryReply(userId: string, req: VercelRequest, res: VercelResponse) {
+  const inquiryId = String(req.body?.inquiryId ?? '').trim();
+  const content = String(req.body?.content ?? '').trim();
+  if (!inquiryId || !content) return res.status(400).json({ error: '문의와 답변 내용이 필요합니다.' });
+  if (content.length > 2000) return res.status(400).json({ error: '답변은 2000자까지 보낼 수 있습니다.' });
+
+  const acc = await loadAccount(userId);
+  if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
+
+  const { data: q } = await supabase!
+    .from('coupang_inquiries')
+    .select('inquiry_id, answered')
+    .eq('user_id', userId)
+    .eq('inquiry_id', inquiryId)
+    .maybeSingle();
+  if (!q) return res.status(404).json({ error: '문의를 찾을 수 없습니다.' });
+  if (q.answered) return res.status(400).json({ error: '이미 답변한 문의입니다.' });
+
+  const creds = credsOf(acc);
+  const r = await coupangCallVersioned(
+    creds,
+    'POST',
+    v => EP.inquiryReply(v, creds.vendorId, inquiryId),
+    '',
+    ['v5', 'v4'],
+    'inquiryReply',
+    { content, vendorId: creds.vendorId, replyBy: creds.vendorId },
+  );
+
+  if (!r.ok) {
+    if (r.authFailed) await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다.');
+    return res.status(502).json({ error: `쿠팡에 답변을 보내지 못했습니다: ${r.error}` });
+  }
+
+  await supabase!
+    .from('coupang_inquiries')
+    .update({ answered: true, replied_at: new Date().toISOString(), draft: content, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('inquiry_id', inquiryId);
+
+  return res.status(200).json({ ok: true });
 }
