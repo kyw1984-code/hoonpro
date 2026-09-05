@@ -997,6 +997,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'costs': return await handleCosts(userId, res);
       case 'cost-save': return await handleCostSave(userId, req, res);
       case 'settlement': return await handleSettlement(userId, res);
+      case 'reports': return await handleReports(userId, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -1113,10 +1114,7 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
   return res.status(200).json({ ok: true, summary: sum });
 }
 
-// 주간 리포트는 3번 기능에서 구현한다 (아래에서 채운다).
-async function cronWeeklyReport(res: VercelResponse) {
-  return res.status(200).json({ ok: true, skipped: '주간 리포트는 아직 준비 중입니다.' });
-}
+
 
 // ═══════════════════════════════════════════════════════════════
 // [1] 상품별 순이익 대시보드
@@ -1155,9 +1153,8 @@ function rangeFromQuery(req: VercelRequest): { from: string; to: string } {
   return { from, to };
 }
 
-async function handleProfit(userId: string, req: VercelRequest, res: VercelResponse) {
-  const { from, to } = rangeFromQuery(req);
-
+/** 순이익 계산 — 화면(1번)과 주간 리포트(3번)가 같은 숫자를 쓰도록 한곳에 둔다 */
+async function computeProfit(userId: string, from: string, to: string) {
   const [salesRes, costRes, itemRes, returnRes, adRes] = await Promise.all([
     supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId).gte('sale_date', from).lte('sale_date', to),
     supabase!.from('coupang_costs').select('*').eq('user_id', userId),
@@ -1262,7 +1259,7 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
   const missingCost = rows.filter(r => r.quantity > 0 && !r.costEntered).length;
   const adReport = (adRes.data ?? [])[0];
 
-  return res.status(200).json({
+  return {
     from,
     to,
     rows,
@@ -1273,9 +1270,14 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
     missingCost,
     // 원가를 하나도 안 넣었으면 순이익이 매출과 같아 보여 오해를 부른다. 화면에서 경고한다.
     costCoverage: rows.length > 0 ? ((rows.length - missingCost) / rows.length) * 100 : 0,
-    adCostHint: adReport?.summary?.totalCost ?? null,
+    adCostHint: (adReport?.summary as any)?.totalCost ?? null,
     adReportAt: adReport?.created_at ?? null,
-  });
+  };
+}
+
+async function handleProfit(userId: string, req: VercelRequest, res: VercelResponse) {
+  const { from, to } = rangeFromQuery(req);
+  return res.status(200).json(await computeProfit(userId, from, to));
 }
 
 // ── 원가 조회·입력 ────────────────────────────────────────────
@@ -1428,4 +1430,202 @@ async function handleSettlement(userId: string, res: VercelResponse) {
     totals: { paid, upcoming, in7, in30, unscheduled, weeklyAverage },
     weekly,
   });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [3] 주간 성과 리포트 자동 발송
+//
+// 대시보드는 사용자가 열어야 보인다. 리포트는 찾아간다. 매주 월요일 아침,
+// 지난주 순이익과 눈에 띄는 변화만 골라 이메일로 보낸다.
+//
+// 숫자는 1번 대시보드와 같은 computeProfit을 쓴다. 화면과 메일의 순이익이
+// 다르면 둘 다 못 믿게 되기 때문이다.
+// ═══════════════════════════════════════════════════════════════
+
+/** 지난주(월~일) 구간 — 월요일 아침에 실행되는 기준 */
+function lastWeekRange(today: string): { start: string; end: string } {
+  const d = new Date(`${today}T00:00:00Z`);
+  const dow = d.getUTCDay(); // 0=일
+  const daysSinceMonday = (dow + 6) % 7;
+  const thisMonday = addDays(today, -daysSinceMonday);
+  return { start: addDays(thisMonday, -7), end: addDays(thisMonday, -1) };
+}
+
+function deltaText(current: number, previous: number): string {
+  if (previous === 0) return current > 0 ? '(첫 주)' : '';
+  const rate = ((current - previous) / Math.abs(previous)) * 100;
+  const sign = rate >= 0 ? '▲' : '▼';
+  const color = rate >= 0 ? '#4ade80' : '#f87171';
+  return `<span style="color:${color};font-size:12px;">${sign} ${Math.abs(rate).toFixed(0)}%</span>`;
+}
+
+function rowsTable(title: string, rows: Array<{ name: string; profit: number; qty: number }>): string {
+  if (rows.length === 0) return '';
+  const body = rows
+    .map(
+      r =>
+        `<tr><td style="padding:6px 0;color:#a8b3c9;font-size:12.5px;">${escapeHtml(r.name).slice(0, 40)}` +
+        `<span style="color:#6b7794;"> · ${r.qty}개</span></td>` +
+        `<td style="padding:6px 0;text-align:right;color:${r.profit >= 0 ? '#4ade80' : '#f87171'};font-size:12.5px;font-weight:600;">${won(r.profit)}</td></tr>`,
+    )
+    .join('');
+  return `<p style="margin:18px 0 4px;color:#e8ecf5;font-size:13px;font-weight:600;">${title}</p><table style="width:100%;border-collapse:collapse;">${body}</table>`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+
+/** 사용자 1명의 주간 리포트를 만들고 보낸다. 보낼 게 없으면 false. */
+async function sendWeeklyReport(
+  userId: string,
+  email: string,
+  name: string,
+  start: string,
+  end: string,
+): Promise<boolean> {
+  if (!supabase) return false;
+
+  // 같은 주를 두 번 보내지 않는다
+  const { data: already } = await supabase
+    .from('coupang_reports')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('period_start', start)
+    .eq('period_end', end)
+    .maybeSingle();
+  if (already) return false;
+
+  const prevStart = addDays(start, -7);
+  const prevEnd = addDays(end, -7);
+
+  const [cur, prev, settleRes] = await Promise.all([
+    computeProfit(userId, start, end),
+    computeProfit(userId, prevStart, prevEnd),
+    supabase
+      .from('coupang_settlements')
+      .select('settlement_date, amount')
+      .eq('user_id', userId)
+      .gte('settlement_date', end)
+      .lte('settlement_date', addDays(end, 14)),
+  ]);
+
+  // 팔린 것도 반품도 없으면 보낼 이유가 없다
+  if (cur.totals.quantity === 0 && cur.totals.returnCount === 0) return false;
+
+  const sold = cur.rows.filter(r => r.quantity > 0);
+  const best = sold.slice(0, 3).map(r => ({ name: r.productName, profit: r.profit, qty: r.quantity }));
+  const worst = sold
+    .filter(r => r.profit < 0)
+    .slice(-3)
+    .reverse()
+    .map(r => ({ name: r.productName, profit: r.profit, qty: r.quantity }));
+
+  const incoming = (settleRes.data ?? []).reduce((n, s) => n + (Number(s.amount) || 0), 0);
+
+  const summary = {
+    quantity: cur.totals.quantity,
+    salesAmount: cur.totals.salesAmount,
+    profit: cur.totals.profit,
+    marginRate: cur.totals.marginRate,
+    returnCount: cur.totals.returnCount,
+    prevSalesAmount: prev.totals.salesAmount,
+    prevProfit: prev.totals.profit,
+    incoming,
+    missingCost: cur.missingCost,
+  };
+
+  const costWarning =
+    cur.missingCost > 0
+      ? `<p style="margin:16px 0 0;padding:10px 12px;background:#1b2540;border-radius:8px;color:#ffb454;font-size:12px;">` +
+        `원가가 비어 있는 상품이 ${cur.missingCost}개 있습니다. 그만큼 순이익이 실제보다 크게 잡힙니다.</p>`
+      : '';
+
+  await sendEmail(
+    email,
+    `[훈프로] ${start} ~ ${end} 주간 성과`,
+    wrapEmail(
+      '지난주 성과 요약',
+      `<p>${escapeHtml(name)}님, 지난주 쿠팡 판매 결과입니다.</p>` +
+        `<table style="width:100%;border-collapse:collapse;margin-top:14px;">` +
+        `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">매출</td>` +
+        `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">${won(cur.totals.salesAmount)} ${deltaText(cur.totals.salesAmount, prev.totals.salesAmount)}</td></tr>` +
+        `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">순이익</td>` +
+        `<td style="padding:8px 0;text-align:right;color:${cur.totals.profit >= 0 ? '#4ade80' : '#f87171'};font-size:14px;font-weight:600;">${won(cur.totals.profit)} ${deltaText(cur.totals.profit, prev.totals.profit)}</td></tr>` +
+        `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">이익률</td>` +
+        `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">${cur.totals.marginRate.toFixed(1)}%</td></tr>` +
+        `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">판매 수량</td>` +
+        `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">${cur.totals.quantity.toLocaleString('ko-KR')}개</td></tr>` +
+        `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">반품</td>` +
+        `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">${cur.totals.returnCount}건</td></tr>` +
+        `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">2주 내 입금 예정</td>` +
+        `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">${won(incoming)}</td></tr>` +
+        `</table>` +
+        rowsTable('많이 남은 상품', best) +
+        rowsTable('적자가 난 상품', worst) +
+        costWarning +
+        emailButtonLink('훈프로에서 자세히 보기'),
+    ),
+  );
+
+  await supabase.from('coupang_reports').insert({
+    user_id: userId,
+    period_start: start,
+    period_end: end,
+    summary,
+  });
+
+  return true;
+}
+
+function emailButtonLink(label: string, href = 'https://hoonproai.com'): string {
+  return `<div style="margin:22px 0 4px;"><a href="${href}" style="display:inline-block;padding:11px 20px;border-radius:10px;background:linear-gradient(135deg,#7cf5ff,#8b7bff);color:#0a0f1f;font-weight:700;font-size:13.5px;text-decoration:none;">${label}</a></div>`;
+}
+
+async function cronWeeklyReport(res: VercelResponse) {
+  if (!supabase) return res.status(200).json({ ok: false, reason: 'supabase 미설정' });
+  if (!process.env.RESEND_API_KEY) return res.status(200).json({ ok: false, reason: 'RESEND_API_KEY 미설정' });
+
+  const { start, end } = lastWeekRange(kstToday());
+  const budgetMs = 240_000;
+  const startedAt = Date.now();
+
+  const { data: accounts } = await supabase
+    .from('coupang_accounts')
+    .select('user_id, users(email, name)')
+    .eq('status', 'active');
+
+  const result = { period: `${start}~${end}`, sent: 0, skipped: 0, failed: 0 };
+
+  for (const acc of (accounts ?? []) as any[]) {
+    if (Date.now() - startedAt > budgetMs) {
+      result.skipped++;
+      continue;
+    }
+    const email = acc.users?.email;
+    if (!email) {
+      result.skipped++;
+      continue;
+    }
+    try {
+      const sent = await sendWeeklyReport(acc.user_id, email, acc.users?.name ?? '', start, end);
+      if (sent) result.sent++;
+      else result.skipped++;
+    } catch (e) {
+      result.failed++;
+    }
+  }
+
+  return res.status(200).json({ ok: true, ...result });
+}
+
+/** 지난 리포트 목록 — 화면에서 주간 추이를 본다 */
+async function handleReports(userId: string, res: VercelResponse) {
+  const { data } = await supabase!
+    .from('coupang_reports')
+    .select('period_start, period_end, summary, sent_at')
+    .eq('user_id', userId)
+    .order('period_start', { ascending: false })
+    .limit(12);
+  return res.status(200).json({ reports: data ?? [] });
 }

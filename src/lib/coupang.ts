@@ -120,6 +120,23 @@ export interface SettlementResponse {
   weekly: Array<{ weekStart: string; amount: number }>;
 }
 
+export interface WeeklyReport {
+  period_start: string;
+  period_end: string;
+  sent_at: string;
+  summary: {
+    quantity: number;
+    salesAmount: number;
+    profit: number;
+    marginRate: number;
+    returnCount: number;
+    prevSalesAmount: number;
+    prevProfit: number;
+    incoming: number;
+    missingCost: number;
+  };
+}
+
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
   saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyIssuedAt?: string }) =>
@@ -131,6 +148,7 @@ export const coupangApi = {
   saveCosts: (items: Array<Partial<CostRow> & { vendorItemId: string }>) =>
     request<{ ok: true; saved: number }>('cost-save', { method: 'POST', body: { items } }),
   settlement: () => request<SettlementResponse>('settlement'),
+  reports: () => request<{ reports: WeeklyReport[] }>('reports'),
 };
 
 // ── 표시 헬퍼 ─────────────────────────────────────────────────

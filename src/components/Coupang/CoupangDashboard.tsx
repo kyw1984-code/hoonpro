@@ -9,6 +9,7 @@ import { KeySetup } from './KeySetup';
 import { ProfitDashboard } from './ProfitDashboard';
 import { CostEditor } from './CostEditor';
 import { SettlementCalendar } from './SettlementCalendar';
+import { WeeklyReports } from './WeeklyReports';
 
 type View = 'profit' | 'settlement' | 'costs' | 'settings';
 
@@ -133,6 +134,8 @@ export function CoupangDashboard() {
       {view === 'costs' && <CostEditor onSaved={() => undefined} />}
 
       {view === 'settings' && (
+        <div className="flex flex-col gap-5">
+        <WeeklyReports />
         <div className="rounded-panel border border-line bg-paper p-6">
           <h3 className="mb-3 text-sm font-semibold text-ink">연동 정보</h3>
           <dl className="grid grid-cols-1 gap-2.5 text-[13px] sm:grid-cols-2">
@@ -153,6 +156,7 @@ export function CoupangDashboard() {
             <Trash2 className="h-3.5 w-3.5" />
             연동 해제
           </button>
+        </div>
         </div>
       )}
     </div>
