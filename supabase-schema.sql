@@ -540,8 +540,6 @@ create table if not exists coupang_accounts (
   updated_at timestamptz default now()
 );
 
-create index if not exists idx_cpa_shard on coupang_accounts(sync_shard, status);
-
 -- 이미 13번 절을 한 번 실행한 프로젝트를 위해 나중에 추가된 칼럼을 따로 보강한다
 alter table coupang_accounts add column if not exists backfill_done boolean not null default false;
 -- 키 거부·만료를 이메일로 알린 시각. 같은 사고로 매일 보내지 않기 위해 기록한다.
