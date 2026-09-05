@@ -243,6 +243,29 @@ function pickDate(obj: any, keys: string[]): string | null {
   const t = Date.parse(s);
   return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : null;
 }
+/**
+ * 타임스탬프 정규화.
+ * 쿠팡은 엔드포인트마다 날짜 형식이 달라 "2026-09-05 14:00:00"처럼 오기도 한다.
+ * 그대로 timestamptz 컬럼에 넣었다가 파싱이 안 되면 그 배치 전체가 실패한다.
+ * 해석이 되면 ISO로 통일하고, 안 되면 null로 떨어뜨려 나머지 값이라도 저장한다.
+ */
+function toIso(v: any): string | null {
+  if (!v) return null;
+  const raw = String(v).trim();
+  if (!raw) return null;
+  // 공백으로 날짜와 시각을 나눈 형식을 ISO로 맞춘다
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(raw) ? raw.replace(' ', 'T') : raw;
+  const t = Date.parse(normalized);
+  if (Number.isFinite(t)) return new Date(t).toISOString();
+  // 날짜만 온 경우
+  const m = raw.match(/\d{4}-\d{2}-\d{2}/);
+  if (m) {
+    const t2 = Date.parse(`${m[0]}T00:00:00Z`);
+    if (Number.isFinite(t2)) return new Date(t2).toISOString();
+  }
+  return null;
+}
+
 /** 응답 본문에서 목록을 꺼낸다 — data / data.content / 배열 그 자체 모두 대응 */
 function listOf(payload: any): any[] {
   if (Array.isArray(payload)) return payload;
@@ -668,7 +691,7 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
           reason: pickStr(rr, ['reasonCodeText', 'cancelReason', 'returnReason', 'reason']),
           fault: pickStr(rr, ['faultByType', 'returnShippingChargeType', 'faultBy']),
           status: pickStr(rr, ['receiptStatus', 'status', 'receiptStatusName']),
-          requested_at: pickRaw(rr, ['createdAt', 'receiptInsertDate', 'requestedAt']) ?? null,
+          requested_at: toIso(pickRaw(rr, ['createdAt', 'receiptInsertDate', 'requestedAt'])),
           raw: rr,
           updated_at: new Date().toISOString(),
         });
@@ -722,7 +745,7 @@ async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSumma
         product_name: pickStr(q, ['sellerProductName', 'vendorItemName', 'productName']),
         content: pickStr(q, ['content', 'inquiryContent', 'question']),
         customer_name: pickStr(q, ['buyerName', 'customerName', 'memberId']),
-        inquired_at: pickRaw(q, ['inquiryAt', 'createdAt', 'inquiryDate']) ?? null,
+        inquired_at: toIso(pickRaw(q, ['inquiryAt', 'createdAt', 'inquiryDate'])),
         answered: false,
         raw: q,
         updated_at: new Date().toISOString(),
