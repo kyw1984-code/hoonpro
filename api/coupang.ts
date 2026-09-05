@@ -999,6 +999,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'settlement': return await handleSettlement(userId, res);
       case 'reports': return await handleReports(userId, res);
       case 'inventory': return await handleInventory(userId, req, res);
+      case 'returns': return await handleReturns(userId, req, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -1762,4 +1763,150 @@ function stockTable(rows: InventoryRow[]): string {
     })
     .join('');
   return `<p style="margin:18px 0 4px;color:#e8ecf5;font-size:13px;font-weight:600;">재고 부족</p><table style="width:100%;border-collapse:collapse;">${body}</table>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [5] 반품 손실 분석
+//
+// 반품은 매출에서 빠지는 것으로 끝나지 않는다. 왕복 배송비가 나가고, 재판매가
+// 안 되는 물건은 원가까지 통째로 날아간다. 그런데 쿠팡 화면은 반품을 건수로만
+// 보여줘서 '얼마를 잃었는지'가 안 보인다.
+//
+// 반품률은 같은 기간 판매수량으로 나눈다. 건수만 보면 많이 파는 상품이 늘
+// 나빠 보인다.
+// ═══════════════════════════════════════════════════════════════
+
+async function handleReturns(userId: string, req: VercelRequest, res: VercelResponse) {
+  const { from, to } = rangeFromQuery(req);
+
+  const [returnRes, salesRes, costRes, itemRes] = await Promise.all([
+    supabase!
+      .from('coupang_returns')
+      .select('receipt_id, vendor_item_id, product_name, quantity, reason, fault, status, requested_at')
+      .eq('user_id', userId)
+      .gte('requested_at', `${from}T00:00:00Z`)
+      .lte('requested_at', `${to}T23:59:59Z`),
+    supabase!
+      .from('coupang_sales_daily')
+      .select('vendor_item_id, quantity, sales_amount')
+      .eq('user_id', userId)
+      .gte('sale_date', from)
+      .lte('sale_date', to),
+    supabase!.from('coupang_costs').select('*').eq('user_id', userId),
+    supabase!.from('coupang_items').select('vendor_item_id, product_name, option_name').eq('user_id', userId),
+  ]);
+
+  const costs = new Map<string, any>();
+  for (const c of costRes.data ?? []) costs.set(String(c.vendor_item_id), c);
+  const items = new Map<string, any>();
+  for (const it of itemRes.data ?? []) items.set(String(it.vendor_item_id), it);
+
+  const soldQty = new Map<string, number>();
+  for (const s of salesRes.data ?? []) {
+    const id = String(s.vendor_item_id);
+    soldQty.set(id, (soldQty.get(id) ?? 0) + (Number(s.quantity) || 0));
+  }
+
+  interface ReturnAgg {
+    vendorItemId: string;
+    productName: string;
+    optionName: string;
+    count: number;
+    quantity: number;
+    soldQuantity: number;
+    returnRate: number;
+    shippingLoss: number;
+    sellerFaultCount: number;
+    topReason: string;
+  }
+
+  const agg = new Map<string, ReturnAgg & { reasons: Map<string, number> }>();
+  const reasonTotals = new Map<string, number>();
+  let sellerFaultTotal = 0;
+
+  for (const r of returnRes.data ?? []) {
+    const id = String(r.vendor_item_id ?? '(미확인)');
+    const item = items.get(id);
+    const cur =
+      agg.get(id) ??
+      {
+        vendorItemId: id,
+        productName: r.product_name || item?.product_name || '(상품명 미확인)',
+        optionName: item?.option_name ?? '',
+        count: 0,
+        quantity: 0,
+        soldQuantity: soldQty.get(id) ?? 0,
+        returnRate: 0,
+        shippingLoss: 0,
+        sellerFaultCount: 0,
+        topReason: '',
+        reasons: new Map<string, number>(),
+      };
+
+    cur.count += 1;
+    cur.quantity += Number(r.quantity) || 1;
+
+    const reason = String(r.reason || '사유 미기재').slice(0, 60);
+    cur.reasons.set(reason, (cur.reasons.get(reason) ?? 0) + 1);
+    reasonTotals.set(reason, (reasonTotals.get(reason) ?? 0) + 1);
+
+    // 판매자 귀책이면 왕복 배송비를 판매자가 부담한다
+    const fault = String(r.fault ?? '').toUpperCase();
+    const sellerFault = fault.includes('COMPANY') || fault.includes('VENDOR') || fault.includes('SELLER');
+    if (sellerFault) {
+      cur.sellerFaultCount += 1;
+      sellerFaultTotal += 1;
+    }
+
+    agg.set(id, cur);
+  }
+
+  const rows = [...agg.values()].map(a => {
+    const cost = costs.get(a.vendorItemId);
+    const perReturn = cost ? Number(cost.return_shipping_cost) || 0 : 0;
+    const shippingLoss = a.count * perReturn;
+    const topReason = [...a.reasons.entries()].sort((x, y) => y[1] - x[1])[0]?.[0] ?? '';
+    return {
+      vendorItemId: a.vendorItemId,
+      productName: a.productName,
+      optionName: a.optionName,
+      count: a.count,
+      quantity: a.quantity,
+      soldQuantity: a.soldQuantity,
+      returnRate: a.soldQuantity > 0 ? (a.quantity / a.soldQuantity) * 100 : 0,
+      shippingLoss,
+      sellerFaultCount: a.sellerFaultCount,
+      topReason,
+      costEntered: perReturn > 0,
+    };
+  });
+
+  // 손실이 큰 순 — 배송비를 안 넣었으면 건수 순으로 떨어진다
+  rows.sort((a, b) => b.shippingLoss - a.shippingLoss || b.count - a.count);
+
+  const totalCount = rows.reduce((n, r) => n + r.count, 0);
+  const totalQuantity = rows.reduce((n, r) => n + r.quantity, 0);
+  const totalLoss = rows.reduce((n, r) => n + r.shippingLoss, 0);
+  const totalSold = [...soldQty.values()].reduce((n, q) => n + q, 0);
+
+  const reasons = [...reasonTotals.entries()]
+    .map(([reason, count]) => ({ reason, count, share: totalCount > 0 ? (count / totalCount) * 100 : 0 }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 12);
+
+  return res.status(200).json({
+    from,
+    to,
+    rows,
+    reasons,
+    totals: {
+      count: totalCount,
+      quantity: totalQuantity,
+      soldQuantity: totalSold,
+      returnRate: totalSold > 0 ? (totalQuantity / totalSold) * 100 : 0,
+      shippingLoss: totalLoss,
+      sellerFaultCount: sellerFaultTotal,
+    },
+    missingReturnCost: rows.filter(r => !r.costEntered).length,
+  });
 }

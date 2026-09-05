@@ -159,6 +159,36 @@ export interface InventoryResponse {
   coverDays: number;
 }
 
+export interface ReturnRow {
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  count: number;
+  quantity: number;
+  soldQuantity: number;
+  returnRate: number;
+  shippingLoss: number;
+  sellerFaultCount: number;
+  topReason: string;
+  costEntered: boolean;
+}
+
+export interface ReturnsResponse {
+  from: string;
+  to: string;
+  rows: ReturnRow[];
+  reasons: Array<{ reason: string; count: number; share: number }>;
+  totals: {
+    count: number;
+    quantity: number;
+    soldQuantity: number;
+    returnRate: number;
+    shippingLoss: number;
+    sellerFaultCount: number;
+  };
+  missingReturnCost: number;
+}
+
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
   saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyIssuedAt?: string }) =>
@@ -173,6 +203,7 @@ export const coupangApi = {
   reports: () => request<{ reports: WeeklyReport[] }>('reports'),
   inventory: (leadTime: number, cover: number) =>
     request<InventoryResponse>(`inventory&leadTime=${leadTime}&cover=${cover}`),
+  returns: (days: number) => request<ReturnsResponse>(`returns&days=${days}`),
 };
 
 // ── 표시 헬퍼 ─────────────────────────────────────────────────
