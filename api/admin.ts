@@ -41,6 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'users') return await handleUsers(req, res);
     if (action === 'user-action') return await handleUserAction(req, res);
     if (action === 'stats') return await handleStats(req, res);
+    if (action === 'costs') return await handleCosts(req, res);
     return res.status(400).json({ error: '알 수 없는 action입니다.' });
   } catch (e) {
     console.error('[admin]', action, e);
@@ -394,4 +395,119 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
+}
+
+
+// ─── 원가 현황 ────────────────────────────────────────────────
+// api_calls에 쌓인 외부 유료 호출을 기간별로 집계한다.
+// 변동비(AI·크롤링·메일)는 실측, 고정비는 관리자가 입력한 값을 쓴다.
+async function handleCosts(req: VercelRequest, res: VercelResponse) {
+  // 고정비 저장 (서버·API 구독료처럼 사용량과 무관한 비용)
+  if (req.method === 'POST') {
+    const items = Array.isArray(req.body?.fixedCosts) ? req.body.fixedCosts : null;
+    if (!items) return res.status(400).json({ error: '고정비 목록이 필요합니다.' });
+    const cleaned = items.slice(0, 30).map((it: any) => ({
+      label: String(it?.label ?? '').slice(0, 60),
+      monthlyKrw: Math.max(0, Math.round(Number(it?.monthlyKrw) || 0)),
+    })).filter((it: any) => it.label);
+    const { error } = await supabase.from('app_config').upsert({
+      key: 'fixed_costs', value: JSON.stringify(cleaned), updated_at: new Date().toISOString(),
+    });
+    if (error) return res.status(500).json({ error: '저장에 실패했습니다.' });
+    return res.status(200).json({ ok: true, fixedCosts: cleaned });
+  }
+
+  const usdKrw = Math.max(1, Number(req.query.usdKrw) || Number(process.env.USD_KRW) || 1380);
+
+  // KST 기준 경계
+  const now = Date.now();
+  const kstNow = new Date(now + 9 * 3600_000);
+  const dayStart = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()) - 9 * 3600_000;
+  const monthStart = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), 1) - 9 * 3600_000;
+  const prevMonthStart = Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth() - 1, 1) - 9 * 3600_000;
+
+  const [{ data: rows }, { data: cfg }, { count: subCount }] = await Promise.all([
+    supabase
+      .from('api_calls')
+      .select('feature, model, cost_usd, created_at, user_id')
+      .gte('created_at', new Date(prevMonthStart).toISOString()),
+    supabase.from('app_config').select('value').eq('key', 'fixed_costs').maybeSingle(),
+    supabase.from('subscriptions').select('id', { count: 'exact', head: true })
+      .in('status', ['trial', 'active', 'past_due']),
+  ]);
+
+  const bucket = () => ({ usd: 0, calls: 0, byFeature: {} as Record<string, { usd: number; calls: number }> });
+  const today = bucket(), month = bucket(), prevMonth = bucket();
+  const byModel: Record<string, { usd: number; calls: number }> = {};
+  const byUser: Record<string, number> = {};
+
+  for (const r of rows ?? []) {
+    const t = new Date(r.created_at).getTime();
+    const usd = Number(r.cost_usd || 0);
+    const feature = r.feature || '(미분류)';
+
+    const add = (b: ReturnType<typeof bucket>) => {
+      b.usd += usd; b.calls += 1;
+      const f = b.byFeature[feature] ?? { usd: 0, calls: 0 };
+      f.usd += usd; f.calls += 1; b.byFeature[feature] = f;
+    };
+
+    if (t >= prevMonthStart && t < monthStart) { add(prevMonth); continue; }
+    if (t >= monthStart) {
+      add(month);
+      if (t >= dayStart) add(today);
+      const m = byModel[r.model || '(미상)'] ?? { usd: 0, calls: 0 };
+      m.usd += usd; m.calls += 1; byModel[r.model || '(미상)'] = m;
+      if (r.user_id) byUser[r.user_id] = (byUser[r.user_id] || 0) + usd;
+    }
+  }
+
+  // 이번 달 원가 상위 사용자 — 한도를 정하려면 헤비유저의 실제 원가를 봐야 한다
+  const topIds = Object.entries(byUser).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  let topUsers: any[] = [];
+  if (topIds.length > 0) {
+    const { data: users } = await supabase
+      .from('users').select('id, name, email').in('id', topIds.map(([id]) => id));
+    const nameMap = new Map((users ?? []).map(u => [u.id, u]));
+    topUsers = topIds.map(([id, usd]) => ({
+      id,
+      name: nameMap.get(id)?.name ?? '(삭제된 회원)',
+      email: nameMap.get(id)?.email ?? '',
+      usd,
+      krw: Math.round(usd * usdKrw),
+    }));
+  }
+
+  let fixedCosts: { label: string; monthlyKrw: number }[] = [];
+  try { fixedCosts = JSON.parse(cfg?.value || '[]'); } catch { fixedCosts = []; }
+  const fixedTotalKrw = fixedCosts.reduce((sum, f) => sum + (Number(f.monthlyKrw) || 0), 0);
+
+  const subscribers = subCount ?? 0;
+  const monthVariableKrw = Math.round(month.usd * usdKrw);
+
+  const shape = (b: ReturnType<typeof bucket>) => ({
+    usd: b.usd,
+    krw: Math.round(b.usd * usdKrw),
+    calls: b.calls,
+    byFeature: Object.entries(b.byFeature)
+      .map(([feature, v]) => ({ feature, usd: v.usd, krw: Math.round(v.usd * usdKrw), calls: v.calls }))
+      .sort((a, b2) => b2.usd - a.usd),
+  });
+
+  return res.status(200).json({
+    usdKrw,
+    today: shape(today),
+    month: shape(month),
+    prevMonth: shape(prevMonth),
+    byModel: Object.entries(byModel)
+      .map(([model, v]) => ({ model, usd: v.usd, krw: Math.round(v.usd * usdKrw), calls: v.calls }))
+      .sort((a, b2) => b2.usd - a.usd),
+    topUsers,
+    fixedCosts,
+    fixedTotalKrw,
+    subscribers,
+    // 구독자 1명당 이번 달 변동비 — 39,800원과 비교할 기준선
+    perSubscriberKrw: subscribers > 0 ? Math.round(monthVariableKrw / subscribers) : 0,
+    totalMonthKrw: monthVariableKrw + fixedTotalKrw,
+  });
 }

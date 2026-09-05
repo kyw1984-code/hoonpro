@@ -67,7 +67,7 @@ export const CompetitorAnalyzer: React.FC = () => {
     setCompetitors(prev => prev.map(c => c.id === id ? { ...c, loading: true } : c));
 
     try {
-      await trackUsage();
+      await trackUsage('analyze');
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         config: { responseMimeType: 'application/json' },
@@ -149,7 +149,7 @@ ${(c as any).marketComment ? `- 시장 특성: ${(c as any).marketComment}` : ''
         ? `\n내 상품 정보:\n- 상품명: ${myProduct.name}\n- 판매 희망가: ${myProduct.price}원\n- 특징/강점: ${myProduct.features}`
         : '';
 
-      await trackUsage();
+      await trackUsage('analyze');
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         config: { responseMimeType: 'text/plain' },

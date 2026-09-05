@@ -7,6 +7,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
+// 기능별 일일 한도 — 이미지 생성이 원가가 가장 크다.
+// 실제 원가를 보고 조정한다 (관리자 → 원가 현황).
+const FEATURE_LIMITS: Record<string, number> = {
+  image: Number(process.env.LIMIT_IMAGE || 30),      // 썸네일·상세페이지 이미지
+  analyze: Number(process.env.LIMIT_ANALYZE || 40),  // 경쟁상품·이미지 분석
+  general: Number(process.env.LIMIT_GENERAL || 40),
+};
+
 const DAILY_LIMIT = 40;
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
@@ -201,17 +209,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const today = new Date().toISOString().split('T')[0];
 
-  const { data, error } = await supabase.rpc('increment_usage', {
+  // 어떤 기능인지 프론트가 알려준다 (미지정이면 general)
+  const rawFeature = String(req.query.feature || req.body?.feature || 'general');
+  const feature = Object.prototype.hasOwnProperty.call(FEATURE_LIMITS, rawFeature) ? rawFeature : 'general';
+  const limit = FEATURE_LIMITS[feature];
+
+  const { data, error } = await supabase.rpc('increment_feature_usage', {
     p_user_id: decoded.userId,
     p_date: today,
-    p_limit: DAILY_LIMIT,
+    p_feature: feature,
+    p_limit: limit,
   });
 
   if (error) return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
 
   if (data?.exceeded) {
     return res.status(429).json({
-      error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다. 내일 다시 이용해주세요.`,
+      error: `이 기능은 하루 ${limit}회까지 이용할 수 있습니다. 내일 다시 이용해주세요.`,
     });
   }
 

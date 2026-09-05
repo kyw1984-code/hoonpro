@@ -517,7 +517,62 @@ async function handleBriefing(_req: VercelRequest, res: VercelResponse) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 쿠팡 상품 분석 — Bright Data Web Unlocker (실시간)
 // ═══════════════════════════════════════════════════════════════════════════════
-async function fetchViaUnlocker(targetUrl: string, retries = 2, minSize = 20000): Promise<{ ok: boolean; html?: string; error?: string }> {
+
+// ─── 원가 기록 ────────────────────────────────────────────────
+// 소싱AI는 Bright Data(건당 과금)와 OpenAI(리뷰 요약)를 쓴다.
+// 지금까지 이 비용이 어디에도 기록되지 않아, 가장 인기 있는 기능의
+// 원가를 볼 수 없었다. api_calls에 남겨 관리자 비용 현황에서 집계한다.
+const UNIT_COST_USD: Record<string, number> = {
+  // 실제 요금제에 맞게 환경변수로 조정한다 (Bright Data는 플랜별로 단가가 다르다)
+  "brightdata-unlocker": Number(process.env.BRIGHTDATA_COST_PER_CALL || 0.0015),
+  "resend-email": Number(process.env.RESEND_COST_PER_EMAIL || 0.0004),
+};
+
+const TOKEN_PRICING: Record<string, { input: number; output: number }> = {
+  "gpt-4.1-mini": { input: 0.40, output: 1.60 },
+  "gpt-4.1": { input: 2.00, output: 8.00 },
+  "gpt-4o-mini": { input: 0.15, output: 0.60 },
+  "gpt-4o": { input: 2.50, output: 10.00 },
+};
+
+/** 외부 유료 호출 1건을 기록한다. 실패해도 기능 흐름은 막지 않는다. */
+async function logCost(
+  userId: string | null,
+  feature: string,
+  model: string,
+  opts: { inputTokens?: number; outputTokens?: number; units?: number } = {},
+): Promise<void> {
+  if (!supabase) return;
+  const inTok = Math.max(0, Number(opts.inputTokens) || 0);
+  const outTok = Math.max(0, Number(opts.outputTokens) || 0);
+
+  let cost = 0;
+  const unit = UNIT_COST_USD[model];
+  if (unit !== undefined) {
+    cost = unit * Math.max(1, Number(opts.units) || 1);
+  } else {
+    const price = TOKEN_PRICING[model];
+    if (price) cost = (inTok * price.input + outTok * price.output) / 1_000_000;
+  }
+
+  try {
+    await supabase.from("api_calls").insert({
+      user_id: userId,
+      feature,
+      model,
+      input_tokens: inTok,
+      output_tokens: outTok,
+      cost_usd: cost,
+    });
+  } catch { /* 원가 기록 실패는 무시 */ }
+}
+
+async function fetchViaUnlocker(
+  targetUrl: string,
+  retries = 2,
+  minSize = 20000,
+  cost: { userId: string | null; feature: string } = { userId: null, feature: "sourcing-unlocker" },
+): Promise<{ ok: boolean; html?: string; error?: string }> {
   let lastError = "Bright Data 호출 실패";
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * attempt));
@@ -530,6 +585,9 @@ async function fetchViaUnlocker(targetUrl: string, retries = 2, minSize = 20000)
         },
         body: JSON.stringify({ zone: BRIGHTDATA_UNLOCKER_ZONE, url: targetUrl, format: "raw" }),
       });
+      // 응답을 받은 시점에 과금된다 — 재시도도 각각 1건으로 기록한다
+      await logCost(cost.userId, cost.feature, "brightdata-unlocker");
+
       if (!res.ok) {
         const body = await res.text().catch(() => "");
         lastError = `Bright Data Unlocker 오류 (HTTP ${res.status}) ${body.slice(0, 300)}`;
@@ -925,15 +983,15 @@ async function checkRankNow(keyword: string, productId: string, decoded: any): P
     if (!decoded?.isAdmin && supabase) {
       try {
         const today = new Date().toISOString().split("T")[0];
-        const { data, error } = await supabase.rpc("increment_usage", {
-          p_user_id: decoded.userId, p_date: today, p_limit: DAILY_LIMIT,
+        const { data, error } = await supabase.rpc("increment_feature_usage", {
+          p_user_id: decoded.userId, p_date: today, p_feature: "rank", p_limit: FEATURE_LIMITS.rank,
         });
-        if (!error && data?.exceeded) return { rankChecked: false, error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다. 내일 새벽 자동 수집 시 기록됩니다.` };
+        if (!error && data?.exceeded) return { rankChecked: false, error: `순위 확인은 하루 ${FEATURE_LIMITS.rank}회까지입니다. 내일 새벽 자동 수집 시 기록됩니다.` };
         if (!error && typeof data?.remaining === "number") remaining = data.remaining;
       } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
     }
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
-    const result = await fetchViaUnlocker(url);
+    const result = await fetchViaUnlocker(url, 2, 20000, { userId: decoded?.userId ?? null, feature: "rank-check" });
     if (result.ok) {
       const p = parseCoupangSearch(result.html!);
       if (p.products.length > 0) {
@@ -1137,7 +1195,16 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
   return { products: scored, market };
 }
 
-const DAILY_LIMIT = 40; // api/usage.ts와 동일한 일일 한도
+// 기능별 일일 한도 — 원가 편차가 커서 하나로 합치면 관리가 안 된다.
+// 소싱·리뷰는 Bright Data 건당 과금, 순위 추적은 상대적으로 가볍다.
+// 실제 원가 데이터를 2~4주 본 뒤 조정한다 (관리자 → 원가 현황).
+const FEATURE_LIMITS: Record<string, number> = {
+  sourcing: Number(process.env.LIMIT_SOURCING || 40),   // 키워드 상품 수집
+  reviews: Number(process.env.LIMIT_REVIEWS || 20),     // 리뷰 수집 + GPT 요약
+  rank: Number(process.env.LIMIT_RANK || 60),           // 순위 확인
+};
+
+const DAILY_LIMIT = 40; // api/usage.ts와 동일한 일일 한도 (레거시 참조용)
 
 async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: any) {
   const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
@@ -1165,19 +1232,20 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
     if (!decoded?.isAdmin && supabase) {
       try {
         const today = new Date().toISOString().split("T")[0];
-        const { data, error } = await supabase.rpc("increment_usage", {
+        const { data, error } = await supabase.rpc("increment_feature_usage", {
           p_user_id: decoded.userId,
           p_date: today,
-          p_limit: DAILY_LIMIT,
+          p_feature: "sourcing",
+          p_limit: FEATURE_LIMITS.sourcing,
         });
         if (!error && data?.exceeded) {
-          return res.status(429).json({ error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다. 내일 다시 이용해주세요. (이미 분석했던 키워드는 캐시로 계속 조회됩니다)` });
+          return res.status(429).json({ error: `소싱 분석은 하루 ${FEATURE_LIMITS.sourcing}회까지입니다. 내일 다시 이용해주세요. (이미 분석했던 키워드는 캐시로 계속 조회됩니다)` });
         }
         if (!error && typeof data?.remaining === "number") remaining = data.remaining;
       } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
     }
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
-    const result = await fetchViaUnlocker(url);
+    const result = await fetchViaUnlocker(url, 2, 20000, { userId: decoded?.userId ?? null, feature: "sourcing-products" });
     if (result.ok) {
       const p = parseCoupangSearch(result.html!);
       parseDebug = p.diagnostics;
@@ -1248,7 +1316,7 @@ function parseReviews(html: string): { rating: number; text: string }[] {
   return out;
 }
 
-async function summarizeReviews(productName: string, reviews: { rating: number; text: string }[]): Promise<any> {
+async function summarizeReviews(productName: string, reviews: { rating: number; text: string }[], userId: string | null = null): Promise<any> {
   const apiKey = (process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY || "").trim();
   if (!apiKey) return { error: "OpenAI API 키가 설정되지 않았습니다." };
   const model = String(process.env.OPENAI_TEXT_MODEL || "gpt-4.1-mini");
@@ -1279,6 +1347,10 @@ ${sample}`;
     });
     if (!r.ok) return { error: `GPT 요약 실패 (HTTP ${r.status})` };
     const data = await r.json();
+    await logCost(userId, "sourcing-review-summary", model, {
+      inputTokens: data?.usage?.prompt_tokens,
+      outputTokens: data?.usage?.completion_tokens,
+    });
     return JSON.parse(data?.choices?.[0]?.message?.content || "{}");
   } catch (e: any) {
     return { error: e?.message || "GPT 요약 실패" };
@@ -1303,10 +1375,10 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   if (!decoded?.isAdmin && supabase) {
     try {
       const today = new Date().toISOString().split("T")[0];
-      const { data, error } = await supabase.rpc("increment_usage", {
-        p_user_id: decoded.userId, p_date: today, p_limit: DAILY_LIMIT,
+      const { data, error } = await supabase.rpc("increment_feature_usage", {
+        p_user_id: decoded.userId, p_date: today, p_feature: "reviews", p_limit: FEATURE_LIMITS.reviews,
       });
-      if (!error && data?.exceeded) return res.status(429).json({ error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다.` });
+      if (!error && data?.exceeded) return res.status(429).json({ error: `리뷰 분석은 하루 ${FEATURE_LIMITS.reviews}회까지입니다.` });
       if (!error && typeof data?.remaining === "number") remaining = data.remaining;
     } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
   }
@@ -1316,7 +1388,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   let reviews: { rating: number; text: string }[] = [];
   let diag = "";
   const reviewUrl = `https://www.coupang.com/vp/product/reviews?productId=${productId}&page=1&size=30&sortBy=ORDER_SCORE_ASC&ratingSummary=true`;
-  const r1 = await fetchViaUnlocker(reviewUrl, 1, 500);
+  const r1 = await fetchViaUnlocker(reviewUrl, 1, 500, { userId: decoded?.userId ?? null, feature: "sourcing-reviews" });
   if (r1.ok) {
     reviews = parseReviews(r1.html!);
     if (reviews.length < 3) diag = `리뷰엔드포인트: htmlLen=${r1.html!.length}, 파싱=${reviews.length}개`;
@@ -1324,7 +1396,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     diag = `리뷰엔드포인트 실패: ${r1.error}`;
   }
   if (reviews.length < 3) {
-    const r2 = await fetchViaUnlocker(`https://www.coupang.com/vp/products/${productId}`, 0);
+    const r2 = await fetchViaUnlocker(`https://www.coupang.com/vp/products/${productId}`, 0, 20000, { userId: decoded?.userId ?? null, feature: "sourcing-reviews" });
     if (r2.ok) {
       const more = parseReviews(r2.html!);
       if (more.length > reviews.length) reviews = more;
@@ -1338,7 +1410,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     return res.status(502).json({ error: `리뷰를 수집하지 못했습니다. 잠시 후 다시 시도해주세요.`, diagnostics: diag });
   }
 
-  const summary = await summarizeReviews(productName, reviews);
+  const summary = await summarizeReviews(productName, reviews, decoded?.userId ?? null);
   const payload = {
     productId,
     productName,
@@ -1462,15 +1534,16 @@ async function handleFavorites(req: VercelRequest, res: VercelResponse, decoded:
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // 이메일 발송 (Resend) — 키가 없으면 조용히 스킵 (api/billing.ts와 동일)
-async function sendEmail(to: string, subject: string, html: string): Promise<void> {
+async function sendEmail(to: string, subject: string, html: string, userId: string | null = null): Promise<void> {
   const key = process.env.RESEND_API_KEY;
   if (!key || !to) return;
   try {
-    await fetch("https://api.resend.com/emails", {
+    const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from: process.env.EMAIL_FROM || "no-reply@hoonpro.app", to: [to], subject, html }),
     });
+    if (r.ok) await logCost(userId, "email-notify", "resend-email");
   } catch { /* 발송 실패가 수집을 막지 않도록 */ }
 }
 
@@ -1637,7 +1710,7 @@ async function handleCron(req: VercelRequest, res: VercelResponse) {
     const cachedAt = ageMap.get(cacheKey);
     if (cachedAt && Date.now() - cachedAt < 20 * 3600 * 1000) continue; // 오늘 이미 수집됨
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(kw)}&channel=user&sorter=scoreDesc&listSize=60`;
-    const result = await fetchViaUnlocker(url, 1);
+    const result = await fetchViaUnlocker(url, 1, 20000, { userId: null, feature: "sourcing-cron" });
     if (!result.ok) { results.push(`${kw}: 실패`); continue; }
     const p = parseCoupangSearch(result.html!);
     if (p.products.length >= 5) {

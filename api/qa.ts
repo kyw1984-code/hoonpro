@@ -366,20 +366,17 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
     return res.status(200).json({ answer, sources: [], matched: false, logId: log?.id ?? null });
   }
 
-  // 일일 사용량 제한 (관리자 무제한) — 기존 increment_usage RPC 재사용
+  // 코칭AI는 일일 한도가 없다. 텍스트라 원가가 낮고, 많이 쓸수록 훈프로
+  // 노하우에 대한 의존이 깊어져 이탈이 줄어든다. 다만 사용량은 남겨
+  // 관리자 원가 현황에서 볼 수 있게 한다 (한도 0 = 무제한).
   if (!decoded.isAdmin) {
     const today = new Date().toISOString().split('T')[0];
-    const { data: usage, error: usageError } = await supabase.rpc('increment_usage', {
+    await supabase.rpc('increment_feature_usage', {
       p_user_id: decoded.userId,
       p_date: today,
-      p_limit: DAILY_LIMIT,
+      p_feature: 'qa',
+      p_limit: 0,
     });
-    if (usageError) return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
-    if (usage?.exceeded) {
-      return res.status(429).json({ error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다. 내일 다시 이용해주세요.` });
-    }
-    res.setHeader('X-Remaining-Calls', String(usage.remaining));
-    (req as any)._remaining = usage.remaining;
   }
 
   // 1) 하이브리드 검색: 벡터 유사도 + 키워드 정확 일치를 병행해 합친다

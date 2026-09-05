@@ -69,11 +69,11 @@ export function notifySubscriptionRequired(message?: string): void {
   }));
 }
 
-export async function trackUsage(): Promise<void> {
+export async function trackUsage(feature: 'image' | 'analyze' | 'general' = 'general'): Promise<void> {
   const token = getToken();
   if (!token) throw new Error('로그인이 필요합니다.');
 
-  const res = await fetch('/api/usage?action=track', {
+  const res = await fetch(`/api/usage?action=track&feature=${feature}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
   });

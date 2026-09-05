@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Building2 } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Building2, Wallet } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
 import { BillingAdmin } from './BillingAdmin';
+import { CostsAdmin } from './CostsAdmin';
 import { QAManager } from './QAManager';
 import { CompanyInfoConfig } from './CompanyInfoConfig';
 
@@ -32,7 +33,7 @@ const STATUS_COLOR: Record<string, string> = {
 const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'billing' | 'stats' | 'config' | 'taborder' | 'company' | 'qa'>('users');
+  const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'stats' | 'config' | 'taborder' | 'company' | 'qa'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -124,8 +125,10 @@ export function AdminPanel() {
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       {/* 탭 네비게이션 */}
-      {/* 모바일: 탭이 많아 가로로 넘치므로 스크롤 처리 (라벨은 줄바꿈 금지) */}
-      <div className="mb-6 flex gap-1 overflow-x-auto border-b border-line -mx-6 px-6 sm:mx-0 sm:px-0">
+      {/* 모바일: 탭이 많아 가로로 넘치므로 스크롤 처리 (라벨은 줄바꿈 금지).
+          음수 마진으로 화면 끝까지 늘리면 바깥 컨테이너 패딩과 어긋나
+          페이지 전체에 가로 스크롤이 생겨서 쓰지 않는다. */}
+      <div className="mb-6 flex gap-1 overflow-x-auto border-b border-line">
         <button
           onClick={() => setTab('users')}
           className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
@@ -141,6 +144,14 @@ export function AdminPanel() {
           }`}
         >
           <CreditCard className="w-4 h-4" /> 구독·쿠폰
+        </button>
+        <button
+          onClick={() => setTab('costs')}
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'costs' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <Wallet className="w-4 h-4" /> 원가 현황
         </button>
         <button
           onClick={() => setTab('stats')}
@@ -184,7 +195,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
+      {tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <ImageConfigTab showToast={showToast} />
       ) : tab === 'taborder' ? (
         <TabOrderConfig showToast={showToast} />
