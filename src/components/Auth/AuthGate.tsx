@@ -49,6 +49,19 @@ const TOOLS = [
 ];
 
 /* 코칭AI 데모 대화 — 실제 답변 톤. 광고·마진처럼 검색해도 안 나오는 실무 질문. */
+// 히어로 키워드 티커 — 예전에는 절대배치라 제목·칩·카드를 가렸다.
+// 일반 흐름 안의 한 줄로 두면 무엇도 가리지 않으면서 움직임은 남는다.
+const KEYWORDS = [
+  { t: '가습기',   n: '29,940', tag: 'HOT',      hot: true, up: true },
+  { t: '등산가방', n: '15,280', tag: 'TREND',    up: true },
+  { t: '담요',     n: '13,850', tag: 'SEASON' },
+  { t: '전기장판', n: '10,880', tag: 'HOT',      hot: true, up: true },
+  { t: '등산복',   n: '10,010', tag: 'TREND',    up: true },
+  { t: '온수매트', n: '8,140',  tag: 'HOT',      hot: true },
+  { t: '등산배낭', n: '7,330',  tag: 'CATEGORY' },
+  { t: '히터',     n: '6,610',  tag: 'SEASON',   up: true },
+];
+
 const COACH_HEADLINE = '훈프로가 실시간으로 답변드립니다';
 
 const COACH_TALKS = [
@@ -339,29 +352,6 @@ export function AuthGate({ onSuccess }: Props) {
     return () => { cancelled = true; clearTimeout(kick); };
   }, []);
 
-  // 코칭 섹션 헤드라인 — 뒷줄만 타이핑된다 ('막히는 지점마다,'는 고정)
-  const [coachLine, setCoachLine] = useState('');
-  useEffect(() => {
-    const phrase = COACH_HEADLINE;
-    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      setCoachLine(phrase);
-      return;
-    }
-    let char = 0, deleting = false, cancelled = false;
-    let timer = 0;
-    const step = () => {
-      if (cancelled) return;
-      char += deleting ? -1 : 1;
-      setCoachLine(phrase.slice(0, char));
-      let delay = deleting ? 35 : 70;
-      if (!deleting && char === phrase.length) { delay = 2600; deleting = true; }
-      else if (deleting && char === 0) { delay = 500; deleting = false; }
-      timer = window.setTimeout(step, delay);
-    };
-    timer = window.setTimeout(step, 500);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, []);
-
   // 코칭AI 데모 — 질문이 뜨고 답변이 타이핑된 뒤 다음 대화로 넘어간다
   const [talkIdx, setTalkIdx] = useState(0);
   const [talkTyped, setTalkTyped] = useState('');
@@ -514,6 +504,29 @@ export function AuthGate({ onSuccess }: Props) {
           vertical-align:-2px; margin-left:4px; animation: hpBlink 1s steps(2) infinite;
         }
         @keyframes hpBlink { 50% { opacity:0; } }
+        /* 키워드 티커 — 절대배치가 아니라 흐름 안의 한 줄이라 무엇도 가리지 않는다 */
+        .hp-landing .hp-ticker {
+          position:relative; overflow:hidden;
+          -webkit-mask-image: linear-gradient(90deg, transparent, #000 13%, #000 86%, transparent);
+                  mask-image: linear-gradient(90deg, transparent, #000 13%, #000 86%, transparent);
+        }
+        .hp-landing .hp-ticker-track {
+          display:flex; width:max-content; gap:8px;
+          animation: hpTicker 34s linear infinite;
+        }
+        .hp-landing .hp-ticker:hover .hp-ticker-track { animation-play-state: paused; }
+        @keyframes hpTicker { to { transform: translateX(-50%); } }
+        .hp-landing .hp-kw {
+          display:inline-flex; align-items:center; gap:7px; white-space:nowrap;
+          padding:7px 12px; border-radius:99px;
+          background: rgba(255,255,255,.045); border:1px solid #31406b;
+          color:#b9c2d8; font-size:12px;
+        }
+        .hp-landing .hp-kw b { color:#fff; font-weight:600; font-variant-numeric: tabular-nums; }
+        .hp-landing .hp-kw .hp-tag { color:#7cf5ff; font-size:10px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; }
+        .hp-landing .hp-kw.is-hot { border-color: rgba(255,180,84,.3); }
+        .hp-landing .hp-kw.is-hot .hp-tag { color:#ffb454; }
+        .hp-landing .hp-kw .hp-up { color:#3ee7a3; font-weight:700; }
         .hp-landing .hp-dot {
           width:8px; height:8px; border-radius:50%; background:#3ee7a3;
           box-shadow: 0 0 0 0 rgba(62,231,163,.7);
@@ -675,13 +688,33 @@ export function AuthGate({ onSuccess }: Props) {
             ))}
           </div>
 
+          {/* 지금 뜨는 키워드 — 가로로 흐른다 (마우스를 올리면 멈춤) */}
+          <div className="relative z-[3] mt-8 max-w-[600px]">
+            <p className="mb-2 flex items-center gap-1.5 text-[11.5px] font-medium tracking-wide text-[#98a3bf]">
+              <span className="hp-badge-dot" />
+              지금 뜨는 키워드
+            </p>
+            <div className="hp-ticker">
+              <div className="hp-ticker-track">
+                {[...KEYWORDS, ...KEYWORDS].map((k, i) => (
+                  <span key={i} className={`hp-kw ${k.hot ? 'is-hot' : ''}`} aria-hidden={i >= KEYWORDS.length}>
+                    <span className="hp-tag">{k.tag}</span>
+                    {k.t}
+                    <b>{k.n}</b>
+                    {k.up && <span className="hp-up">↑</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* 툴 칩 */}
-          <div className="relative z-[3] mt-9 flex max-w-[560px] flex-wrap gap-2">
+          <div className="relative z-[3] mt-7 flex max-w-[560px] flex-wrap gap-2">
             {TOOLS.map((t, i) => (
               <span
                 key={i}
-                className="hp-chip inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-[12.5px] transition-all"
-                style={{ background: 'rgba(255,255,255,.055)', borderColor: '#31406b', color: '#b9c2d8' }}
+                className="hp-chip inline-flex items-center gap-2 rounded-[10px] border px-3.5 py-2.5 text-[13px] font-medium transition-all"
+                style={{ background: 'rgba(255,255,255,.08)', borderColor: '#455684', color: '#f5f8ff' }}
               >
                 <t.icon className="h-3.5 w-3.5" style={{ color: '#7cf5ff' }} />
                 {t.label}
@@ -1136,10 +1169,7 @@ export function AuthGate({ onSuccess }: Props) {
               style={{ wordBreak: 'keep-all', minHeight: '3.15em' }}
             >
               <span className="block">막히는 지점마다,</span>
-              <span className="hp-accent">
-                {coachLine}
-                <span className="hp-caret" />
-              </span>
+              <span className="hp-accent">{COACH_HEADLINE}</span>
             </h2>
             <p className="mt-4 text-[14px] leading-relaxed text-[#b9c2d8]">
               검색해도 안 나오고, 물어볼 데도 없는 질문이 있습니다.
