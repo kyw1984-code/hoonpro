@@ -996,6 +996,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'profit': return await handleProfit(userId, req, res);
       case 'costs': return await handleCosts(userId, res);
       case 'cost-save': return await handleCostSave(userId, req, res);
+      case 'settlement': return await handleSettlement(userId, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -1350,4 +1351,81 @@ async function handleCostSave(userId: string, req: VercelRequest, res: VercelRes
   const err = await upsertChunked('coupang_costs', rows, 'user_id,vendor_item_id');
   if (err) return res.status(500).json({ error: `저장 실패: ${err}` });
   return res.status(200).json({ ok: true, saved: rows.length });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [2] 정산 캐시플로 캘린더
+//
+// 소상공인이 가장 불안해하는 질문은 "언제 얼마가 들어오나"다.
+// 지급내역 API가 주는 확정·예정 금액을 날짜에 붙이고, 아직 지급일이 잡히지
+// 않은 매출은 '미배정'으로 따로 보여준다. 둘을 섞으면 실제 입금일이 없는
+// 돈까지 캘린더에 찍혀 계획을 그르친다.
+// ═══════════════════════════════════════════════════════════════
+
+async function handleSettlement(userId: string, res: VercelResponse) {
+  const today = kstToday();
+  const from = addDays(today, -90);
+  const to = addDays(today, 90);
+
+  const [setRes, salesRes] = await Promise.all([
+    supabase!
+      .from('coupang_settlements')
+      .select('settlement_date, settlement_type, recognition_month, amount, status')
+      .eq('user_id', userId)
+      .gte('settlement_date', from)
+      .lte('settlement_date', to)
+      .order('settlement_date'),
+    // 최근 90일 정산예정액 — 지급 일정이 아직 안 잡힌 몫을 가늠한다
+    supabase!
+      .from('coupang_sales_daily')
+      .select('sale_date, settlement_amount')
+      .eq('user_id', userId)
+      .gte('sale_date', from),
+  ]);
+
+  const byDate = new Map<string, { date: string; amount: number; items: Array<{ type: string; amount: number; status: string }> }>();
+  let paid = 0;      // 이미 들어온 돈
+  let upcoming = 0;  // 앞으로 들어올 돈
+
+  for (const s of setRes.data ?? []) {
+    const date = String(s.settlement_date);
+    const amount = Number(s.amount) || 0;
+    const cur = byDate.get(date) ?? { date, amount: 0, items: [] };
+    cur.amount += amount;
+    cur.items.push({ type: String(s.settlement_type ?? '정산'), amount, status: String(s.status ?? '') });
+    byDate.set(date, cur);
+    if (date < today) paid += amount;
+    else upcoming += amount;
+  }
+
+  const days = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+  // 앞으로 7일 / 30일 입금 예정
+  const in7 = days.filter(d => d.date >= today && d.date <= addDays(today, 7)).reduce((n, d) => n + d.amount, 0);
+  const in30 = days.filter(d => d.date >= today && d.date <= addDays(today, 30)).reduce((n, d) => n + d.amount, 0);
+
+  // 지급 일정이 잡힌 총액과 매출 기준 정산예정액의 차이 = 아직 일정 미배정
+  const totalSettlementPlanned = (setRes.data ?? []).reduce((n, s) => n + (Number(s.amount) || 0), 0);
+  const totalSalesSettlement = (salesRes.data ?? []).reduce((n, s) => n + (Number(s.settlement_amount) || 0), 0);
+  const unscheduled = Math.max(0, totalSalesSettlement - totalSettlementPlanned);
+
+  // 최근 8주 주간 입금 추이 — 다음 주 예상의 근거로 쓴다
+  const weekly: Array<{ weekStart: string; amount: number }> = [];
+  for (let i = 7; i >= 0; i--) {
+    const start = addDays(today, -7 * i - 6);
+    const end = addDays(today, -7 * i);
+    weekly.push({
+      weekStart: start,
+      amount: days.filter(d => d.date >= start && d.date <= end).reduce((n, d) => n + d.amount, 0),
+    });
+  }
+  const past = weekly.filter(w => w.amount > 0);
+  const weeklyAverage = past.length > 0 ? past.reduce((n, w) => n + w.amount, 0) / past.length : 0;
+
+  return res.status(200).json({
+    today,
+    days,
+    totals: { paid, upcoming, in7, in30, unscheduled, weeklyAverage },
+    weekly,
+  });
 }

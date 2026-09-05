@@ -100,6 +100,26 @@ export interface CostRow {
   memo: string;
 }
 
+export interface SettlementDay {
+  date: string;
+  amount: number;
+  items: Array<{ type: string; amount: number; status: string }>;
+}
+
+export interface SettlementResponse {
+  today: string;
+  days: SettlementDay[];
+  totals: {
+    paid: number;
+    upcoming: number;
+    in7: number;
+    in30: number;
+    unscheduled: number;
+    weeklyAverage: number;
+  };
+  weekly: Array<{ weekStart: string; amount: number }>;
+}
+
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
   saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyIssuedAt?: string }) =>
@@ -110,6 +130,7 @@ export const coupangApi = {
   costs: () => request<{ rows: CostRow[] }>('costs'),
   saveCosts: (items: Array<Partial<CostRow> & { vendorItemId: string }>) =>
     request<{ ok: true; saved: number }>('cost-save', { method: 'POST', body: { items } }),
+  settlement: () => request<SettlementResponse>('settlement'),
 };
 
 // ── 표시 헬퍼 ─────────────────────────────────────────────────

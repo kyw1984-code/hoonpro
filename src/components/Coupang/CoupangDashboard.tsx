@@ -8,11 +8,13 @@ import { coupangApi, sinceText, type CoupangStatus, type SyncSummary } from '../
 import { KeySetup } from './KeySetup';
 import { ProfitDashboard } from './ProfitDashboard';
 import { CostEditor } from './CostEditor';
+import { SettlementCalendar } from './SettlementCalendar';
 
-type View = 'profit' | 'costs' | 'settings';
+type View = 'profit' | 'settlement' | 'costs' | 'settings';
 
 const VIEWS: Array<{ id: View; label: string }> = [
   { id: 'profit', label: '순이익' },
+  { id: 'settlement', label: '정산 캘린더' },
   { id: 'costs', label: '원가 입력' },
   { id: 'settings', label: '연동 설정' },
 ];
@@ -127,6 +129,7 @@ export function CoupangDashboard() {
       )}
 
       {view === 'profit' && <ProfitDashboard onEditCosts={() => setView('costs')} />}
+      {view === 'settlement' && <SettlementCalendar />}
       {view === 'costs' && <CostEditor onSaved={() => undefined} />}
 
       {view === 'settings' && (
