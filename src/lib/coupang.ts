@@ -202,6 +202,27 @@ export interface Inquiry {
   repliedAt: string | null;
 }
 
+export interface RankSeriesPoint {
+  date: string;
+  rank: number | null;
+  quantity: number;
+  amount: number;
+}
+
+export interface RankRevenueItem {
+  keyword: string;
+  productId: string;
+  productName: string;
+  status: 'ok' | 'few-days' | 'flat-rank' | 'no-orders';
+  days: number;
+  correlation: number | null;
+  perStepQty: number | null;
+  weeklyRevenuePerStep: number | null;
+  avgPrice: number;
+  latestRank: number | null;
+  series: RankSeriesPoint[];
+}
+
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
   saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyIssuedAt?: string }) =>
@@ -222,6 +243,8 @@ export const coupangApi = {
     request<{ ok: true; draft: string; remaining: number }>('inquiry-draft', { method: 'POST', body: { inquiryId } }),
   inquiryReply: (inquiryId: string, content: string) =>
     request<{ ok: true }>('inquiry-reply', { method: 'POST', body: { inquiryId, content } }),
+  rankRevenue: () =>
+    request<{ items: RankRevenueItem[]; minPairs: number; hint?: string }>('rank-revenue'),
 };
 
 // ── 표시 헬퍼 ─────────────────────────────────────────────────

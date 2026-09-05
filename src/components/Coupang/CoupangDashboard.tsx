@@ -13,8 +13,9 @@ import { WeeklyReports } from './WeeklyReports';
 import { InventoryForecast } from './InventoryForecast';
 import { ReturnAnalysis } from './ReturnAnalysis';
 import { InquiryAssistant } from './InquiryAssistant';
+import { RankRevenue } from './RankRevenue';
 
-type View = 'profit' | 'settlement' | 'inventory' | 'returns' | 'inquiries' | 'costs' | 'settings';
+type View = 'profit' | 'settlement' | 'inventory' | 'returns' | 'inquiries' | 'rank' | 'costs' | 'settings';
 
 const VIEWS: Array<{ id: View; label: string }> = [
   { id: 'profit', label: '순이익' },
@@ -22,6 +23,7 @@ const VIEWS: Array<{ id: View; label: string }> = [
   { id: 'inventory', label: '재고 예측' },
   { id: 'returns', label: '반품 분석' },
   { id: 'inquiries', label: '고객문의' },
+  { id: 'rank', label: '순위·매출' },
   { id: 'costs', label: '원가 입력' },
   { id: 'settings', label: '연동 설정' },
 ];
@@ -140,6 +142,7 @@ export function CoupangDashboard() {
       {view === 'inventory' && <InventoryForecast />}
       {view === 'returns' && <ReturnAnalysis onEditCosts={() => setView('costs')} />}
       {view === 'inquiries' && <InquiryAssistant />}
+      {view === 'rank' && <RankRevenue />}
       {view === 'costs' && <CostEditor onSaved={() => undefined} />}
 
       {view === 'settings' && (

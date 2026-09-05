@@ -1003,6 +1003,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'inquiries': return await handleInquiries(userId, req, res);
       case 'inquiry-draft': return await handleInquiryDraft(userId, req, res);
       case 'inquiry-reply': return await handleInquiryReply(userId, req, res);
+      case 'rank-revenue': return await handleRankRevenue(userId, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -2136,4 +2137,193 @@ async function handleInquiryReply(userId: string, req: VercelRequest, res: Verce
     .eq('inquiry_id', inquiryId);
 
   return res.status(200).json({ ok: true });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [7] 순위와 판매의 상관 분석
+//
+// 훈프로에는 이미 순위 추적 이력이 쌓여 있고, 이제 실제 판매량도 있다. 둘을
+// 붙이면 "이 키워드 순위 한 계단이 내 매출로 얼마인가"라는, 다른 도구가 못 주는
+// 답이 나온다. 순위 추적은 노출상품ID 기준이고 주문은 옵션ID 기준이라
+// 상품 마스터를 거쳐 연결한다.
+//
+// 통계를 함부로 말하지 않는다. 겹치는 날이 열흘이 안 되거나 순위가 거의
+// 안 변했으면 상관을 계산하지 않고 "아직 판단할 수 없다"고 답한다.
+// ═══════════════════════════════════════════════════════════════
+
+const MIN_PAIRS_FOR_CORRELATION = 10;
+
+function pearson(xs: number[], ys: number[]): number | null {
+  const n = xs.length;
+  if (n < 2) return null;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) {
+    const a = xs[i] - mx;
+    const b = ys[i] - my;
+    num += a * b;
+    dx += a * a;
+    dy += b * b;
+  }
+  if (dx === 0 || dy === 0) return null;
+  return num / Math.sqrt(dx * dy);
+}
+
+/** ys = a + b·xs 의 기울기 b */
+function slope(xs: number[], ys: number[]): number | null {
+  const n = xs.length;
+  if (n < 2) return null;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - mx) * (ys[i] - my);
+    den += (xs[i] - mx) ** 2;
+  }
+  if (den === 0) return null;
+  return num / den;
+}
+
+async function handleRankRevenue(userId: string, res: VercelResponse) {
+  const today = kstToday();
+  const from = addDays(today, -89);
+
+  const { data: watches } = await supabase!
+    .from('sourcing_rank_watch')
+    .select('keyword, product_id, product_name')
+    .eq('user_id', userId);
+
+  if (!watches || watches.length === 0) {
+    return res.status(200).json({ items: [], hint: 'no-watch' });
+  }
+
+  const productIds = [...new Set(watches.map(w => String(w.product_id)))];
+
+  // 노출상품ID → 옵션ID 묶음 (주문은 옵션 단위로 쌓인다)
+  const { data: items } = await supabase!
+    .from('coupang_items')
+    .select('vendor_item_id, product_id')
+    .eq('user_id', userId)
+    .in('product_id', productIds);
+
+  const vendorItemsByProduct = new Map<string, string[]>();
+  for (const it of items ?? []) {
+    const pid = String(it.product_id ?? '');
+    if (!pid) continue;
+    const list = vendorItemsByProduct.get(pid) ?? [];
+    list.push(String(it.vendor_item_id));
+    vendorItemsByProduct.set(pid, list);
+  }
+
+  const allVendorItems = [...vendorItemsByProduct.values()].flat();
+
+  const [rankRes, orderRes] = await Promise.all([
+    supabase!
+      .from('sourcing_rank_obs')
+      .select('keyword, product_id, rank, captured_at')
+      .in('product_id', productIds)
+      .gte('captured_at', `${from}T00:00:00Z`),
+    allVendorItems.length > 0
+      ? supabase!
+          .from('coupang_orders_daily')
+          .select('vendor_item_id, order_date, quantity, order_amount')
+          .eq('user_id', userId)
+          .in('vendor_item_id', allVendorItems)
+          .gte('order_date', from)
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
+
+  // 하루에 여러 번 수집될 수 있으므로 날짜별 평균 순위를 쓴다
+  const rankByKey = new Map<string, Map<string, { sum: number; n: number }>>();
+  for (const o of rankRes.data ?? []) {
+    if (o.rank === null || o.rank === undefined) continue; // 60위 밖은 순위값이 없다
+    const key = `${o.keyword}::${o.product_id}`;
+    const day = String(o.captured_at).slice(0, 10);
+    const perDay = rankByKey.get(key) ?? new Map();
+    const cur = perDay.get(day) ?? { sum: 0, n: 0 };
+    cur.sum += Number(o.rank);
+    cur.n += 1;
+    perDay.set(day, cur);
+    rankByKey.set(key, perDay);
+  }
+
+  const ordersByProduct = new Map<string, Map<string, { qty: number; amount: number }>>();
+  const productOfVendorItem = new Map<string, string>();
+  for (const [pid, vids] of vendorItemsByProduct) for (const v of vids) productOfVendorItem.set(v, pid);
+
+  for (const o of orderRes.data ?? []) {
+    const pid = productOfVendorItem.get(String(o.vendor_item_id));
+    if (!pid) continue;
+    const day = String(o.order_date);
+    const perDay = ordersByProduct.get(pid) ?? new Map();
+    const cur = perDay.get(day) ?? { qty: 0, amount: 0 };
+    cur.qty += Number(o.quantity) || 0;
+    cur.amount += Number(o.order_amount) || 0;
+    perDay.set(day, cur);
+    ordersByProduct.set(pid, perDay);
+  }
+
+  const results = watches.map(w => {
+    const key = `${w.keyword}::${w.product_id}`;
+    const rankDays = rankByKey.get(key) ?? new Map();
+    const orderDays = ordersByProduct.get(String(w.product_id)) ?? new Map();
+
+    const days = [...new Set([...rankDays.keys(), ...orderDays.keys()])].sort();
+    const series = days.map(d => {
+      const r = rankDays.get(d);
+      const o = orderDays.get(d);
+      return {
+        date: d,
+        rank: r ? Math.round((r.sum / r.n) * 10) / 10 : null,
+        quantity: o?.qty ?? 0,
+        amount: o?.amount ?? 0,
+      };
+    });
+
+    // 상관은 순위와 판매가 둘 다 있는 날만 쓴다
+    const paired = series.filter(p => p.rank !== null);
+    const xs = paired.map(p => p.rank as number);
+    const ys = paired.map(p => p.quantity);
+
+    const hasOrders = allVendorItems.length > 0 && ordersByProduct.has(String(w.product_id));
+    let status: 'ok' | 'few-days' | 'flat-rank' | 'no-orders' = 'ok';
+    if (!hasOrders) status = 'no-orders';
+    else if (paired.length < MIN_PAIRS_FOR_CORRELATION) status = 'few-days';
+
+    const r = status === 'ok' ? pearson(xs, ys) : null;
+    const b = status === 'ok' ? slope(xs, ys) : null;
+    if (status === 'ok' && r === null) status = 'flat-rank';
+
+    const totalQty = ys.reduce((a, c) => a + c, 0);
+    const totalAmount = paired.reduce((a, c) => a + c.amount, 0);
+    const avgPrice = totalQty > 0 ? totalAmount / totalQty : 0;
+
+    // 기울기는 보통 음수다(순위 숫자가 작아질수록 많이 팔린다).
+    // 한 계단 '개선' 효과로 뒤집어 보여준다.
+    const perStepQty = b === null ? null : -b;
+    const weeklyRevenuePerStep = perStepQty === null ? null : perStepQty * 7 * avgPrice;
+
+    return {
+      keyword: String(w.keyword),
+      productId: String(w.product_id),
+      productName: String(w.product_name ?? ''),
+      status,
+      days: paired.length,
+      correlation: r,
+      perStepQty,
+      weeklyRevenuePerStep,
+      avgPrice,
+      latestRank: [...rankDays.keys()].sort().slice(-1).map(d => {
+        const v = rankDays.get(d)!;
+        return Math.round((v.sum / v.n) * 10) / 10;
+      })[0] ?? null,
+      series,
+    };
+  });
+
+  // 신호가 뚜렷한 것부터
+  results.sort((a, b) => Math.abs(b.correlation ?? 0) - Math.abs(a.correlation ?? 0));
+
+  return res.status(200).json({ items: results, minPairs: MIN_PAIRS_FOR_CORRELATION });
 }
