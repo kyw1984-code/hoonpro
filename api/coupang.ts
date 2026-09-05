@@ -107,6 +107,8 @@ export interface CoupangResult<T = any> {
   error?: string;
   /** 키 자체가 거부됐다 — 만료·오타·IP 미등록. 계정 상태를 invalid로 내린다. */
   authFailed?: boolean;
+  /** 쿠팡이 아니라 중계 서버가 낸 오류다. 판매자 키와 무관하므로 계정을 건드리면 안 된다. */
+  relayError?: boolean;
 }
 
 /**
@@ -156,13 +158,17 @@ async function coupangCall<T = any>(
     }
 
     if (!res.ok) {
-      // 401/403은 키 문제 또는 IP 미등록 — 사용자가 조치해야 하므로 구분한다.
-      const authFailed = res.status === 401 || res.status === 403;
+      // 중계 서버 자체가 만든 오류(비밀키 불일치, 쿠팡 미도달)는 X-Relay-Error를
+      // 달고 온다. 이걸 키 거부로 읽으면 운영자가 비밀키 하나 바꾼 날 판매자
+      // 계정이 무더기로 무효화된다. 401·403은 쿠팡이 직접 보낸 것일 때만 키 문제다.
+      const fromRelay = res.headers.get('x-relay-error') === '1';
+      const authFailed = !fromRelay && (res.status === 401 || res.status === 403);
       return {
         ok: false,
         status: res.status,
         authFailed,
-        error: parsed?.message || parsed?.error || text.slice(0, 300) || `HTTP ${res.status}`,
+        relayError: fromRelay,
+        error: (fromRelay ? '중계 서버: ' : '') + (parsed?.message || parsed?.error || text.slice(0, 300) || `HTTP ${res.status}`),
       };
     }
 
@@ -948,8 +954,36 @@ function won(n: number): string {
  * 시간 예산을 두고 남은 계정은 다음 시간대가 이어받으므로, 사용자가 늘어도
  * 한 번의 실행이 타임아웃에 걸리지 않는다.
  */
+/**
+ * 중계 서버 사전 점검. 비밀키가 어긋났거나 서버가 죽었으면 수집을 아예
+ * 시작하지 않는다. 그 상태로 돌면 모든 호출이 실패하고, 실패 원인을 잘못
+ * 읽으면 판매자 계정까지 무효화된다.
+ */
+async function relayPreflight(): Promise<{ ok: boolean; reason?: string }> {
+  if (!RELAY_URL) return { ok: true };
+  try {
+    const base = RELAY_URL.replace(/\/relay\/?$/, '');
+    const r = await fetch(`${base}/health`, {
+      headers: RELAY_SECRET ? { 'X-Relay-Secret': RELAY_SECRET } : {},
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!r.ok) return { ok: false, reason: `중계 서버 응답 ${r.status}` };
+    const data: any = await r.json().catch(() => ({}));
+    if (data?.auth === false) return { ok: false, reason: '중계 서버 비밀키가 일치하지 않습니다 (COUPANG_RELAY_SECRET 확인)' };
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, reason: `중계 서버에 닿지 못했습니다: ${e?.message ?? e}` };
+  }
+}
+
 async function cronSync(res: VercelResponse) {
   if (!supabase) return res.status(200).json({ ok: false, reason: 'supabase 미설정' });
+
+  const preflight = await relayPreflight();
+  if (!preflight.ok) {
+    console.error('coupang cron aborted:', preflight.reason);
+    return res.status(200).json({ ok: false, reason: preflight.reason });
+  }
 
   const budgetMs = 240_000; // maxDuration 300초 안에서 여유를 남긴다
   // 한 사용자가 예산 전체를 먹지 않도록 1인당 상한을 따로 둔다. 상품이 많은
