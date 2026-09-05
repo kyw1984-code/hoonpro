@@ -202,7 +202,12 @@ export default function App() {
         <header className="sticky top-0 z-20 backdrop-blur-xl bg-ground/75 border-b border-line">
           {/* 상단 줄 — 브랜드와 계정 */}
           <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-2 px-4 sm:gap-4 sm:px-6">
-            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setActiveTab('home')}
+              aria-label="홈으로 이동"
+              className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition-opacity hover:opacity-80"
+            >
               <div
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control text-[13px] font-extrabold"
                 style={{
@@ -216,7 +221,7 @@ export default function App() {
               <h1 className="truncate text-[15px] font-semibold tracking-tight text-ink">
                 쇼크트리 훈프로 <span className="hidden text-ink-3 font-medium sm:inline">AI 자동화</span>
               </h1>
-            </div>
+            </button>
 
             <div className="flex shrink-0 items-center gap-3">
               {!user.isAdmin && remainingCalls !== null && (

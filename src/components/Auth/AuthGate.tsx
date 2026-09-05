@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Lock, UserPlus, LogIn, ShieldCheck, ArrowRight, Sparkles, Activity,
   TrendingUp, Image as ImageIcon, LayoutTemplate, ListOrdered, MessageSquareText,
@@ -17,7 +17,7 @@ type Mode = 'login' | 'signup';
 
 /* ────────────────────────────────────────────────────────────────
  * 로그인 전 랜딩 (다크 테크)
- * - 미로그인 사용자에게 훈프로의 8가지 AI 도구를 라이브 데모처럼 보여주고
+ * - 미로그인 사용자에게 훈프로의 7가지 AI 도구를 라이브 데모처럼 보여주고
  *   그대로 로그인/가입까지 진행시킨다.
  * - 기존 API 호출 로직 100% 유지 (login / send-code / signup / PASS)
  * ──────────────────────────────────────────────────────────────── */
@@ -29,23 +29,6 @@ const DEMO_PRODUCTS = [
   { cat: 'HOME · 침구',     name: '극세사 겨울 담요 초대형',     price: '24,900원', q: '13,850', comp: '높음', trend: '+15%', score: 71 },
   { cat: 'SEASONAL · 가전', name: '전기장판 세탁가능 프리미엄',  price: '79,000원', q: '10,880', comp: '중간', trend: '+51%', score: 88 },
   { cat: 'OUTDOOR · 의류',  name: '고어텍스 등산복 자켓 방풍',   price: '149,000원', q: '10,010', comp: '높음', trend: '+9%',  score: 64 },
-];
-
-const KEYWORDS = [
-  { t: '가습기',     n: '29,940', tag: 'HOT',      hot: true,  up: true },
-  { t: '등산가방',   n: '15,280', tag: 'TREND',    up: true },
-  { t: '담요',       n: '13,850', tag: 'SEASON' },
-  { t: '전기장판',   n: '10,880', tag: 'HOT',      hot: true,  up: true },
-  { t: '등산복',     n: '10,010', tag: 'TREND',    up: true },
-  { t: '등산배낭',   n: '7,330',  tag: 'CATEGORY' },
-  { t: '히터',       n: '6,610',  tag: 'SEASON',   up: true },
-  { t: '온수매트',   n: '8,140',  tag: 'HOT',      hot: true },
-];
-
-const KEYWORD_SPOTS = [
-  { x: 82, y: 6 }, { x: 92, y: 24 }, { x: 78, y: 44 },
-  { x: 4,  y: 58 }, { x: 88, y: 60 }, { x: 2,  y: 82 },
-  { x: 26, y: 2 }, { x: 52, y: 4 },
 ];
 
 const TYPE_PHRASES = [
@@ -63,6 +46,40 @@ const TOOLS = [
   { icon: MessageSquareText,  label: '리뷰 분석' },
   { icon: BarChart3,          label: '광고 성과 분석' },
   { icon: MessageCircleQuestion, label: '훈프로 코칭AI' },
+];
+
+/* 코칭AI 데모 대화 — 실제 답변 톤. 광고·마진처럼 검색해도 안 나오는 실무 질문. */
+// 히어로 키워드 티커 — 예전에는 절대배치라 제목·칩·카드를 가렸다.
+// 일반 흐름 안의 한 줄로 두면 무엇도 가리지 않으면서 움직임은 남는다.
+const KEYWORDS = [
+  { t: '가습기',   n: '29,940', tag: 'HOT',      hot: true, up: true },
+  { t: '등산가방', n: '15,280', tag: 'TREND',    up: true },
+  { t: '담요',     n: '13,850', tag: 'SEASON' },
+  { t: '전기장판', n: '10,880', tag: 'HOT',      hot: true, up: true },
+  { t: '등산복',   n: '10,010', tag: 'TREND',    up: true },
+  { t: '온수매트', n: '8,140',  tag: 'HOT',      hot: true },
+  { t: '등산배낭', n: '7,330',  tag: 'CATEGORY' },
+  { t: '히터',     n: '6,610',  tag: 'SEASON',   up: true },
+];
+
+const COACH_HEADLINE = '훈프로가 실시간으로 답변드립니다';
+
+const COACH_TALKS = [
+  {
+    q: '검색 영역 광고수익률이 높은데 목표수익률을 어떻게 바꿔야 하나요?',
+    a: '목표수익률을 낮추면 클릭당 비용이 올라가면서 검색 광고 순위가 올라갑니다. 600%에서 550% 정도로 낮춰 검색 비중을 키워보세요.',
+    flow: '목표수익률 ↓ → CPC ↑ → 광고 순위 ↑ → 검색 비중 ↑',
+  },
+  {
+    q: '광고 예산은 처음에 얼마로 잡는 게 좋나요?',
+    a: '하루 1만원으로 2주간 데이터부터 모으세요. 전환이 붙는 키워드가 보이면 그때 그 키워드에 예산을 몰아주는 순서입니다.',
+    flow: '소액 테스트 → 전환 키워드 확인 → 예산 집중',
+  },
+  {
+    q: '마진 15%면 괜찮은 편인가요?',
+    a: '수수료와 반품까지 빼고 남는 15%라면 나쁘지 않지만 광고를 돌릴 여력이 부족합니다. 원가를 3~5%만 낮춰도 광고 확장 여지가 생깁니다.',
+    flow: '원가 −3% → 광고 예산 확보 → 노출 확대',
+  },
 ];
 
 /* ──────────────── 컴포넌트 ──────────────── */
@@ -268,12 +285,15 @@ export function AuthGate({ onSuccess }: Props) {
     } else if (!signupName.trim() || !signupPhone.trim() || !signupEmail.trim()) {
       return setMessage({ text: '모든 항목을 입력해주세요.', type: 'error' });
     }
-    if (emailCodeRequired && !verificationRequired) {
-      if (!/^\d{6}$/.test(signupCode.trim())) return setMessage({ text: '이메일로 받은 6자리 인증코드를 입력해주세요.', type: 'error' });
-      if (signupPassword.length < 8 || !/[A-Za-z]/.test(signupPassword) || !/[0-9]/.test(signupPassword)) {
-        return setMessage({ text: '비밀번호는 영문·숫자를 포함해 8자 이상이어야 합니다.', type: 'error' });
-      }
-      if (!ageChecked) return setMessage({ text: '만 14세 이상 확인에 동의해주세요.', type: 'error' });
+    if (emailCodeRequired && !verificationRequired && !/^\d{6}$/.test(signupCode.trim())) {
+      return setMessage({ text: '이메일로 받은 6자리 인증코드를 입력해주세요.', type: 'error' });
+    }
+    // 비밀번호는 가입 방식과 무관하게 필수 — 로그인이 항상 비밀번호를 요구한다
+    if (signupPassword.length < 8 || !/[A-Za-z]/.test(signupPassword) || !/[0-9]/.test(signupPassword)) {
+      return setMessage({ text: '비밀번호는 영문·숫자를 포함해 8자 이상이어야 합니다.', type: 'error' });
+    }
+    if (emailCodeRequired && !verificationRequired && !ageChecked) {
+      return setMessage({ text: '만 14세 이상 확인에 동의해주세요.', type: 'error' });
     }
     setLoading(true);
     setMessage(null);
@@ -335,6 +355,39 @@ export function AuthGate({ onSuccess }: Props) {
     return () => { cancelled = true; clearTimeout(kick); };
   }, []);
 
+  // 코칭AI 데모 — 질문이 뜨고 답변이 타이핑된 뒤 다음 대화로 넘어간다
+  const [talkIdx, setTalkIdx] = useState(0);
+  const [talkTyped, setTalkTyped] = useState('');
+  const [talkDone, setTalkDone] = useState(false);
+  useEffect(() => {
+    const reduce = typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const full = COACH_TALKS[talkIdx].a;
+    if (reduce) {
+      setTalkTyped(full);
+      setTalkDone(true);
+      const hold = setTimeout(() => setTalkIdx(i => (i + 1) % COACH_TALKS.length), 6000);
+      return () => clearTimeout(hold);
+    }
+
+    let char = 0;
+    setTalkTyped('');
+    setTalkDone(false);
+    const timers: number[] = [];
+    const tick = () => {
+      char += 1;
+      setTalkTyped(full.slice(0, char));
+      if (char < full.length) {
+        timers.push(window.setTimeout(tick, 28));
+      } else {
+        setTalkDone(true);
+        timers.push(window.setTimeout(() => setTalkIdx(i => (i + 1) % COACH_TALKS.length), 3400));
+      }
+    };
+    timers.push(window.setTimeout(tick, 700));
+    return () => timers.forEach(clearTimeout);
+  }, [talkIdx]);
+
   // 상품 롤링
   const [prodIdx, setProdIdx] = useState(0);
   useEffect(() => {
@@ -388,20 +441,19 @@ export function AuthGate({ onSuccess }: Props) {
     authRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
 
-  const keywordBubbles = useMemo(() =>
-    KEYWORDS.slice(0, KEYWORD_SPOTS.length).map((k, i) => {
-      const p = KEYWORD_SPOTS[i];
-      return {
-        ...k,
-        left: p.x + '%',
-        top: p.y + '%',
-        dx: (Math.random() * 30 - 15).toFixed(0) + 'px',
-        dy: (Math.random() * 24 - 12).toFixed(0) + 'px',
-        dur: 8 + Math.random() * 6,
-        delay: Math.random() * 3,
-        appearDelay: 300 + i * 140,
-      };
-    }), []);
+  // 요금 카드에서 고른 플랜 — 가입 후 구독 화면이 이 값을 그대로 선택해준다
+  const [pickedInterval, setPickedInterval] = useState<'year' | 'month'>('year');
+
+  const startSignup = (interval: 'year' | 'month') => {
+    setPickedInterval(interval);
+    try {
+      sessionStorage.setItem('hoonpro_plan_intent', interval);
+    } catch { /* 저장 실패해도 가입은 진행된다 */ }
+    setHelper(null);
+    setMode('signup');
+    setMessage(null);
+    scrollToAuth();
+  };
 
   return (
     <div className="hp-landing relative min-h-screen w-full overflow-x-hidden text-[#f5f8ff]">
@@ -455,6 +507,29 @@ export function AuthGate({ onSuccess }: Props) {
           vertical-align:-2px; margin-left:4px; animation: hpBlink 1s steps(2) infinite;
         }
         @keyframes hpBlink { 50% { opacity:0; } }
+        /* 키워드 티커 — 절대배치가 아니라 흐름 안의 한 줄이라 무엇도 가리지 않는다 */
+        .hp-landing .hp-ticker {
+          position:relative; overflow:hidden;
+          -webkit-mask-image: linear-gradient(90deg, transparent, #000 13%, #000 86%, transparent);
+                  mask-image: linear-gradient(90deg, transparent, #000 13%, #000 86%, transparent);
+        }
+        .hp-landing .hp-ticker-track {
+          display:flex; width:max-content; gap:8px;
+          animation: hpTicker 34s linear infinite;
+        }
+        .hp-landing .hp-ticker:hover .hp-ticker-track { animation-play-state: paused; }
+        @keyframes hpTicker { to { transform: translateX(-50%); } }
+        .hp-landing .hp-kw {
+          display:inline-flex; align-items:center; gap:7px; white-space:nowrap;
+          padding:7px 12px; border-radius:99px;
+          background: rgba(255,255,255,.045); border:1px solid #31406b;
+          color:#b9c2d8; font-size:12px;
+        }
+        .hp-landing .hp-kw b { color:#fff; font-weight:600; font-variant-numeric: tabular-nums; }
+        .hp-landing .hp-kw .hp-tag { color:#7cf5ff; font-size:10px; text-transform:uppercase; letter-spacing:.08em; font-weight:700; }
+        .hp-landing .hp-kw.is-hot { border-color: rgba(255,180,84,.3); }
+        .hp-landing .hp-kw.is-hot .hp-tag { color:#ffb454; }
+        .hp-landing .hp-kw .hp-up { color:#3ee7a3; font-weight:700; }
         .hp-landing .hp-dot {
           width:8px; height:8px; border-radius:50%; background:#3ee7a3;
           box-shadow: 0 0 0 0 rgba(62,231,163,.7);
@@ -468,27 +543,6 @@ export function AuthGate({ onSuccess }: Props) {
         .hp-landing .hp-badge-dot {
           width:6px; height:6px; border-radius:50%; background:#7cf5ff;
           box-shadow:0 0 12px #7cf5ff; animation: hpBlink 1.6s infinite;
-        }
-        .hp-landing .hp-bubble {
-          position:absolute; padding:9px 14px; border-radius:99px;
-          background: rgba(27,39,69,.82); border:1px solid #31406b;
-          color:#b9c2d8; font-size:12px;
-          backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-          display:flex; align-items:center; gap:8px; white-space:nowrap;
-          box-shadow: 0 8px 24px rgba(0,0,0,.4);
-          opacity:0; transform: translateY(10px);
-          transition: opacity .8s ease, transform .8s ease;
-        }
-        .hp-landing .hp-bubble.hp-in { opacity:1; transform: translateY(0); }
-        .hp-landing .hp-bubble b { color:#fff; font-weight:600; font-variant-numeric: tabular-nums; }
-        .hp-landing .hp-bubble .hp-tag { color:#7cf5ff; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; font-weight:600; }
-        .hp-landing .hp-bubble.hp-hot { border-color: rgba(255,180,84,.3); }
-        .hp-landing .hp-bubble.hp-hot .hp-tag { color:#ffb454; }
-        .hp-landing .hp-bubble.hp-up::after { content:"↑"; color:#3ee7a3; font-weight:700; margin-left:2px; }
-        @keyframes hpDrift {
-          0%   { transform: translate(0,0); }
-          50%  { transform: translate(var(--dx,20px), var(--dy,-14px)); }
-          100% { transform: translate(0,0); }
         }
         .hp-landing .hp-scan::after {
           content:""; position:absolute; inset:0;
@@ -595,26 +649,7 @@ export function AuthGate({ onSuccess }: Props) {
         {/* LEFT — 랜딩 */}
         <section className="relative">
           {/* 떠다니는 키워드 버블 */}
-          <div className="pointer-events-none absolute inset-0 z-[2] hidden lg:block">
-            {keywordBubbles.map((k, i) => (
-              <div
-                key={i}
-                className={`hp-bubble hp-in ${k.hot ? 'hp-hot' : ''} ${k.up ? 'hp-up' : ''}`}
-                style={{
-                  left: k.left,
-                  top: k.top,
-                  animation: `hpDrift ${k.dur}s ease-in-out ${k.delay}s infinite`,
-                  transitionDelay: `${k.appearDelay}ms`,
-                  ['--dx' as any]: k.dx,
-                  ['--dy' as any]: k.dy,
-                }}
-              >
-                <span className="hp-tag">{k.tag}</span>
-                <span>{k.t}</span>
-                <b>{k.n}</b>
-              </div>
-            ))}
-          </div>
+          
 
           {/* 라이브 배지 */}
           <span
@@ -636,7 +671,7 @@ export function AuthGate({ onSuccess }: Props) {
 
           <p className="relative z-[3] mt-5 max-w-[560px] text-[17px] leading-[1.6] text-[#b9c2d8]">
             키워드 발굴부터 썸네일·상세페이지 제작, 순위·리뷰·광고 분석까지 —
-            셀러의 반복 업무를 <b className="font-semibold text-white">8가지 AI 도구</b>가 한 화면에서 자동화합니다.
+            셀러의 반복 업무를 <b className="font-semibold text-white">7가지 AI 도구</b>가 한 화면에서 자동화합니다.
           </p>
 
           {/* 스탯 */}
@@ -656,13 +691,33 @@ export function AuthGate({ onSuccess }: Props) {
             ))}
           </div>
 
+          {/* 지금 뜨는 키워드 — 가로로 흐른다 (마우스를 올리면 멈춤) */}
+          <div className="relative z-[3] mt-8 max-w-[600px]">
+            <p className="mb-2 flex items-center gap-1.5 text-[11.5px] font-medium tracking-wide text-[#98a3bf]">
+              <span className="hp-badge-dot" />
+              지금 뜨는 키워드
+            </p>
+            <div className="hp-ticker">
+              <div className="hp-ticker-track">
+                {[...KEYWORDS, ...KEYWORDS].map((k, i) => (
+                  <span key={i} className={`hp-kw ${k.hot ? 'is-hot' : ''}`} aria-hidden={i >= KEYWORDS.length}>
+                    <span className="hp-tag">{k.tag}</span>
+                    {k.t}
+                    <b>{k.n}</b>
+                    {k.up && <span className="hp-up">↑</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
           {/* 툴 칩 */}
-          <div className="relative z-[3] mt-9 flex max-w-[560px] flex-wrap gap-2">
+          <div className="relative z-[3] mt-7 flex max-w-[560px] flex-wrap gap-2">
             {TOOLS.map((t, i) => (
               <span
                 key={i}
-                className="hp-chip inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-[12.5px] transition-all"
-                style={{ background: 'rgba(255,255,255,.055)', borderColor: '#31406b', color: '#b9c2d8' }}
+                className="hp-chip inline-flex items-center gap-2 rounded-[10px] border px-3.5 py-2.5 text-[13px] font-medium transition-all"
+                style={{ background: 'rgba(255,255,255,.08)', borderColor: '#455684', color: '#f5f8ff' }}
               >
                 <t.icon className="h-3.5 w-3.5" style={{ color: '#7cf5ff' }} />
                 {t.label}
@@ -763,7 +818,7 @@ export function AuthGate({ onSuccess }: Props) {
                 : emailCodeRequired
                   ? '이메일 인증 즉시 모든 AI 도구가 열립니다'
                   : mode === 'signup'
-                    ? '가입 후 관리자 승인이 완료되면 이용하실 수 있습니다'
+                    ? '가입 즉시 모든 AI 도구를 이용할 수 있습니다'
                     : '이메일과 비밀번호로 로그인하세요'}
             </p>
 
@@ -1007,40 +1062,45 @@ export function AuthGate({ onSuccess }: Props) {
                     </button>
                   )}
                 </div>
+                {/* 인증코드 — 발송한 뒤에만 필요 */}
                 {emailCodeRequired && !verificationRequired && codeSent && (
-                  <>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={signupCode}
+                    onChange={e => setSignupCode(e.target.value.replace(/\D/g, ''))}
+                    onKeyDown={e => e.key === 'Enter' && handleSignup()}
+                    placeholder="인증코드 6자리"
+                    className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-center text-[15px] tracking-[0.4em] text-white outline-none transition-all placeholder:tracking-normal"
+                    style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
+                  />
+                )}
+
+                {/* 비밀번호는 어떤 가입 방식에서도 필요하다. 인증코드 발송 여부와
+                    무관하게 항상 보여줘야 '비밀번호를 안 받는다'는 오해가 없다. */}
+                <input
+                  type="password"
+                  value={signupPassword}
+                  onChange={e => setSignupPassword(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleSignup()}
+                  placeholder="비밀번호 (영문·숫자 8자 이상)"
+                  autoComplete="new-password"
+                  className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
+                  style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
+                />
+
+                {emailCodeRequired && !verificationRequired && (
+                  <label className="flex min-h-[36px] cursor-pointer items-center gap-2 px-1 text-[12.5px] text-[#b9c2d8]">
                     <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={signupCode}
-                      onChange={e => setSignupCode(e.target.value.replace(/\D/g, ''))}
-                      onKeyDown={e => e.key === 'Enter' && handleSignup()}
-                      placeholder="인증코드 6자리"
-                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-center text-[15px] tracking-[0.4em] text-white outline-none transition-all placeholder:tracking-normal"
-                      style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
+                      type="checkbox"
+                      checked={ageChecked}
+                      onChange={e => setAgeChecked(e.target.checked)}
+                      className="h-3.5 w-3.5"
+                      style={{ accentColor: '#7cf5ff' }}
                     />
-                    <input
-                      type="password"
-                      value={signupPassword}
-                      onChange={e => setSignupPassword(e.target.value)}
-                      onKeyDown={e => e.key === 'Enter' && handleSignup()}
-                      placeholder="비밀번호 (영문·숫자 포함 8자 이상)"
-                      autoComplete="new-password"
-                      className="hp-input w-full rounded-[11px] border px-3.5 py-3 text-[14px] text-white outline-none transition-all"
-                      style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
-                    />
-                    <label className="flex cursor-pointer items-center gap-2 px-1 text-[12.5px] text-[#b9c2d8]">
-                      <input
-                        type="checkbox"
-                        checked={ageChecked}
-                        onChange={e => setAgeChecked(e.target.checked)}
-                        className="h-3.5 w-3.5"
-                        style={{ accentColor: '#7cf5ff' }}
-                      />
-                      만 14세 이상입니다.
-                    </label>
-                  </>
+                    만 14세 이상입니다.
+                  </label>
                 )}
                 <button
                   onClick={handleSignup}
@@ -1104,6 +1164,101 @@ export function AuthGate({ onSuccess }: Props) {
       </main>
 
       {/* ─── 요금 안내 (비회원도 가입 전에 가격을 확인할 수 있어야 한다) ─── */}
+      {/* ─── 훈프로 코칭AI ─── */}
+      <section className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#31406b' }}>
+        <div className="mx-auto grid max-w-[1120px] items-center gap-10 md:grid-cols-[1.15fr_1fr]">
+          <div>
+            <p className="text-[11.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: '#7cf5ff' }}>
+              COACHING AI
+            </p>
+            <h2
+              className="mt-2.5 text-[clamp(38px,4.6vw,64px)] font-bold leading-[1.05] tracking-[-0.03em] text-white"
+              // keep-all: 한글이 '실시간으/로'처럼 어절 중간에서 끊기지 않게
+              style={{ wordBreak: 'keep-all', minHeight: '3.15em' }}
+            >
+              <span className="block">막히는 지점마다,</span>
+              <span className="hp-accent">{COACH_HEADLINE}</span>
+            </h2>
+            <p className="mt-4 text-[14px] leading-relaxed text-[#b9c2d8]">
+              검색해도 안 나오고, 물어볼 데도 없는 질문이 있습니다.
+              목표수익률을 얼마로 잡아야 하는지, 광고 예산은 어디서 시작하는지, 이 마진이 정상인지.
+              <b className="text-white"> 훈프로의 노하우를 학습한 AI</b>가 답합니다.
+            </p>
+
+            <ul className="mt-6 flex flex-col gap-2.5">
+              {[
+                '쿠팡 판매 실무에 맞춘 답 — 일반 AI의 원론적인 답변이 아닙니다',
+                '새벽에도 즉시 답변, 질문 횟수 제한 없음',
+                '이전 질문과 답변이 남아 다시 찾아볼 수 있습니다',
+              ].map(t => (
+                <li key={t} className="flex items-start gap-2 text-[13.5px] leading-relaxed text-[#dae1f0]">
+                  <Check className="mt-[3px] h-3.5 w-3.5 shrink-0" style={{ color: '#3ee7a3' }} />
+                  {t}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* 대화 예시 */}
+          <div
+            className="rounded-[20px] border p-5 sm:p-6"
+            style={{ background: 'rgba(38,52,88,.55)', borderColor: '#31406b', backdropFilter: 'blur(10px)' }}
+          >
+            <div className="mb-4 flex items-center gap-2">
+              <div
+                className="flex h-7 w-7 items-center justify-center rounded-[9px]"
+                style={{ background: 'linear-gradient(135deg,#7cf5ff,#8b7bff)' }}
+              >
+                <MessageCircleQuestion className="h-4 w-4" style={{ color: '#101a2e' }} />
+              </div>
+              <span className="text-[13px] font-semibold text-white">훈프로 코칭AI</span>
+            </div>
+
+            <div key={talkIdx} className="hp-fade flex min-h-[184px] flex-col gap-3">
+              <div className="ml-auto max-w-[88%] rounded-[14px] rounded-br-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-white"
+                   style={{ background: 'rgba(124,245,255,.13)', border: '1px solid rgba(124,245,255,.28)' }}>
+                {COACH_TALKS[talkIdx].q}
+              </div>
+
+              {talkTyped ? (
+                <div className="max-w-[94%] rounded-[14px] rounded-bl-[4px] px-3.5 py-2.5 text-[13px] leading-relaxed text-[#dae1f0]"
+                     style={{ background: 'rgba(255,255,255,.05)', border: '1px solid #31406b' }}>
+                  {talkTyped}
+                  {!talkDone && <span className="hp-caret" />}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-1 text-[12px] text-[#98a3bf]">
+                  <span className="hp-dot" style={{ width: 6, height: 6 }} />
+                  훈프로 코칭AI가 답변을 작성하고 있습니다…
+                </div>
+              )}
+
+              {talkDone && (
+                <div className="hp-fade flex items-center gap-2 rounded-[11px] px-3 py-2 text-[12.5px] font-semibold tracking-tight"
+                     style={{ background: 'rgba(124,245,255,.08)', border: '1px solid rgba(124,245,255,.24)', color: '#7cf5ff' }}>
+                  {COACH_TALKS[talkIdx].flow}
+                </div>
+              )}
+            </div>
+
+            {/* 진행 표시 — 지금 몇 번째 대화인지 */}
+            <div className="mt-4 flex gap-1.5" aria-hidden="true">
+              {COACH_TALKS.map((_, i) => (
+                <span
+                  key={i}
+                  className="h-1 flex-1 rounded-full transition-colors"
+                  style={{ background: i === talkIdx ? '#7cf5ff' : '#31406b' }}
+                />
+              ))}
+            </div>
+
+            <p className="mt-3 border-t pt-3 text-[11.5px] text-[#98a3bf]" style={{ borderColor: '#31406b' }}>
+              실제 답변 예시입니다. 질문 내용에 따라 답은 달라집니다.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section id="pricing" className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#31406b' }}>
         <div className="mx-auto max-w-[880px]">
           <div className="text-center">
@@ -1112,7 +1267,7 @@ export function AuthGate({ onSuccess }: Props) {
               도구 하나 값으로, 팀 하나를 씁니다
             </h2>
             <p className="mt-3 text-[14px] leading-relaxed text-[#b9c2d8]">
-              7가지 AI 도구를 하나의 구독으로. 언제든 해지할 수 있고, 해지해도 남은 기간은 그대로 이용합니다.
+              훈프로 코칭AI를 포함한 7가지 도구를 하나의 구독으로. 언제든 해지할 수 있고, 해지해도 남은 기간은 그대로 이용합니다.
             </p>
           </div>
 
@@ -1120,15 +1275,33 @@ export function AuthGate({ onSuccess }: Props) {
             {/* 연간 — 추천 */}
             {yearly && (
               <div
-                className="hp-login-card relative rounded-[20px] border p-7"
+                role="radio"
+                aria-checked={pickedInterval === 'year'}
+                tabIndex={0}
+                onClick={() => setPickedInterval('year')}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPickedInterval('year'); } }}
+                className="hp-login-card hp-plan relative cursor-pointer rounded-[20px] border p-7 transition-all"
                 style={{
                   background: 'linear-gradient(180deg, rgba(38,52,88,.92), rgba(25,36,66,.94))',
-                  borderColor: '#31406b',
-                  boxShadow: '0 30px 70px -30px rgba(0,0,0,.7)',
+                  borderColor: pickedInterval === 'year' ? '#7cf5ff' : '#31406b',
+                  boxShadow: pickedInterval === 'year'
+                    ? '0 30px 70px -30px rgba(0,0,0,.7), 0 0 0 3px rgba(124,245,255,.18)'
+                    : '0 30px 70px -30px rgba(0,0,0,.7)',
                 }}
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[14px] font-semibold text-white">연간 결제</span>
+                  <span className="flex items-center gap-2 text-[14px] font-semibold text-white">
+                    <span
+                      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
+                      style={{
+                        borderColor: pickedInterval === 'year' ? '#7cf5ff' : '#54628a',
+                        background: pickedInterval === 'year' ? '#7cf5ff' : 'transparent',
+                      }}
+                    >
+                      {pickedInterval === 'year' && <Check className="h-3 w-3" strokeWidth={3} style={{ color: '#101a2e' }} />}
+                    </span>
+                    연간 결제
+                  </span>
                   {yearlyDiscount > 0 && (
                     <span
                       className="rounded-full px-2.5 py-1 text-[11px] font-bold"
@@ -1153,8 +1326,8 @@ export function AuthGate({ onSuccess }: Props) {
                   </p>
                 )}
                 <button
-                  onClick={scrollToAuth}
-                  className="hp-submit hp-cta group mt-6 flex w-full items-center justify-center gap-1.5 rounded-[11px] py-3 text-[14px]"
+                  onClick={e => { e.stopPropagation(); startSignup('year'); }}
+                  className="hp-submit hp-cta group mt-6 flex w-full min-h-[48px] items-center justify-center gap-1.5 rounded-[11px] py-3 text-[14px]"
                 >
                   연간으로 시작하기 <ArrowRight className="hp-arrow h-4 w-4 transition-transform" />
                 </button>
@@ -1164,10 +1337,30 @@ export function AuthGate({ onSuccess }: Props) {
             {/* 월간 */}
             {monthly && (
               <div
-                className="rounded-[20px] border p-7"
-                style={{ background: 'rgba(255,255,255,.045)', borderColor: '#31406b' }}
+                role="radio"
+                aria-checked={pickedInterval === 'month'}
+                tabIndex={0}
+                onClick={() => setPickedInterval('month')}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPickedInterval('month'); } }}
+                className="hp-plan cursor-pointer rounded-[20px] border p-7 transition-all"
+                style={{
+                  background: 'rgba(255,255,255,.045)',
+                  borderColor: pickedInterval === 'month' ? '#7cf5ff' : '#31406b',
+                  boxShadow: pickedInterval === 'month' ? '0 0 0 3px rgba(124,245,255,.18)' : 'none',
+                }}
               >
-                <span className="text-[14px] font-semibold text-white">월간 결제</span>
+                <span className="flex items-center gap-2 text-[14px] font-semibold text-white">
+                  <span
+                    className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
+                    style={{
+                      borderColor: pickedInterval === 'month' ? '#7cf5ff' : '#54628a',
+                      background: pickedInterval === 'month' ? '#7cf5ff' : 'transparent',
+                    }}
+                  >
+                    {pickedInterval === 'month' && <Check className="h-3 w-3" strokeWidth={3} style={{ color: '#101a2e' }} />}
+                  </span>
+                  월간 결제
+                </span>
                 <div className="mt-4 flex items-baseline gap-1.5">
                   <span className="text-[38px] font-bold tracking-[-0.03em] text-white tabular">
                     {monthly.price.toLocaleString()}
@@ -1176,8 +1369,8 @@ export function AuthGate({ onSuccess }: Props) {
                 </div>
                 <p className="mt-1.5 text-[12.5px] text-[#98a3bf]">매월 자동결제 · 부담 없이 시작</p>
                 <button
-                  onClick={scrollToAuth}
-                  className="mt-6 w-full rounded-[11px] border py-3 text-[14px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5"
+                  onClick={e => { e.stopPropagation(); startSignup('month'); }}
+                  className="mt-6 min-h-[48px] w-full rounded-[11px] border py-3 text-[14px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5"
                   style={{ borderColor: '#31406b', background: 'rgba(255,255,255,.045)' }}
                 >
                   월간으로 시작하기
@@ -1204,7 +1397,11 @@ export function AuthGate({ onSuccess }: Props) {
           </div>
 
           <p className="mt-5 text-center text-[12px] leading-relaxed text-[#98a3bf]">
-            표시 금액은 부가세 포함입니다. 결제 후 7일 이내 미사용 시 전액 환불되며,
+            <b className="text-[#dae1f0]">
+              {pickedInterval === 'year' ? '연간 결제' : '월간 결제'}를 선택하셨습니다.
+            </b>{' '}
+            [시작하기]를 누르면 가입 화면으로 이동하고, 가입 후 이 플랜이 자동으로 선택됩니다.
+            <br />표시 금액은 부가세 포함입니다. 결제 후 7일 이내 미사용 시 전액 환불되며,
             그 외에는 <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="underline hover:text-white">환불 정책</a>에 따라 처리됩니다.
             <br />결제일 7일 전 이메일로 미리 안내드립니다.
           </p>

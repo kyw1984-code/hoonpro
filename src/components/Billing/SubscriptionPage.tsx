@@ -57,8 +57,15 @@ export function SubscriptionPage() {
 
   const [couponCode, setCouponCode] = useState('');
   const [couponPreview, setCouponPreview] = useState<CouponPreview | null>(null);
-  // 연간 결제를 기본 선택으로 유도
-  const [selectedPlanId, setSelectedPlanId] = useState('yearly');
+  // 연간 결제를 기본 선택으로 유도.
+  // 랜딩 요금표에서 고르고 가입한 경우 그 선택을 이어받는다.
+  const [selectedPlanId, setSelectedPlanId] = useState(() => {
+    try {
+      return sessionStorage.getItem('hoonpro_plan_intent') === 'month' ? 'monthly' : 'yearly';
+    } catch {
+      return 'yearly';
+    }
+  });
 
   // 친구 추천 코드 (개인 쿠폰 — 사용 현황 포함)
   const [referral, setReferral] = useState<any | null>(null);
@@ -176,6 +183,7 @@ export function SubscriptionPage() {
     : 0;
 
   const selectPlan = (id: string) => {
+    try { sessionStorage.removeItem('hoonpro_plan_intent'); } catch { /* 무시 */ }
     setSelectedPlanId(id);
     setCouponPreview(null); // 쿠폰 금액은 플랜 기준으로 다시 검증
   };
