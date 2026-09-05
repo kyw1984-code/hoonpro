@@ -32,17 +32,29 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   // 순간 load의 정체성이 바뀌어 쓸데없는 재조회가 한 번 더 나간다.
   const adTouched = useRef(false);
 
+  // 기간 버튼을 빠르게 두 번 누르면 먼저 보낸 요청이 나중에 도착할 수 있다.
+  // 순번이 뒤처진 응답은 버린다.
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     setLoading(true);
     try {
       const d = await coupangApi.profit(days);
+      if (mine !== seq.current) return;
+      // 원가가 빈 상품은 순이익이 부풀려진 값이라, 실제 순이익 순위 사이에 섞이면
+      // 가장 위에 올라와 착시를 만든다. 원가를 넣은 상품 뒤로 보낸다.
+      d.rows.sort((a, b) => {
+        if (a.costEntered !== b.costEntered) return a.costEntered ? -1 : 1;
+        return b.profit - a.profit;
+      });
       setData(d);
       if (!adTouched.current) setAdCost(Math.round(d.adCostHint ?? 0));
       setError(null);
     } catch (e: any) {
+      if (mine !== seq.current) return;
       setError(e.message);
     } finally {
-      setLoading(false);
+      if (mine === seq.current) setLoading(false);
     }
   }, [days]);
 
@@ -161,7 +173,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
           <div className="rounded-panel border border-line bg-paper">
             <div className="flex items-center gap-2 border-b border-line px-5 py-4">
               <h3 className="text-sm font-semibold text-ink">상품별 순이익</h3>
-              <span className="text-[11.5px] text-ink-3">순이익 높은 순</span>
+              <span className="text-[11.5px] text-ink-3">순이익 높은 순 · 원가 미입력 상품은 아래</span>
               <button onClick={onEditCosts} className="ml-auto text-[12px] font-medium text-accent hover:underline">
                 원가 편집
               </button>

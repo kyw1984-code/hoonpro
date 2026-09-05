@@ -5,7 +5,7 @@
  * '왜 반품됐는지'에 답한다. 사유가 상품 설명으로 고칠 수 있는 것이면
  * 상세페이지를 고치는 게 가장 싼 해결책이다.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, PackageOpen, RotateCcw } from 'lucide-react';
 import { coupangApi, pct, won, type ReturnsResponse } from '../../lib/coupang';
 
@@ -19,11 +19,17 @@ export function ReturnAnalysis({ onEditCosts }: { onEditCosts: () => void }) {
   const [data, setData] = useState<ReturnsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 기간 버튼 연타 시 늦게 온 옛 응답이 화면을 덮지 않게 순번으로 거른다
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     try {
-      setData(await coupangApi.returns(days));
+      const d = await coupangApi.returns(days);
+      if (mine !== seq.current) return;
+      setData(d);
       setError(null);
     } catch (e: any) {
+      if (mine !== seq.current) return;
       setError(e.message);
     }
   }, [days]);
