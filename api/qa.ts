@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+import { buildSellerContext } from './_coupang-context';
 
 // "훈프로 코칭AI" RAG 챗봇 통합 API
 // Vercel Hobby 함수 개수 제한(12개) 때문에 action 파라미터로 통합
@@ -249,7 +250,8 @@ const SYSTEM_PROMPT = `당신은 쿠팡 셀러 강의를 운영하는 강사 '�
 4. 환불, 계정 정지, 세무 관련 질문은 답변하지 말고 관리자에게 직접 문의하도록 안내합니다.
 5. 답변은 한국어로, 핵심 위주로 간결하게 (필요하면 번호/불릿 사용).
 6. 자료 제목, 강의 회차, 출처는 답변에 표시하지 않습니다.
-7. 자료에 영어 약칭으로 적힌 일반 단어는 자연스러운 한글 표기로 바꿔 말합니다. (예: '반팔 T' → '반팔 티', 'T셔츠' → '티셔츠') 단, 실제로 영어로 입력해야 하는 설정값(색상 옵션 Black/White 등)과 고유명사·서비스명은 그대로 둡니다.`;
+7. 자료에 영어 약칭으로 적힌 일반 단어는 자연스러운 한글 표기로 바꿔 말합니다. (예: '반팔 T' → '반팔 티', 'T셔츠' → '티셔츠') 단, 실제로 영어로 입력해야 하는 설정값(색상 옵션 Black/White 등)과 고유명사·서비스명은 그대로 둡니다.
+8. [수강생의 실제 판매 데이터]가 주어지면, 그 숫자는 이 수강생 본인의 확정된 실적입니다. 조언의 근거는 여전히 [강의 자료]에서만 가져오되, 그 조언을 이 수강생의 숫자에 맞춰 구체적으로 말하세요. (예: "이익률이 4.2%시니 이 상태로 광고를 늘리면 팔수록 손해입니다") 데이터에 없는 수치를 지어내지 말고, 데이터가 없으면 있는 척하지 마세요.`;
 
 // ─────────────────────────────────────────────────────────────
 
@@ -433,6 +435,11 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
   const apiKey = getOpenAiKey();
   if (!apiKey) return res.status(500).json({ error: 'OPENAIAPIKEY가 설정되지 않았습니다.' });
 
+  // 쿠팡을 연동한 수강생이면 본인 실적을 함께 넘긴다. 같은 질문이라도
+  // 이익률 3%인 사람과 22%인 사람에게 답이 달라야 하기 때문이다.
+  const sellerContext = await buildSellerContext(decoded.userId);
+  const sellerBlock = sellerContext ? `\n\n[수강생의 실제 판매 데이터]\n${sellerContext}` : '';
+
   const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
@@ -440,7 +447,7 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
       model: TEXT_MODEL,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `[강의 자료]\n${context}\n\n[수강생 질문]\n${question}` },
+        { role: 'user', content: `[강의 자료]\n${context}${sellerBlock}\n\n[수강생 질문]\n${question}` },
       ],
       temperature: 0.5,
     }),

@@ -45,10 +45,10 @@ const RELAY_SECRET = (process.env.COUPANG_RELAY_SECRET || '').trim();
 function kstNow(): Date {
   return new Date(Date.now() + 9 * 3600_000);
 }
-function kstToday(): string {
+export function kstToday(): string {
   return kstNow().toISOString().slice(0, 10);
 }
-function addDays(dateStr: string, days: number): string {
+export function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
@@ -1160,7 +1160,7 @@ function rangeFromQuery(req: VercelRequest): { from: string; to: string } {
 }
 
 /** 순이익 계산 — 화면(1번)과 주간 리포트(3번)가 같은 숫자를 쓰도록 한곳에 둔다 */
-async function computeProfit(userId: string, from: string, to: string) {
+export async function computeProfit(userId: string, from: string, to: string) {
   const [salesRes, costRes, itemRes, returnRes, adRes] = await Promise.all([
     supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId).gte('sale_date', from).lte('sale_date', to),
     supabase!.from('coupang_costs').select('*').eq('user_id', userId),
@@ -1672,7 +1672,7 @@ const RISK_ORDER: Record<InventoryRow['risk'], number> = {
   out: 0, urgent: 1, watch: 2, excess: 3, ok: 4, idle: 5,
 };
 
-async function computeInventory(
+export async function computeInventory(
   userId: string,
   leadTimeDays = 14,
   coverDays = 30,
