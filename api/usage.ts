@@ -7,7 +7,51 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 );
 
-const DAILY_LIMIT = 40;
+// ─── 기능별 일일 한도 ─────────────────────────────────────────
+// 관리자 화면에서 조정한다 (app_config.feature_limits). 0 = 무제한.
+// 한도는 '최악의 사용자'가 적자를 만들지 않는 선이고, 평균 사용자는
+// 그 15~20%만 쓰므로 실제 평균 원가는 요금의 10~15% 수준이 된다.
+export const DEFAULT_FEATURE_LIMITS: Record<string, number> = {
+  image: 40,     // 썸네일·상세페이지 이미지 (low 품질 기준 장당 약 7원)
+  qa: 100,       // 코칭AI — 사실상 무제한, 스크립트 남용만 차단
+  sourcing: 60,  // 소싱 상품 수집
+  reviews: 20,   // 리뷰 수집 + GPT 요약
+  rank: 40,      // 순위 확인
+  analyze: 40,   // 경쟁상품·이미지 분석
+  general: 200,  // 기획·문구 생성, 이미지 검수 등 내부 호출 (한 건 처리에 수십 번 쓰인다)
+};
+
+let limitCache: { at: number; value: Record<string, number> } | null = null;
+
+async function loadLimits(): Promise<Record<string, number>> {
+  if (limitCache && Date.now() - limitCache.at < 60_000) return limitCache.value;
+  try {
+    const { data } = await supabase
+      .from('app_config').select('value').eq('key', 'feature_limits').maybeSingle();
+    const parsed = data?.value ? JSON.parse(data.value) : {};
+    const merged = { ...DEFAULT_FEATURE_LIMITS };
+    for (const [k, v] of Object.entries(parsed)) {
+      if (k in merged && Number.isFinite(Number(v))) merged[k] = Math.max(0, Math.round(Number(v)));
+    }
+    limitCache = { at: Date.now(), value: merged };
+    return merged;
+  } catch {
+    return DEFAULT_FEATURE_LIMITS;
+  }
+}
+
+// 한도는 KST 자정에 초기화된다. UTC 날짜를 쓰면 오전 9시에 초기화돼
+// 한국 사용자에게 어색하다.
+function kstToday(): string {
+  return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** 다음 초기화 시각 (KST 자정) — 화면에 안내한다 */
+function nextResetIso(): string {
+  const kst = new Date(Date.now() + 9 * 3600_000);
+  const midnightKst = Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate() + 1);
+  return new Date(midnightKst - 9 * 3600_000).toISOString();
+}
 
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
   'gemini-2.5-flash': { input: 0.30, output: 2.50 },
@@ -170,6 +214,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ok: true });
   }
 
+  // ─── 내 사용량 (기능별 한도·잔여·초기화 시각) ───
+  if (action === 'limits') {
+    const limits = await loadLimits();
+    const today = kstToday();
+
+    const { data: rows } = await supabase
+      .from('feature_usage')
+      .select('feature, call_count')
+      .eq('user_id', decoded.userId)
+      .eq('date', today);
+
+    const usedMap = new Map((rows ?? []).map(r => [r.feature, Number(r.call_count) || 0]));
+
+    return res.status(200).json({
+      resetAt: nextResetIso(),
+      unlimited: Boolean(decoded.isAdmin),
+      features: Object.entries(limits).map(([feature, limit]) => {
+        const used = usedMap.get(feature) ?? 0;
+        return {
+          feature,
+          limit,
+          used,
+          // 관리자와 한도 0(무제한)은 잔여를 -1로 표시한다
+          remaining: decoded.isAdmin || limit <= 0 ? -1 : Math.max(0, limit - used),
+        };
+      }),
+    });
+  }
+
   // 기본: 일일 사용 한도 증가 및 잔여 횟수 반환
   // 관리자는 한도 제한 없음
   if (decoded.isAdmin) {
@@ -199,19 +272,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = kstToday();
+  const limits = await loadLimits();
 
-  const { data, error } = await supabase.rpc('increment_usage', {
+  // 어떤 기능인지 프론트가 알려준다 (미지정이면 general)
+  const rawFeature = String(req.query.feature || req.body?.feature || 'general');
+  const feature = Object.prototype.hasOwnProperty.call(limits, rawFeature) ? rawFeature : 'general';
+  const limit = limits[feature];
+
+  const { data, error } = await supabase.rpc('increment_feature_usage', {
     p_user_id: decoded.userId,
     p_date: today,
-    p_limit: DAILY_LIMIT,
+    p_feature: feature,
+    p_limit: limit,
   });
 
   if (error) return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
 
   if (data?.exceeded) {
     return res.status(429).json({
-      error: `하루 ${DAILY_LIMIT}회 호출 한도를 초과했습니다. 내일 다시 이용해주세요.`,
+      error: `이 기능은 하루 ${limit}회까지 이용할 수 있습니다. 내일 다시 이용해주세요.`,
     });
   }
 

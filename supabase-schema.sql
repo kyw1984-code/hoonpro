@@ -443,3 +443,66 @@ alter table payments add column if not exists refunded_at timestamptz;
 
 -- 월별 매출 집계용
 create index if not exists idx_payments_created on payments(created_at);
+
+-- ─────────────────────────────────────────────────────────────
+-- 25. 기능별 일일 한도
+-- ─────────────────────────────────────────────────────────────
+-- 기존 api_usage는 전 기능 합산 한 칸이라, 원가가 싼 코칭AI를 많이 쓰면
+-- 원가가 비싼 소싱AI를 못 쓰게 되는 문제가 있었다. 기능별로 따로 센다.
+create table if not exists feature_usage (
+  user_id uuid not null references users(id) on delete cascade,
+  date date not null default current_date,
+  feature text not null,
+  call_count integer not null default 0,
+  primary key (user_id, date, feature)
+);
+
+alter table feature_usage disable row level security;
+
+create index if not exists idx_feature_usage_date on feature_usage(date);
+
+-- 원자적 증가 — 동시 요청에서도 한도를 넘지 않는다
+create or replace function increment_feature_usage(
+  p_user_id uuid, p_date date, p_feature text, p_limit int
+)
+returns json
+language plpgsql
+as $$
+declare
+  v_count int;
+begin
+  -- 한도 0 이하는 무제한으로 취급 (코칭AI 등)
+  if p_limit <= 0 then
+    insert into feature_usage (user_id, date, feature, call_count)
+    values (p_user_id, p_date, p_feature, 1)
+    on conflict (user_id, date, feature)
+    do update set call_count = feature_usage.call_count + 1;
+    return json_build_object('exceeded', false, 'remaining', -1);
+  end if;
+
+  select call_count into v_count
+  from feature_usage
+  where user_id = p_user_id and date = p_date and feature = p_feature
+  for update;
+
+  if v_count is null then
+    insert into feature_usage (user_id, date, feature, call_count)
+    values (p_user_id, p_date, p_feature, 1);
+    return json_build_object('exceeded', false, 'remaining', p_limit - 1);
+  end if;
+
+  if v_count >= p_limit then
+    return json_build_object('exceeded', true, 'remaining', 0);
+  end if;
+
+  update feature_usage set call_count = v_count + 1
+  where user_id = p_user_id and date = p_date and feature = p_feature;
+
+  return json_build_object('exceeded', false, 'remaining', p_limit - v_count - 1);
+end;
+$$;
+
+-- 기능별 한도 기본값 (관리자 화면에서 조정. 0 = 무제한)
+insert into app_config (key, value) values
+  ('feature_limits', '{"image":40,"qa":100,"sourcing":60,"reviews":20,"rank":40,"analyze":40,"general":200}')
+on conflict (key) do nothing;

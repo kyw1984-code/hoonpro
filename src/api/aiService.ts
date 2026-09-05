@@ -956,7 +956,8 @@ export const generateImage = async (
   }
 ): Promise<GeneratedImageResult | undefined> => {
   try {
-    await trackUsage();
+    // 이미지 1장 = 한도 1회. 원가가 가장 큰 기능이라 별도 버킷으로 센다.
+    await trackUsage('image');
 
     const token = getToken();
     if (!token) throw new Error('로그인이 필요합니다.');
