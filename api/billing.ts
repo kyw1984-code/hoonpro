@@ -25,6 +25,9 @@ const DEFAULT_PLAN_ID = 'yearly'; // 쿠폰 미리보기 기본값 — 연간 �
 const RETRY_SCHEDULE_DAYS = [1, 2]; // 실패 1회차 → D+1, 2회차 → 추가 2일(D+3)
 const MAX_FAIL = 3;
 
+// 해지 사유 — 프론트 선택지와 동일한 값만 저장한다 (자유 입력은 reasonDetail로 분리)
+const CANCEL_REASONS = ['price', 'not-using', 'missing-feature', 'quality', 'temporary', 'other'];
+
 // 청구 주기 — 월간 1개월 / 연간 12개월, 일할 환불 기준일도 주기에 따름
 function planMonths(plan: { interval?: string }): number {
   return plan?.interval === 'year' ? 12 : 1;
@@ -621,16 +624,22 @@ async function cancelSubscription(user: any, req: VercelRequest, res: VercelResp
   const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', user.userId).maybeSingle();
   if (!sub || sub.status === 'canceled') return res.status(404).json({ error: '진행 중인 구독이 없습니다.' });
 
+  // 해지 사유 — 선택 입력. 개선 지점을 찾기 위한 수집이므로 없어도 해지는 진행한다.
+  const reason = CANCEL_REASONS.includes(String(req.body?.reason)) ? String(req.body.reason) : null;
+  const reasonDetail = String(req.body?.reasonDetail || '').trim().slice(0, 500) || null;
+
   // 정지 상태는 즉시 종료, 그 외에는 남은 기간까지 이용 후 종료 (자동결제만 중단)
   if (sub.status === 'paused') {
     await supabase.from('subscriptions').update({
       status: 'canceled', canceled_at: new Date().toISOString(), next_billing_at: null, updated_at: new Date().toISOString(),
+      cancel_reason: reason, cancel_reason_detail: reasonDetail,
     }).eq('id', sub.id);
     return res.status(200).json({ ok: true, canceledNow: true });
   }
 
   await supabase.from('subscriptions').update({
     cancel_at_period_end: true, canceled_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    cancel_reason: reason, cancel_reason_detail: reasonDetail,
   }).eq('id', sub.id);
   return res.status(200).json({ ok: true, canceledNow: false, usableUntil: sub.current_period_end });
 }
@@ -825,6 +834,25 @@ async function tossWebhook(req: VercelRequest, res: VercelResponse) {
       receipt_url: payment.receipt?.url ?? null,
       approved_at: payment.approvedAt ?? null,
     }).eq('order_id', payment.orderId);
+
+    // 앱이 아닌 토스 관리자 화면에서 전액 취소했거나 카드사 이의제기가 들어온 경우.
+    // 결제만 되돌리고 구독을 그대로 두면 환불받은 사용자가 계속 이용하고
+    // 다음 달 크론이 또 청구한다. 구독도 함께 종료한다.
+    if (mapped === 'refunded') {
+      const { data: row } = await supabase
+        .from('payments').select('user_id').eq('order_id', payment.orderId).maybeSingle();
+      if (row?.user_id) {
+        const now = new Date().toISOString();
+        await supabase.from('subscriptions').update({
+          status: 'canceled',
+          canceled_at: now,
+          current_period_end: now,
+          next_billing_at: null,
+          cancel_reason: 'toss-refund',
+          updated_at: now,
+        }).eq('user_id', row.user_id).neq('status', 'canceled');
+      }
+    }
   }
   return res.status(200).json({ ok: true });
 }
@@ -888,7 +916,98 @@ async function chargeDue(req: VercelRequest, res: VercelResponse) {
     result.ok ? summary.charged++ : summary.failed++;
   }
 
-  return res.status(200).json({ ok: true, date: today, ...summary });
+  const cleaned = await cleanupOldRows();
+  await sendDailyOpsReport(today, summary);
+
+  return res.status(200).json({ ok: true, date: today, ...summary, cleaned });
+}
+
+// ── 오래된 로그 정리 ───────────────────────────────────────
+// api_calls는 호출 1건당 1행이라 그대로 두면 무한정 쌓인다.
+// 환불 '미사용' 판정이 이 테이블을 보므로 90일치는 반드시 남긴다.
+const LOG_RETENTION_DAYS = 90;
+
+async function cleanupOldRows(): Promise<{ apiCalls: number; verifications: number }> {
+  const result = { apiCalls: 0, verifications: 0 };
+  const cutoff = new Date(Date.now() - LOG_RETENTION_DAYS * 86400_000).toISOString();
+
+  // count만 받는다. select로 행을 끌어오면 첫 실행에서 대량 전송이 발생한다.
+  const { count: calls } = await supabase
+    .from('api_calls').delete({ count: 'exact' }).lt('created_at', cutoff);
+  result.apiCalls = calls ?? 0;
+
+  // 만료된 인증코드 — 가입을 끝내지 않은 행이 남는다. 하루 지난 것부터 정리.
+  const { count: v } = await supabase
+    .from('email_verifications').delete({ count: 'exact' })
+    .lt('expires_at', new Date(Date.now() - 86400_000).toISOString());
+  result.verifications = v ?? 0;
+
+  return result;
+}
+
+// ── 운영 일일 요약 메일 ────────────────────────────────────
+// 결제가 실패해도 관리자가 알 방법이 없어, 크론이 돈 결과를 매일 보낸다.
+async function sendDailyOpsReport(date: string, summary: Record<string, number>) {
+  const to = (process.env.ADMIN_EMAIL || '').trim();
+  if (!to) return;
+
+  const stats = await collectTodayStats();
+  const row = (label: string, value: string | number, warn = false) =>
+    `<tr>
+       <td style="padding:8px 0;color:#b9c2d8;font-size:14px;">${label}</td>
+       <td style="padding:8px 0;text-align:right;font-weight:700;font-size:15px;color:${warn ? '#ff6b6b' : '#f5f8ff'};">${value}</td>
+     </tr>`;
+
+  const hasProblem = summary.failed > 0 || stats.pastDue > 0 || stats.paused > 0;
+
+  await sendEmail(to, `[훈프로] ${date} 운영 요약${hasProblem ? ' — 확인 필요' : ''}`, wrapEmail(
+    `${date} 운영 요약`,
+    `<p>자동결제 크론이 방금 실행됐습니다.</p>
+     <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+       ${row('결제 성공', `${summary.charged}건`)}
+       ${row('결제 실패', `${summary.failed}건`, summary.failed > 0)}
+       ${row('기간 종료 해지', `${summary.canceled}건`)}
+       ${row('사전 고지 발송', `${summary.notified}건`)}
+     </table>
+     <p style="margin-top:24px;font-weight:700;">현재 구독 현황</p>
+     <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+       ${row('이용 중', `${stats.active}명`)}
+       ${row('무료 기간', `${stats.trial}명`)}
+       ${row('결제 실패 재시도 중', `${stats.pastDue}명`, stats.pastDue > 0)}
+       ${row('정지', `${stats.paused}명`, stats.paused > 0)}
+       ${row('오늘 신규 구독', `${stats.newToday}명`)}
+       ${row('오늘 해지 신청', `${stats.canceledToday}명`)}
+     </table>
+     ${hasProblem
+       ? '<p style="color:#ffb454;">결제 실패나 정지 계정이 있습니다. 관리자 화면에서 확인해주세요.</p>'
+       : '<p style="color:#98a3bf;">특이사항 없습니다.</p>'}`
+  ));
+}
+
+// 오늘/현재 기준 구독 지표 — 요약 메일과 관리자 화면이 함께 쓴다
+async function collectTodayStats() {
+  const startOfDay = new Date(); startOfDay.setUTCHours(0, 0, 0, 0);
+  const since = new Date(startOfDay.getTime() - 9 * 3600_000).toISOString(); // KST 자정
+
+  const { data: subs } = await supabase
+    .from('subscriptions').select('status, created_at, canceled_at, cancel_at_period_end');
+
+  const stats = {
+    active: 0, trial: 0, pastDue: 0, paused: 0, canceled: 0,
+    newToday: 0, canceledToday: 0, cancelScheduled: 0,
+  };
+  for (const s of subs ?? []) {
+    if (s.status === 'active') stats.active++;
+    else if (s.status === 'trial') stats.trial++;
+    else if (s.status === 'past_due') stats.pastDue++;
+    else if (s.status === 'paused') stats.paused++;
+    else if (s.status === 'canceled') stats.canceled++;
+
+    if (s.created_at && s.created_at >= since) stats.newToday++;
+    if (s.canceled_at && s.canceled_at >= since) stats.canceledToday++;
+    if (s.cancel_at_period_end && s.status !== 'canceled') stats.cancelScheduled++;
+  }
+  return stats;
 }
 
 // ── 관리자 ────────────────────────────────────────────────
@@ -959,6 +1078,22 @@ async function adminStats(res: VercelResponse) {
   }
   const paidList = (pays ?? []).filter(p => p.status === 'paid');
   const failedList = (pays ?? []).filter(p => p.status === 'failed');
+
+  // 오늘 지표 — 매일 확인해야 이상을 하루 안에 발견할 수 있다
+  const today = await collectTodayStats();
+  const startOfDay = new Date(); startOfDay.setUTCHours(0, 0, 0, 0);
+  const sinceKst = new Date(startOfDay.getTime() - 9 * 3600_000).toISOString();
+  const todayPays = (pays ?? []).filter(p => p.created_at >= sinceKst);
+
+  // 해지 사유 분포 (최근 30일) — 무엇을 고쳐야 하는지 알려주는 지표
+  const { data: reasons } = await supabase
+    .from('subscriptions').select('cancel_reason')
+    .not('cancel_reason', 'is', null).gte('canceled_at', monthAgo);
+  const cancelReasons: Record<string, number> = {};
+  for (const r of reasons ?? []) {
+    if (r.cancel_reason) cancelReasons[r.cancel_reason] = (cancelReasons[r.cancel_reason] || 0) + 1;
+  }
+
   return res.status(200).json({
     counts,
     totalSubscribers: counts.trial + counts.active + counts.past_due,
@@ -967,6 +1102,16 @@ async function adminStats(res: VercelResponse) {
     payments30d: paidList.length,
     failed30d: failedList.length,
     canceled30d,
+    today: {
+      newSubs: today.newToday,
+      canceled: today.canceledToday,
+      paid: todayPays.filter(p => p.status === 'paid').length,
+      failed: todayPays.filter(p => p.status === 'failed').length,
+      revenue: todayPays.filter(p => p.status === 'paid').reduce((s, p) => s + Number(p.amount || 0), 0),
+      needsAttention: counts.past_due + counts.paused,
+      cancelScheduled: today.cancelScheduled,
+    },
+    cancelReasons,
   });
 }
 

@@ -112,6 +112,8 @@ export default function App() {
   }, [user]);
 
   const [billingLocked, setBillingLocked] = useState(false);
+  // 402(구독 필요)에 막혔을 때 띄우는 안내 — 구독 관리로 바로 이동시킨다
+  const [subPrompt, setSubPrompt] = useState<string | null>(null);
 
   const applyBillingStatus = (s: BillingStatus, u: AuthUser | null) => {
     const subOk = s.subscription && ['trial', 'active', 'past_due'].includes(s.subscription.status);
@@ -132,11 +134,16 @@ export default function App() {
     const billingHandler = (e: Event) => {
       applyBillingStatus((e as CustomEvent).detail as BillingStatus, getUser());
     };
+    const subRequiredHandler = (e: Event) => {
+      setSubPrompt((e as CustomEvent).detail?.message || '구독 후 이용할 수 있습니다.');
+    };
     window.addEventListener('usage-updated', handler);
     window.addEventListener('billing-updated', billingHandler);
+    window.addEventListener('subscription-required', subRequiredHandler);
     return () => {
       window.removeEventListener('usage-updated', handler);
       window.removeEventListener('billing-updated', billingHandler);
+      window.removeEventListener('subscription-required', subRequiredHandler);
     };
   }, []);
 
@@ -154,6 +161,43 @@ export default function App() {
   return (
     <ApiKeyCheck>
       <div className="min-h-screen bg-ground flex flex-col font-sans">
+        {/* ─── 구독 필요 안내 ─── */}
+        {subPrompt && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setSubPrompt(null)}
+          >
+            <div
+              className="w-full max-w-[400px] rounded-panel border border-line bg-paper p-6 shadow-overlay"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-control bg-accent-soft">
+                <Lock className="h-5 w-5 text-accent" />
+              </div>
+              <h2 className="text-[17px] font-semibold text-ink">구독이 필요합니다</h2>
+              <p className="mt-2 text-[13.5px] leading-relaxed text-ink-2">{subPrompt}</p>
+              <div className="mt-5 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setSubPrompt(null); setActiveTab('billing'); }}
+                  className="min-h-[44px] flex-1 rounded-control bg-accent px-4 text-[14px] font-bold text-ground transition-opacity hover:opacity-90"
+                >
+                  구독하러 가기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubPrompt(null)}
+                  className="min-h-[44px] rounded-control border border-line px-4 text-[14px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ─── 다크 테크 헤더 ─── */}
         <header className="sticky top-0 z-20 backdrop-blur-xl bg-ground/75 border-b border-line">
           {/* 상단 줄 — 브랜드와 계정 */}

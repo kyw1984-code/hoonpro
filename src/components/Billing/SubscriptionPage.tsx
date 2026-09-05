@@ -17,6 +17,16 @@ const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
   canceled: { text: '해지됨', cls: 'bg-paper-2 text-ink-3' },
 };
 
+// 해지 사유 — 값은 서버(api/billing.ts CANCEL_REASONS)와 반드시 일치해야 한다
+const CANCEL_REASONS = [
+  { value: 'price',           label: '가격이 부담돼서' },
+  { value: 'not-using',       label: '생각보다 자주 안 쓰게 돼서' },
+  { value: 'missing-feature', label: '필요한 기능이 없어서' },
+  { value: 'quality',         label: '결과물이 기대에 못 미쳐서' },
+  { value: 'temporary',       label: '잠시 쉬었다가 다시 올게요' },
+  { value: 'other',           label: '기타' },
+];
+
 const PAYMENT_LABEL: Record<string, string> = {
   paid: '결제 완료',
   failed: '실패',
@@ -34,6 +44,10 @@ export function SubscriptionPage() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  // 해지 사유 — 무엇을 고쳐야 하는지 알기 위한 수집. 선택하지 않아도 해지는 진행된다.
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelDetail, setCancelDetail] = useState('');
   const [processing, setProcessing] = useState(false); // 토스에서 돌아와 구독 활성화 중
   const [message, setMessage] = useState<{ text: string; type: 'error' | 'success' } | null>(null);
 
@@ -451,11 +465,7 @@ export function SubscriptionPage() {
                 </button>
               ) : (
                 <button
-                  onClick={() => {
-                    if (window.confirm('구독을 해지할까요? 남은 기간까지는 그대로 이용할 수 있습니다.')) {
-                      act(cancelSubscription, '해지가 예약됐습니다. 남은 기간까지 이용할 수 있습니다.');
-                    }
-                  }}
+                  onClick={() => setCancelOpen(v => !v)}
                   disabled={busy}
                   className="rounded-control border border-line px-4 py-2 text-[13px] font-medium text-ink-3 transition-colors hover:bg-paper-2 hover:text-critical disabled:opacity-40"
                 >
@@ -477,6 +487,68 @@ export function SubscriptionPage() {
                 환불 요청
               </button>
             </div>
+
+            {/* 해지 사유 — 선택하지 않아도 해지는 진행된다 */}
+            {cancelOpen && (
+              <div className="mt-4 rounded-card border border-line bg-paper-2 p-4">
+                <p className="text-[13.5px] font-semibold text-ink">해지하시는 이유를 알려주시겠어요?</p>
+                <p className="mt-1 text-[12px] text-ink-2">
+                  선택하지 않아도 해지됩니다. 남겨주시면 개선에 그대로 반영합니다.
+                </p>
+
+                <div className="mt-3 flex flex-col gap-1.5">
+                  {CANCEL_REASONS.map(r => (
+                    <label
+                      key={r.value}
+                      className="flex min-h-[40px] cursor-pointer items-center gap-2.5 rounded-control px-2 text-[13px] text-ink-2 transition-colors hover:bg-paper"
+                    >
+                      <input
+                        type="radio"
+                        name="cancel-reason"
+                        value={r.value}
+                        checked={cancelReason === r.value}
+                        onChange={e => setCancelReason(e.target.value)}
+                        className="accent-accent"
+                      />
+                      {r.label}
+                    </label>
+                  ))}
+                </div>
+
+                <textarea
+                  value={cancelDetail}
+                  onChange={e => setCancelDetail(e.target.value.slice(0, 500))}
+                  rows={2}
+                  placeholder="더 하고 싶은 말씀이 있다면 자유롭게 적어주세요. (선택)"
+                  className="mt-3 w-full resize-none rounded-control border border-line bg-paper px-3 py-2 text-[13px] text-ink outline-none transition-colors focus:border-accent"
+                />
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    onClick={async () => {
+                      await act(
+                        () => cancelSubscription(cancelReason || undefined, cancelDetail || undefined),
+                        '해지가 예약됐습니다. 남은 기간까지 이용할 수 있습니다.',
+                      );
+                      setCancelOpen(false);
+                      setCancelReason('');
+                      setCancelDetail('');
+                    }}
+                    disabled={busy}
+                    className="min-h-[40px] rounded-control border border-critical/40 px-4 text-[13px] font-semibold text-critical transition-colors hover:bg-critical-soft disabled:opacity-40"
+                  >
+                    해지하기
+                  </button>
+                  <button
+                    onClick={() => setCancelOpen(false)}
+                    disabled={busy}
+                    className="min-h-[40px] rounded-control border border-line px-4 text-[13px] font-medium text-ink-2 transition-colors hover:text-ink disabled:opacity-40"
+                  >
+                    계속 이용할게요
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 결제 이력 */}

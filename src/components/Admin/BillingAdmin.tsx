@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CreditCard, Ticket, Plus, RefreshCw, Power, Loader2 } from 'lucide-react';
+import { CreditCard, Ticket, Plus, RefreshCw, Power, Loader2, AlertTriangle } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 
 // 관리자 — 구독 현황 / 쿠폰 관리 / 유료화 스위치
@@ -37,6 +37,17 @@ const SUB_STATUS: Record<string, { text: string; cls: string }> = {
   past_due: { text: '재시도 중', cls: 'bg-caution-soft text-caution' },
   paused: { text: '정지', cls: 'bg-critical-soft text-critical' },
   canceled: { text: '해지', cls: 'bg-paper-2 text-ink-3' },
+};
+
+// 해지 사유 라벨 — 값은 서버·구독 화면과 동일
+const CANCEL_REASON_LABEL: Record<string, string> = {
+  price: '가격 부담',
+  'not-using': '자주 안 씀',
+  'missing-feature': '기능 부족',
+  quality: '결과물 불만족',
+  temporary: '일시 중단',
+  other: '기타',
+  'toss-refund': '토스에서 환불 처리',
 };
 
 const COUPON_TYPE: Record<string, string> = {
@@ -159,8 +170,46 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
 
   const inputCls = 'w-full rounded-control border border-line bg-paper-2 px-3 py-2 text-[13px] outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper';
 
+  const today = stats?.today;
+  const needsAttention = (today?.needsAttention ?? 0) > 0 || (today?.failed ?? 0) > 0;
+
   return (
     <div className="space-y-8">
+      {/* 오늘 — 매일 확인해야 이상을 하루 안에 발견할 수 있다 */}
+      {today && (
+        <div className={`rounded-card border p-5 ${needsAttention ? 'border-caution/40 bg-caution-soft' : 'border-line bg-paper'}`}>
+          <div className="mb-4 flex items-center gap-2">
+            {needsAttention
+              ? <AlertTriangle className="h-4 w-4 text-caution" />
+              : <CreditCard className="h-4 w-4 text-ink" />}
+            <h3 className="text-[15px] font-semibold text-ink">오늘</h3>
+            {needsAttention && (
+              <span className="rounded-full bg-caution-soft px-2 py-0.5 text-[11px] font-semibold text-caution">
+                확인 필요
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            {[
+              { label: '신규 구독', value: `${today.newSubs ?? 0}명`, warn: false },
+              { label: '해지 신청', value: `${today.canceled ?? 0}명`, warn: false },
+              { label: '결제 성공', value: `${today.paid ?? 0}건`, warn: false },
+              { label: '결제 실패', value: `${today.failed ?? 0}건`, warn: (today.failed ?? 0) > 0 },
+              { label: '조치 필요', value: `${today.needsAttention ?? 0}명`, warn: (today.needsAttention ?? 0) > 0 },
+            ].map(({ label, value, warn }) => (
+              <div key={label} className="rounded-control border border-line bg-paper p-3">
+                <p className="text-[11px] font-semibold text-ink-3">{label}</p>
+                <p className={`mt-1 text-[18px] font-semibold tabular-nums ${warn ? 'text-critical' : 'text-ink'}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[11.5px] text-ink-2">
+            오늘 결제액 {(today.revenue ?? 0).toLocaleString()}원 · 해지 예약 {today.cancelScheduled ?? 0}명
+            {' · '}같은 내용을 매일 저녁 크론 실행 후 관리자 메일로도 보냅니다.
+          </p>
+        </div>
+      )}
+
       {/* 수익 요약 */}
       {stats && (
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -176,6 +225,30 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
               <p className="mt-0.5 text-[11px] text-ink-3">{sub}</p>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* 해지 사유 (최근 30일) — 무엇을 고쳐야 하는지 알려주는 지표 */}
+      {stats?.cancelReasons && Object.keys(stats.cancelReasons).length > 0 && (
+        <div className="rounded-card border border-line bg-paper p-5">
+          <h3 className="mb-3 text-[15px] font-semibold text-ink">해지 사유 <span className="text-[12px] font-normal text-ink-3">최근 30일</span></h3>
+          <div className="flex flex-col gap-2">
+            {Object.entries(stats.cancelReasons as Record<string, number>)
+              .sort((a, b) => b[1] - a[1])
+              .map(([key, count]) => {
+                const total = Object.values(stats.cancelReasons as Record<string, number>).reduce((s, n) => s + n, 0);
+                const pct = Math.round((count / total) * 100);
+                return (
+                  <div key={key} className="flex items-center gap-3">
+                    <span className="w-[150px] shrink-0 text-[12.5px] text-ink-2">{CANCEL_REASON_LABEL[key] ?? key}</span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-paper-2">
+                      <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="w-[64px] shrink-0 text-right text-[12px] tabular-nums text-ink-3">{count}건 {pct}%</span>
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
 

@@ -112,6 +112,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ok: true });
   }
 
+  // ─── 온보딩 (첫 사용 안내) ───
+  // 완료 여부는 별도 플래그가 아니라 실제 사용 데이터로 판정한다.
+  // 그래서 기존 사용자에게는 처음부터 완료 상태로 보이고, 카드가 뜨지 않는다.
+  if (action === 'onboarding') {
+    const since90 = new Date(Date.now() - 90 * 86400_000).toISOString();
+    const [favRes, watchRes, thumbRes, userRes] = await Promise.all([
+      supabase.from('sourcing_favorites').select('keyword', { count: 'exact', head: true })
+        .eq('user_id', decoded.userId),
+      supabase.from('sourcing_rank_watch').select('product_id', { count: 'exact', head: true })
+        .eq('user_id', decoded.userId),
+      supabase.from('api_calls').select('id', { count: 'exact', head: true })
+        .eq('user_id', decoded.userId).like('feature', '%thumbnail%').gte('created_at', since90),
+      supabase.from('users').select('onboarding_dismissed_at').eq('id', decoded.userId).maybeSingle(),
+    ]);
+
+    const steps = {
+      sourcing: (favRes.count ?? 0) > 0,
+      rank: (watchRes.count ?? 0) > 0,
+      thumbnail: (thumbRes.count ?? 0) > 0,
+    };
+    const done = steps.sourcing && steps.rank && steps.thumbnail;
+
+    return res.status(200).json({
+      steps,
+      done,
+      dismissed: Boolean(userRes.data?.onboarding_dismissed_at),
+    });
+  }
+
+  if (action === 'onboarding-dismiss') {
+    await supabase.from('users')
+      .update({ onboarding_dismissed_at: new Date().toISOString() })
+      .eq('id', decoded.userId);
+    return res.status(200).json({ ok: true });
+  }
+
   // 사용량 호출 기록 (비용/모델 로깅)
   if (action === 'log') {
     const { feature, model, inputTokens, outputTokens } = req.body ?? {};

@@ -63,7 +63,8 @@ export const fetchBillingStatus = () => call<BillingStatus>('status');
 export const validateCoupon = (code: string, planId: string) => call<CouponPreview>('coupon-validate', { code, planId });
 export const subscribeWithCard = (authKey: string, customerKey: string, planId: string, couponCode?: string) =>
   call<{ ok: boolean; status: string; nextBillingAt: string }>('subscribe', { authKey, customerKey, planId, couponCode });
-export const cancelSubscription = () => call<{ ok: boolean; canceledNow: boolean; usableUntil?: string }>('cancel');
+export const cancelSubscription = (reason?: string, reasonDetail?: string) =>
+  call<{ ok: boolean; canceledNow: boolean; usableUntil?: string }>('cancel', { reason, reasonDetail });
 export const resumeSubscription = () => call<{ ok: boolean }>('resume');
 export const changeCard = (authKey: string, customerKey: string) =>
   call<{ ok: boolean; reactivated: boolean; cardSummary: string }>('change-card', { authKey, customerKey });

@@ -58,6 +58,17 @@ export function getUser(): AuthUser | null {
   }
 }
 
+/**
+ * 유료화 게이트에 막혔을 때(402) 앱 전체에 알린다.
+ * 오류 문구만 띄우면 사용자가 구독 관리 탭을 직접 찾아가야 해서,
+ * App이 이 이벤트를 받아 바로 이동할 수 있는 안내를 띄운다.
+ */
+export function notifySubscriptionRequired(message?: string): void {
+  window.dispatchEvent(new CustomEvent('subscription-required', {
+    detail: { message: message || '구독 후 이용할 수 있습니다.' },
+  }));
+}
+
 export async function trackUsage(): Promise<void> {
   const token = getToken();
   if (!token) throw new Error('로그인이 필요합니다.');
@@ -68,7 +79,10 @@ export async function trackUsage(): Promise<void> {
   });
 
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? 'API 호출 한도를 초과했습니다.');
+  if (!res.ok) {
+    if (res.status === 402) notifySubscriptionRequired(data.error);
+    throw new Error(data.error ?? 'API 호출 한도를 초과했습니다.');
+  }
 
   window.dispatchEvent(new CustomEvent('usage-updated', { detail: { remaining: data.remaining } }));
 }
