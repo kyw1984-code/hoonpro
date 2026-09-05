@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Lock, UserPlus, LogIn, ShieldCheck, ArrowRight, Sparkles, Activity,
   TrendingUp, Image as ImageIcon, LayoutTemplate, ListOrdered, MessageSquareText,
-  BarChart3, MessageCircleQuestion, ChevronRight, Youtube, ExternalLink,
+  BarChart3, MessageCircleQuestion, ChevronRight, Youtube, ExternalLink, ShoppingBag,
   KeyRound, ArrowLeft, Mail, Check,
 } from 'lucide-react';
 import { setToken } from '../../lib/auth';
@@ -45,6 +45,7 @@ const TOOLS = [
   { icon: ListOrdered,        label: '순위 추적' },
   { icon: MessageSquareText,  label: '리뷰 분석' },
   { icon: BarChart3,          label: '광고 성과 분석' },
+  { icon: ShoppingBag,        label: '쿠팡 매출·정산' },
   { icon: MessageCircleQuestion, label: '훈프로 코칭AI' },
 ];
 
