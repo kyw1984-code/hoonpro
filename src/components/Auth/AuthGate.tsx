@@ -17,7 +17,7 @@ type Mode = 'login' | 'signup';
 
 /* ────────────────────────────────────────────────────────────────
  * 로그인 전 랜딩 (다크 테크)
- * - 미로그인 사용자에게 훈프로의 8가지 AI 도구를 라이브 데모처럼 보여주고
+ * - 미로그인 사용자에게 훈프로의 7가지 AI 도구를 라이브 데모처럼 보여주고
  *   그대로 로그인/가입까지 진행시킨다.
  * - 기존 API 호출 로직 100% 유지 (login / send-code / signup / PASS)
  * ──────────────────────────────────────────────────────────────── */
@@ -650,7 +650,7 @@ export function AuthGate({ onSuccess }: Props) {
 
           <p className="relative z-[3] mt-5 max-w-[560px] text-[17px] leading-[1.6] text-[#b9c2d8]">
             키워드 발굴부터 썸네일·상세페이지 제작, 순위·리뷰·광고 분석까지 —
-            셀러의 반복 업무를 <b className="font-semibold text-white">8가지 AI 도구</b>가 한 화면에서 자동화합니다.
+            셀러의 반복 업무를 <b className="font-semibold text-white">7가지 AI 도구</b>가 한 화면에서 자동화합니다.
           </p>
 
           {/* 스탯 */}
@@ -1199,7 +1199,7 @@ export function AuthGate({ onSuccess }: Props) {
               도구 하나 값으로, 팀 하나를 씁니다
             </h2>
             <p className="mt-3 text-[14px] leading-relaxed text-[#b9c2d8]">
-              훈프로 코칭AI를 포함한 8가지 도구를 하나의 구독으로. 언제든 해지할 수 있고, 해지해도 남은 기간은 그대로 이용합니다.
+              훈프로 코칭AI를 포함한 7가지 도구를 하나의 구독으로. 언제든 해지할 수 있고, 해지해도 남은 기간은 그대로 이용합니다.
             </p>
           </div>
 
