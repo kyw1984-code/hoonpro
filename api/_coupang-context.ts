@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { computeProfit, computeInventory, kstToday, addDays } from './coupang';
+import { computeProfit, computeInventory, kstToday, addDays, selectAll } from './coupang';
 
 // ═══════════════════════════════════════════════════════════════
 // [8] 코칭AI에 질문자의 실제 판매 데이터를 붙인다
@@ -65,12 +65,13 @@ async function computeSellerContext(userId: string): Promise<string | null> {
     const [profit, inventory, settleRes] = await Promise.all([
       computeProfit(userId, from, today),
       computeInventory(userId),
-      supabase
+      selectAll<{ amount: number }>((f, t) => supabase
         .from('coupang_settlements')
         .select('amount')
         .eq('user_id', userId)
         .gte('settlement_date', today)
-        .lte('settlement_date', addDays(today, 30)),
+        .lte('settlement_date', addDays(today, 30))
+        .order('settlement_date').range(f, t)),
     ]);
 
     if (profit.totals.quantity === 0) return null;
@@ -110,7 +111,7 @@ async function computeSellerContext(userId: string): Promise<string | null> {
       );
     }
 
-    const incoming = (settleRes.data ?? []).reduce((n, s) => n + (Number(s.amount) || 0), 0);
+    const incoming = settleRes.rows.reduce((n, s) => n + (Number(s.amount) || 0), 0);
     if (incoming > 0) lines.push(`· 30일 내 입금 예정 ${won(incoming)}`);
 
     return lines.join('\n');

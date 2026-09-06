@@ -65,7 +65,11 @@ export function CoupangDashboard() {
       const { summary } = await coupangApi.sync(full);
       setSyncMsg(describeSync(summary));
       await load();
-      setRefreshKey(k => k + 1);
+      // 원가·가격 화면에서 입력하던 값이 있으면 다시 만들지 않는다. 수집은 최대
+      // 90초 걸리고 키 등록 직후 자동으로도 도는데, 그 사이 작성하던 내용이
+      // 예고 없이 사라지면 안 된다. 그 화면들은 저장 후 스스로 다시 읽는다.
+      const editing = view === 'costs' || view === 'price';
+      if (!editing) setRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncMsg(e.message);
     } finally {

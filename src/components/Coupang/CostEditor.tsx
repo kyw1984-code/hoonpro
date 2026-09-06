@@ -31,14 +31,27 @@ function parseSheet(file: File): Promise<Array<Partial<CostRow> & { vendorItemId
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
         const num = (v: unknown) => Math.max(0, Math.round(Number(String(v ?? '').replace(/[^0-9.-]/g, '')) || 0));
+        // 시트에 없는 열은 값을 보내지 않는다. 매입원가만 채운 파일을 올렸을 때
+        // 이미 입력해 둔 부자재·배송비가 0으로 덮이면, 순이익과 반품 손실이
+        // 사용자도 모르게 바뀐다.
+        const headers = new Set(Object.keys(rows[0] ?? {}));
+        const pick = (row: Record<string, unknown>, header: string) =>
+          headers.has(header) ? { value: num(row[header]) } : null;
         const out = rows
-          .map(r => ({
-            vendorItemId: String(r[SHEET_COLUMNS.vendorItemId] ?? r['vendorItemId'] ?? '').trim(),
-            unitCost: num(r[SHEET_COLUMNS.unitCost]),
-            packagingCost: num(r[SHEET_COLUMNS.packagingCost]),
-            shippingCost: num(r[SHEET_COLUMNS.shippingCost]),
-            returnShippingCost: num(r[SHEET_COLUMNS.returnShippingCost]),
-          }))
+          .map(r => {
+            const patch: Partial<CostRow> & { vendorItemId: string } = {
+              vendorItemId: String(r[SHEET_COLUMNS.vendorItemId] ?? r['vendorItemId'] ?? '').trim(),
+            };
+            const unit = pick(r, SHEET_COLUMNS.unitCost);
+            const pack = pick(r, SHEET_COLUMNS.packagingCost);
+            const ship = pick(r, SHEET_COLUMNS.shippingCost);
+            const ret = pick(r, SHEET_COLUMNS.returnShippingCost);
+            if (unit) patch.unitCost = unit.value;
+            if (pack) patch.packagingCost = pack.value;
+            if (ship) patch.shippingCost = ship.value;
+            if (ret) patch.returnShippingCost = ret.value;
+            return patch;
+          })
           .filter(r => r.vendorItemId);
         if (out.length === 0) reject(new Error(`'${SHEET_COLUMNS.vendorItemId}' 열이 있는 행을 찾지 못했습니다. 양식을 내려받아 그 형식으로 올려주세요.`));
         else resolve(out);
@@ -149,6 +162,16 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
       const items = parsed.filter(r => known.has(r.vendorItemId));
       const unknown = parsed.length - items.length;
       if (items.length === 0) throw new Error('올린 파일의 옵션ID가 수집된 상품과 하나도 맞지 않습니다.');
+      // 어떤 항목이 바뀌는지 먼저 알린다. 되돌릴 수 없는 일괄 변경이다.
+      const fields = ([
+        ['unitCost', '매입원가'],
+        ['packagingCost', '부자재'],
+        ['shippingCost', '출고배송'],
+        ['returnShippingCost', '반품배송'],
+      ] as const).filter(([key]) => items.some(it => it[key] !== undefined)).map(([, label]) => label);
+      if (!confirm(`${items.length}개 상품의 ${fields.join('·')}을(를) 파일 값으로 덮어씁니다. 진행할까요?`)) {
+        return;
+      }
       const { saved } = await coupangApi.saveCosts(items);
       setDraft({});
       setMsg(`${saved}개 저장했습니다.${unknown > 0 ? ` 수집된 상품에 없는 옵션ID ${unknown}건은 건너뛰었습니다.` : ''}`);

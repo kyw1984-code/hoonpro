@@ -181,7 +181,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       thumbnail: (thumbRes.count ?? 0) > 0,
       coupang: (coupangRes.count ?? 0) > 0,
     };
-    const done = steps.sourcing && steps.rank && steps.thumbnail && steps.coupang;
+    // 완료 판정은 기존 3단계 그대로 둔다. 쿠팡을 필수로 넣으면 이미 온보딩을
+    // 끝낸 사용자 전원에게 카드가 다시 뜬다. 쿠팡은 아직 안 한 사람에게만
+    // 추가로 권하는 선택 단계로 남긴다.
+    const done = steps.sourcing && steps.rank && steps.thumbnail;
 
     return res.status(200).json({
       steps,

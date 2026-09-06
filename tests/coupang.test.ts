@@ -16,6 +16,7 @@ import {
   lastWeekRange,
   median,
   pearson,
+  selectAll,
   signedDate,
   slope,
   toIso,
@@ -81,4 +82,44 @@ test('isActiveReturn: 취소·철회는 손실이 아니다', () => {
   assert.equal(isActiveReturn('CANCEL'), false);
   assert.equal(isActiveReturn('반품 철회'), false);
   assert.equal(isActiveReturn(null), true);
+});
+
+test('selectAll: 1000행 상한을 넘겨 끝까지 읽는다', async () => {
+  // 2400행을 가진 가짜 테이블. PostgREST처럼 range로 잘라 돌려준다.
+  const all = Array.from({ length: 2400 }, (_, i) => ({ i }));
+  let calls = 0;
+  const build = (from: number, to: number) => {
+    calls++;
+    return Promise.resolve({ data: all.slice(from, to + 1), error: null });
+  };
+  const { rows, truncated } = await selectAll<{ i: number }>(build);
+  assert.equal(rows.length, 2400);
+  assert.equal(truncated, false);
+  assert.equal(calls, 3, '1000씩 세 번 읽는다');
+  assert.equal(rows[2399].i, 2399, '마지막 행까지 들어온다');
+});
+
+test('selectAll: 마지막 페이지가 꽉 차면 한 번 더 확인한다', async () => {
+  const all = Array.from({ length: 2000 }, (_, i) => ({ i }));
+  const { rows, truncated } = await selectAll<{ i: number }>((f, t) =>
+    Promise.resolve({ data: all.slice(f, t + 1), error: null }));
+  assert.equal(rows.length, 2000);
+  assert.equal(truncated, false, '빈 페이지를 확인해야 끝난 걸 안다');
+});
+
+test('selectAll: 오류는 그대로 올린다', async () => {
+  await assert.rejects(
+    () => selectAll(() => Promise.resolve({ data: null, error: { message: 'boom' } })),
+    /boom/,
+  );
+});
+
+test('selectAll: 페이지 상한에 닿으면 truncated로 알린다', async () => {
+  const { rows, truncated } = await selectAll<{ i: number }>(
+    (f, t) => Promise.resolve({ data: Array.from({ length: t - f + 1 }, (_, k) => ({ i: f + k })), error: null }),
+    10,
+    3,
+  );
+  assert.equal(rows.length, 30);
+  assert.equal(truncated, true);
 });

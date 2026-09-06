@@ -374,6 +374,33 @@ export function dateChunks(from: string, to: string, size = LIMITS.chunkDays): A
 }
 
 /**
+ * 상한 없이 전부 읽는다.
+ *
+ * PostgREST는 한 요청에 기본 1000행까지만 돌려준다. 쿠팡 데이터는 날짜 × 옵션이라
+ * 옵션 30개짜리 판매자도 한 달이면 그 벽에 닿는다. 상한에 걸린 걸 알려주지도
+ * 않으므로, 순이익·재고·상관이 조용히 일부 데이터로만 계산되고 숫자가 어느
+ * 시점부터 안 늘어나는 형태로 나타난다.
+ *
+ * 정렬 키를 주면 커서로 넘기고(중복·누락 없음), 없으면 range로 넘긴다.
+ */
+export async function selectAll<T = any>(
+  build: (from: number, to: number) => any,
+  pageSize = 1000,
+  maxPages = 60,
+): Promise<{ rows: T[]; truncated: boolean }> {
+  const out: T[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const { data, error } = await build(page * pageSize, (page + 1) * pageSize - 1);
+    if (error) throw new Error(error.message);
+    const chunk = (data ?? []) as T[];
+    out.push(...chunk);
+    if (chunk.length < pageSize) return { rows: out, truncated: false };
+  }
+  // 상한까지 갔다면 더 있을 수 있다. 호출부가 판단하도록 알린다.
+  return { rows: out, truncated: true };
+}
+
+/**
  * 대량 upsert — Supabase 요청 크기를 넘기지 않도록 잘라서 넣는다.
  *
  * 넣기 전에 기본키로 중복을 걷어낸다. Postgres는 한 번의 upsert 안에 같은 키가
@@ -433,12 +460,14 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
   }
 
   // 상세를 가져올 대상 — 아직 한 번도 못 받았거나 가장 오래된 것 우선
-  const { data: known } = await supabase
-    .from('coupang_items')
-    .select('seller_product_id, synced_at')
-    .eq('user_id', userId);
+  const { rows: known } = await selectAll<{ seller_product_id: string | null; synced_at: string | null }>((f, t) =>
+    supabase
+      .from('coupang_items')
+      .select('seller_product_id, synced_at')
+      .eq('user_id', userId)
+      .order('vendor_item_id').range(f, t));
   const lastSynced = new Map<string, string>();
-  for (const k of known ?? []) lastSynced.set(String(k.seller_product_id), String(k.synced_at ?? ''));
+  for (const k of known) lastSynced.set(String(k.seller_product_id), String(k.synced_at ?? ''));
 
   const ordered = [...sellerProductIds].sort(
     (a, b) => (lastSynced.get(a.id) ?? '').localeCompare(lastSynced.get(b.id) ?? ''),
@@ -490,11 +519,13 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
   // 목록으로 지우면 멀쩡한 상품이 사라진다.
   if (listingComplete && sellerProductIds.length > 0) {
     const keep = new Set(sellerProductIds.map(sp => sp.id));
-    const { data: existing } = await supabase
-      .from('coupang_items')
-      .select('vendor_item_id, seller_product_id')
-      .eq('user_id', userId);
-    const gone = (existing ?? [])
+    const { rows: existing } = await selectAll<{ vendor_item_id: string; seller_product_id: string | null }>((f, t) =>
+      supabase
+        .from('coupang_items')
+        .select('vendor_item_id, seller_product_id')
+        .eq('user_id', userId)
+        .order('vendor_item_id').range(f, t));
+    const gone = existing
       .filter(e => e.seller_product_id && !keep.has(String(e.seller_product_id)))
       .map(e => String(e.vendor_item_id));
     for (let i = 0; i < gone.length; i += 200) {
@@ -854,8 +885,12 @@ async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSumma
   const today = kstToday();
   const from = addDays(today, -LIMITS.inquiryDays + 1);
   const rows: any[] = [];
+  // 목록을 끝까지 받았는지. 정합은 '이 구간의 미답변 전체'를 안다는 전제 위에서만
+  // 안전하다. 페이지 상한에 걸리거나 중간에 끊기면 못 받은 문의가 '답변됨'으로
+  // 뒤집히므로, 완주했을 때만 정합한다.
+  let inquiriesComplete = false;
 
-  for (let pageNum = 1; pageNum <= 10; pageNum++) {
+  for (let pageNum = 1; pageNum <= 40; pageNum++) {
     if (outOfTime(deadline, sum)) break;
     const query =
       `vendorId=${creds.vendorId}&inquiryStartAt=${from}&inquiryEndAt=${today}` +
@@ -874,7 +909,11 @@ async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSumma
       break;
     }
     const list = listOf(r.data);
-    if (list.length === 0) break;
+    // 페이지 크기를 쿠팡이 그대로 지킨다는 보장이 없어, 빈 페이지를 만날 때까지 돈다
+    if (list.length === 0) {
+      inquiriesComplete = true;
+      break;
+    }
     for (const q of list) {
       const inquiryId = pickStr(q, ['inquiryId', 'inquiryID', 'id']);
       if (!inquiryId) continue;
@@ -892,7 +931,6 @@ async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSumma
         updated_at: new Date().toISOString(),
       });
     }
-    if (list.length < 50) break;
   }
 
   const err = await upsertChunked('coupang_inquiries', rows, 'user_id,inquiry_id');
@@ -903,15 +941,16 @@ async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSumma
   // 답변된 것이다. 그대로 두면 영원히 미답변으로 남아 건수가 틀리고, 이미 답한
   // 문의에 초안을 만들어 한도를 쓰거나 두 번째 답변을 보내는 일이 생긴다.
   // 구간 조회가 끊기거나 실패했으면 목록이 불완전하므로 정합을 건너뛴다.
-  if (!err && !sum.truncated && !sum.errors.some(e => e.startsWith('고객문의'))) {
+  if (!err && inquiriesComplete && !sum.truncated && !sum.errors.some(e => e.startsWith('고객문의'))) {
     const stillOpen = new Set(rows.map(r => String(r.inquiry_id)));
-    const { data: local } = await supabase
+    const { rows: local } = await selectAll<{ inquiry_id: string }>((f, t) => supabase
       .from('coupang_inquiries')
       .select('inquiry_id')
       .eq('user_id', userId)
       .eq('answered', false)
-      .gte('inquired_at', `${from}T00:00:00+09:00`);
-    const answeredElsewhere = (local ?? []).map(l => String(l.inquiry_id)).filter(id => !stillOpen.has(id));
+      .gte('inquired_at', `${from}T00:00:00+09:00`)
+      .order('inquiry_id').range(f, t));
+    const answeredElsewhere = local.map(l => String(l.inquiry_id)).filter(id => !stillOpen.has(id));
     for (let i = 0; i < answeredElsewhere.length; i += 200) {
       await supabase
         .from('coupang_inquiries')
@@ -1096,8 +1135,10 @@ function won(n: number): string {
 async function relayPreflight(): Promise<{ ok: boolean; reason?: string }> {
   if (!RELAY_URL) return { ok: true };
   try {
-    const base = RELAY_URL.replace(/\/relay\/?$/, '');
-    const r = await fetch(`${base}/health`, {
+    // 주소 끝의 /relay만 잘라내면 'https://host/' 형태에서 '//health'가 되어
+    // 중계 서버가 경로를 못 알아본다. 실제 호출은 되는데 점검만 실패해 매시
+    // 수집이 통째로 중단된다. URL 기준으로 경로를 갈아 끼운다.
+    const r = await fetch(new URL('/health', RELAY_URL).toString(), {
       headers: RELAY_SECRET ? { 'X-Relay-Secret': RELAY_SECRET } : {},
       signal: AbortSignal.timeout(8_000),
     });
@@ -1359,12 +1400,15 @@ async function handleStatus(userId: string, res: VercelResponse) {
     });
   }
 
-  const [{ count: itemCount }, salesDatesRes] = await Promise.all([
+  const [{ count: itemCount }, salesDates] = await Promise.all([
     supabase!.from('coupang_items').select('vendor_item_id', { count: 'exact', head: true }).eq('user_id', userId),
     // 행 수는 날짜 × 옵션이라 '일치'가 아니다. 날짜를 세야 한다.
-    supabase!.from('coupang_sales_daily').select('sale_date').eq('user_id', userId),
+    // 1000행 상한에 걸리면 며칠치인지가 어느 순간부터 안 늘어나므로 끝까지 읽는다.
+    selectAll<{ sale_date: string }>((f, t) =>
+      supabase!.from('coupang_sales_daily').select('sale_date').eq('user_id', userId)
+        .order('sale_date').range(f, t)),
   ]);
-  const salesDays = new Set((salesDatesRes.data ?? []).map(r => String(r.sale_date))).size;
+  const salesDays = new Set(salesDates.rows.map(r => String(r.sale_date))).size;
 
   return res.status(200).json({
     connected: true,
@@ -1501,27 +1545,34 @@ function rangeFromQuery(req: VercelRequest): { from: string; to: string } {
 /** 순이익 계산 — 화면(1번)과 주간 리포트(3번)가 같은 숫자를 쓰도록 한곳에 둔다 */
 export async function computeProfit(userId: string, from: string, to: string) {
   const [salesRes, costRes, itemRes, returnRes, adRes] = await Promise.all([
-    supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId).gte('sale_date', from).lte('sale_date', to),
-    supabase!.from('coupang_costs').select('*').eq('user_id', userId),
-    supabase!.from('coupang_items').select('vendor_item_id, product_name, option_name, sale_price, stock').eq('user_id', userId),
-    supabase!
+    selectAll((f, t) => supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId)
+      .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
+    selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    selectAll((f, t) => supabase!.from('coupang_items')
+      .select('vendor_item_id, product_name, option_name, sale_price, stock').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    // 저장된 시각은 한국 시각을 UTC로 옮긴 값이다. 경계도 한국 시각으로 잡아야
+    // 새벽에 접수된 반품이 앞뒤 날짜로 밀리지 않는다.
+    selectAll((f, t) => supabase!
       .from('coupang_returns')
       .select('vendor_item_id, quantity, requested_at, status')
       .eq('user_id', userId)
-      .gte('requested_at', `${from}T00:00:00Z`)
-      .lte('requested_at', `${to}T23:59:59Z`),
+      .gte('requested_at', `${from}T00:00:00+09:00`)
+      .lte('requested_at', `${to}T23:59:59+09:00`)
+      .order('requested_at').range(f, t)),
     // 저장된 광고 보고서가 있으면 기간 광고비의 기본값으로 제안한다
     supabase!.from('ad_reports').select('summary, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1),
   ]);
 
   const costs = new Map<string, any>();
-  for (const c of costRes.data ?? []) costs.set(String(c.vendor_item_id), c);
+  for (const c of costRes.rows) costs.set(String(c.vendor_item_id), c);
 
   const items = new Map<string, any>();
-  for (const it of itemRes.data ?? []) items.set(String(it.vendor_item_id), it);
+  for (const it of itemRes.rows) items.set(String(it.vendor_item_id), it);
 
   const returnAgg = new Map<string, number>();
-  for (const r of returnRes.data ?? []) {
+  for (const r of returnRes.rows) {
     if (!isActiveReturn(r.status)) continue;
     const id = String(r.vendor_item_id ?? '');
     if (!id) continue;
@@ -1529,7 +1580,7 @@ export async function computeProfit(userId: string, from: string, to: string) {
   }
 
   const agg = new Map<string, ProfitRow>();
-  for (const s of salesRes.data ?? []) {
+  for (const s of salesRes.rows) {
     const id = String(s.vendor_item_id);
     const item = items.get(id);
     const cur =
@@ -1629,26 +1680,29 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
 // ── 원가 조회·입력 ────────────────────────────────────────────
 async function handleCosts(userId: string, res: VercelResponse) {
   const [itemRes, costRes, soldRes] = await Promise.all([
-    supabase!.from('coupang_items').select('*').eq('user_id', userId).order('product_name'),
-    supabase!.from('coupang_costs').select('*').eq('user_id', userId),
+    selectAll((f, t) => supabase!.from('coupang_items').select('*').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
     // 최근 30일 판매수량 — 원가를 어디부터 채워야 효과가 큰지 보여준다
-    supabase!
+    selectAll((f, t) => supabase!
       .from('coupang_sales_daily')
       .select('vendor_item_id, quantity')
       .eq('user_id', userId)
-      .gte('sale_date', addDays(kstToday(), -30)),
+      .gte('sale_date', addDays(kstToday(), -30))
+      .order('sale_date').range(f, t)),
   ]);
 
   const costs = new Map<string, any>();
-  for (const c of costRes.data ?? []) costs.set(String(c.vendor_item_id), c);
+  for (const c of costRes.rows) costs.set(String(c.vendor_item_id), c);
 
   const sold = new Map<string, number>();
-  for (const s of soldRes.data ?? []) {
+  for (const s of soldRes.rows) {
     const id = String(s.vendor_item_id);
     sold.set(id, (sold.get(id) ?? 0) + (Number(s.quantity) || 0));
   }
 
-  const rows = (itemRes.data ?? []).map((it: any) => {
+  const rows = itemRes.rows.map((it: any) => {
     const c = costs.get(String(it.vendor_item_id));
     return {
       vendorItemId: String(it.vendor_item_id),
@@ -1683,21 +1737,41 @@ async function handleCostSave(userId: string, req: VercelRequest, res: VercelRes
   if (items.length > 1000) return res.status(400).json({ error: '한 번에 1000건까지 저장할 수 있습니다.' });
 
   const clamp = (v: any) => Math.max(0, Math.min(100_000_000, Math.round(Number(v) || 0)));
-  const rows = items
-    .filter((it: any) => it?.vendorItemId)
-    .map((it: any) => ({
-      user_id: userId,
-      vendor_item_id: String(it.vendorItemId),
-      unit_cost: clamp(it.unitCost),
-      packaging_cost: clamp(it.packagingCost),
-      shipping_cost: clamp(it.shippingCost),
-      return_shipping_cost: clamp(it.returnShippingCost),
-      ...(typeof it.memo === 'string' ? { memo: it.memo.slice(0, 200) } : {}),
-      updated_at: new Date().toISOString(),
-    }));
 
-  const err = await upsertChunked('coupang_costs', rows, 'user_id,vendor_item_id');
+  // 보내지 않은 항목은 건드리지 않는다. 엑셀로 매입원가 열만 채워 올렸을 때
+  // 이미 넣어둔 부자재·배송비가 0으로 덮이면 순이익과 반품 손실이 조용히 바뀐다.
+  const keyed = new Map<string, any>();
+  for (const it of items) {
+    if (!it?.vendorItemId) continue;
+    const id = String(it.vendorItemId);
+    const row: any = { user_id: userId, vendor_item_id: id, updated_at: new Date().toISOString() };
+    if (it.unitCost !== undefined) row.unit_cost = clamp(it.unitCost);
+    if (it.packagingCost !== undefined) row.packaging_cost = clamp(it.packagingCost);
+    if (it.shippingCost !== undefined) row.shipping_cost = clamp(it.shippingCost);
+    if (it.returnShippingCost !== undefined) row.return_shipping_cost = clamp(it.returnShippingCost);
+    if (typeof it.memo === 'string') row.memo = it.memo.slice(0, 200);
+    keyed.set(id, row);
+  }
+  const rows = [...keyed.values()];
+  if (rows.length === 0) return res.status(400).json({ error: '저장할 원가가 없습니다.' });
+
+  // upsert는 빠진 칼럼을 기본값으로 채우므로, 이미 있는 행은 update로 부분만 바꾼다
+  const { rows: existing } = await selectAll<{ vendor_item_id: string }>((f, t) =>
+    supabase!.from('coupang_costs').select('vendor_item_id').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t));
+  const known = new Set(existing.map(e => String(e.vendor_item_id)));
+
+  const err = await upsertChunked('coupang_costs', rows.filter(r => !known.has(r.vendor_item_id)), 'user_id,vendor_item_id');
   if (err) return res.status(500).json({ error: `저장 실패: ${err}` });
+
+  for (const r of rows.filter(r => known.has(r.vendor_item_id))) {
+    const { vendor_item_id, user_id, ...patch } = r;
+    const { error } = await supabase!
+      .from('coupang_costs').update(patch)
+      .eq('user_id', userId).eq('vendor_item_id', vendor_item_id);
+    if (error) return res.status(500).json({ error: `저장 실패: ${error.message}` });
+  }
+
   return res.status(200).json({ ok: true, saved: rows.length });
 }
 
@@ -1716,26 +1790,27 @@ async function handleSettlement(userId: string, res: VercelResponse) {
   const to = addDays(today, 90);
 
   const [setRes, salesRes] = await Promise.all([
-    supabase!
+    selectAll((f, t) => supabase!
       .from('coupang_settlements')
       .select('settlement_date, settlement_type, recognition_month, amount, status')
       .eq('user_id', userId)
       .gte('settlement_date', from)
       .lte('settlement_date', to)
-      .order('settlement_date'),
+      .order('settlement_date').range(f, t)),
     // 최근 90일 정산예정액 — 지급 일정이 아직 안 잡힌 몫을 가늠한다
-    supabase!
+    selectAll((f, t) => supabase!
       .from('coupang_sales_daily')
       .select('sale_date, settlement_amount')
       .eq('user_id', userId)
-      .gte('sale_date', from),
+      .gte('sale_date', from)
+      .order('sale_date').range(f, t)),
   ]);
 
   const byDate = new Map<string, { date: string; amount: number; items: Array<{ type: string; amount: number; status: string }> }>();
   let paid = 0;      // 이미 들어온 돈
   let upcoming = 0;  // 앞으로 들어올 돈
 
-  for (const s of setRes.data ?? []) {
+  for (const s of setRes.rows) {
     const date = String(s.settlement_date);
     const amount = Number(s.amount) || 0;
     const cur = byDate.get(date) ?? { date, amount: 0, items: [] };
@@ -1756,12 +1831,12 @@ async function handleSettlement(userId: string, res: VercelResponse) {
   // 예전에는 90일 매출 총액에서 ±90일 지급 총액을 뺐는데, 두 구간이 서로 다른
   // 매출을 가리켜 거의 항상 0으로 눌렸다. 인식월끼리 맞춰 비교한다.
   const salesByMonth = new Map<string, number>();
-  for (const s of salesRes.data ?? []) {
+  for (const s of salesRes.rows) {
     const m = String(s.sale_date).slice(0, 7);
     salesByMonth.set(m, (salesByMonth.get(m) ?? 0) + (Number(s.settlement_amount) || 0));
   }
   const plannedByMonth = new Map<string, number>();
-  for (const s of setRes.data ?? []) {
+  for (const s of setRes.rows) {
     const m = String(s.recognition_month ?? '').slice(0, 7);
     if (!m) continue;
     plannedByMonth.set(m, (plannedByMonth.get(m) ?? 0) + (Number(s.amount) || 0));
@@ -1869,12 +1944,13 @@ async function sendWeeklyReport(
   const [cur, prev, settleRes] = await Promise.all([
     computeProfit(userId, start, end),
     computeProfit(userId, prevStart, prevEnd),
-    supabase
+    selectAll<{ settlement_date: string; amount: number }>((f, t) => supabase
       .from('coupang_settlements')
       .select('settlement_date, amount')
       .eq('user_id', userId)
       .gte('settlement_date', end)
-      .lte('settlement_date', addDays(end, 14)),
+      .lte('settlement_date', addDays(end, 14))
+      .order('settlement_date').range(f, t)),
   ]);
 
   // 팔린 것도 반품도 없으면 보낼 이유가 없다
@@ -1888,7 +1964,7 @@ async function sendWeeklyReport(
     .reverse()
     .map(r => ({ name: r.productName, profit: r.profit, qty: r.quantity }));
 
-  const incoming = (settleRes.data ?? []).reduce((n, s) => n + (Number(s.amount) || 0), 0);
+  const incoming = settleRes.rows.reduce((n, s) => n + (Number(s.amount) || 0), 0);
 
   // 품절 임박 — 지난주 성과보다 이게 더 급한 주도 있다
   const { rows: inventory } = await computeInventory(userId);
@@ -2042,18 +2118,21 @@ export async function computeInventory(
 
   const today = kstToday();
   const [itemRes, orderRes] = await Promise.all([
-    supabase.from('coupang_items').select('vendor_item_id, product_name, option_name, stock, status').eq('user_id', userId),
-    supabase
+    selectAll((f, t) => supabase.from('coupang_items')
+      .select('vendor_item_id, product_name, option_name, stock, status').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    selectAll((f, t) => supabase
       .from('coupang_orders_daily')
       .select('vendor_item_id, order_date, quantity')
       .eq('user_id', userId)
-      .gte('order_date', addDays(today, -27)),
+      .gte('order_date', addDays(today, -27))
+      .order('order_date').range(f, t)),
   ]);
 
   const sold7 = new Map<string, number>();
   const sold28 = new Map<string, number>();
   const since7 = addDays(today, -6);
-  for (const o of orderRes.data ?? []) {
+  for (const o of orderRes.rows) {
     const id = String(o.vendor_item_id);
     const qty = Number(o.quantity) || 0;
     sold28.set(id, (sold28.get(id) ?? 0) + qty);
@@ -2061,7 +2140,7 @@ export async function computeInventory(
   }
 
   const rows: InventoryRow[] = [];
-  for (const it of itemRes.data ?? []) {
+  for (const it of itemRes.rows) {
     const id = String(it.vendor_item_id);
     const stock = Number(it.stock) || 0;
     const s28 = sold28.get(id) ?? 0;
@@ -2150,29 +2229,34 @@ async function handleReturns(userId: string, req: VercelRequest, res: VercelResp
   const { from, to } = rangeFromQuery(req);
 
   const [returnRes, salesRes, costRes, itemRes] = await Promise.all([
-    supabase!
+    selectAll((f, t) => supabase!
       .from('coupang_returns')
       .select('receipt_id, kind, vendor_item_id, product_name, quantity, reason, fault, status, requested_at')
       .eq('user_id', userId)
-      .gte('requested_at', `${from}T00:00:00Z`)
-      .lte('requested_at', `${to}T23:59:59Z`),
-    supabase!
+      .gte('requested_at', `${from}T00:00:00+09:00`)
+      .lte('requested_at', `${to}T23:59:59+09:00`)
+      .order('requested_at').range(f, t)),
+    selectAll((f, t) => supabase!
       .from('coupang_sales_daily')
       .select('vendor_item_id, quantity, sales_amount')
       .eq('user_id', userId)
       .gte('sale_date', from)
-      .lte('sale_date', to),
-    supabase!.from('coupang_costs').select('*').eq('user_id', userId),
-    supabase!.from('coupang_items').select('vendor_item_id, product_name, option_name').eq('user_id', userId),
+      .lte('sale_date', to)
+      .order('sale_date').range(f, t)),
+    selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    selectAll((f, t) => supabase!.from('coupang_items')
+      .select('vendor_item_id, product_name, option_name').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
   ]);
 
   const costs = new Map<string, any>();
-  for (const c of costRes.data ?? []) costs.set(String(c.vendor_item_id), c);
+  for (const c of costRes.rows) costs.set(String(c.vendor_item_id), c);
   const items = new Map<string, any>();
-  for (const it of itemRes.data ?? []) items.set(String(it.vendor_item_id), it);
+  for (const it of itemRes.rows) items.set(String(it.vendor_item_id), it);
 
   const soldQty = new Map<string, number>();
-  for (const s of salesRes.data ?? []) {
+  for (const s of salesRes.rows) {
     const id = String(s.vendor_item_id);
     soldQty.set(id, (soldQty.get(id) ?? 0) + (Number(s.quantity) || 0));
   }
@@ -2196,7 +2280,7 @@ async function handleReturns(userId: string, req: VercelRequest, res: VercelResp
 
   let cancelledCount = 0;
   let exchangeCount = 0;
-  for (const r of returnRes.data ?? []) {
+  for (const r of returnRes.rows) {
     if (!isActiveReturn(r.status)) {
       cancelledCount++;
       continue;
@@ -2576,20 +2660,24 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
   const productIds = [...new Set(watches.map(w => String(w.product_id)))];
 
   // 노출상품ID → 옵션ID 묶음 (주문은 옵션 단위로 쌓인다)
-  const { data: items } = await supabase!
-    .from('coupang_items')
-    .select('vendor_item_id, product_id')
-    .eq('user_id', userId)
-    .in('product_id', productIds);
+  const { rows: items } = await selectAll<{ vendor_item_id: string; product_id: string | null }>((f, t) =>
+    supabase!
+      .from('coupang_items')
+      .select('vendor_item_id, product_id')
+      .eq('user_id', userId)
+      .in('product_id', productIds)
+      .order('vendor_item_id').range(f, t));
 
   // 상품 상세에 노출상품ID가 없거나 아직 못 받았어도, 발주서에는 주문마다
   // 노출상품ID가 실려 온다. 두 경로를 합쳐야 연결이 끊기지 않는다.
-  const { data: orderLinks } = await supabase!
-    .from('coupang_orders_daily')
-    .select('vendor_item_id, product_id')
-    .eq('user_id', userId)
-    .in('product_id', productIds)
-    .gte('order_date', from);
+  const { rows: orderLinks } = await selectAll<{ vendor_item_id: string; product_id: string | null }>((f, t) =>
+    supabase!
+      .from('coupang_orders_daily')
+      .select('vendor_item_id, product_id')
+      .eq('user_id', userId)
+      .in('product_id', productIds)
+      .gte('order_date', from)
+      .order('order_date').range(f, t));
 
   const vendorItemsByProduct = new Map<string, string[]>();
   const addLink = (pid: string, vid: string) => {
@@ -2598,30 +2686,32 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
     if (!list.includes(vid)) list.push(vid);
     vendorItemsByProduct.set(pid, list);
   };
-  for (const it of items ?? []) addLink(String(it.product_id ?? ''), String(it.vendor_item_id));
-  for (const o of orderLinks ?? []) addLink(String(o.product_id ?? ''), String(o.vendor_item_id));
+  for (const it of items) addLink(String(it.product_id ?? ''), String(it.vendor_item_id));
+  for (const o of orderLinks) addLink(String(o.product_id ?? ''), String(o.vendor_item_id));
 
   const allVendorItems = [...vendorItemsByProduct.values()].flat();
 
   const [rankRes, orderRes] = await Promise.all([
-    supabase!
+    selectAll((f, t) => supabase!
       .from('sourcing_rank_obs')
       .select('keyword, product_id, rank, captured_at')
       .in('product_id', productIds)
-      .gte('captured_at', `${from}T00:00:00Z`),
+      .gte('captured_at', `${from}T00:00:00+09:00`)
+      .order('captured_at').range(f, t)),
     allVendorItems.length > 0
-      ? supabase!
+      ? selectAll((f, t) => supabase!
           .from('coupang_orders_daily')
           .select('vendor_item_id, order_date, quantity, order_amount')
           .eq('user_id', userId)
           .in('vendor_item_id', allVendorItems)
           .gte('order_date', from)
-      : Promise.resolve({ data: [] as any[] }),
+          .order('order_date').range(f, t))
+      : Promise.resolve({ rows: [] as any[], truncated: false }),
   ]);
 
   // 하루에 여러 번 수집될 수 있으므로 날짜별 평균 순위를 쓴다
   const rankByKey = new Map<string, Map<string, { sum: number; n: number }>>();
-  for (const o of rankRes.data ?? []) {
+  for (const o of rankRes.rows) {
     if (o.rank === null || o.rank === undefined) continue; // 60위 밖은 순위값이 없다
     const key = `${o.keyword}::${o.product_id}`;
     const day = String(o.captured_at).slice(0, 10);
@@ -2643,12 +2733,12 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
   // 좋아져서 팔렸다"는 결론을 만들어 낸다. 판매 0으로 셀 수 있는 날은
   // 주문 수집이 닿은 구간 안쪽뿐이다.
   let orderCoverageStart: string | null = null;
-  for (const o of orderRes.data ?? []) {
+  for (const o of orderRes.rows) {
     const d = String(o.order_date);
     if (orderCoverageStart === null || d < orderCoverageStart) orderCoverageStart = d;
   }
 
-  for (const o of orderRes.data ?? []) {
+  for (const o of orderRes.rows) {
     const pid = productOfVendorItem.get(String(o.vendor_item_id));
     if (!pid) continue;
     const day = String(o.order_date);
@@ -2797,24 +2887,29 @@ async function buildPriceSuggestions(userId: string): Promise<PriceSuggestion[]>
 
   const today = kstToday();
   const [itemRes, costRes, ruleRes, salesRes] = await Promise.all([
-    supabase.from('coupang_items').select('vendor_item_id, product_name, option_name, sale_price').eq('user_id', userId),
-    supabase.from('coupang_costs').select('*').eq('user_id', userId),
-    supabase.from('coupang_price_rules').select('*').eq('user_id', userId),
-    supabase
+    selectAll((f, t) => supabase.from('coupang_items')
+      .select('vendor_item_id, product_name, option_name, sale_price').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    selectAll((f, t) => supabase.from('coupang_costs').select('*').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    selectAll((f, t) => supabase.from('coupang_price_rules').select('*').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    selectAll((f, t) => supabase
       .from('coupang_sales_daily')
       .select('vendor_item_id, sales_amount, commission')
       .eq('user_id', userId)
-      .gte('sale_date', addDays(today, -30)),
+      .gte('sale_date', addDays(today, -30))
+      .order('sale_date').range(f, t)),
   ]);
 
   const costs = new Map<string, any>();
-  for (const c of costRes.data ?? []) costs.set(String(c.vendor_item_id), c);
+  for (const c of costRes.rows) costs.set(String(c.vendor_item_id), c);
   const rules = new Map<string, any>();
-  for (const r of ruleRes.data ?? []) rules.set(String(r.vendor_item_id), r);
+  for (const r of ruleRes.rows) rules.set(String(r.vendor_item_id), r);
 
   // 상품별 실제 수수료율 — 카테고리마다 달라 고정값을 쓰면 적자가 난다
   const feeAgg = new Map<string, { sales: number; fee: number }>();
-  for (const s of salesRes.data ?? []) {
+  for (const s of salesRes.rows) {
     const id = String(s.vendor_item_id);
     const cur = feeAgg.get(id) ?? { sales: 0, fee: 0 };
     cur.sales += Number(s.sales_amount) || 0;
@@ -2823,16 +2918,17 @@ async function buildPriceSuggestions(userId: string): Promise<PriceSuggestion[]>
   }
 
   // 규칙에 걸린 키워드들의 시장가를 한 번에 모은다
-  const keywords = [...new Set((ruleRes.data ?? []).map(r => String(r.target_keyword ?? '')).filter(Boolean))];
+  const keywords = [...new Set(ruleRes.rows.map((r: any) => String(r.target_keyword ?? '')).filter(Boolean))];
   const marketByKeyword = new Map<string, number>();
   if (keywords.length > 0) {
-    const { data: obs } = await supabase
+    const { rows: obs } = await selectAll<{ keyword: string; price: number }>((f, t) => supabase
       .from('sourcing_product_obs')
       .select('keyword, price')
       .in('keyword', keywords)
-      .gte('captured_at', `${addDays(today, -14)}T00:00:00Z`);
+      .gte('captured_at', `${addDays(today, -14)}T00:00:00+09:00`)
+      .order('captured_at').range(f, t));
     const grouped = new Map<string, number[]>();
-    for (const o of obs ?? []) {
+    for (const o of obs) {
       const k = String(o.keyword);
       const list = grouped.get(k) ?? [];
       list.push(Number(o.price) || 0);
@@ -2845,7 +2941,7 @@ async function buildPriceSuggestions(userId: string): Promise<PriceSuggestion[]>
   }
 
   const out: PriceSuggestion[] = [];
-  for (const it of itemRes.data ?? []) {
+  for (const it of itemRes.rows) {
     const id = String(it.vendor_item_id);
     const rule = rules.get(id);
     const cost = costs.get(id);
@@ -3129,12 +3225,12 @@ async function runAutoPricing(userId: string, creds: CoupangCreds): Promise<{ ap
 async function handleAdminOverview(decoded: any, res: VercelResponse) {
   if (!decoded?.isAdmin) return res.status(403).json({ error: '관리자만 볼 수 있습니다.' });
 
-  const { data: accounts } = await supabase!
+  const { rows: accounts } = await selectAll<any>((f, t) => supabase!
     .from('coupang_accounts')
     .select('user_id, vendor_id, status, last_sync_at, last_sync_error, backfill_done, key_issued_at, created_at, users(name, email)')
-    .order('last_sync_at', { ascending: true, nullsFirst: true });
+    .order('user_id').range(f, t));
 
-  const rows = (accounts ?? []) as any[];
+  const rows = accounts;
   const now = Date.now();
   const staleMs = 26 * 3600_000; // 매시 크론이 20시간 기준으로 도니, 26시간 넘게 안 돌았으면 이상하다
 
