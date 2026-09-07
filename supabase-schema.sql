@@ -510,11 +510,231 @@ $$;
 
 -- 기능별 한도 기본값 (관리자 화면에서 조정. 0 = 무제한)
 insert into app_config (key, value) values
-  ('feature_limits', '{"image":40,"qa":100,"sourcing":60,"reviews":20,"rank":40,"analyze":40,"general":200}')
+  ('feature_limits', '{"image":40,"qa":100,"sourcing":60,"reviews":20,"rank":40,"analyze":40,"inquiry":60,"general":200}')
 on conflict (key) do nothing;
 
+-- ═════════════════════════════════════════════════════════════
+-- 26. 쿠팡 윙 Open API 연동 — 판매·정산·재고·반품·문의 자동 수집
+--
+-- 설계 원칙
+--  · 키는 사용자별로 각자 발급받아 등록한다. 쿠팡 호출 한도는 업체코드
+--    단위로 적용되므로 사용자가 늘어도 한도가 서로 잠식하지 않는다.
+--  · Secret Key만 AES-256-GCM으로 암호화한다(빌링키와 동일 방식).
+--    Access Key와 업체코드는 조회용 식별자라 평문으로 둔다.
+--  · 원본(raw)은 매핑 검증이 필요한 반품·문의·정산에만 남기고,
+--    행 수가 가장 많은 매출은 집계만 저장해 저장공간을 아낀다.
+-- ═════════════════════════════════════════════════════════════
+
+-- 사용자별 윙 API 키
+create table if not exists coupang_accounts (
+  user_id uuid primary key references users(id) on delete cascade,
+  vendor_id text not null,               -- 업체코드 (A00123456 형식)
+  access_key text not null,
+  secret_key_enc text not null,          -- AES-256-GCM
+  status text not null default 'active'  -- active | invalid (인증 실패) | expired
+    check (status in ('active', 'invalid', 'expired')),
+  key_issued_at date,                    -- 발급일 — 6개월 만료 사전 알림에 사용
+  expiry_notified_at date,               -- 만료 임박 알림을 보낸 날 (중복 발송 방지)
+  last_verified_at timestamptz,
+  last_sync_at timestamptz,
+  last_sync_error text,
+  -- 첫 전체 수집(백필)이 끝났는지. 시간 예산에 걸려 중간에 끊긴 회차와
+  -- 정상적으로 끝난 회차를 구분해야, 큰 판매자가 매 시간 처음부터 다시
+  -- 시작하며 다른 사용자의 수집을 굶기는 일을 막을 수 있다.
+  backfill_done boolean not null default false,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+-- 이미 13번 절을 한 번 실행한 프로젝트를 위해 나중에 추가된 칼럼을 따로 보강한다
+alter table coupang_accounts add column if not exists backfill_done boolean not null default false;
+-- 키 거부·만료를 이메일로 알린 시각. 같은 사고로 매일 보내지 않기 위해 기록한다.
+alter table coupang_accounts add column if not exists status_notified_at timestamptz;
+-- 크론 분산 슬롯은 쓰지 않는다. 수집은 마지막 수집 시각 기준으로 오래된 계정부터 돈다.
+alter table coupang_accounts drop column if exists sync_shard;
+
+alter table coupang_accounts enable row level security;
+
+-- 상품(옵션) 마스터 — 원가 입력과 재고 예측의 단위
+create table if not exists coupang_items (
+  user_id uuid not null references users(id) on delete cascade,
+  vendor_item_id text not null,          -- 옵션ID (가격·재고 변경의 키)
+  seller_product_id text,                -- 등록상품ID
+  product_id text,                       -- 노출상품ID (순위 추적과 연결)
+  product_name text,
+  option_name text,
+  sale_price int,
+  stock int,
+  status text,                           -- 판매중 / 판매중지 등 원문
+  synced_at timestamptz default now(),
+  primary key (user_id, vendor_item_id)
+);
+
+create index if not exists idx_cpi_user on coupang_items(user_id);
+create index if not exists idx_cpi_pid on coupang_items(user_id, product_id);
+alter table coupang_items enable row level security;
+
+-- 원가 — 사용자가 직접 입력한다. 순이익 계산의 유일한 수동 입력값이다.
+create table if not exists coupang_costs (
+  user_id uuid not null references users(id) on delete cascade,
+  vendor_item_id text not null,
+  unit_cost int not null default 0,            -- 매입원가 (개당)
+  packaging_cost int not null default 0,       -- 부자재·포장비 (개당)
+  shipping_cost int not null default 0,        -- 출고 택배비 (개당)
+  return_shipping_cost int not null default 0, -- 반품 1건당 왕복 배송비
+  memo text,
+  updated_at timestamptz default now(),
+  primary key (user_id, vendor_item_id)
+);
+
+alter table coupang_costs enable row level security;
+
+-- 일별·옵션별 매출 집계 (매출내역 API)
+create table if not exists coupang_sales_daily (
+  user_id uuid not null references users(id) on delete cascade,
+  sale_date date not null,               -- 매출인식일
+  vendor_item_id text not null,
+  product_name text,
+  quantity int not null default 0,
+  sales_amount bigint not null default 0,     -- 고객 결제금액 합
+  commission bigint not null default 0,       -- 쿠팡 판매수수료
+  settlement_amount bigint not null default 0,-- 정산예정액 (수수료 차감 후)
+  updated_at timestamptz default now(),
+  primary key (user_id, sale_date, vendor_item_id)
+);
+
+create index if not exists idx_cpsd_user_date on coupang_sales_daily(user_id, sale_date desc);
+alter table coupang_sales_daily enable row level security;
+
+-- 지급(정산) 내역 — 캐시플로 캘린더
+create table if not exists coupang_settlements (
+  user_id uuid not null references users(id) on delete cascade,
+  settlement_key text not null,          -- 지급일+유형+인식월 해시 (중복 방지)
+  settlement_date date not null,         -- 지급 예정일 / 지급일
+  settlement_type text,                  -- 주정산 / 월정산 / 추가지급
+  recognition_month text,                -- 매출인식월 (YYYY-MM)
+  amount bigint not null default 0,
+  status text,                           -- 예정 / 확정 / 지급완료 (원문)
+  raw jsonb,
+  updated_at timestamptz default now(),
+  primary key (user_id, settlement_key)
+);
+
+create index if not exists idx_cpst_user_date on coupang_settlements(user_id, settlement_date);
+alter table coupang_settlements enable row level security;
+
+-- 반품·교환 요청
+create table if not exists coupang_returns (
+  user_id uuid not null references users(id) on delete cascade,
+  receipt_id text not null,              -- 접수번호
+  kind text not null default 'return'    -- return | exchange
+    check (kind in ('return', 'exchange')),
+  vendor_item_id text,
+  product_name text,
+  quantity int not null default 1,
+  reason text,                           -- 사유 원문
+  fault text,                            -- 귀책 (COMPANY=판매자 / CUSTOMER=고객)
+  status text,
+  requested_at timestamptz,
+  raw jsonb,
+  updated_at timestamptz default now(),
+  primary key (user_id, receipt_id)
+);
+
+create index if not exists idx_cpr_user_at on coupang_returns(user_id, requested_at desc);
+create index if not exists idx_cpr_item on coupang_returns(user_id, vendor_item_id);
+alter table coupang_returns enable row level security;
+
+-- 고객문의 + AI 답변 초안
+create table if not exists coupang_inquiries (
+  user_id uuid not null references users(id) on delete cascade,
+  inquiry_id text not null,
+  source text not null default 'product' -- product(상품문의) | cs(고객센터)
+    check (source in ('product', 'cs')),
+  vendor_item_id text,
+  product_name text,
+  content text,
+  customer_name text,
+  inquired_at timestamptz,
+  answered boolean not null default false,
+  draft text,                            -- AI 초안 (사용자 승인 전)
+  draft_at timestamptz,
+  replied_at timestamptz,
+  raw jsonb,
+  updated_at timestamptz default now(),
+  primary key (user_id, inquiry_id)
+);
+
+create index if not exists idx_cpq_user on coupang_inquiries(user_id, answered, inquired_at desc);
+alter table coupang_inquiries enable row level security;
+
+-- 가격 규칙 — 마진 하한을 지키는 선에서만 조정을 제안/적용한다
+create table if not exists coupang_price_rules (
+  user_id uuid not null references users(id) on delete cascade,
+  vendor_item_id text not null,
+  enabled boolean not null default true,
+  auto_apply boolean not null default false,  -- false = 제안만, true = 크론이 실제 반영
+  min_margin_rate numeric not null default 10,-- 순이익률 하한 (%)
+  min_price int,                              -- 절대 하한가 (선택)
+  max_price int,                              -- 절대 상한가 (선택)
+  target_keyword text,                        -- 경쟁가 비교에 쓸 키워드
+  last_applied_at timestamptz,
+  updated_at timestamptz default now(),
+  primary key (user_id, vendor_item_id)
+);
+
+alter table coupang_price_rules enable row level security;
+
+-- 가격 변경 제안·적용 로그 (되돌리기와 감사 추적용)
+create table if not exists coupang_price_logs (
+  id bigserial primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  vendor_item_id text not null,
+  old_price int,
+  new_price int,
+  reason text,
+  applied boolean not null default false,     -- false = 제안만 남김
+  error text,
+  created_at timestamptz default now()
+);
+
+create index if not exists idx_cppl_user on coupang_price_logs(user_id, created_at desc);
+alter table coupang_price_logs enable row level security;
+
+-- 주간 성과 리포트 발송 이력 (중복 발송 방지 + 지난주 대비 비교)
+create table if not exists coupang_reports (
+  id bigserial primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  period_start date not null,
+  period_end date not null,
+  summary jsonb not null,
+  sent_at timestamptz default now()
+);
+
+create unique index if not exists idx_cprep_uniq on coupang_reports(user_id, period_start, period_end);
+alter table coupang_reports enable row level security;
+
+-- 일별 주문 집계 (발주서 API) — 매출인식일은 배송완료 이후라 최대 열흘 늦다.
+-- 재고 소진 예측과 순위·판매 상관에는 '주문일' 기준의 신선한 수치가 필요해
+-- 매출 집계와 별도로 둔다.
+create table if not exists coupang_orders_daily (
+  user_id uuid not null references users(id) on delete cascade,
+  order_date date not null,
+  vendor_item_id text not null,
+  product_id text,                       -- 노출상품ID (순위 추적과 연결)
+  product_name text,
+  quantity int not null default 0,
+  order_amount bigint not null default 0,
+  updated_at timestamptz default now(),
+  primary key (user_id, order_date, vendor_item_id)
+);
+
+create index if not exists idx_cpod_user_date on coupang_orders_daily(user_id, order_date desc);
+create index if not exists idx_cpod_pid on coupang_orders_daily(user_id, product_id, order_date);
+alter table coupang_orders_daily enable row level security;
+
 -- ─────────────────────────────────────────────────────────────
--- 26. 접근 차단 — RLS 전면 활성화 + anon/authenticated 권한 회수
+-- 27. 접근 차단 — RLS 전면 활성화 + anon/authenticated 권한 회수
 -- ─────────────────────────────────────────────────────────────
 -- 이 앱은 브라우저에서 Supabase에 직접 접속하지 않는다. 모든 DB 접근은
 -- 서버리스 함수(api/*)가 SUPABASE_SERVICE_KEY로 수행하고, service_role은
@@ -525,7 +745,7 @@ on conflict (key) do nothing;
 -- payments 전건, email_verifications 인증코드(계정 탈취)까지 읽고 쓸 수 있다.
 -- anon 키는 Supabase 설계상 '공개돼도 되는 키'라 언젠가는 새는 것을 전제해야 한다.
 --
--- 위 25번까지의 테이블별 enable 문이 누락을 만들 수 있어, 여기서 public
+-- 위 26번까지의 테이블별 enable 문이 누락을 만들 수 있어, 여기서 public
 -- 스키마 전체를 한 번 더 훑는다. (과거 프로젝트 잔재 테이블까지 포함)
 do $$
 declare t record;

@@ -17,11 +17,12 @@ import { SubscriptionPage } from './components/Billing/SubscriptionPage';
 import { AskHoonpro } from './components/QA/AskHoonpro';
 import { HomeDashboard } from './components/Home/HomeDashboard';
 import { WorksLibrary } from './components/Works/WorksLibrary';
-import { Home, FolderOpen, LayoutTemplate, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock } from 'lucide-react';
+import { CoupangDashboard } from './components/Coupang/CoupangDashboard';
+import { Home, FolderOpen, LayoutTemplate, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag } from 'lucide-react';
 import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 import { fetchBillingStatus, type BillingStatus } from './lib/billing';
 
-type Tab = 'home' | 'works' | 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'qa' | 'billing' | 'admin';
+type Tab = 'home' | 'works' | 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'coupang' | 'qa' | 'billing' | 'admin';
 
 type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
 
@@ -33,6 +34,7 @@ const TABS: TabDef[] = [
   { id: 'ranktracker', label: '순위 추적', icon: ListOrdered },
   { id: 'review', label: '리뷰 분석', icon: MessageSquareText },
   { id: 'analyzer', label: '광고 성과 분석', icon: BarChart3 },
+  { id: 'coupang', label: '쿠팡 매출·정산', icon: ShoppingBag },
   { id: 'qa', label: '훈프로 코칭AI', icon: MessageCircleQuestion },
   { id: 'works', label: '내 작업', icon: FolderOpen },
 ];
@@ -300,6 +302,7 @@ export default function App() {
               {activeTab === 'ranktracker' && <RankTracker />}
               {activeTab === 'review' && <ReviewAnalyzer />}
               {activeTab === 'analyzer' && <AdAnalyzer />}
+              {activeTab === 'coupang' && <CoupangDashboard />}
               {activeTab === 'works' && <WorksLibrary />}
               {activeTab === 'qa' && qaVisible && <AskHoonpro />}
               {activeTab === 'billing' && <SubscriptionPage />}

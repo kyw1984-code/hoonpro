@@ -36,6 +36,7 @@ const ONBOARDING_STEPS = [
   { key: 'sourcing',  tab: 'sourcing',    title: '팔 상품 찾기',   desc: '소싱AI에서 키워드를 ★로 저장해보세요' },
   { key: 'rank',      tab: 'ranktracker', title: '내 상품 등록',   desc: '순위 추적에 등록하면 매일 순위가 갱신됩니다' },
   { key: 'thumbnail', tab: 'thumbnail',   title: '썸네일 만들기',  desc: 'AI로 썸네일 이미지를 하나 생성해보세요' },
+  { key: 'coupang',   tab: 'coupang',     title: '쿠팡 연동',      desc: '윙 API 키를 넣으면 매출·정산·순이익이 자동으로 들어옵니다' },
 ] as const;
 
 interface Onboarding {

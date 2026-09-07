@@ -18,6 +18,7 @@ export const DEFAULT_FEATURE_LIMITS: Record<string, number> = {
   reviews: 20,   // 리뷰 수집 + GPT 요약
   rank: 40,      // 순위 확인
   analyze: 40,   // 경쟁상품·이미지 분석
+  inquiry: 60,   // 쿠팡 고객문의 답변 초안 (건당 약 2원)
   general: 200,  // 기획·문구 생성, 이미지 검수 등 내부 호출 (한 건 처리에 수십 번 쓰인다)
 };
 
@@ -161,7 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 그래서 기존 사용자에게는 처음부터 완료 상태로 보이고, 카드가 뜨지 않는다.
   if (action === 'onboarding') {
     const since90 = new Date(Date.now() - 90 * 86400_000).toISOString();
-    const [favRes, watchRes, thumbRes, userRes] = await Promise.all([
+    const [favRes, watchRes, thumbRes, userRes, coupangRes] = await Promise.all([
       supabase.from('sourcing_favorites').select('keyword', { count: 'exact', head: true })
         .eq('user_id', decoded.userId),
       supabase.from('sourcing_rank_watch').select('product_id', { count: 'exact', head: true })
@@ -169,13 +170,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       supabase.from('api_calls').select('id', { count: 'exact', head: true })
         .eq('user_id', decoded.userId).like('feature', '%thumbnail%').gte('created_at', since90),
       supabase.from('users').select('onboarding_dismissed_at').eq('id', decoded.userId).maybeSingle(),
+      // 쿠팡 연동은 가장 가치가 큰 단계라 온보딩에 넣는다. 키가 등록돼 있으면 완료다.
+      supabase.from('coupang_accounts').select('user_id', { count: 'exact', head: true })
+        .eq('user_id', decoded.userId),
     ]);
 
     const steps = {
       sourcing: (favRes.count ?? 0) > 0,
       rank: (watchRes.count ?? 0) > 0,
       thumbnail: (thumbRes.count ?? 0) > 0,
+      coupang: (coupangRes.count ?? 0) > 0,
     };
+    // 완료 판정은 기존 3단계 그대로 둔다. 쿠팡을 필수로 넣으면 이미 온보딩을
+    // 끝낸 사용자 전원에게 카드가 다시 뜬다. 쿠팡은 아직 안 한 사람에게만
+    // 추가로 권하는 선택 단계로 남긴다.
     const done = steps.sourcing && steps.rank && steps.thumbnail;
 
     return res.status(200).json({
