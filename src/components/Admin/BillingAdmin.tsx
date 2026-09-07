@@ -218,11 +218,24 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
               ))}
             </div>
 
+            {/* 쿠폰 적용 결제는 위 매출에서 빠져 있다. 실제로 들어온 돈이라
+                정산과 대조할 수 있게 금액은 숨기지 않고 여기 따로 적는다. */}
+            {totals.couponCount > 0 && (
+              <div className="rounded-card border border-line bg-paper-2 px-4 py-3 text-[12.5px] text-ink-2">
+                <b className="text-ink">쿠폰 적용 결제는 위 매출에 포함되지 않습니다.</b>{' '}
+                누적 {totals.couponCount}건 · {won(totals.couponNet)}
+                {thisMonth.couponCount > 0 && <> (이번 달 {thisMonth.couponCount}건 · {won(thisMonth.couponNet)})</>}
+                <span className="mt-0.5 block text-[11.5px] text-ink-3">
+                  무료 기간 쿠폰은 결제가 일어나지 않아 애초에 집계되지 않습니다.
+                </span>
+              </div>
+            )}
+
             {/* 월별 순매출 — 단일 계열이라 범례 없음 */}
             <div className="rounded-card border border-line bg-paper p-5">
               <div className="mb-1 flex flex-wrap items-baseline gap-x-2">
                 <h3 className="text-[15px] font-semibold text-ink">월별 순매출</h3>
-                <span className="text-[12px] text-ink-3">최근 12개월 · 결제액에서 환불액을 뺀 금액</span>
+                <span className="text-[12px] text-ink-3">최근 12개월 · 결제액에서 환불액을 뺀 금액 (쿠폰 적용 결제 제외)</span>
               </div>
 
               <div className="mt-5 flex gap-2">

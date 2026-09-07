@@ -1078,7 +1078,7 @@ async function adminRevenue(res: VercelResponse) {
   const [{ data: pays }, { data: planRows }] = await Promise.all([
     supabase
       .from('payments')
-      .select('amount, status, refunded_amount, refunded_at, created_at, user_id, subscriptions(plan_id)')
+      .select('amount, discount, status, refunded_amount, refunded_at, created_at, user_id, subscriptions(plan_id)')
       .in('status', ['paid', 'refunded', 'partial_refund']),
     supabase.from('plans').select('id, name, interval'),
   ]);
@@ -1100,25 +1100,44 @@ async function adminRevenue(res: VercelResponse) {
     months.push(`${kst.getUTCFullYear()}-${String(kst.getUTCMonth() + 1).padStart(2, '0')}`);
   }
 
-  type Bucket = { gross: number; refund: number; count: number; payers: Set<string> };
+  // 쿠폰이 적용된 결제는 매출에서 빼고 따로 센다. 프로모션으로 받은 돈을
+  // 정상 매출에 섞으면 다음 달 예측이 부풀려진다. 다만 실제로 들어온 돈이라
+  // 정산 대조가 가능하도록 숨기지 않고 별도 항목으로 돌려준다.
+  // (무료 기간 쿠폰은 결제 자체가 없어 payments 행이 생기지 않는다)
+  type Bucket = { gross: number; refund: number; count: number; payers: Set<string>;
+                  couponNet: number; couponCount: number };
   const buckets = new Map<string, Bucket>(
-    months.map(m => [m, { gross: 0, refund: 0, count: 0, payers: new Set<string>() }]),
+    months.map(m => [m, { gross: 0, refund: 0, count: 0, payers: new Set<string>(),
+                          couponNet: 0, couponCount: 0 }]),
   );
 
-  const totals = { gross: 0, refund: 0, count: 0 };
+  const totals = { gross: 0, refund: 0, count: 0, couponNet: 0, couponCount: 0 };
   const allPayers = new Set<string>();
   const byPlan = new Map<string, { name: string; interval: string; net: number; count: number }>();
 
   for (const p of pays ?? []) {
     const amount = Number(p.amount || 0);
-    const refunded = Number(p.refunded_amount || 0);
+    // status가 refunded면 전액 환불이다. refunded_amount는 웹훅이 채우는 값이라
+    // 웹훅 등록 전이나 앱 밖에서 취소된 건은 비어 있을 수 있다. 그때 0으로 두면
+    // 환불된 돈이 매출로 남으므로 결제액 전체를 환불로 본다.
+    const recorded = Number(p.refunded_amount || 0);
+    const refunded = p.status === 'refunded' ? Math.max(recorded, amount) : recorded;
+    const mk = monthKey(p.created_at);
+
+    // 쿠폰 적용 결제 — 매출 집계에서 제외하고 별도로 센다
+    if (Number(p.discount || 0) > 0) {
+      totals.couponNet += amount - refunded;
+      totals.couponCount += 1;
+      const cb = buckets.get(mk);
+      if (cb) { cb.couponNet += amount - refunded; cb.couponCount += 1; }
+      continue;
+    }
 
     totals.gross += amount;
     totals.refund += refunded;
     totals.count += 1;
     if (p.user_id) allPayers.add(p.user_id);
 
-    const mk = monthKey(p.created_at);
     const b = buckets.get(mk);
     if (b) {
       b.gross += amount;
@@ -1155,6 +1174,8 @@ async function adminRevenue(res: VercelResponse) {
       net: b.gross - b.refund,
       count: b.count,
       payers: b.payers.size,
+      couponNet: b.couponNet,
+      couponCount: b.couponCount,
     };
   });
 
@@ -1168,6 +1189,8 @@ async function adminRevenue(res: VercelResponse) {
       net: totals.gross - totals.refund,
       count: totals.count,
       payers: allPayers.size,
+      couponNet: totals.couponNet,
+      couponCount: totals.couponCount,
     },
     thisMonth,
     lastMonth: lastMonth ?? null,
