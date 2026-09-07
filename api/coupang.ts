@@ -1007,7 +1007,7 @@ interface AccountRow {
   access_key: string;
   secret_key_enc: string;
   status: string;
-  key_issued_at: string | null;
+  key_expires_at: string | null;
   expiry_notified_at: string | null;
   last_sync_at: string | null;
   last_sync_error: string | null;
@@ -1028,6 +1028,16 @@ function credsOf(acc: AccountRow): CoupangCreds {
 async function verifyCreds(creds: CoupangCreds): Promise<{ ok: boolean; error?: string }> {
   const r = await coupangCall(creds, 'GET', EP.sellerProducts, `vendorId=${creds.vendorId}&maxPerPage=1`);
   if (r.ok) return { ok: true };
+  // 화면에는 원인 후보를 다 적어 보내지만, 어느 쪽인지는 쿠팡이 돌려준 원문에만
+  // 있다. IP 미등록인지 키 오타인지 24시간 미경과인지 로그에서 가려낼 수 있게
+  // 남긴다. (키 값 자체는 찍지 않는다)
+  console.error('[coupang] 키 확인 실패', {
+    status: r.status,
+    relayError: r.relayError ?? false,
+    relayConfigured: Boolean(RELAY_URL),
+    vendorId: creds.vendorId,
+    coupangMessage: (r.error || '').slice(0, 300),
+  });
   if (r.status === 401 || r.status === 403) {
     return {
       ok: false,
@@ -1078,10 +1088,11 @@ async function setAccountStatus(userId: string, status: string, error: string | 
 }
 
 /** 키 만료(발급 후 6개월)까지 남은 일수 — 발급일을 모르면 null */
-function daysToExpiry(keyIssuedAt: string | null): number | null {
-  if (!keyIssuedAt) return null;
-  const expiry = addDays(keyIssuedAt.slice(0, 10), 180);
-  return daysBetween(kstToday(), expiry);
+// 윙은 발급일이 아니라 '유효 기간'(만료 시각)을 보여준다. 발급일을 받아
+// 180일을 더해 추정하면 하루 이틀씩 어긋나므로, 만료일을 그대로 받는다.
+function daysToExpiry(keyExpiresAt: string | null): number | null {
+  if (!keyExpiresAt) return null;
+  return daysBetween(kstToday(), keyExpiresAt.slice(0, 10));
 }
 
 // ── 이메일 (billing.ts와 같은 Resend 경로) ────────────────────
@@ -1233,10 +1244,10 @@ async function cronDaily(res: VercelResponse) {
   const { data: accounts } = await supabase
     .from('coupang_accounts')
     .select('*, users(email, name)')
-    .not('key_issued_at', 'is', null);
+    .not('key_expires_at', 'is', null);
 
   for (const acc of (accounts ?? []) as any[]) {
-    const left = daysToExpiry(acc.key_issued_at);
+    const left = daysToExpiry(acc.key_expires_at);
     if (left === null) continue;
 
     if (left <= 0 && acc.status === 'active') {
@@ -1417,8 +1428,8 @@ async function handleStatus(userId: string, res: VercelResponse) {
     status: acc.status,
     lastSyncAt: acc.last_sync_at,
     lastSyncError: acc.last_sync_error,
-    keyIssuedAt: acc.key_issued_at,
-    daysToExpiry: daysToExpiry(acc.key_issued_at),
+    keyExpiresAt: acc.key_expires_at,
+    daysToExpiry: daysToExpiry(acc.key_expires_at),
     itemCount: itemCount ?? 0,
     salesDays,
     relayIp: process.env.COUPANG_RELAY_IP || null,
@@ -1430,7 +1441,7 @@ async function handleKeySave(userId: string, req: VercelRequest, res: VercelResp
   const vendorId = String(req.body?.vendorId ?? '').trim();
   const accessKey = String(req.body?.accessKey ?? '').trim();
   const secretKey = String(req.body?.secretKey ?? '').trim();
-  const keyIssuedAt = String(req.body?.keyIssuedAt ?? '').trim() || null;
+  const keyExpiresAt = String(req.body?.keyExpiresAt ?? '').trim() || null;
 
   if (!vendorId || !accessKey || !secretKey) {
     return res.status(400).json({ error: '업체코드, Access Key, Secret Key를 모두 입력해주세요.' });
@@ -1452,7 +1463,7 @@ async function handleKeySave(userId: string, req: VercelRequest, res: VercelResp
       access_key: accessKey,
       secret_key_enc: encryptSecret(secretKey),
       status: 'active',
-      key_issued_at: keyIssuedAt,
+      key_expires_at: keyExpiresAt,
       expiry_notified_at: null,
       last_verified_at: new Date().toISOString(),
       last_sync_error: null,
@@ -3227,7 +3238,7 @@ async function handleAdminOverview(decoded: any, res: VercelResponse) {
 
   const { rows: accounts } = await selectAll<any>((f, t) => supabase!
     .from('coupang_accounts')
-    .select('user_id, vendor_id, status, last_sync_at, last_sync_error, backfill_done, key_issued_at, created_at, users(name, email)')
+    .select('user_id, vendor_id, status, last_sync_at, last_sync_error, backfill_done, key_expires_at, created_at, users(name, email)')
     .order('user_id').range(f, t));
 
   const rows = accounts;
@@ -3238,7 +3249,7 @@ async function handleAdminOverview(decoded: any, res: VercelResponse) {
   const list = rows.map(a => {
     const lastSync = a.last_sync_at ? new Date(a.last_sync_at).getTime() : null;
     const stale = a.status === 'active' && (lastSync === null || now - lastSync > staleMs);
-    const left = daysToExpiry(a.key_issued_at);
+    const left = daysToExpiry(a.key_expires_at);
     if (a.status === 'active') counts.active++;
     if (a.status === 'invalid') counts.invalid++;
     if (a.status === 'expired') counts.expired++;

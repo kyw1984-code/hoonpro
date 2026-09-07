@@ -9,7 +9,7 @@ export interface CoupangStatus {
   status?: 'active' | 'invalid' | 'expired';
   lastSyncAt?: string | null;
   lastSyncError?: string | null;
-  keyIssuedAt?: string | null;
+  keyExpiresAt?: string | null;
   daysToExpiry?: number | null;
   itemCount?: number;
   salesDays?: number;
@@ -260,7 +260,7 @@ export interface PriceLog {
 
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
-  saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyIssuedAt?: string }) =>
+  saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyExpiresAt?: string }) =>
     request<{ ok: true; message: string }>('key-save', { method: 'POST', body }),
   deleteKey: () => request<{ ok: true }>('key-delete', { method: 'POST' }),
   sync: (full = false) => request<{ ok: true; summary: SyncSummary }>('sync', { method: 'POST', body: { full } }),

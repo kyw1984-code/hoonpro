@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { computeProfit, computeInventory, kstToday, addDays, selectAll } from './coupang';
+import { computeProfit, computeInventory, kstToday, addDays, selectAll } from '../api/coupang';
 
 // ═══════════════════════════════════════════════════════════════
 // [8] 코칭AI에 질문자의 실제 판매 데이터를 붙인다
@@ -13,7 +13,8 @@ import { computeProfit, computeInventory, kstToday, addDays, selectAll } from '.
 //    상품 목록을 통째로 넣으면 코칭AI 원가가 몇 배가 된다.
 //  · 조언의 근거는 여전히 강의 자료다. 숫자는 '질문자에 대한 사실'로만 쓴다.
 //
-// 파일명이 밑줄로 시작하므로 Vercel이 이 파일을 라우트로 만들지 않는다.
+// api/ 밖에 둔다. api/ 안에 두면 Vercel이 라우트로 만들려 하고, 밑줄로 시작하면
+// 라우트는 면하지만 번들에서도 빠져 qa 함수가 런타임에 이 파일을 못 찾는다.
 // ═══════════════════════════════════════════════════════════════
 
 const supabase =
