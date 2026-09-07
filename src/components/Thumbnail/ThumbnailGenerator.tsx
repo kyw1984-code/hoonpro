@@ -444,12 +444,13 @@ export const ThumbnailGenerator: React.FC = () => {
                     {resultImage ? (
                         <img src={resultImage} alt="Generated Thumbnail" className="w-full h-full object-contain" />
                     ) : loading ? (
-                        <div className="flex flex-col items-center text-ink-2">
+                        // 바둑판 배경은 흰 타일이 절반이라 밝은 글자가 묻힌다 — 어두운 패널을 깔아 준다
+                        <div className="flex flex-col items-center rounded-card border border-line bg-ground/90 px-8 py-6 text-ink-2 backdrop-blur-sm">
                             <Loader2 className="w-10 h-10 animate-spin mb-3 text-accent" />
                             <p className="font-medium">AI가 썸네일을 디자인하고 있습니다...</p>
                         </div>
                     ) : (
-                        <div className="flex flex-col items-center text-ink-3">
+                        <div className="flex flex-col items-center rounded-card border border-line bg-ground/90 px-8 py-6 text-ink-3 backdrop-blur-sm">
                             <ImageIcon className="w-12 h-12 mb-3 opacity-50" />
                             <p>생성된 썸네일이 이곳에 표시됩니다.</p>
                         </div>

@@ -25,6 +25,9 @@
     "api/qa.ts": {
       "maxDuration": 60
     },
+    "api/sourcing.ts": {
+      "maxDuration": 300
+    },
     "api/billing.ts": {
       "maxDuration": 300
     },
