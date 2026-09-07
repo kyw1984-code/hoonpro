@@ -5,8 +5,9 @@
  * 매출은 쿠팡이 보여주지만 순이익은 아무도 안 보여준다. 정산예정액에서
  * 원가와 반품 배송비를 빼야 비로소 남는 돈이 나온다.
  *
- * 광고비는 상품 단위로 알 수 없어(윙 API에 광고 데이터가 없다) 기간 총액으로만
- * 반영한다. 저장된 광고 보고서가 있으면 그 값을 기본값으로 채워 준다.
+ * 광고비는 상품 단위로 알 수 없어(쿠팡 Open API에 광고 엔드포인트 자체가 없다)
+ * 기간 총액으로만 반영한다. [광고 성과 분석]에서 보고서를 올려 두면 날짜별로
+ * 쌓이고, 여기서는 조회 기간에 겹치는 날만 합산해 자동으로 채운다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpRight, Download, Loader2, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
@@ -107,6 +108,21 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   const noSales = data.rows.length === 0;
   const prev = data.previous;
 
+  // 광고비가 어디서 온 값인지 밝힌다. 쿠팡은 광고 API를 제공하지 않아
+  // 보고서 파일에서 받은 날짜만 채워지고, 빠진 날은 순이익을 부풀린다.
+  const ac = data.adCost;
+  const adNote = (() => {
+    if (!ac || ac.coveredDays === 0) {
+      return '쿠팡은 광고 데이터를 API로 제공하지 않습니다. [광고 성과 분석]에서 광고 보고서를 올리면 이 칸이 기간에 맞춰 자동으로 채워집니다.';
+    }
+    const missing = ac.spanDays - ac.coveredDays;
+    const est = ac.estimatedDays > 0 ? ` 이 중 ${ac.estimatedDays}일은 기간 총액을 일수로 나눈 추정치입니다.` : '';
+    if (missing > 0) {
+      return `광고 보고서에서 ${ac.coveredDays}일치를 자동으로 채웠습니다. ${ac.spanDays}일 중 ${missing}일은 광고비 데이터가 없어 순이익이 실제보다 크게 나옵니다.${est}`;
+    }
+    return `광고 보고서에서 이 기간 ${ac.coveredDays}일치를 자동으로 채웠습니다.${est}`;
+  })();
+
   // 화면의 표를 그대로 엑셀로 내린다. 정산·세무 자료로 넘길 때
   // 화면을 다시 옮겨 적지 않게 하려는 것이다.
   const downloadExcel = () => {
@@ -141,7 +157,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
       '이익률(%)': Number(data.totals.marginRate.toFixed(1)),
     });
     // 광고비는 상품별로 나눌 수 없어 합계 아래에 한 줄로만 뺀다
-    sheet.push({ 상품명: '광고비 (직접 입력)', 순이익: -Math.round(adCost) });
+    sheet.push({ 상품명: '광고비', 순이익: -Math.round(adCost) });
     sheet.push({
       상품명: '광고비 차감 후 순이익',
       순이익: Math.round(netProfit),
@@ -166,7 +182,12 @@ export function ProfitDashboard({ onEditCosts }: Props) {
         {PERIODS.map(p => (
           <button
             key={p.days}
-            onClick={() => setDays(p.days)}
+            onClick={() => {
+              // 기간이 바뀌면 광고비도 그 기간 값으로 다시 채운다. 한 번 손댔다는
+              // 이유로 90일 화면에 7일치 광고비가 남아 있으면 순이익이 틀린다.
+              adTouched.current = false;
+              setDays(p.days);
+            }}
             className={`rounded-control border px-3 py-1.5 text-[12px] font-medium transition-colors ${
               days === p.days ? 'border-accent bg-accent-soft text-ink' : 'border-line text-ink-3 hover:border-line-strong hover:text-ink'
             }`}
@@ -259,8 +280,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
             />
             <span className="text-[12px] text-ink-3">원</span>
             <p className="w-full text-[11.5px] leading-relaxed text-ink-3 sm:w-auto sm:flex-1">
-              쿠팡 광고 데이터는 윙 API로 받을 수 없어 직접 입력합니다.
-              {data.adCostHint !== null && ' [광고 성과 분석]에 저장된 보고서 값을 기본값으로 채웠습니다.'}
+              {adNote}
             </p>
           </div>
 
