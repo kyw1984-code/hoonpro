@@ -21,6 +21,7 @@ create table if not exists api_usage (
 create or replace function increment_usage(p_user_id uuid, p_date date, p_limit int)
 returns json
 language plpgsql
+set search_path = public   -- 호출자가 search_path를 바꿔 동명 객체를 끼워넣는 것을 차단
 as $$
 declare
   v_count int;
@@ -334,6 +335,7 @@ returns table (
   similarity float
 )
 language sql
+set search_path = public   -- 호출자가 search_path를 바꿔 동명 객체를 끼워넣는 것을 차단
 stable
 as $$
   select
@@ -420,6 +422,7 @@ alter table email_verifications add column if not exists purpose text default 's
 create or replace function increment_coupon_redeemed(p_coupon_id uuid)
 returns void
 language sql
+set search_path = public   -- 호출자가 search_path를 바꿔 동명 객체를 끼워넣는 것을 차단
 as $$
   update coupons set redeemed_count = coalesce(redeemed_count, 0) + 1 where id = p_coupon_id;
 $$;
@@ -469,6 +472,7 @@ create or replace function increment_feature_usage(
 )
 returns json
 language plpgsql
+set search_path = public   -- 호출자가 search_path를 바꿔 동명 객체를 끼워넣는 것을 차단
 as $$
 declare
   v_count int;
