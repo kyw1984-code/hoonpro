@@ -92,6 +92,16 @@ export interface ProfitResponse {
   costCoverage: number;
   adCostHint: number | null;
   adReportAt: string | null;
+  // 같은 길이의 직전 기간. hasData가 false면 그때 판매가 없어 증감률이 무의미하다.
+  previous?: {
+    from: string;
+    to: string;
+    salesAmount: number;
+    quantity: number;
+    commission: number;
+    profit: number;
+    hasData: boolean;
+  };
 }
 
 export interface CostRow {

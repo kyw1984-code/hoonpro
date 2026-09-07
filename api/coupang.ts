@@ -1797,7 +1797,31 @@ export async function computeProfit(userId: string, from: string, to: string) {
 
 async function handleProfit(userId: string, req: VercelRequest, res: VercelResponse) {
   const { from, to } = rangeFromQuery(req);
-  return res.status(200).json(await computeProfit(userId, from, to));
+
+  // 같은 길이의 직전 기간을 함께 계산해 "지난 기간 대비"를 보여준다.
+  // 숫자 하나만 보면 3,240,000원이 좋은 건지 나쁜 건지 알 수 없다.
+  const span = daysBetween(from, to) + 1;
+  const prevTo = addDays(from, -1);
+  const prevFrom = addDays(prevTo, -(span - 1));
+
+  const [cur, prev] = await Promise.all([
+    computeProfit(userId, from, to),
+    computeProfit(userId, prevFrom, prevTo),
+  ]);
+
+  return res.status(200).json({
+    ...cur,
+    previous: {
+      from: prevFrom,
+      to: prevTo,
+      salesAmount: prev.totals.salesAmount,
+      quantity: prev.totals.quantity,
+      commission: prev.totals.commission,
+      profit: prev.totals.profit,
+      // 직전 기간에 판매가 아예 없으면 증감률이 무의미하다. 화면이 판단하도록 알린다
+      hasData: prev.totals.quantity > 0,
+    },
+  });
 }
 
 // ── 원가 조회·입력 ────────────────────────────────────────────
