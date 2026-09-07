@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
-import { buildSellerContext } from '../lib/coupang-context';
+import { buildSellerContext } from '../lib/coupang-context.js';
 
 // "훈프로 코칭AI" RAG 챗봇 통합 API
 // Vercel Hobby 함수 개수 제한(12개) 때문에 action 파라미터로 통합

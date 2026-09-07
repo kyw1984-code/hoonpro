@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { computeProfit, computeInventory, kstToday, addDays, selectAll } from '../api/coupang';
+import { computeProfit, computeInventory, kstToday, addDays, selectAll } from '../api/coupang.js';
 
 // ═══════════════════════════════════════════════════════════════
 // [8] 코칭AI에 질문자의 실제 판매 데이터를 붙인다
@@ -15,6 +15,10 @@ import { computeProfit, computeInventory, kstToday, addDays, selectAll } from '.
 //
 // api/ 밖에 둔다. api/ 안에 두면 Vercel이 라우트로 만들려 하고, 밑줄로 시작하면
 // 라우트는 면하지만 번들에서도 빠져 qa 함수가 런타임에 이 파일을 못 찾는다.
+//
+// import 경로 끝의 .js는 실수가 아니다. package.json이 type: module이라
+// 빌드 결과가 ESM이고, ESM은 상대 경로에 확장자를 요구한다. 확장자를 빼면
+// 런타임에 ERR_MODULE_NOT_FOUND로 함수가 통째로 죽는다.
 // ═══════════════════════════════════════════════════════════════
 
 const supabase =
