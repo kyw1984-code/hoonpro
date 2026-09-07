@@ -1031,11 +1031,23 @@ async function verifyCreds(creds: CoupangCreds): Promise<{ ok: boolean; error?: 
   // 화면에는 원인 후보를 다 적어 보내지만, 어느 쪽인지는 쿠팡이 돌려준 원문에만
   // 있다. IP 미등록인지 키 오타인지 24시간 미경과인지 로그에서 가려낼 수 있게
   // 남긴다. (키 값 자체는 찍지 않는다)
+  // 'Invalid signature.'는 IP 문제가 아니라 서명이 안 맞는다는 뜻이다. 서명식은
+  // 쿠팡 명세와 같으므로 대개 입력값 문제(두 키를 바꿔 넣었거나, 복사가 잘렸거나,
+  // 보이지 않는 문자가 섞였거나)다. 그걸 가려낼 수 있게 값이 아니라 '형태'만 남긴다.
+  const shape = (v: string) => ({
+    len: v.length,
+    // 쿠팡 Access Key는 하이픈이 섞인 36자 안팎, Secret Key는 하이픈 없는 영숫자다
+    hasHyphen: v.includes('-'),
+    // 눈에 안 보이는 문자가 섞이면 서명이 조용히 깨진다
+    nonAscii: /[^\x21-\x7e]/.test(v),
+  });
   console.error('[coupang] 키 확인 실패', {
     status: r.status,
     relayError: r.relayError ?? false,
     relayConfigured: Boolean(RELAY_URL),
     vendorId: creds.vendorId,
+    accessKey: shape(creds.accessKey),
+    secretKey: shape(creds.secretKey),
     coupangMessage: (r.error || '').slice(0, 300),
   });
   if (r.status === 401 || r.status === 403) {
