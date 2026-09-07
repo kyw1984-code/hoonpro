@@ -3,6 +3,8 @@ import * as XLSX from "xlsx";
 import Papa from "papaparse";
 import { Upload, Save, TrendingUp, X, Loader2 } from "lucide-react";
 import { getToken } from "../../lib/auth";
+import { coupangApi } from "../../lib/coupang";
+import { extractDailyAdCost } from "../../lib/adcost";
 
 // ─── 지면 분류 헬퍼 ("비검색"이 "검색"을 포함하는 substring 함정 방지) ───
 function isSearchPlatform(platform: string): boolean {
@@ -76,8 +78,15 @@ export function AnalyzerDashboard() {
     try {
       if (file.name.endsWith(".csv")) {
         const buffer = await file.arrayBuffer();
+        // 쿠팡 보고서는 EUC-KR로 내려오는 경우가 많다. UTF-8로 읽어 대체문자(U+FFFD)가
+        // 섞이면 EUC-KR로 다시 읽는다.
+        // 예전에는 이 대체문자가 소스에서 사라져 includes("")가 되어 있었다. 빈 문자열은
+        // 항상 포함되므로 UTF-8 파일까지 EUC-KR로 잘못 읽었고, 컬럼명이 깨져
+        // "판매수량 컬럼을 찾을 수 없습니다"가 떴다.
         let text = new TextDecoder("utf-8").decode(buffer);
-        if (text.includes("")) text = new TextDecoder("euc-kr").decode(buffer);
+        if (text.includes("\uFFFD")) text = new TextDecoder("euc-kr").decode(buffer);
+        // BOM이 남으면 첫 열 이름이 "\uFEFF날짜"가 되어 어떤 컬럼 탐지에도 걸리지 않는다
+        if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
         Papa.parse(text, {
           header: true,
           skipEmptyLines: true,
@@ -86,7 +95,9 @@ export function AnalyzerDashboard() {
         });
       } else {
         const buffer = await file.arrayBuffer();
-        const wb = XLSX.read(buffer, { type: "array" });
+        // cellDates가 없으면 날짜 셀이 45000 같은 시리얼 숫자로 들어와
+        // 일자별 광고비를 뽑을 수 없다.
+        const wb = XLSX.read(buffer, { type: "array", cellDates: true });
         const ws = wb.Sheets[wb.SheetNames[0]];
         setRawData(XLSX.utils.sheet_to_json(ws) as any[]);
       }
@@ -522,6 +533,15 @@ export function AnalyzerDashboard() {
   const [reportSaving, setReportSaving] = useState(false);
   const [reportMsg, setReportMsg] = useState<string | null>(null);
 
+  // 광고비를 순이익 화면으로 넘기기 위한 기간. 보고서에 일자 컬럼이 있으면
+  // 자동으로 채워지고, 없으면 사용자가 직접 넣는다.
+  const adDaily = useMemo(() => extractDailyAdCost(rawData), [rawData]);
+  const [adFrom, setAdFrom] = useState("");
+  const [adTo, setAdTo] = useState("");
+  useEffect(() => {
+    if (adDaily) { setAdFrom(adDaily.from); setAdTo(adDaily.to); }
+  }, [adDaily]);
+
   const usageHeaders = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` });
 
   const loadReports = async () => {
@@ -562,8 +582,25 @@ export function AnalyzerDashboard() {
         body: JSON.stringify({ action: "report-save", summary }),
       });
       const data = await res.json();
-      if (!res.ok || data.error) setReportMsg(data.error || "저장 실패");
-      else { setReportMsg("저장됐습니다. 다음 보고서 분석 때 자동으로 비교됩니다."); loadReports(); }
+      if (!res.ok || data.error) { setReportMsg(data.error || "저장 실패"); return; }
+
+      // 광고비를 날짜별로 남긴다. 이걸 해두면 [쿠팡 매출·정산 → 순이익] 화면이
+      // 조회 기간에 겹치는 날만 합산해 광고비를 자동으로 채운다.
+      let adMsg = " 광고비 기간을 넣으면 순이익 화면에도 자동 반영됩니다.";
+      if (adFrom && adTo && adFrom <= adTo) {
+        try {
+          const r = adDaily
+            ? await coupangApi.adCostSave({ from: adFrom, to: adTo, daily: adDaily.days })
+            : await coupangApi.adCostSave({ from: adFrom, to: adTo, total: Math.round(summary.totalCost) });
+          adMsg = adDaily
+            ? ` 광고비 ${r.days}일치(${r.total.toLocaleString()}원)가 순이익 화면에 자동 반영됩니다.`
+            : ` 광고비 ${r.total.toLocaleString()}원을 ${r.days}일로 나눠 순이익 화면에 반영했습니다.`;
+        } catch (e: any) {
+          adMsg = ` (광고비 반영은 실패했습니다: ${e.message})`;
+        }
+      }
+      setReportMsg("저장됐습니다. 다음 보고서 분석 때 자동으로 비교됩니다." + adMsg);
+      loadReports();
     } catch (e: any) {
       setReportMsg(e.message);
     } finally {
@@ -833,6 +870,27 @@ export function AnalyzerDashboard() {
                             비교 기준: {new Date(savedReports![0].created_at).toLocaleDateString("ko-KR")} 저장 보고서 · 광고비 증가는 확장 중이면 정상이니 ROAS·순이익과 함께 보세요.
                           </p>
                         )}
+                        {/* 광고비 기간 — 이 값이 순이익 화면의 광고비가 된다.
+                            쿠팡은 광고 API를 제공하지 않아 여기서 받는 수밖에 없다. */}
+                        <div className="mb-4 rounded-card border border-line bg-paper-2 p-4">
+                          <p className="text-[12px] font-semibold text-ink">이 보고서의 광고 집행 기간</p>
+                          <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-3">
+                            {adDaily
+                              ? `보고서에 일자가 있어 ${adDaily.days.length}일치를 날짜별로 저장합니다. 순이익 화면에서 어떤 기간을 보든 그 기간에 맞는 광고비가 자동으로 빠집니다.`
+                              : "보고서에 일자 컬럼이 없습니다. 기간을 넣어 주시면 총 광고비를 일수로 나눠 반영합니다. (일자별 보고서를 받으시면 더 정확합니다)"}
+                          </p>
+                          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                            <input type="date" value={adFrom} onChange={e => setAdFrom(e.target.value)}
+                              className="rounded-control border border-line bg-paper px-2.5 py-1.5 text-[12.5px] text-ink outline-none focus:ring-2 focus:ring-accent" />
+                            <span className="text-[12px] text-ink-3">~</span>
+                            <input type="date" value={adTo} onChange={e => setAdTo(e.target.value)}
+                              className="rounded-control border border-line bg-paper px-2.5 py-1.5 text-[12.5px] text-ink outline-none focus:ring-2 focus:ring-accent" />
+                            {adFrom && adTo && adFrom > adTo && (
+                              <span className="text-[11.5px] text-critical">시작일이 종료일보다 뒤입니다.</span>
+                            )}
+                          </div>
+                        </div>
+
                         <div className="flex items-center gap-3 flex-wrap">
                           <button onClick={saveReport} disabled={reportSaving || !cur}
                             className="flex items-center gap-1.5 rounded-control bg-ink px-4 py-2 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">

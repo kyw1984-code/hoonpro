@@ -73,6 +73,15 @@ export interface ProfitRow {
   salePrice: number | null;
 }
 
+export interface ProfitDay {
+  date: string;
+  quantity: number;
+  salesAmount: number;
+  commission: number;
+  /** 광고비를 빼기 전 순이익 (광고비는 날짜별로 상품에 나눌 수 없다) */
+  profit: number;
+}
+
 export interface ProfitResponse {
   from: string;
   to: string;
@@ -90,8 +99,35 @@ export interface ProfitResponse {
   };
   missingCost: number;
   costCoverage: number;
+  /** 기간 안의 모든 날짜. 판매가 없던 날도 0으로 채워져 있다 */
+  daily: ProfitDay[];
+  // 광고 보고서에서 받아 둔 이 기간 광고비. 하루도 없으면 null이다
+  // (0으로 주면 '안 올린 것'과 '정말 0원'이 구분되지 않는다).
   adCostHint: number | null;
-  adReportAt: string | null;
+  adCost?: {
+    total: number;
+    coveredDays: number;
+    spanDays: number;
+    estimatedDays: number;
+  };
+  // 같은 길이의 직전 기간. hasData가 false면 그때 판매가 없어 증감률이 무의미하다.
+  previous?: {
+    from: string;
+    to: string;
+    salesAmount: number;
+    quantity: number;
+    commission: number;
+    profit: number;
+    hasData: boolean;
+  };
+}
+
+export interface AdCostsResponse {
+  from: string;
+  to: string;
+  days: { date: string; cost: number; source: string }[];
+  total: number;
+  spanDays: number;
 }
 
 export interface CostRow {
@@ -142,6 +178,8 @@ export interface WeeklyReport {
     returnCount: number;
     prevSalesAmount: number;
     prevProfit: number;
+    // 그 주에 등록된 광고비. 예전 리포트에는 없어 옵셔널이다.
+    adCost?: number;
     incoming: number;
     missingCost: number;
   };
@@ -277,6 +315,11 @@ export const coupangApi = {
   sync: (full = false) => request<{ ok: true; summary: SyncSummary }>('sync', { method: 'POST', body: { full } }),
   profit: (days: number) => request<ProfitResponse>(`profit&days=${days}`),
   costs: () => request<{ rows: CostRow[] }>('costs'),
+  adCosts: (days: number) => request<AdCostsResponse>(`ad-costs&days=${days}`),
+  adCostSave: (body: { from: string; to: string; daily?: { date: string; cost: number }[]; total?: number; source?: 'report' | 'manual' }) =>
+    request<{ ok: true; from: string; to: string; days: number; source: string; total: number }>('ad-cost-save', { method: 'POST', body }),
+  adCostDelete: (from: string, to: string) =>
+    request<{ ok: true }>('ad-cost-delete', { method: 'POST', body: { from, to } }),
   saveCosts: (items: Array<Partial<CostRow> & { vendorItemId: string }>) =>
     request<{ ok: true; saved: number }>('cost-save', { method: 'POST', body: { items } }),
   settlement: () => request<SettlementResponse>('settlement'),

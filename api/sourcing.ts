@@ -916,12 +916,22 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
 async function recordObservations(keyword: string, products: ParsedProduct[]): Promise<void> {
   if (!supabase || products.length === 0) return;
   try {
+    // 한 번의 수집에는 같은 snapshot_at을 넣는다. 행마다 now()가 찍히면
+    // 마이크로초가 어긋나 "이번 수집분"을 한 덩어리로 골라낼 수 없다.
+    const snapshotAt = new Date().toISOString();
     await supabase.from("sourcing_product_obs").insert(
       products.map(p => ({
         product_id: p.productId,
         keyword,
         review_count: p.reviewCount,
         price: p.productPrice,
+        // 아래는 경쟁 분석용 — 이미 파싱해 놓고 버리던 값들이라 수집 비용이 늘지 않는다
+        product_name: p.productName ? p.productName.slice(0, 300) : null,
+        rank: p.rank,
+        is_ad: p.isAd,
+        rating: p.rating || null,
+        delivery_type: p.deliveryType,
+        snapshot_at: snapshotAt,
       })),
     );
   } catch {
@@ -1058,6 +1068,89 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
     return res.status(200).json({ ok: true });
   }
 
+  // 경쟁 분석: 이 키워드 검색 결과의 최신 스냅샷 — "내 위에 누가 있나"
+  //
+  // 순위 추적은 "내가 몇 위인지"까지만 답한다. 순위를 올리려면 그다음 질문에
+  // 답해야 한다 — 위에 있는 상품들은 얼마에 팔고, 리뷰가 몇 개이고, 로켓인가.
+  // 검색 결과 60개를 이미 파싱하고 있으므로 추가 수집 비용은 없다.
+  if (action === "competitors") {
+    const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
+    if (!keyword) return res.status(400).json({ error: "keyword가 필요합니다." });
+
+    // 내가 이 키워드로 추적 중인 상품 — 표에서 강조하고 요약의 기준이 된다
+    const { data: mine } = await supabase
+      .from("sourcing_rank_watch")
+      .select("product_id")
+      .eq("user_id", userId)
+      .eq("keyword", keyword);
+    const myIds = new Set((mine ?? []).map(m => String(m.product_id)));
+
+    const { data: rows } = await supabase
+      .from("sourcing_product_obs")
+      .select("product_id, product_name, rank, is_ad, price, review_count, rating, delivery_type, snapshot_at")
+      .eq("keyword", keyword)
+      .not("snapshot_at", "is", null)
+      .order("snapshot_at", { ascending: false })
+      .limit(300);
+
+    if (!rows || rows.length === 0) {
+      return res.status(200).json({ keyword, capturedAt: null, products: [], summary: null });
+    }
+
+    // 가장 최근 수집분만 남긴다. 여러 회차가 섞이면 같은 상품이 여러 번 나온다.
+    const latest = rows[0].snapshot_at;
+    const snap = rows
+      .filter(r => r.snapshot_at === latest && typeof r.rank === "number")
+      .sort((a, b) => (a.rank as number) - (b.rank as number));
+
+    const products = snap.slice(0, 40).map(r => ({
+      productId: String(r.product_id),
+      productName: r.product_name ?? "",
+      rank: r.rank as number,
+      isAd: Boolean(r.is_ad),
+      price: Number(r.price) || 0,
+      reviewCount: Number(r.review_count) || 0,
+      rating: r.rating === null || r.rating === undefined ? null : Number(r.rating),
+      deliveryType: (r.delivery_type as string) || "general",
+      isMine: myIds.has(String(r.product_id)),
+    }));
+
+    // 요약은 광고를 뺀 오가닉 상위 10개로 낸다. 광고는 돈으로 산 자리라
+    // "이 자리에 가려면 무엇이 필요한가"의 답이 되지 못한다.
+    const organic = products.filter(p => !p.isAd);
+    const top = organic.slice(0, 10);
+    const me = products.find(p => p.isMine) ?? null;
+    const median = (xs: number[]) => {
+      const v = xs.filter(n => n > 0).sort((a, b) => a - b);
+      if (v.length === 0) return null;
+      const m = Math.floor(v.length / 2);
+      return v.length % 2 ? v[m] : Math.round((v[m - 1] + v[m]) / 2);
+    };
+    const rocketShare = top.length > 0
+      ? Math.round((top.filter(p => p.deliveryType !== "general").length / top.length) * 100)
+      : null;
+
+    return res.status(200).json({
+      keyword,
+      capturedAt: latest,
+      products,
+      summary: top.length === 0 ? null : {
+        topCount: top.length,
+        medianPrice: median(top.map(p => p.price)),
+        medianReviews: median(top.map(p => p.reviewCount)),
+        rocketShare,
+        adCount: products.filter(p => p.isAd).length,
+        me: me && {
+          rank: me.rank,
+          price: me.price,
+          reviewCount: me.reviewCount,
+          isAd: me.isAd,
+          deliveryType: me.deliveryType,
+        },
+      },
+    });
+  }
+
   // list: 등록 목록 + 각 항목의 최근 순위 이력
   const { data: watches, error } = await supabase
     .from("sourcing_rank_watch")
@@ -1082,12 +1175,33 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
       .reverse(); // 화면 표시는 과거→최신 순
     const latest = history[history.length - 1] || null;
     const prev = history.length >= 2 ? history[history.length - 2] : null;
+
+    // 기록된 순위만 모아 최고·최저를 낸다. 60위 밖(null)은 "몇 위"가 아니므로
+    // 최저 순위로 세면 안 된다. 대신 몇 번이나 밖으로 밀렸는지를 따로 센다.
+    const ranked = history.map(o => o.rank).filter((r): r is number => typeof r === 'number');
+    const outCount = history.filter(o => o.rank === null).length;
+
+    // 가격은 순위와 함께 봐야 뜻이 생긴다 — 값을 내렸는데 순위가 그대로면
+    // 마진만 깎은 것이다.
+    const prices = history.map(o => o.price).filter((v): v is number => typeof v === 'number' && v > 0);
+    const firstPrice = prices.length > 0 ? prices[0] : null;
+    const lastPrice = prices.length > 0 ? prices[prices.length - 1] : null;
+
     return {
       ...w,
       history,
       latestRank: latest ? latest.rank : undefined,
+      // 광고 포함 노출 순서. 광고를 돌리는 셀러에게는 "실제로 몇 번째에 보이나"가
+      // 오가닉 순위보다 중요할 때가 많다.
+      latestAdRank: latest ? latest.rank_with_ads ?? null : null,
       latestAt: latest ? latest.captured_at : null,
       delta: latest && prev && latest.rank !== null && prev.rank !== null ? prev.rank - latest.rank : null,
+      best: ranked.length > 0 ? Math.min(...ranked) : null,
+      worst: ranked.length > 0 ? Math.max(...ranked) : null,
+      outCount,
+      records: history.length,
+      price: lastPrice,
+      priceDelta: firstPrice !== null && lastPrice !== null && firstPrice !== lastPrice ? lastPrice - firstPrice : null,
     };
   });
   return res.status(200).json({ watches: result });

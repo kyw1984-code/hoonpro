@@ -1419,6 +1419,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'profit': return await handleProfit(userId, req, res);
       case 'costs': return await handleCosts(userId, res);
       case 'cost-save': return await handleCostSave(userId, req, res);
+      case 'ad-costs': return await handleAdCosts(userId, req, res);
+      case 'ad-cost-save': return await handleAdCostSave(userId, req, res);
+      case 'ad-cost-delete': return await handleAdCostDelete(userId, req, res);
       case 'settlement': return await handleSettlement(userId, res);
       case 'reports': return await handleReports(userId, res);
       case 'inventory': return await handleInventory(userId, req, res);
@@ -1684,8 +1687,11 @@ export async function computeProfit(userId: string, from: string, to: string) {
       .gte('requested_at', `${from}T00:00:00+09:00`)
       .lte('requested_at', `${to}T23:59:59+09:00`)
       .order('requested_at').range(f, t)),
-    // 저장된 광고 보고서가 있으면 기간 광고비의 기본값으로 제안한다
-    supabase!.from('ad_reports').select('summary, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(1),
+    // 이 기간에 걸친 일자별 광고비. 쿠팡 Open API에 광고 엔드포인트가 없어
+    // 보고서 파일로 받아 둔 값이다(coupang_ad_costs 참고).
+    selectAll((f, t) => supabase!.from('coupang_ad_costs')
+      .select('ad_date, cost, source').eq('user_id', userId)
+      .gte('ad_date', from).lte('ad_date', to).order('ad_date').range(f, t)),
   ]);
 
   const costs = new Map<string, any>();
@@ -1777,7 +1783,61 @@ export async function computeProfit(userId: string, from: string, to: string) {
   );
 
   const missingCost = rows.filter(r => r.quantity > 0 && !r.costEntered).length;
-  const adReport = (adRes.data ?? [])[0];
+
+  // ── 일별 추이 ──
+  // 합계 하나로는 "지금 오르는 중인지 꺾이는 중인지"를 알 수 없다. 같은 300만원도
+  // 우상향이면 재고를 늘려야 하고 우하향이면 원인을 찾아야 한다.
+  // 원가는 옵션별 단가를 그날 판매수량에 곱해 그날로 귀속시킨다.
+  const dailyMap = new Map<string, { date: string; quantity: number; salesAmount: number; commission: number; profit: number }>();
+  const dayOf = (d: string) => {
+    let cur = dailyMap.get(d);
+    if (!cur) { cur = { date: d, quantity: 0, salesAmount: 0, commission: 0, profit: 0 }; dailyMap.set(d, cur); }
+    return cur;
+  };
+  for (const sale of salesRes.rows) {
+    const d = String(sale.sale_date ?? '').slice(0, 10);
+    if (!d) continue;
+    const c = costs.get(String(sale.vendor_item_id));
+    const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) : 0;
+    const qty = Number(sale.quantity) || 0;
+    const cur = dayOf(d);
+    cur.quantity += qty;
+    cur.salesAmount += Number(sale.sales_amount) || 0;
+    cur.commission += Number(sale.commission) || 0;
+    cur.profit += (Number(sale.settlement_amount) || 0) - perUnit * qty;
+  }
+  // 반품 배송비는 접수일에 귀속시킨다. 판매일에 붙이면 손실이 난 날이 어긋난다.
+  // requested_at은 정상 UTC 시각이므로 한국 날짜로 옮겨야 한다. 그냥 앞 10글자를
+  // 자르면 새벽 2시 반품이 전날로 밀린다.
+  for (const r of returnRes.rows) {
+    if (!isActiveReturn(r.status)) continue;
+    const t = Date.parse(String(r.requested_at ?? ''));
+    if (!Number.isFinite(t)) continue;
+    const d = new Date(t + 9 * 3600_000).toISOString().slice(0, 10);
+    if (d < from || d > to) continue;
+    const c = costs.get(String(r.vendor_item_id ?? ''));
+    if (!c) continue;
+    dayOf(d).profit -= (Number(r.quantity) || 1) * (Number(c.return_shipping_cost) || 0);
+  }
+  // 판매가 없던 날도 0으로 채운다. 빠뜨리면 선이 이어져 없던 날이 사라진다.
+  const daily: Array<{ date: string; quantity: number; salesAmount: number; commission: number; profit: number }> = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    daily.push(dailyMap.get(d) ?? { date: d, quantity: 0, salesAmount: 0, commission: 0, profit: 0 });
+    if (daily.length > 400) break;
+  }
+
+  // 광고비는 기간에 겹치는 날짜만 더한다. 예전에는 '가장 최근 보고서의 총액'을
+  // 기간과 무관하게 그대로 썼는데, 하루치 보고서를 올려두고 30일을 보면
+  // 광고비가 하루치만 빠져 순이익이 부풀려 보였다.
+  let adCostTotal = 0;
+  let adCostDays = 0;
+  let adCostSpread = 0;
+  for (const a of adRes.rows) {
+    adCostTotal += Number(a.cost) || 0;
+    adCostDays += 1;
+    if (a.source === 'spread') adCostSpread += 1;
+  }
+  const spanDays = daysBetween(from, to) + 1;
 
   return {
     from,
@@ -1788,16 +1848,50 @@ export async function computeProfit(userId: string, from: string, to: string) {
       marginRate: totals.salesAmount > 0 ? (totals.profit / totals.salesAmount) * 100 : 0,
     },
     missingCost,
+    daily,
     // 원가를 하나도 안 넣었으면 순이익이 매출과 같아 보여 오해를 부른다. 화면에서 경고한다.
     costCoverage: rows.length > 0 ? ((rows.length - missingCost) / rows.length) * 100 : 0,
-    adCostHint: (adReport?.summary as any)?.totalCost ?? null,
-    adReportAt: adReport?.created_at ?? null,
+    // 데이터가 하루도 없으면 0이 아니라 null이다. 0을 주면 화면이
+    // '광고비 0원'으로 확정해 버려, 안 올린 것과 정말 안 쓴 것이 구분되지 않는다.
+    adCostHint: adCostDays > 0 ? Math.round(adCostTotal) : null,
+    adCost: {
+      total: Math.round(adCostTotal),
+      // 이 기간 며칠치가 채워졌는지. 30일 중 7일만 있으면 화면이 그렇게 알린다.
+      coveredDays: adCostDays,
+      spanDays,
+      // 기간 총액을 일수로 나눠 넣은 날. 정확한 값이 아니라고 표시해야 한다.
+      estimatedDays: adCostSpread,
+    },
   };
 }
 
 async function handleProfit(userId: string, req: VercelRequest, res: VercelResponse) {
   const { from, to } = rangeFromQuery(req);
-  return res.status(200).json(await computeProfit(userId, from, to));
+
+  // 같은 길이의 직전 기간을 함께 계산해 "지난 기간 대비"를 보여준다.
+  // 숫자 하나만 보면 3,240,000원이 좋은 건지 나쁜 건지 알 수 없다.
+  const span = daysBetween(from, to) + 1;
+  const prevTo = addDays(from, -1);
+  const prevFrom = addDays(prevTo, -(span - 1));
+
+  const [cur, prev] = await Promise.all([
+    computeProfit(userId, from, to),
+    computeProfit(userId, prevFrom, prevTo),
+  ]);
+
+  return res.status(200).json({
+    ...cur,
+    previous: {
+      from: prevFrom,
+      to: prevTo,
+      salesAmount: prev.totals.salesAmount,
+      quantity: prev.totals.quantity,
+      commission: prev.totals.commission,
+      profit: prev.totals.profit,
+      // 직전 기간에 판매가 아예 없으면 증감률이 무의미하다. 화면이 판단하도록 알린다
+      hasData: prev.totals.quantity > 0,
+    },
+  });
 }
 
 // ── 원가 조회·입력 ────────────────────────────────────────────
@@ -1896,6 +1990,109 @@ async function handleCostSave(userId: string, req: VercelRequest, res: VercelRes
   }
 
   return res.status(200).json({ ok: true, saved: rows.length });
+}
+
+// ── 광고비 (일자별) ───────────────────────────────────────────
+// 쿠팡 Open API에는 광고 엔드포인트가 없다. 광고 데이터는 광고센터라는
+// 별도 시스템에만 있고 판매자용 공개 API가 없어서, 광고 보고서 파일을
+// 받아 올리는 것 말고는 방법이 없다. 대신 한 번 올린 값을 일자별로 쪼개
+// 두면 이후에는 어떤 기간을 보든 광고비가 자동으로 맞는다.
+
+const AD_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function handleAdCosts(userId: string, req: VercelRequest, res: VercelResponse) {
+  const { from, to } = rangeFromQuery(req);
+  const { rows } = await selectAll<{ ad_date: string; cost: number; source: string }>((f, t) =>
+    supabase!.from('coupang_ad_costs').select('ad_date, cost, source')
+      .eq('user_id', userId).gte('ad_date', from).lte('ad_date', to)
+      .order('ad_date').range(f, t));
+
+  return res.status(200).json({
+    from, to,
+    days: rows.map(r => ({ date: r.ad_date, cost: Math.round(Number(r.cost) || 0), source: r.source })),
+    total: Math.round(rows.reduce((a, r) => a + (Number(r.cost) || 0), 0)),
+    spanDays: daysBetween(from, to) + 1,
+  });
+}
+
+/**
+ * 광고비 저장.
+ *   daily가 있으면  — 보고서에 일자 컬럼이 있었던 경우. 그날 값을 그대로 쓴다.
+ *   total만 있으면  — 기간 총액만 아는 경우. 일수로 나눠 넣고 source='spread'로
+ *                     표시해, 화면이 "추정치"라고 밝힐 수 있게 한다.
+ *
+ * 같은 기간을 다시 올리면 그 구간을 통째로 지우고 새로 넣는다. 덧쓰기만 하면
+ * 지난번에 있던 날짜가 남아 광고비가 이중으로 잡힌다.
+ */
+async function handleAdCostSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  const body = req.body ?? {};
+  const from = String(body.from ?? '');
+  const to = String(body.to ?? '');
+  if (!AD_DATE_RE.test(from) || !AD_DATE_RE.test(to)) {
+    return res.status(400).json({ error: '기간을 YYYY-MM-DD 형식으로 보내주세요.' });
+  }
+  const span = daysBetween(from, to) + 1;
+  if (span < 1) return res.status(400).json({ error: '시작일이 종료일보다 뒤입니다.' });
+  if (span > 400) return res.status(400).json({ error: '한 번에 400일까지 저장할 수 있습니다.' });
+
+  const clamp = (v: any) => Math.max(0, Math.min(1_000_000_000, Math.round(Number(v) || 0)));
+  const daily = Array.isArray(body.daily) ? body.daily : null;
+
+  const byDate = new Map<string, number>();
+  let source: 'report' | 'spread' | 'manual' = 'report';
+
+  if (daily && daily.length > 0) {
+    for (const d of daily) {
+      const date = String(d?.date ?? '');
+      // 기간 밖 날짜는 버린다. 보고서에 다른 달이 섞여 들어오면 지우는 구간과
+      // 넣는 구간이 어긋나 남은 행이 생긴다.
+      if (!AD_DATE_RE.test(date) || date < from || date > to) continue;
+      byDate.set(date, (byDate.get(date) ?? 0) + clamp(d?.cost));
+    }
+    if (byDate.size === 0) return res.status(400).json({ error: '기간 안에 들어오는 날짜가 없습니다.' });
+    source = body.source === 'manual' ? 'manual' : 'report';
+  } else {
+    const total = clamp(body.total);
+    if (total <= 0) return res.status(400).json({ error: '광고비 총액이 없습니다.' });
+    // 나머지가 버려지지 않게 마지막 날에 몰아준다. 합계는 총액과 정확히 같아야 한다.
+    const per = Math.floor(total / span);
+    for (let i = 0; i < span; i++) {
+      byDate.set(addDays(from, i), i === span - 1 ? total - per * (span - 1) : per);
+    }
+    source = 'spread';
+  }
+
+  const batchId = crypto.randomBytes(8).toString('hex');
+  const rows = [...byDate.entries()].map(([ad_date, cost]) => ({
+    user_id: userId, ad_date, cost, source, batch_id: batchId,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { error: delErr } = await supabase!
+    .from('coupang_ad_costs').delete()
+    .eq('user_id', userId).gte('ad_date', from).lte('ad_date', to);
+  if (delErr) return res.status(500).json({ error: `저장 실패: ${delErr.message}` });
+
+  const err = await upsertChunked('coupang_ad_costs', rows, 'user_id,ad_date');
+  if (err) return res.status(500).json({ error: `저장 실패: ${err}` });
+
+  return res.status(200).json({
+    ok: true, from, to, days: rows.length, source,
+    total: rows.reduce((a, r) => a + r.cost, 0),
+  });
+}
+
+async function handleAdCostDelete(userId: string, req: VercelRequest, res: VercelResponse) {
+  const from = String(req.body?.from ?? '');
+  const to = String(req.body?.to ?? '');
+  if (!AD_DATE_RE.test(from) || !AD_DATE_RE.test(to)) {
+    return res.status(400).json({ error: '기간을 YYYY-MM-DD 형식으로 보내주세요.' });
+  }
+  const { error } = await supabase!
+    .from('coupang_ad_costs').delete()
+    .eq('user_id', userId).gte('ad_date', from).lte('ad_date', to);
+  if (error) return res.status(500).json({ error: `삭제 실패: ${error.message}` });
+  return res.status(200).json({ ok: true });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2093,24 +2290,38 @@ async function sendWeeklyReport(
   const { rows: inventory } = await computeInventory(userId);
   const atRisk = inventory.filter(r => r.risk === 'out' || r.risk === 'urgent').slice(0, 5);
 
+  // 광고비까지 뺀 값이 진짜 순이익이다. 광고 보고서를 올려 둔 주에만
+  // 값이 있고, 안 올린 주는 0이라 예전과 같은 숫자가 나간다.
+  const adCost = cur.adCostHint ?? 0;
+  const prevAdCost = prev.adCostHint ?? 0;
+  const netProfit = cur.totals.profit - adCost;
+  const prevNetProfit = prev.totals.profit - prevAdCost;
+  const netMargin = cur.totals.salesAmount > 0 ? (netProfit / cur.totals.salesAmount) * 100 : 0;
+
   const summary = {
     quantity: cur.totals.quantity,
     salesAmount: cur.totals.salesAmount,
-    profit: cur.totals.profit,
-    marginRate: cur.totals.marginRate,
+    profit: netProfit,
+    marginRate: netMargin,
     returnCount: cur.totals.returnCount,
     prevSalesAmount: prev.totals.salesAmount,
-    prevProfit: prev.totals.profit,
+    prevProfit: prevNetProfit,
+    adCost,
     incoming,
     missingCost: cur.missingCost,
     atRiskCount: atRisk.length,
   };
 
+  const warn = (msg: string) =>
+    `<p style="margin:16px 0 0;padding:10px 12px;background:#1b2540;border-radius:8px;color:#ffb454;font-size:12px;">${msg}</p>`;
+
   const costWarning =
-    cur.missingCost > 0
-      ? `<p style="margin:16px 0 0;padding:10px 12px;background:#1b2540;border-radius:8px;color:#ffb454;font-size:12px;">` +
-        `원가가 비어 있는 상품이 ${cur.missingCost}개 있습니다. 그만큼 순이익이 실제보다 크게 잡힙니다.</p>`
-      : '';
+    (cur.missingCost > 0
+      ? warn(`원가가 비어 있는 상품이 ${cur.missingCost}개 있습니다. 그만큼 순이익이 실제보다 크게 잡힙니다.`)
+      : '') +
+    (adCost === 0
+      ? warn('이번 주 광고비가 등록되어 있지 않아 순이익에서 빠지지 않았습니다. 훈프로 [광고 성과 분석]에서 광고 보고서를 올리면 자동으로 반영됩니다.')
+      : '');
 
   await sendEmail(
     email,
@@ -2121,10 +2332,14 @@ async function sendWeeklyReport(
         `<table style="width:100%;border-collapse:collapse;margin-top:14px;">` +
         `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">매출</td>` +
         `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">${won(cur.totals.salesAmount)} ${deltaText(cur.totals.salesAmount, prev.totals.salesAmount)}</td></tr>` +
+        (adCost > 0
+          ? `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">광고비</td>` +
+            `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">− ${won(adCost)}</td></tr>`
+          : '') +
         `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">순이익</td>` +
-        `<td style="padding:8px 0;text-align:right;color:${cur.totals.profit >= 0 ? '#4ade80' : '#f87171'};font-size:14px;font-weight:600;">${won(cur.totals.profit)} ${deltaText(cur.totals.profit, prev.totals.profit)}</td></tr>` +
+        `<td style="padding:8px 0;text-align:right;color:${netProfit >= 0 ? '#4ade80' : '#f87171'};font-size:14px;font-weight:600;">${won(netProfit)} ${deltaText(netProfit, prevNetProfit)}</td></tr>` +
         `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">이익률</td>` +
-        `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">${cur.totals.marginRate.toFixed(1)}%</td></tr>` +
+        `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">${netMargin.toFixed(1)}%</td></tr>` +
         `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">판매 수량</td>` +
         `<td style="padding:8px 0;text-align:right;color:#e8ecf5;font-size:14px;font-weight:600;">${cur.totals.quantity.toLocaleString('ko-KR')}개</td></tr>` +
         `<tr><td style="padding:8px 0;color:#a8b3c9;font-size:13px;">반품</td>` +

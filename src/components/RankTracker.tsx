@@ -4,8 +4,10 @@
  * (오가닉 기준, 1페이지 60위까지 · 사용자당 최대 20개)
  */
 import { useEffect, useState } from 'react';
-import { ListOrdered, Loader2, RefreshCw, X } from 'lucide-react';
+import { ChevronDown, ListOrdered, Loader2, RefreshCw, Users, X } from 'lucide-react';
 import { getToken } from '../lib/auth';
+import { RankSparkline } from './RankSparkline';
+import { CompetitorPanel } from './CompetitorPanel';
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -22,6 +24,8 @@ export function RankTracker() {
   const [kw, setKw] = useState('');
   const [product, setProduct] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
+  // 경쟁 분석은 펼친 카드만 불러온다. 20개를 한꺼번에 조회하면 첫 화면이 느려진다.
+  const [openCompetitors, setOpenCompetitors] = useState<string | null>(null);
 
   const notifyUsage = (remaining: any) => {
     if (typeof remaining === 'number') {
@@ -103,7 +107,7 @@ export function RankTracker() {
         </div>
         <p className="mb-4 text-[12px] leading-relaxed text-ink-2">
           내 상품(또는 경쟁 상품)이 <b>키워드 검색 결과 몇 위</b>인지 매일 새벽 자동으로 기록합니다.
-          광고를 제외한 오가닉 순위 기준이며, 1페이지(60위)까지 추적합니다. 훈프로 소싱AI의 상품 카드 [순위 추적]으로도 등록됩니다. (최대 20개)
+          광고를 제외한 오가닉 순위가 기준이고, 광고를 포함한 실제 노출 순서도 함께 기록합니다. 1페이지(60위)까지 추적합니다. 훈프로 소싱AI의 상품 카드 [순위 추적]으로도 등록됩니다. (최대 20개)
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input value={kw} onChange={e => setKw(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
@@ -141,10 +145,14 @@ export function RankTracker() {
         ) : (
           <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
             {watches.map((w: any) => {
-              const trail = (w.history || []).slice(-10).map((o: any) => (o.rank === null ? '밖' : `${o.rank}`)).join(' → ');
               const key = `${w.keyword}:${w.product_id}`;
               return (
-                <div key={key} className="rounded-card border border-line bg-paper-2 p-4">
+                <div
+                  key={key}
+                  // 경쟁 상품 표를 펼치면 열이 6개라 반 폭 카드에서는 잘린다.
+                  // 펼친 카드만 두 칸을 차지하게 해 표가 온전히 보이게 한다.
+                  className={`rounded-card border border-line bg-paper-2 p-4 ${openCompetitors === key ? 'lg:col-span-2' : ''}`}
+                >
                   <div className="flex items-center gap-2">
                     <span className="shrink-0 text-[13px] font-semibold text-ink">"{w.keyword}"</span>
                     <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -175,11 +183,55 @@ export function RankTracker() {
                     <span className="mr-1.5 rounded-control bg-paper px-1.5 py-0.5 font-mono text-[10px] text-ink-3 ring-1 ring-line">#{w.product_id}</span>
                     <span className="align-middle">{w.product_name || '상품명은 첫 수집 시 자동으로 채워집니다'}</span>
                   </a>
-                  {trail && <p className="mt-2 text-[11px] tabular-nums text-ink-3">순위 추이: {trail}위</p>}
+                  {w.records > 1 && (
+                    <div className="mt-2.5 flex items-center gap-3">
+                      <RankSparkline history={w.history || []} />
+                      <div className="min-w-0 text-[11px] leading-relaxed text-ink-3">
+                        {w.best !== null && (
+                          <p className="tabular-nums">
+                            최고 <b className="text-ink-2">{w.best}위</b> · 최저 <b className="text-ink-2">{w.worst}위</b>
+                            {w.outCount > 0 && ` · 60위 밖 ${w.outCount}회`}
+                          </p>
+                        )}
+                        <p className="tabular-nums">최근 {w.records}회 기록</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 광고를 돌리는 셀러에게는 "실제로 몇 번째에 보이나"가 오가닉 순위보다 급하다 */}
+                  {(typeof w.latestAdRank === 'number' || w.priceDelta !== null) && (
+                    <p className="mt-1.5 flex flex-wrap gap-x-3 text-[11px] tabular-nums text-ink-3">
+                      {typeof w.latestAdRank === 'number' && <span>광고 포함 노출 {w.latestAdRank}번째</span>}
+                      {w.priceDelta !== null && (
+                        <span className={w.priceDelta < 0 ? 'text-critical' : 'text-ink-3'}>
+                          가격 {w.priceDelta > 0 ? '▲' : '▼'} {Math.abs(w.priceDelta).toLocaleString('ko-KR')}원
+                          {w.price ? ` (현재 ${w.price.toLocaleString('ko-KR')}원)` : ''}
+                        </span>
+                      )}
+                    </p>
+                  )}
+
                   {w.latestAt && (
-                    <p className="mt-0.5 text-[10px] text-ink-3">
+                    <p className="mt-1 text-[10px] text-ink-3">
                       마지막 기록 {Math.round((Date.now() - new Date(w.latestAt).getTime()) / 3600000)}시간 전
                     </p>
+                  )}
+
+                  {/* 순위만으로는 왜 밀리는지 알 수 없다. 같은 검색 결과에 있던
+                      경쟁 상품의 가격·리뷰·배송을 펼쳐 본다. */}
+                  <button
+                    onClick={() => setOpenCompetitors(openCompetitors === key ? null : key)}
+                    aria-expanded={openCompetitors === key}
+                    className="mt-2 flex w-full items-center gap-1 rounded-control border border-line px-2.5 py-1.5 text-[11.5px] font-medium text-ink-2 hover:border-line-strong hover:text-ink"
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    이 키워드 경쟁 상품 보기
+                    <ChevronDown className={`ml-auto h-3.5 w-3.5 transition-transform ${openCompetitors === key ? 'rotate-180' : ''}`} />
+                  </button>
+                  {openCompetitors === key && (
+                    <div className="mt-2.5">
+                      <CompetitorPanel keyword={w.keyword} />
+                    </div>
                   )}
                 </div>
               );

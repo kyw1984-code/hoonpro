@@ -5,12 +5,15 @@
  * 매출은 쿠팡이 보여주지만 순이익은 아무도 안 보여준다. 정산예정액에서
  * 원가와 반품 배송비를 빼야 비로소 남는 돈이 나온다.
  *
- * 광고비는 상품 단위로 알 수 없어(윙 API에 광고 데이터가 없다) 기간 총액으로만
- * 반영한다. 저장된 광고 보고서가 있으면 그 값을 기본값으로 채워 준다.
+ * 광고비는 상품 단위로 알 수 없어(쿠팡 Open API에 광고 엔드포인트 자체가 없다)
+ * 기간 총액으로만 반영한다. [광고 성과 분석]에서 보고서를 올려 두면 날짜별로
+ * 쌓이고, 여기서는 조회 기간에 겹치는 날만 합산해 자동으로 채운다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowUpRight, Loader2, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowUpRight, Download, Loader2, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { coupangApi, pct, won, type ProfitResponse } from '../../lib/coupang';
+import { DailyTrendChart } from './DailyTrendChart';
 
 const PERIODS = [
   { days: 7, label: '최근 7일' },
@@ -20,6 +23,26 @@ const PERIODS = [
 
 interface Props {
   onEditCosts: () => void;
+}
+
+interface Delta { text: string; good: boolean; bad: boolean }
+
+/**
+ * 직전 같은 길이 기간과의 증감.
+ * 비용(수수료·원가)은 늘어난 쪽이 나쁘므로 higherIsBetter로 색을 뒤집는다.
+ * 직전 기간에 판매가 없으면 증감률이 무의미해 표시하지 않는다.
+ */
+function delta(current: number, previous: number, hasData: boolean, higherIsBetter = true): Delta | null {
+  if (!hasData || previous === 0) return null;
+  const diff = current - previous;
+  if (Math.round(diff) === 0) return { text: '지난 기간과 비슷', good: false, bad: false };
+  const rate = (diff / Math.abs(previous)) * 100;
+  const up = diff > 0;
+  return {
+    text: `${up ? '▲' : '▼'} ${Math.abs(rate).toFixed(0)}%`,
+    good: up === higherIsBetter,
+    bad: up !== higherIsBetter,
+  };
 }
 
 export function ProfitDashboard({ onEditCosts }: Props) {
@@ -84,6 +107,74 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   if (!data) return null;
 
   const noSales = data.rows.length === 0;
+  const prev = data.previous;
+
+  // 광고비가 어디서 온 값인지 밝힌다. 쿠팡은 광고 API를 제공하지 않아
+  // 보고서 파일에서 받은 날짜만 채워지고, 빠진 날은 순이익을 부풀린다.
+  const ac = data.adCost;
+  const adNote = (() => {
+    if (!ac || ac.coveredDays === 0) {
+      return '쿠팡은 광고 데이터를 API로 제공하지 않습니다. [광고 성과 분석]에서 광고 보고서를 올리면 이 칸이 기간에 맞춰 자동으로 채워집니다.';
+    }
+    const missing = ac.spanDays - ac.coveredDays;
+    const est = ac.estimatedDays > 0 ? ` 이 중 ${ac.estimatedDays}일은 기간 총액을 일수로 나눈 추정치입니다.` : '';
+    if (missing > 0) {
+      return `광고 보고서에서 ${ac.coveredDays}일치를 자동으로 채웠습니다. ${ac.spanDays}일 중 ${missing}일은 광고비 데이터가 없어 순이익이 실제보다 크게 나옵니다.${est}`;
+    }
+    return `광고 보고서에서 이 기간 ${ac.coveredDays}일치를 자동으로 채웠습니다.${est}`;
+  })();
+
+  // 화면의 표를 그대로 엑셀로 내린다. 정산·세무 자료로 넘길 때
+  // 화면을 다시 옮겨 적지 않게 하려는 것이다.
+  const downloadExcel = () => {
+    // 원가를 안 넣은 상품은 0이 아니라 빈칸으로 내린다. 0으로 내리면
+    // 받아 본 사람이 "원가가 0원인 상품"으로 읽는다.
+    const blank = '';
+    const sheet: Record<string, string | number>[] = data.rows.map(r => ({
+      상품명: r.productName,
+      옵션: r.optionName,
+      옵션ID: r.vendorItemId,
+      판매수량: r.quantity,
+      매출: Math.round(r.salesAmount),
+      쿠팡수수료: Math.round(r.commission),
+      원가: r.costEntered ? Math.round(r.unitCostTotal) : blank,
+      반품건수: r.returnCount,
+      반품비용: Math.round(r.returnCost),
+      순이익: r.costEntered ? Math.round(r.profit) : blank,
+      '이익률(%)': r.costEntered ? Number(r.marginRate.toFixed(1)) : blank,
+      원가입력: r.costEntered ? 'O' : 'X',
+    }));
+
+    sheet.push({});
+    sheet.push({
+      상품명: '상품 합계',
+      판매수량: data.totals.quantity,
+      매출: Math.round(data.totals.salesAmount),
+      쿠팡수수료: Math.round(data.totals.commission),
+      원가: Math.round(data.totals.unitCostTotal),
+      반품건수: data.totals.returnCount,
+      반품비용: Math.round(data.totals.returnCost),
+      순이익: Math.round(data.totals.profit),
+      '이익률(%)': Number(data.totals.marginRate.toFixed(1)),
+    });
+    // 광고비는 상품별로 나눌 수 없어 합계 아래에 한 줄로만 뺀다
+    sheet.push({ 상품명: '광고비', 순이익: -Math.round(adCost) });
+    sheet.push({
+      상품명: '광고비 차감 후 순이익',
+      순이익: Math.round(netProfit),
+      '이익률(%)': Number(netMargin.toFixed(1)),
+    });
+
+    const header = [
+      '상품명', '옵션', '옵션ID', '판매수량', '매출', '쿠팡수수료',
+      '원가', '반품건수', '반품비용', '순이익', '이익률(%)', '원가입력',
+    ];
+    const ws = XLSX.utils.json_to_sheet(sheet, { header });
+    ws['!cols'] = [{ wch: 38 }, { wch: 20 }, { wch: 14 }, ...Array(9).fill({ wch: 12 })];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '상품별 순이익');
+    XLSX.writeFile(wb, `훈프로_순이익_${data.from}_${data.to}.xlsx`);
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -92,7 +183,12 @@ export function ProfitDashboard({ onEditCosts }: Props) {
         {PERIODS.map(p => (
           <button
             key={p.days}
-            onClick={() => setDays(p.days)}
+            onClick={() => {
+              // 기간이 바뀌면 광고비도 그 기간 값으로 다시 채운다. 한 번 손댔다는
+              // 이유로 90일 화면에 7일치 광고비가 남아 있으면 순이익이 틀린다.
+              adTouched.current = false;
+              setDays(p.days);
+            }}
             className={`rounded-control border px-3 py-1.5 text-[12px] font-medium transition-colors ${
               days === p.days ? 'border-accent bg-accent-soft text-ink' : 'border-line text-ink-3 hover:border-line-strong hover:text-ink'
             }`}
@@ -135,16 +231,48 @@ export function ProfitDashboard({ onEditCosts }: Props) {
         <>
           {/* 핵심 지표 */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Stat label="매출" value={won(data.totals.salesAmount)} sub={`${data.totals.quantity.toLocaleString('ko-KR')}개 판매`} />
-            <Stat label="쿠팡 수수료" value={`− ${won(data.totals.commission)}`} sub={pct((data.totals.commission / Math.max(1, data.totals.salesAmount)) * 100)} />
-            <Stat label="원가 + 배송" value={`− ${won(data.totals.unitCostTotal + data.totals.returnCost)}`} sub={`반품 ${data.totals.returnCount}건 포함`} />
+            <Stat
+              label="매출"
+              value={won(data.totals.salesAmount)}
+              sub={`${data.totals.quantity.toLocaleString('ko-KR')}개 판매`}
+              delta={delta(data.totals.salesAmount, prev?.salesAmount ?? 0, Boolean(prev?.hasData))}
+            />
+            <Stat
+              label="쿠팡 수수료"
+              value={`− ${won(data.totals.commission)}`}
+              sub={pct((data.totals.commission / Math.max(1, data.totals.salesAmount)) * 100)}
+              delta={delta(data.totals.commission, prev?.commission ?? 0, Boolean(prev?.hasData), false)}
+            />
+            <Stat
+              label="원가 + 배송"
+              value={`− ${won(data.totals.unitCostTotal + data.totals.returnCost)}`}
+              sub={`반품 ${data.totals.returnCount}건 포함`}
+            />
             <Stat
               label="순이익"
               value={won(netProfit)}
               sub={pct(netMargin)}
               tone={netProfit >= 0 ? 'positive' : 'critical'}
+              delta={delta(data.totals.profit, prev?.profit ?? 0, Boolean(prev?.hasData))}
             />
           </div>
+
+          {prev?.hasData && (
+            <p className="-mt-1 text-[11.5px] text-ink-3">
+              증감은 직전 같은 기간({prev.from} ~ {prev.to}) 대비입니다. 순이익 증감은 광고비를 빼기 전 기준입니다.
+            </p>
+          )}
+
+          {/* 일별 추이 — 합계만 보면 오르는 중인지 꺾이는 중인지 알 수 없다 */}
+          {data.daily && data.daily.length >= 2 && (
+            <div className="rounded-panel border border-line bg-paper px-5 py-4">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold text-ink">일별 추이</h3>
+                <span className="text-[11.5px] text-ink-3">그래프에 커서를 대면 그날 숫자가 보입니다</span>
+              </div>
+              <DailyTrendChart days={data.daily} />
+            </div>
+          )}
 
           {/* 광고비 입력 */}
           <div className="flex flex-wrap items-center gap-3 rounded-panel border border-line bg-paper px-5 py-4">
@@ -164,19 +292,27 @@ export function ProfitDashboard({ onEditCosts }: Props) {
             />
             <span className="text-[12px] text-ink-3">원</span>
             <p className="w-full text-[11.5px] leading-relaxed text-ink-3 sm:w-auto sm:flex-1">
-              쿠팡 광고 데이터는 윙 API로 받을 수 없어 직접 입력합니다.
-              {data.adCostHint !== null && ' [광고 성과 분석]에 저장된 보고서 값을 기본값으로 채웠습니다.'}
+              {adNote}
             </p>
           </div>
 
           {/* 상품별 표 */}
           <div className="rounded-panel border border-line bg-paper">
-            <div className="flex items-center gap-2 border-b border-line px-5 py-4">
+            <div className="flex flex-wrap items-center gap-2 border-b border-line px-5 py-4">
               <h3 className="text-sm font-semibold text-ink">상품별 순이익</h3>
               <span className="text-[11.5px] text-ink-3">순이익 높은 순 · 원가 미입력 상품은 아래</span>
-              <button onClick={onEditCosts} className="ml-auto text-[12px] font-medium text-accent hover:underline">
-                원가 편집
-              </button>
+              <div className="ml-auto flex items-center gap-3">
+                <button
+                  onClick={downloadExcel}
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-ink-2 hover:text-ink"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  엑셀 내려받기
+                </button>
+                <button onClick={onEditCosts} className="text-[12px] font-medium text-accent hover:underline">
+                  원가 편집
+                </button>
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[860px] text-[12.5px]">
@@ -244,18 +380,31 @@ function Stat({
   value,
   sub,
   tone,
+  delta,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: 'positive' | 'critical';
+  delta?: Delta | null;
 }) {
   const toneClass = tone === 'positive' ? 'text-positive' : tone === 'critical' ? 'text-critical' : 'text-ink';
   return (
     <div className="rounded-panel border border-line bg-paper px-4 py-4">
       <p className="text-[11.5px] text-ink-3">{label}</p>
       <p className={`mt-1 text-[19px] font-semibold tabular-nums ${toneClass}`}>{value}</p>
-      {sub && <p className="mt-0.5 text-[11.5px] tabular-nums text-ink-3">{sub}</p>}
+      <div className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5">
+        {sub && <span className="text-[11.5px] tabular-nums text-ink-3">{sub}</span>}
+        {delta && (
+          <span
+            className={`text-[11.5px] font-semibold tabular-nums ${
+              delta.good ? 'text-positive' : delta.bad ? 'text-critical' : 'text-ink-3'
+            }`}
+          >
+            {delta.text}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

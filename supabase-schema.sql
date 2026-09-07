@@ -777,3 +777,49 @@ alter default privileges in schema public revoke all on sequences from anon, aut
 -- 발급일을 받아 180일을 더해 추정하면 며칠씩 어긋나므로 만료일을 그대로 받는다.
 alter table coupang_accounts add column if not exists key_expires_at date;
 alter table coupang_accounts drop column if exists key_issued_at;
+
+-- ─────────────────────────────────────────────────────────────
+-- 29. 광고비 일자별 저장 — 순이익에서 광고비를 자동으로 빼기 위한 것
+-- ─────────────────────────────────────────────────────────────
+-- 쿠팡 Open API에는 광고 엔드포인트가 없다. 광고 데이터는 광고센터라는
+-- 별도 시스템에만 있고 판매자용 공개 API가 없어, 광고 보고서 파일을
+-- 올려받는 수밖에 없다. 대신 한 번 올린 값을 '일자별'로 쪼개 두면
+-- 이후 어떤 기간을 조회하든 그 기간에 맞는 광고비가 자동으로 잡힌다.
+--
+-- source
+--   'report' — 보고서에 일자 컬럼이 있어 그날 값을 그대로 넣은 것 (정확)
+--   'spread' — 기간 총액만 있어 일수로 나눈 것 (추정, 화면에 그렇게 표시한다)
+--   'manual' — 사용자가 직접 입력한 것
+create table if not exists coupang_ad_costs (
+  user_id uuid not null,
+  ad_date date not null,
+  cost numeric not null default 0,
+  source text not null default 'report',
+  -- 어느 업로드에서 온 값인지. 같은 기간을 다시 올리면 통째로 갈아끼운다.
+  batch_id text,
+  updated_at timestamptz default now(),
+  primary key (user_id, ad_date)
+);
+
+create index if not exists idx_cac_user_date on coupang_ad_costs(user_id, ad_date);
+
+alter table coupang_ad_costs enable row level security;
+revoke all on table coupang_ad_costs from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 30. 키워드 경쟁 분석 — 검색 결과를 이미 수집하면서 버리던 정보를 남긴다
+-- ─────────────────────────────────────────────────────────────
+-- 순위 추적은 "내가 몇 위인지"만 답한다. 그런데 순위를 올리려면 다음 질문에
+-- 답해야 한다 — "내 위에 있는 상품들은 얼마에 팔고, 리뷰가 몇 개이고,
+-- 로켓배송인가?" 검색 결과 60개를 이미 파싱하고 있으므로 추가 수집 비용은 없다.
+--
+-- snapshot_at은 한 번의 수집 전체에 같은 값을 넣는다. 행마다 now()를 쓰면
+-- 마이크로초가 어긋나 "이번 수집분"을 한 덩어리로 골라낼 수 없다.
+alter table sourcing_product_obs add column if not exists product_name text;
+alter table sourcing_product_obs add column if not exists rank int;
+alter table sourcing_product_obs add column if not exists is_ad boolean;
+alter table sourcing_product_obs add column if not exists rating numeric;
+alter table sourcing_product_obs add column if not exists delivery_type text;
+alter table sourcing_product_obs add column if not exists snapshot_at timestamptz;
+
+create index if not exists idx_spo_kw_snap on sourcing_product_obs(keyword, snapshot_at desc);
