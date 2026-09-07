@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpRight, Download, Loader2, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { coupangApi, pct, won, type ProfitResponse } from '../../lib/coupang';
+import { DailyTrendChart } from './DailyTrendChart';
 
 const PERIODS = [
   { days: 7, label: '최근 7일' },
@@ -260,6 +261,17 @@ export function ProfitDashboard({ onEditCosts }: Props) {
             <p className="-mt-1 text-[11.5px] text-ink-3">
               증감은 직전 같은 기간({prev.from} ~ {prev.to}) 대비입니다. 순이익 증감은 광고비를 빼기 전 기준입니다.
             </p>
+          )}
+
+          {/* 일별 추이 — 합계만 보면 오르는 중인지 꺾이는 중인지 알 수 없다 */}
+          {data.daily && data.daily.length >= 2 && (
+            <div className="rounded-panel border border-line bg-paper px-5 py-4">
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold text-ink">일별 추이</h3>
+                <span className="text-[11.5px] text-ink-3">그래프에 커서를 대면 그날 숫자가 보입니다</span>
+              </div>
+              <DailyTrendChart days={data.daily} />
+            </div>
           )}
 
           {/* 광고비 입력 */}

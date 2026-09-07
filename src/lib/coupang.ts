@@ -73,6 +73,15 @@ export interface ProfitRow {
   salePrice: number | null;
 }
 
+export interface ProfitDay {
+  date: string;
+  quantity: number;
+  salesAmount: number;
+  commission: number;
+  /** 광고비를 빼기 전 순이익 (광고비는 날짜별로 상품에 나눌 수 없다) */
+  profit: number;
+}
+
 export interface ProfitResponse {
   from: string;
   to: string;
@@ -90,6 +99,8 @@ export interface ProfitResponse {
   };
   missingCost: number;
   costCoverage: number;
+  /** 기간 안의 모든 날짜. 판매가 없던 날도 0으로 채워져 있다 */
+  daily: ProfitDay[];
   // 광고 보고서에서 받아 둔 이 기간 광고비. 하루도 없으면 null이다
   // (0으로 주면 '안 올린 것'과 '정말 0원'이 구분되지 않는다).
   adCostHint: number | null;

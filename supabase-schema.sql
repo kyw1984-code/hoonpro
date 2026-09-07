@@ -805,3 +805,21 @@ create index if not exists idx_cac_user_date on coupang_ad_costs(user_id, ad_dat
 
 alter table coupang_ad_costs enable row level security;
 revoke all on table coupang_ad_costs from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 30. 키워드 경쟁 분석 — 검색 결과를 이미 수집하면서 버리던 정보를 남긴다
+-- ─────────────────────────────────────────────────────────────
+-- 순위 추적은 "내가 몇 위인지"만 답한다. 그런데 순위를 올리려면 다음 질문에
+-- 답해야 한다 — "내 위에 있는 상품들은 얼마에 팔고, 리뷰가 몇 개이고,
+-- 로켓배송인가?" 검색 결과 60개를 이미 파싱하고 있으므로 추가 수집 비용은 없다.
+--
+-- snapshot_at은 한 번의 수집 전체에 같은 값을 넣는다. 행마다 now()를 쓰면
+-- 마이크로초가 어긋나 "이번 수집분"을 한 덩어리로 골라낼 수 없다.
+alter table sourcing_product_obs add column if not exists product_name text;
+alter table sourcing_product_obs add column if not exists rank int;
+alter table sourcing_product_obs add column if not exists is_ad boolean;
+alter table sourcing_product_obs add column if not exists rating numeric;
+alter table sourcing_product_obs add column if not exists delivery_type text;
+alter table sourcing_product_obs add column if not exists snapshot_at timestamptz;
+
+create index if not exists idx_spo_kw_snap on sourcing_product_obs(keyword, snapshot_at desc);

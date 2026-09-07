@@ -1784,6 +1784,48 @@ export async function computeProfit(userId: string, from: string, to: string) {
 
   const missingCost = rows.filter(r => r.quantity > 0 && !r.costEntered).length;
 
+  // ── 일별 추이 ──
+  // 합계 하나로는 "지금 오르는 중인지 꺾이는 중인지"를 알 수 없다. 같은 300만원도
+  // 우상향이면 재고를 늘려야 하고 우하향이면 원인을 찾아야 한다.
+  // 원가는 옵션별 단가를 그날 판매수량에 곱해 그날로 귀속시킨다.
+  const dailyMap = new Map<string, { date: string; quantity: number; salesAmount: number; commission: number; profit: number }>();
+  const dayOf = (d: string) => {
+    let cur = dailyMap.get(d);
+    if (!cur) { cur = { date: d, quantity: 0, salesAmount: 0, commission: 0, profit: 0 }; dailyMap.set(d, cur); }
+    return cur;
+  };
+  for (const sale of salesRes.rows) {
+    const d = String(sale.sale_date ?? '').slice(0, 10);
+    if (!d) continue;
+    const c = costs.get(String(sale.vendor_item_id));
+    const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) : 0;
+    const qty = Number(sale.quantity) || 0;
+    const cur = dayOf(d);
+    cur.quantity += qty;
+    cur.salesAmount += Number(sale.sales_amount) || 0;
+    cur.commission += Number(sale.commission) || 0;
+    cur.profit += (Number(sale.settlement_amount) || 0) - perUnit * qty;
+  }
+  // 반품 배송비는 접수일에 귀속시킨다. 판매일에 붙이면 손실이 난 날이 어긋난다.
+  // requested_at은 정상 UTC 시각이므로 한국 날짜로 옮겨야 한다. 그냥 앞 10글자를
+  // 자르면 새벽 2시 반품이 전날로 밀린다.
+  for (const r of returnRes.rows) {
+    if (!isActiveReturn(r.status)) continue;
+    const t = Date.parse(String(r.requested_at ?? ''));
+    if (!Number.isFinite(t)) continue;
+    const d = new Date(t + 9 * 3600_000).toISOString().slice(0, 10);
+    if (d < from || d > to) continue;
+    const c = costs.get(String(r.vendor_item_id ?? ''));
+    if (!c) continue;
+    dayOf(d).profit -= (Number(r.quantity) || 1) * (Number(c.return_shipping_cost) || 0);
+  }
+  // 판매가 없던 날도 0으로 채운다. 빠뜨리면 선이 이어져 없던 날이 사라진다.
+  const daily: Array<{ date: string; quantity: number; salesAmount: number; commission: number; profit: number }> = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    daily.push(dailyMap.get(d) ?? { date: d, quantity: 0, salesAmount: 0, commission: 0, profit: 0 });
+    if (daily.length > 400) break;
+  }
+
   // 광고비는 기간에 겹치는 날짜만 더한다. 예전에는 '가장 최근 보고서의 총액'을
   // 기간과 무관하게 그대로 썼는데, 하루치 보고서를 올려두고 30일을 보면
   // 광고비가 하루치만 빠져 순이익이 부풀려 보였다.
@@ -1806,6 +1848,7 @@ export async function computeProfit(userId: string, from: string, to: string) {
       marginRate: totals.salesAmount > 0 ? (totals.profit / totals.salesAmount) * 100 : 0,
     },
     missingCost,
+    daily,
     // 원가를 하나도 안 넣었으면 순이익이 매출과 같아 보여 오해를 부른다. 화면에서 경고한다.
     costCoverage: rows.length > 0 ? ((rows.length - missingCost) / rows.length) * 100 : 0,
     // 데이터가 하루도 없으면 0이 아니라 null이다. 0을 주면 화면이
