@@ -25,21 +25,11 @@ interface Props {
 const WING_URL = 'https://wing.coupang.com';
 
 /**
- * 다른 주문수집 프로그램의 IP.
+ * 다른 주문수집 프로그램의 IP는 서버(app_config.coupang_vendors)에서 온다.
  * 자체개발 모드에서는 업체를 하나만 고르는 게 아니라 IP를 여러 개 등록하므로,
- * 여기 값을 함께 넣으면 기존 프로그램과 훈프로가 같이 돈다 (윙 등록 한도 10개).
- * 새 업체 IP를 확보하면 이 목록에 추가한다.
+ * 그 값을 함께 넣으면 기존 프로그램과 훈프로가 같이 돈다 (윙 등록 한도 10개).
+ * 관리자 화면에서 업체를 추가하면 배포 없이 여기 반영된다.
  */
-const VENDORS: { id: string; name: string; ips: string[] }[] = [
-  { id: 'none', name: '안 씁니다', ips: [] },
-  {
-    id: 'togle',
-    name: '토글 (토글랩스)',
-    // 토글 고객센터가 안내한 주문 수집 필수 IP
-    ips: ['61.251.171.79', '61.251.171.82', '61.251.171.84', '61.251.171.86', '61.251.171.88', '61.251.171.133'],
-  },
-  { id: 'other', name: '다른 프로그램', ips: [] },
-];
 
 // 윙 화면의 라벨을 그대로 보여주는 태그. 사용자가 화면에서 같은 글자를 찾게 한다.
 function WingLabel({ children }: { children: string }) {
@@ -111,7 +101,13 @@ export function KeySetup({ status, onSaved }: Props) {
     }
   };
 
-  const picked = VENDORS.find(v => v.id === vendor);
+  // 서버가 준 업체 목록 앞뒤로 '안 씁니다'와 '다른 프로그램'을 붙인다
+  const vendorOptions = [
+    { id: 'none', name: '안 씁니다', ips: [] as string[] },
+    ...(status.vendors ?? []),
+    { id: 'other', name: '다른 프로그램', ips: [] as string[] },
+  ];
+  const picked = vendorOptions.find(v => v.id === vendor);
   const ipList = [...(relayIp ? [relayIp] : []), ...(picked?.ips ?? [])];
   const doneCount = ipList.filter(ip => addedIps.has(ip)).length;
 
@@ -213,7 +209,7 @@ export function KeySetup({ status, onSaved }: Props) {
           <div className="mt-4">
             <p className="text-[13.5px] font-semibold text-ink">지금 쓰고 계신 주문수집 프로그램이 있나요?</p>
             <div className="mt-2.5 flex flex-wrap gap-2">
-              {VENDORS.map(v => (
+              {vendorOptions.map(v => (
                 <button
                   key={v.id}
                   type="button"

@@ -1431,6 +1431,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'price-rule-save': return await handlePriceRuleSave(userId, req, res);
       case 'price-apply': return await handlePriceApply(userId, req, res);
       case 'admin-overview': return await handleAdminOverview(decoded, res);
+      case 'admin-vendors': return await handleAdminVendors(decoded, req, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -1440,13 +1441,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+// ── 주문수집 업체 IP 목록 ─────────────────────────────────────
+// 자체개발 모드에서는 업체를 하나 고르는 게 아니라 IP를 여러 개 등록한다.
+// 그래서 기존 프로그램의 IP를 훈프로 IP와 함께 넣으면 둘 다 돈다.
+// 판매자가 업체에 일일이 전화하지 않도록 우리가 목록을 갖고 있는다.
+// (app_config.coupang_vendors에서 관리자가 편집한다)
+
+interface VendorEntry {
+  id: string;
+  name: string;
+  ips: string[];
+}
+
+const DEFAULT_VENDORS: VendorEntry[] = [
+  // 토글 고객센터가 안내한 주문 수집 필수 IP
+  {
+    id: 'togle',
+    name: '토글 (토글랩스)',
+    ips: ['61.251.171.79', '61.251.171.82', '61.251.171.84', '61.251.171.86', '61.251.171.88', '61.251.171.133'],
+  },
+];
+
+function sanitizeVendors(raw: unknown): VendorEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const out: VendorEntry[] = [];
+  for (const v of raw.slice(0, 40)) {
+    const name = String((v as any)?.name ?? '').trim().slice(0, 40);
+    if (!name) continue;
+    const ips = Array.isArray((v as any)?.ips)
+      ? (v as any).ips
+          .map((ip: unknown) => String(ip).trim())
+          // 윙이 받는 것은 IPv4뿐이다. 형식이 어긋난 값은 넣어봐야 등록이 안 된다.
+          .filter((ip: string) => /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && ip.split('.').every(n => Number(n) <= 255))
+          .slice(0, 10)
+      : [];
+    out.push({ id: String((v as any)?.id ?? name).trim().slice(0, 40) || name, name, ips });
+  }
+  return out;
+}
+
+async function loadVendors(): Promise<VendorEntry[]> {
+  if (!supabase) return DEFAULT_VENDORS;
+  try {
+    const { data } = await supabase
+      .from('app_config').select('value').eq('key', 'coupang_vendors').maybeSingle();
+    if (!data?.value) return DEFAULT_VENDORS;
+    const parsed = sanitizeVendors(JSON.parse(data.value));
+    return parsed.length > 0 ? parsed : DEFAULT_VENDORS;
+  } catch {
+    return DEFAULT_VENDORS;
+  }
+}
+
+// 관리자: 업체·IP 목록 조회/저장
+async function handleAdminVendors(decoded: any, req: VercelRequest, res: VercelResponse) {
+  if (!decoded?.isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+
+  if (req.method === 'POST') {
+    const cleaned = sanitizeVendors(req.body?.vendors);
+    const { error } = await supabase!.from('app_config').upsert({
+      key: 'coupang_vendors',
+      value: JSON.stringify(cleaned),
+      updated_at: new Date().toISOString(),
+    });
+    if (error) return res.status(500).json({ error: '저장에 실패했습니다.' });
+    return res.status(200).json({ ok: true, vendors: cleaned });
+  }
+
+  return res.status(200).json({ vendors: await loadVendors() });
+}
+
 // ── 연동 상태 ─────────────────────────────────────────────────
 async function handleStatus(userId: string, res: VercelResponse) {
   const acc = await loadAccount(userId);
   if (!acc) {
+    // 아직 연동 전이면 온보딩 화면이 업체별 IP 목록을 그려야 한다
     return res.status(200).json({
       connected: false,
       relayIp: process.env.COUPANG_RELAY_IP || null,
+      vendors: await loadVendors(),
     });
   }
 
