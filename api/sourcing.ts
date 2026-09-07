@@ -913,12 +913,23 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
 }
 
 // ─── 리뷰 증가속도 (관측 기록 기반) ───────────────────────────────────────────
+// 쿠팡 검색 1페이지는 60개다. 이보다 한참 적게 긁힌 회차는 파싱이 막힌 것이라
+// 경쟁 분석 스냅샷으로 쓰지 않는다. (캐시 판정에 쓰는 5개보다 높게 잡은 이유는,
+// 5개짜리 표를 "1페이지 경쟁 상품"이라고 보여주면 오히려 오해를 주기 때문이다)
+const FULL_SNAPSHOT_MIN = 20;
+
 async function recordObservations(keyword: string, products: ParsedProduct[]): Promise<void> {
   if (!supabase || products.length === 0) return;
   try {
     // 한 번의 수집에는 같은 snapshot_at을 넣는다. 행마다 now()가 찍히면
     // 마이크로초가 어긋나 "이번 수집분"을 한 덩어리로 골라낼 수 없다.
-    const snapshotAt = new Date().toISOString();
+    //
+    // 다만 스냅샷으로 인정하는 건 파싱이 온전할 때뿐이다. 경쟁 분석 화면은
+    // 가장 최근 snapshot_at 하나만 보여주므로, 쿠팡이 막아 3개만 긁힌 회차가
+    // 60개짜리 스냅샷을 밀어내면 화면이 "1페이지 경쟁 상품 3개"가 된다.
+    // 리뷰 증가속도 히스토리는 몇 개든 쌓아야 하므로 그쪽은 그대로 둔다.
+    const isFullPage = products.length >= FULL_SNAPSHOT_MIN;
+    const snapshotAt = isFullPage ? new Date().toISOString() : null;
     await supabase.from("sourcing_product_obs").insert(
       products.map(p => ({
         product_id: p.productId,
@@ -1103,7 +1114,10 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
       .filter(r => r.snapshot_at === latest && typeof r.rank === "number")
       .sort((a, b) => (a.rank as number) - (b.rank as number));
 
-    const products = snap.slice(0, 40).map(r => ({
+    // 요약은 페이지 전체(60개)로 낸다. 표시용으로 자르기 전에 계산해야 한다.
+    // 40개로 먼저 자르면 41~60위에 있는 내 상품이 "1페이지 안에 없습니다"로
+    // 나오고, 광고 개수도 실제보다 적게 센다.
+    const all = snap.map(r => ({
       productId: String(r.product_id),
       productName: r.product_name ?? "",
       rank: r.rank as number,
@@ -1117,9 +1131,13 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
 
     // 요약은 광고를 뺀 오가닉 상위 10개로 낸다. 광고는 돈으로 산 자리라
     // "이 자리에 가려면 무엇이 필요한가"의 답이 되지 못한다.
-    const organic = products.filter(p => !p.isAd);
+    const organic = all.filter(p => !p.isAd);
     const top = organic.slice(0, 10);
-    const me = products.find(p => p.isMine) ?? null;
+    const me = all.find(p => p.isMine) ?? null;
+
+    // 표는 40행까지만 보낸다. 내 상품이 그 밖에 있으면 잘리지 않게 끼워 넣는다.
+    const products = all.slice(0, 40);
+    if (me && !products.some(p => p.isMine)) products.push(me);
     const median = (xs: number[]) => {
       const v = xs.filter(n => n > 0).sort((a, b) => a - b);
       if (v.length === 0) return null;
@@ -1139,7 +1157,8 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
         medianPrice: median(top.map(p => p.price)),
         medianReviews: median(top.map(p => p.reviewCount)),
         rocketShare,
-        adCount: products.filter(p => p.isAd).length,
+        adCount: all.filter(p => p.isAd).length,
+        pageCount: all.length,
         me: me && {
           rank: me.rank,
           price: me.price,

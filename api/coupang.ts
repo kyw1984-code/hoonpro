@@ -1669,13 +1669,24 @@ function rangeFromQuery(req: VercelRequest): { from: string; to: string } {
 }
 
 /** 순이익 계산 — 화면(1번)과 주간 리포트(3번)가 같은 숫자를 쓰도록 한곳에 둔다 */
-export async function computeProfit(userId: string, from: string, to: string) {
+/**
+ * @param opts.totalsOnly 합계만 쓰는 호출(직전 기간 비교 등)에서 켠다.
+ *   상품명·재고와 광고비는 합계에 들어가지 않으므로 조회를 건너뛴다.
+ *   켜지 않으면 기간 비교 하나 때문에 한 요청이 조회를 두 배로 하게 된다.
+ */
+export async function computeProfit(
+  userId: string,
+  from: string,
+  to: string,
+  opts: { totalsOnly?: boolean } = {},
+) {
+  const lite = opts.totalsOnly === true;
   const [salesRes, costRes, itemRes, returnRes, adRes] = await Promise.all([
     selectAll((f, t) => supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId)
       .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
     selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
-    selectAll((f, t) => supabase!.from('coupang_items')
+    lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_items')
       .select('vendor_item_id, product_name, option_name, sale_price, stock').eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
     // 저장된 시각은 한국 시각을 UTC로 옮긴 값이다. 경계도 한국 시각으로 잡아야
@@ -1689,7 +1700,7 @@ export async function computeProfit(userId: string, from: string, to: string) {
       .order('requested_at').range(f, t)),
     // 이 기간에 걸친 일자별 광고비. 쿠팡 Open API에 광고 엔드포인트가 없어
     // 보고서 파일로 받아 둔 값이다(coupang_ad_costs 참고).
-    selectAll((f, t) => supabase!.from('coupang_ad_costs')
+    lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_ad_costs')
       .select('ad_date, cost, source').eq('user_id', userId)
       .gte('ad_date', from).lte('ad_date', to).order('ad_date').range(f, t)),
   ]);
@@ -1789,12 +1800,13 @@ export async function computeProfit(userId: string, from: string, to: string) {
   // 우상향이면 재고를 늘려야 하고 우하향이면 원인을 찾아야 한다.
   // 원가는 옵션별 단가를 그날 판매수량에 곱해 그날로 귀속시킨다.
   const dailyMap = new Map<string, { date: string; quantity: number; salesAmount: number; commission: number; profit: number }>();
+  const buildDaily = !lite;
   const dayOf = (d: string) => {
     let cur = dailyMap.get(d);
     if (!cur) { cur = { date: d, quantity: 0, salesAmount: 0, commission: 0, profit: 0 }; dailyMap.set(d, cur); }
     return cur;
   };
-  for (const sale of salesRes.rows) {
+  for (const sale of buildDaily ? salesRes.rows : []) {
     const d = String(sale.sale_date ?? '').slice(0, 10);
     if (!d) continue;
     const c = costs.get(String(sale.vendor_item_id));
@@ -1809,7 +1821,7 @@ export async function computeProfit(userId: string, from: string, to: string) {
   // 반품 배송비는 접수일에 귀속시킨다. 판매일에 붙이면 손실이 난 날이 어긋난다.
   // requested_at은 정상 UTC 시각이므로 한국 날짜로 옮겨야 한다. 그냥 앞 10글자를
   // 자르면 새벽 2시 반품이 전날로 밀린다.
-  for (const r of returnRes.rows) {
+  for (const r of buildDaily ? returnRes.rows : []) {
     if (!isActiveReturn(r.status)) continue;
     const t = Date.parse(String(r.requested_at ?? ''));
     if (!Number.isFinite(t)) continue;
@@ -1821,9 +1833,11 @@ export async function computeProfit(userId: string, from: string, to: string) {
   }
   // 판매가 없던 날도 0으로 채운다. 빠뜨리면 선이 이어져 없던 날이 사라진다.
   const daily: Array<{ date: string; quantity: number; salesAmount: number; commission: number; profit: number }> = [];
-  for (let d = from; d <= to; d = addDays(d, 1)) {
-    daily.push(dailyMap.get(d) ?? { date: d, quantity: 0, salesAmount: 0, commission: 0, profit: 0 });
-    if (daily.length > 400) break;
+  if (buildDaily) {
+    for (let d = from; d <= to; d = addDays(d, 1)) {
+      daily.push(dailyMap.get(d) ?? { date: d, quantity: 0, salesAmount: 0, commission: 0, profit: 0 });
+      if (daily.length > 400) break;
+    }
   }
 
   // 광고비는 기간에 겹치는 날짜만 더한다. 예전에는 '가장 최근 보고서의 총액'을
@@ -1876,7 +1890,7 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
 
   const [cur, prev] = await Promise.all([
     computeProfit(userId, from, to),
-    computeProfit(userId, prevFrom, prevTo),
+    computeProfit(userId, prevFrom, prevTo, { totalsOnly: true }),
   ]);
 
   return res.status(200).json({
@@ -2068,13 +2082,18 @@ async function handleAdCostSave(userId: string, req: VercelRequest, res: VercelR
     updated_at: new Date().toISOString(),
   }));
 
-  const { error: delErr } = await supabase!
-    .from('coupang_ad_costs').delete()
-    .eq('user_id', userId).gte('ad_date', from).lte('ad_date', to);
-  if (delErr) return res.status(500).json({ error: `저장 실패: ${delErr.message}` });
-
+  // 넣고 나서 지운다. 반대로 하면 저장이 중간에 실패했을 때 이미 지운 기간의
+  // 광고비가 통째로 사라지고, 사용자는 "저장 실패"만 보고 손실을 알지 못한다.
   const err = await upsertChunked('coupang_ad_costs', rows, 'user_id,ad_date');
   if (err) return res.status(500).json({ error: `저장 실패: ${err}` });
+
+  // 이번 배치에 없는 같은 기간의 옛 행만 지운다. 남겨두면 지난번에 더 넓게
+  // 올린 날짜가 살아남아 광고비가 이중으로 잡힌다.
+  const { error: delErr } = await supabase!
+    .from('coupang_ad_costs').delete()
+    .eq('user_id', userId).gte('ad_date', from).lte('ad_date', to)
+    .neq('batch_id', batchId);
+  if (delErr) return res.status(500).json({ error: `정리 실패: ${delErr.message}` });
 
   return res.status(200).json({
     ok: true, from, to, days: rows.length, source,
@@ -2263,7 +2282,7 @@ async function sendWeeklyReport(
 
   const [cur, prev, settleRes] = await Promise.all([
     computeProfit(userId, start, end),
-    computeProfit(userId, prevStart, prevEnd),
+    computeProfit(userId, prevStart, prevEnd, { totalsOnly: true }),
     selectAll<{ settlement_date: string; amount: number }>((f, t) => supabase
       .from('coupang_settlements')
       .select('settlement_date, amount')

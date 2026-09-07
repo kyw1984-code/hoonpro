@@ -531,16 +531,20 @@ export function AnalyzerDashboard() {
   // ─── 성과 추이 — 보고서 요약을 저장해 지난 분석 대비 변화를 비교 ────────────
   const [savedReports, setSavedReports] = useState<any[] | null>(null);
   const [reportSaving, setReportSaving] = useState(false);
-  const [reportMsg, setReportMsg] = useState<string | null>(null);
+  const [reportMsg, setReportMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   // 광고비를 순이익 화면으로 넘기기 위한 기간. 보고서에 일자 컬럼이 있으면
   // 자동으로 채워지고, 없으면 사용자가 직접 넣는다.
   const adDaily = useMemo(() => extractDailyAdCost(rawData), [rawData]);
   const [adFrom, setAdFrom] = useState("");
   const [adTo, setAdTo] = useState("");
+  // rawData가 바뀌면 반드시 다시 판단한다. adDaily만 의존하면 일자 컬럼이 없는
+  // 보고서를 올렸을 때 (adDaily === null) 이전 보고서의 기간이 그대로 남고,
+  // 서버가 그 기간을 통째로 지우고 총액을 뿌려 정확했던 일자별 값이 사라진다.
   useEffect(() => {
     if (adDaily) { setAdFrom(adDaily.from); setAdTo(adDaily.to); }
-  }, [adDaily]);
+    else { setAdFrom(""); setAdTo(""); }
+  }, [adDaily, rawData]);
 
   const usageHeaders = () => ({ "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` });
 
@@ -582,11 +586,12 @@ export function AnalyzerDashboard() {
         body: JSON.stringify({ action: "report-save", summary }),
       });
       const data = await res.json();
-      if (!res.ok || data.error) { setReportMsg(data.error || "저장 실패"); return; }
+      if (!res.ok || data.error) { setReportMsg({ text: data.error || "저장 실패", ok: false }); return; }
 
       // 광고비를 날짜별로 남긴다. 이걸 해두면 [쿠팡 매출·정산 → 순이익] 화면이
       // 조회 기간에 겹치는 날만 합산해 광고비를 자동으로 채운다.
       let adMsg = " 광고비 기간을 넣으면 순이익 화면에도 자동 반영됩니다.";
+      let adOk = true;
       if (adFrom && adTo && adFrom <= adTo) {
         try {
           const r = adDaily
@@ -596,13 +601,16 @@ export function AnalyzerDashboard() {
             ? ` 광고비 ${r.days}일치(${r.total.toLocaleString()}원)가 순이익 화면에 자동 반영됩니다.`
             : ` 광고비 ${r.total.toLocaleString()}원을 ${r.days}일로 나눠 순이익 화면에 반영했습니다.`;
         } catch (e: any) {
-          adMsg = ` (광고비 반영은 실패했습니다: ${e.message})`;
+          adMsg = ` 다만 광고비 반영은 실패했습니다: ${e.message}`;
+          adOk = false;
         }
       }
-      setReportMsg("저장됐습니다. 다음 보고서 분석 때 자동으로 비교됩니다." + adMsg);
+      // 광고비가 실패했으면 초록색으로 띄우지 않는다. 성공으로 읽고 넘어가면
+      // 순이익 화면에 광고비가 빠진 채로 남는다.
+      setReportMsg({ text: "저장됐습니다. 다음 보고서 분석 때 자동으로 비교됩니다." + adMsg, ok: adOk });
       loadReports();
     } catch (e: any) {
-      setReportMsg(e.message);
+      setReportMsg({ text: e.message, ok: false });
     } finally {
       setReportSaving(false);
     }
@@ -897,7 +905,7 @@ export function AnalyzerDashboard() {
                             {reportSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                             현재 분석 저장
                           </button>
-                          {reportMsg && <span className={`text-[12px] ${reportMsg.includes("저장됐") ? "text-positive" : "text-critical"}`}>{reportMsg}</span>}
+                          {reportMsg && <span className={`text-[12px] ${reportMsg.ok ? "text-positive" : "text-critical"}`}>{reportMsg.text}</span>}
                         </div>
 
                         {savedReports && savedReports.length > 0 && (
