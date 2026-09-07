@@ -83,6 +83,21 @@ const authHeaders = (): Record<string, string> => {
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
+// 응답 본문을 JSON으로 읽는다. Vercel이 함수 타임아웃(504)·크래시(502)를 낼 때는
+// JSON이 아니라 평문("An error occurred with your deployment")을 돌려주므로,
+// 그대로 res.json()을 부르면 "Unexpected token 'A'" 같은 파싱 오류가 화면에 뜬다.
+// 그런 경우 사용자가 읽을 수 있는 안내로 바꿔 돌려준다.
+const readJson = async (res: Response): Promise<any> => {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (res.status === 504) return { error: '수집 시간이 초과됐습니다. 잠시 후 다시 시도해주세요.' };
+    if (res.status >= 500) return { error: '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' };
+    return { error: text.slice(0, 120) || `요청 실패 (${res.status})` };
+  }
+};
+
 const loadFavorites = (): Record<string, KeywordStat> => {
   try { return JSON.parse(localStorage.getItem(FAV_KEY) || '{}'); } catch { return {}; }
 };
@@ -203,7 +218,7 @@ export function SourcingFinder() {
     (async () => {
       try {
         const res = await fetch('/api/sourcing?type=favorites&action=list', { headers: authHeaders() });
-        const data = await res.json();
+        const data = await readJson(res);
         if (res.ok && Array.isArray(data.favorites)) {
           const map: Record<string, KeywordStat> = {};
           for (const f of data.favorites) {
@@ -237,7 +252,7 @@ export function SourcingFinder() {
     setShowFavorites(false);
     try {
       const res = await fetch(`/api/sourcing?type=keywords&seed=${encodeURIComponent(trimmed)}`, { headers: authHeaders() });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || data.error) {
         setError(data.error || '키워드 조회 실패');
         return;
@@ -270,7 +285,7 @@ export function SourcingFinder() {
     setCurrentSeed(cat);
     try {
       const res = await fetch(`/api/sourcing?type=keywords&category=${encodeURIComponent(cat)}`, { headers: authHeaders() });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || data.error) {
         setError(data.error || '추천 키워드 조회 실패');
         setKeywords([]);
@@ -298,7 +313,7 @@ export function SourcingFinder() {
     setCurrentSeed(`${m}월 시즌`);
     try {
       const res = await fetch(`/api/sourcing?type=keywords&month=${m}`, { headers: authHeaders() });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || data.error) {
         setError(data.error || '월별 시즌 키워드 조회 실패');
         setKeywords([]);
@@ -319,7 +334,7 @@ export function SourcingFinder() {
     if (trendMap[kw]) return;
     try {
       const res = await fetch(`/api/sourcing?type=trend&keyword=${encodeURIComponent(kw)}`, { headers: authHeaders() });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || data.error) {
         setTrendMap(prev => ({ ...prev, [kw]: { keyword: kw, error: data.error || '트렌드 조회 실패' } }));
       } else {
@@ -357,7 +372,7 @@ export function SourcingFinder() {
     setFavReportLoading(true);
     try {
       const res = await fetch('/api/sourcing?type=favorites&action=report', { headers: authHeaders() });
-      const data = await res.json();
+      const data = await readJson(res);
       setFavReport(!res.ok || data.error ? [] : (data.report || []));
     } catch {
       setFavReport([]);
@@ -375,7 +390,7 @@ export function SourcingFinder() {
   const fetchBriefing = async () => {
     try {
       const res = await fetch('/api/sourcing?type=briefing', { headers: authHeaders() });
-      const data = await res.json();
+      const data = await readJson(res);
       if (res.ok && !data.error) setBriefing(data);
     } catch { /* 브리핑 실패는 조용히 무시 */ }
   };
@@ -386,7 +401,7 @@ export function SourcingFinder() {
     if (name) params.set('name', name.slice(0, 150));
     try {
       const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || data.error) { alert(data.error || '순위 추적 등록 실패'); return false; }
       return true;
     } catch (e: any) {
@@ -433,7 +448,7 @@ export function SourcingFinder() {
       const params = new URLSearchParams({ type: 'products', keyword: kw });
       if (volume > 0) params.set('volume', String(volume));
       const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok || (data.error && !data.products?.length)) {
         setProdError(data.error || '상품 조회 실패');
         setProducts([]);
