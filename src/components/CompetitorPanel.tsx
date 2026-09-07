@@ -30,6 +30,7 @@ interface Summary {
   medianReviews: number | null;
   rocketShare: number | null;
   adCount: number;
+  pageCount: number;
   me: { rank: number; price: number; reviewCount: number; isAd: boolean; deliveryType: string } | null;
 }
 
@@ -113,7 +114,7 @@ export function CompetitorPanel({ keyword }: { keyword: string }) {
             {s.medianPrice !== null && <> 가격 <b className="text-ink">{won(s.medianPrice)}</b></>}
             {s.medianReviews !== null && <>, 리뷰 <b className="text-ink">{s.medianReviews.toLocaleString('ko-KR')}개</b></>}
             {s.rocketShare !== null && <>, 로켓 계열 <b className="text-ink">{s.rocketShare}%</b></>}
-            입니다. 이 페이지에 광고 상품은 {s.adCount}개입니다.
+            입니다. 수집한 {s.pageCount}개 중 광고 상품은 {s.adCount}개입니다.
           </p>
           {s.me ? (
             <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-2">

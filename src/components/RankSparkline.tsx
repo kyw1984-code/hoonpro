@@ -32,17 +32,22 @@ export function RankSparkline({ history }: { history: Point[] }) {
   const x = (i: number) => PAD + i * step;
   const y = (r: number) => (span === 0 ? H / 2 : PAD + ((r - best) / span) * (H - PAD * 2));
 
+  // 선은 두 점 이상일 때만 그릴 수 있다. 앞뒤가 모두 60위 밖이라 혼자 남은
+  // 기록은 선이 못 되므로 점으로 찍는다. 버리면 "최고 N위"라고 써 놓고
+  // 그래프에는 아무것도 없는 상태가 된다.
   const segments: string[] = [];
-  let cur: string[] = [];
+  const isolated: Array<{ i: number; rank: number }> = [];
+  let cur: Array<{ i: number; rank: number }> = [];
+  const flush = () => {
+    if (cur.length > 1) segments.push(cur.map((p, k) => `${k === 0 ? 'M' : 'L'}${x(p.i).toFixed(1)},${y(p.rank).toFixed(1)}`).join(' '));
+    else if (cur.length === 1) isolated.push(cur[0]);
+    cur = [];
+  };
   pts.forEach((p, i) => {
-    if (p.rank === null) {
-      if (cur.length > 1) segments.push(cur.join(' '));
-      cur = [];
-      return;
-    }
-    cur.push(`${cur.length === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.rank).toFixed(1)}`);
+    if (p.rank === null) { flush(); return; }
+    cur.push({ i, rank: p.rank });
   });
-  if (cur.length > 1) segments.push(cur.join(' '));
+  flush();
 
   const last = pts[pts.length - 1];
 
@@ -55,6 +60,10 @@ export function RankSparkline({ history }: { history: Point[] }) {
     >
       {segments.map((d, i) => (
         <path key={i} d={d} fill="none" stroke="var(--color-accent)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      ))}
+      {/* 앞뒤가 모두 60위 밖이라 선을 못 이루는 기록 */}
+      {isolated.map(p => (
+        <circle key={`i${p.i}`} cx={x(p.i)} cy={y(p.rank)} r="1.8" fill="var(--color-accent)" />
       ))}
       {/* 순위가 없던 날 — 바닥에 점으로만 남긴다 */}
       {pts.map((p, i) =>

@@ -43,9 +43,13 @@ function toNumber(val: any): number {
 /** 보고서에서 날짜별 광고비를 뽑는다. 일자 컬럼이 없으면 null (기간을 직접 받아야 한다) */
 export function extractDailyAdCost(rawData: any[]): { days: { date: string; cost: number }[]; from: string; to: string } | null {
   if (!rawData || rawData.length === 0) return null;
-  const keyOf = (row: any) => Object.keys(row).map(k => k.trim());
+  // 컬럼 목록은 여러 행에서 모은다. sheet_to_json은 빈 칸의 키를 아예 만들지
+  // 않아서, 첫 행의 날짜나 광고비가 비어 있으면 정확한 일자별 경로를 놓치고
+  // 총액을 균등 분배하는 쪽으로 조용히 떨어진다.
   const cols = new Set<string>();
-  keyOf(rawData[0]).forEach(k => cols.add(k));
+  for (const row of rawData.slice(0, 20)) {
+    Object.keys(row ?? {}).forEach(k => cols.add(k.trim()));
+  }
   const dateCol = AD_DATE_COLUMNS.find(c => cols.has(c));
   if (!dateCol || !cols.has("광고비")) return null;
 
