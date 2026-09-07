@@ -20,7 +20,7 @@ export function KeySetup({ status, onSaved }: Props) {
   const [vendorId, setVendorId] = useState('');
   const [accessKey, setAccessKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
-  const [keyIssuedAt, setKeyIssuedAt] = useState('');
+  const [keyExpiresAt, setKeyExpiresAt] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -47,7 +47,7 @@ export function KeySetup({ status, onSaved }: Props) {
         vendorId: vendorId.trim(),
         accessKey: accessKey.trim(),
         secretKey: secretKey.trim(),
-        keyIssuedAt: keyIssuedAt || undefined,
+        keyExpiresAt: keyExpiresAt || undefined,
       });
       onSaved();
     } catch (e: any) {
@@ -150,12 +150,12 @@ export function KeySetup({ status, onSaved }: Props) {
 
           <label className="flex flex-col gap-1.5">
             <span className="text-[12px] font-medium text-ink-2">
-              키 발급일 <span className="text-ink-3">(선택 — 만료 2주 전에 미리 알려드립니다)</span>
+              키 만료일 <span className="text-ink-3">(선택 사항 — 윙 [유효 기간]에 적힌 날짜. 넣어두면 만료 2주 전에 미리 알려드립니다)</span>
             </span>
             <input
               type="date"
-              value={keyIssuedAt}
-              onChange={e => setKeyIssuedAt(e.target.value)}
+              value={keyExpiresAt}
+              onChange={e => setKeyExpiresAt(e.target.value)}
               className="rounded-control border border-line bg-paper px-3 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-accent"
             />
           </label>

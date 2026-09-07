@@ -175,7 +175,7 @@ export function CoupangDashboard() {
             <Row label="Access Key" value={status.accessKeyMasked ?? '-'} mono />
             <Row label="수집된 상품(옵션)" value={`${(status.itemCount ?? 0).toLocaleString('ko-KR')}개`} />
             <Row label="매출 데이터" value={`${(status.salesDays ?? 0).toLocaleString('ko-KR')}일치`} />
-            <Row label="키 발급일" value={status.keyIssuedAt ?? '미입력'} />
+            <Row label="키 만료일" value={status.keyExpiresAt ?? '미입력'} />
             <Row
               label="키 만료까지"
               value={status.daysToExpiry === null || status.daysToExpiry === undefined ? '발급일 미입력' : `${status.daysToExpiry}일`}

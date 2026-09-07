@@ -769,3 +769,11 @@ alter default privileges in schema public revoke all on sequences from anon, aut
 --   (select count(*) from pg_tables where schemaname='public' and rowsecurity) as RLS켜진테이블,
 --   (select count(*) from information_schema.role_table_grants
 --      where table_schema='public' and grantee in ('anon','authenticated')) as anon권한수;
+
+-- ─────────────────────────────────────────────────────────────
+-- 28. 쿠팡 키 만료 관리 — 발급일이 아니라 만료일을 받는다
+-- ─────────────────────────────────────────────────────────────
+-- 윙 화면은 발급일을 보여주지 않는다. '유효 기간'에 만료 시각만 나온다.
+-- 발급일을 받아 180일을 더해 추정하면 며칠씩 어긋나므로 만료일을 그대로 받는다.
+alter table coupang_accounts add column if not exists key_expires_at date;
+alter table coupang_accounts drop column if exists key_issued_at;
