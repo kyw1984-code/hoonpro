@@ -140,18 +140,46 @@ sudo systemctl restart caddy
 
 ### 확인
 
+살아 있는지 본다.
+
 ```bash
 curl https://relay.hoonproai.com/health
-# {"ok":true}
+# {"ok":true,"auth":null}
 ```
 
-이제 Vercel 환경변수에 아래 셋을 넣으면 끝이다.
+비밀키가 맞는지도 같이 본다. `auth`가 **true**여야 한다.
+
+```bash
+curl -H "X-Relay-Secret: 위에서-만든-값" https://relay.hoonproai.com/health
+# {"ok":true,"auth":true}
+```
+
+`auth`가 false면 서버의 `RELAY_SECRET`과 지금 보낸 값이 다르다. 훈프로의 수집 크론은
+매시 이 확인을 먼저 하고, 어긋나 있으면 **판매자 계정을 건드리지 않고 중단한다.**
+그래서 비밀키가 틀리면 수집이 조용히 멈출 뿐 계정이 잘못 무효화되지는 않는다.
+
+이제 Vercel 환경변수에 아래 셋을 넣으면 끝이다. Production과 Preview 양쪽에 넣어야 한다.
 
 ```
 COUPANG_RELAY_URL=https://relay.hoonproai.com/relay
 COUPANG_RELAY_SECRET=위에서 만든 값
 COUPANG_RELAY_IP=Lightsail 고정 IP
 ```
+
+`COUPANG_RELAY_URL`은 경로가 무엇이든 상관없다. 상태 확인 주소는 코드가 도메인 기준으로
+`/health`를 다시 만들어 쓴다.
+
+넣은 뒤에는 **재배포해야 반영된다.** Vercel 환경변수는 빌드 시점에 묶이므로, 값만 넣고
+두면 이전 배포는 계속 중계 서버를 모르는 상태로 돈다.
+
+### 잘 안 될 때
+
+| 증상 | 원인 |
+|---|---|
+| 연동 화면에서 "쿠팡이 키를 거부했습니다" | 키 오타, 발급 후 24시간 미경과, 또는 중계 IP가 윙에 미등록 |
+| 관리자 화면에 "중계 서버가 설정돼 있지 않습니다" | 환경변수 미입력, 또는 넣고 재배포를 안 함 |
+| 수집이 아무 소리 없이 안 돎 | `/health`의 `auth`가 false. 서버와 Vercel의 비밀키가 다르다 |
+| `curl`이 응답 없음 | 방화벽 443 미개방, 또는 A 레코드가 고정 IP를 안 가리킴 |
 
 중계 서버는 목적지를 `api-gateway.coupang.com`으로 고정하고 공유 비밀키가 맞을 때만 응답한다.
 서명은 훈프로 서버에서 이미 끝난 상태로 오므로 중계는 판매자의 키를 모른다.
