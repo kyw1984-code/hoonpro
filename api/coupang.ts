@@ -1050,7 +1050,34 @@ async function verifyCreds(creds: CoupangCreds): Promise<{ ok: boolean; error?: 
     secretKey: shape(creds.secretKey),
     coupangMessage: (r.error || '').slice(0, 300),
   });
+
+  // 쿠팡은 IP 차단일 때 막힌 IP를 원문에 담아 준다. 이건 키 문제가 아니므로
+  // '키를 확인하세요'로 뭉뚱그리면 사용자가 멀쩡한 키만 계속 다시 넣게 된다.
+  const blockedIp = (r.error || '').match(/ip address ([\d.]+) is not allowed/i)?.[1];
+  if (blockedIp) {
+    return {
+      ok: false,
+      error: RELAY_URL
+        ? `쿠팡이 IP ${blockedIp}를 막았습니다. 윙 [연동 정보]에 이 IP가 등록돼 있는지 확인해주세요.`
+        : `키는 정상입니다. 다만 쿠팡이 호출 IP(${blockedIp})를 막았습니다. ` +
+          '쿠팡은 윙에 등록된 IP에서 온 요청만 받는데, 지금은 고정 IP 없이 호출하고 있어 ' +
+          '매번 IP가 바뀝니다. 관리자에게 고정 IP 중계 서버 설정을 요청해주세요.',
+    };
+  }
+
   if (r.status === 401 || r.status === 403) {
+    // Access Key는 하이픈이 섞인 36자, Secret Key는 하이픈 없는 40자다.
+    // 실제로 두 칸을 바꿔 넣어 'Invalid signature'만 반복된 사례가 있었다.
+    const looksSwapped = creds.secretKey.includes('-') && !creds.accessKey.includes('-');
+    if (looksSwapped || creds.accessKey === creds.secretKey) {
+      return {
+        ok: false,
+        error:
+          'Access Key와 Secret Key가 뒤바뀐 것 같습니다. ' +
+          'Access Key는 하이픈이 들어간 36자, Secret Key는 하이픈 없는 40자입니다. ' +
+          '윙에서 두 값을 각각 다시 복사해 넣어주세요.',
+      };
+    }
     return {
       ok: false,
       error:
