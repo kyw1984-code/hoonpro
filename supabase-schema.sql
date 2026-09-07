@@ -21,6 +21,7 @@ create table if not exists api_usage (
 create or replace function increment_usage(p_user_id uuid, p_date date, p_limit int)
 returns json
 language plpgsql
+set search_path = public   -- 호출자가 search_path를 바꿔 동명 객체를 끼워넣는 것을 차단
 as $$
 declare
   v_count int;
@@ -48,9 +49,11 @@ begin
 end;
 $$;
 
--- 4. Row Level Security 비활성화 (서비스 키로만 접근)
-alter table users disable row level security;
-alter table api_usage disable row level security;
+-- 4. Row Level Security 활성화 (정책 없음 — 서비스 키로만 접근)
+--    service_role은 RLS를 우회하므로 서버는 그대로 동작하고,
+--    anon/authenticated 키로는 아무것도 읽거나 쓸 수 없다. 자세한 이유는 26번 참고.
+alter table users enable row level security;
+alter table api_usage enable row level security;
 
 -- 5. 상세 API 호출 로그 (기능/모델/토큰/비용 추적)
 create table if not exists api_calls (
@@ -69,7 +72,7 @@ create index if not exists idx_api_calls_created_at on api_calls(created_at);
 create index if not exists idx_api_calls_feature on api_calls(feature);
 create index if not exists idx_api_calls_model on api_calls(model);
 
-alter table api_calls disable row level security;
+alter table api_calls enable row level security;
 
 -- 6. 앱 전역 설정 (관리자 제어, 서비스 키로만 접근)
 create table if not exists app_config (
@@ -78,7 +81,7 @@ create table if not exists app_config (
   updated_at timestamptz default now()
 );
 
-alter table app_config disable row level security;
+alter table app_config enable row level security;
 
 -- 기본값 시드 (이미 존재하면 덮어쓰지 않음)
 insert into app_config (key, value) values
@@ -94,7 +97,7 @@ create table if not exists sourcing_cache (
   created_at timestamptz default now()
 );
 
-alter table sourcing_cache disable row level security;
+alter table sourcing_cache enable row level security;
 
 -- 8. 소싱 파인더 리뷰 관측 기록 (수집 시마다 리뷰 수를 기록해 리뷰 증가속도(≒판매속도) 산출)
 create table if not exists sourcing_product_obs (
@@ -108,7 +111,7 @@ create table if not exists sourcing_product_obs (
 
 create index if not exists idx_spo_pid on sourcing_product_obs(product_id, captured_at);
 
-alter table sourcing_product_obs disable row level security;
+alter table sourcing_product_obs enable row level security;
 
 -- 9. 소싱 파인더 관심 키워드 (크론 자동 추적 대상)
 create table if not exists sourcing_favorites (
@@ -119,7 +122,7 @@ create table if not exists sourcing_favorites (
   primary key (user_id, keyword)
 );
 
-alter table sourcing_favorites disable row level security;
+alter table sourcing_favorites enable row level security;
 
 -- 10. 내 상품 순위 추적 — 등록 상품이 키워드 검색 결과 몇 위인지 수집 시마다 기록
 create table if not exists sourcing_rank_watch (
@@ -131,7 +134,7 @@ create table if not exists sourcing_rank_watch (
   primary key (user_id, keyword, product_id)
 );
 
-alter table sourcing_rank_watch disable row level security;
+alter table sourcing_rank_watch enable row level security;
 
 create table if not exists sourcing_rank_obs (
   id bigserial primary key,
@@ -145,7 +148,7 @@ create table if not exists sourcing_rank_obs (
 
 create index if not exists idx_sro on sourcing_rank_obs(keyword, product_id, captured_at);
 
-alter table sourcing_rank_obs disable row level security;
+alter table sourcing_rank_obs enable row level security;
 
 -- ─────────────────────────────────────────────────────────────
 -- 11. 유료화(월 구독 자동결제) — plans / subscriptions / payments / coupons
@@ -198,7 +201,7 @@ create unique index if not exists idx_sub_user on subscriptions(user_id);
 create index if not exists idx_sub_next_billing on subscriptions(next_billing_at)
   where status in ('trial', 'active', 'past_due');
 
-alter table subscriptions disable row level security;
+alter table subscriptions enable row level security;
 
 -- 결제 이력
 create table if not exists payments (
@@ -220,7 +223,7 @@ create table if not exists payments (
 
 create index if not exists idx_payments_user on payments(user_id, created_at);
 
-alter table payments disable row level security;
+alter table payments enable row level security;
 
 -- 쿠폰
 create table if not exists coupons (
@@ -238,7 +241,7 @@ create table if not exists coupons (
   created_at timestamptz default now()
 );
 
-alter table coupons disable row level security;
+alter table coupons enable row level security;
 
 -- 쿠폰 사용 기록 — CI(본인인증 고유값) 기준 1인 1회로 재가입 어뷰징 차단
 create table if not exists coupon_redemptions (
@@ -254,7 +257,7 @@ create table if not exists coupon_redemptions (
 create unique index if not exists idx_redemption_ci
   on coupon_redemptions(coupon_id, ci) where ci is not null;
 
-alter table coupon_redemptions disable row level security;
+alter table coupon_redemptions enable row level security;
 
 -- users 확장 — 본인인증(PASS) 결과
 alter table users add column if not exists ci text;
@@ -276,7 +279,7 @@ create table if not exists email_verifications (
   created_at timestamptz default now()
 );
 
-alter table email_verifications disable row level security;
+alter table email_verifications enable row level security;
 -- "훈프로에게 질문" RAG 챗봇 (지식 문서 + 청크 임베딩 + 질문 로그)
 -- ─────────────────────────────────────────────────────────────
 
@@ -298,7 +301,7 @@ create table if not exists knowledge_docs (
 -- 기존 설치본 마이그레이션 (이미 컬럼이 있으면 무시됨)
 alter table knowledge_docs add column if not exists content text;
 
-alter table knowledge_docs disable row level security;
+alter table knowledge_docs enable row level security;
 
 -- 13. 지식 청크 (text-embedding-3-small = 1536차원)
 create table if not exists knowledge_chunks (
@@ -315,7 +318,7 @@ create index if not exists idx_knowledge_chunks_doc_id on knowledge_chunks(doc_i
 create index if not exists idx_knowledge_chunks_embedding on knowledge_chunks
   using ivfflat (embedding vector_cosine_ops) with (lists = 100);
 
-alter table knowledge_chunks disable row level security;
+alter table knowledge_chunks enable row level security;
 
 -- 14. 유사도 검색 RPC (코사인 유사도 상위 N개 청크 + 문서 정보)
 create or replace function match_knowledge_chunks(
@@ -332,6 +335,7 @@ returns table (
   similarity float
 )
 language sql
+set search_path = public   -- 호출자가 search_path를 바꿔 동명 객체를 끼워넣는 것을 차단
 stable
 as $$
   select
@@ -365,7 +369,7 @@ create table if not exists qa_logs (
 create index if not exists idx_qa_logs_created_at on qa_logs(created_at);
 create index if not exists idx_qa_logs_user_id on qa_logs(user_id);
 
-alter table qa_logs disable row level security;
+alter table qa_logs enable row level security;
 
 -- 11. 광고 보고서 추이 — 분석 요약본을 저장해 지난 보고서 대비 변화를 비교
 create table if not exists ad_reports (
@@ -377,7 +381,7 @@ create table if not exists ad_reports (
 
 create index if not exists idx_adr_user on ad_reports(user_id, created_at desc);
 
-alter table ad_reports disable row level security;
+alter table ad_reports enable row level security;
 
 -- 12. 작업 보관함 — 상세페이지 기획안·썸네일 결과물 저장
 create table if not exists saved_works (
@@ -391,7 +395,7 @@ create table if not exists saved_works (
 
 create index if not exists idx_sw_user on saved_works(user_id, created_at desc);
 
-alter table saved_works disable row level security;
+alter table saved_works enable row level security;
 
 -- 썸네일 이미지 보관용 공개 버킷
 insert into storage.buckets (id, name, public) values ('works', 'works', true)
@@ -418,6 +422,7 @@ alter table email_verifications add column if not exists purpose text default 's
 create or replace function increment_coupon_redeemed(p_coupon_id uuid)
 returns void
 language sql
+set search_path = public   -- 호출자가 search_path를 바꿔 동명 객체를 끼워넣는 것을 차단
 as $$
   update coupons set redeemed_count = coalesce(redeemed_count, 0) + 1 where id = p_coupon_id;
 $$;
@@ -457,7 +462,7 @@ create table if not exists feature_usage (
   primary key (user_id, date, feature)
 );
 
-alter table feature_usage disable row level security;
+alter table feature_usage enable row level security;
 
 create index if not exists idx_feature_usage_date on feature_usage(date);
 
@@ -467,6 +472,7 @@ create or replace function increment_feature_usage(
 )
 returns json
 language plpgsql
+set search_path = public   -- 호출자가 search_path를 바꿔 동명 객체를 끼워넣는 것을 차단
 as $$
 declare
   v_count int;
@@ -508,7 +514,7 @@ insert into app_config (key, value) values
 on conflict (key) do nothing;
 
 -- ═════════════════════════════════════════════════════════════
--- 13. 쿠팡 윙 Open API 연동 — 판매·정산·재고·반품·문의 자동 수집
+-- 26. 쿠팡 윙 Open API 연동 — 판매·정산·재고·반품·문의 자동 수집
 --
 -- 설계 원칙
 --  · 키는 사용자별로 각자 발급받아 등록한다. 쿠팡 호출 한도는 업체코드
@@ -547,7 +553,7 @@ alter table coupang_accounts add column if not exists status_notified_at timesta
 -- 크론 분산 슬롯은 쓰지 않는다. 수집은 마지막 수집 시각 기준으로 오래된 계정부터 돈다.
 alter table coupang_accounts drop column if exists sync_shard;
 
-alter table coupang_accounts disable row level security;
+alter table coupang_accounts enable row level security;
 
 -- 상품(옵션) 마스터 — 원가 입력과 재고 예측의 단위
 create table if not exists coupang_items (
@@ -566,7 +572,7 @@ create table if not exists coupang_items (
 
 create index if not exists idx_cpi_user on coupang_items(user_id);
 create index if not exists idx_cpi_pid on coupang_items(user_id, product_id);
-alter table coupang_items disable row level security;
+alter table coupang_items enable row level security;
 
 -- 원가 — 사용자가 직접 입력한다. 순이익 계산의 유일한 수동 입력값이다.
 create table if not exists coupang_costs (
@@ -581,7 +587,7 @@ create table if not exists coupang_costs (
   primary key (user_id, vendor_item_id)
 );
 
-alter table coupang_costs disable row level security;
+alter table coupang_costs enable row level security;
 
 -- 일별·옵션별 매출 집계 (매출내역 API)
 create table if not exists coupang_sales_daily (
@@ -598,7 +604,7 @@ create table if not exists coupang_sales_daily (
 );
 
 create index if not exists idx_cpsd_user_date on coupang_sales_daily(user_id, sale_date desc);
-alter table coupang_sales_daily disable row level security;
+alter table coupang_sales_daily enable row level security;
 
 -- 지급(정산) 내역 — 캐시플로 캘린더
 create table if not exists coupang_settlements (
@@ -615,7 +621,7 @@ create table if not exists coupang_settlements (
 );
 
 create index if not exists idx_cpst_user_date on coupang_settlements(user_id, settlement_date);
-alter table coupang_settlements disable row level security;
+alter table coupang_settlements enable row level security;
 
 -- 반품·교환 요청
 create table if not exists coupang_returns (
@@ -637,7 +643,7 @@ create table if not exists coupang_returns (
 
 create index if not exists idx_cpr_user_at on coupang_returns(user_id, requested_at desc);
 create index if not exists idx_cpr_item on coupang_returns(user_id, vendor_item_id);
-alter table coupang_returns disable row level security;
+alter table coupang_returns enable row level security;
 
 -- 고객문의 + AI 답변 초안
 create table if not exists coupang_inquiries (
@@ -660,7 +666,7 @@ create table if not exists coupang_inquiries (
 );
 
 create index if not exists idx_cpq_user on coupang_inquiries(user_id, answered, inquired_at desc);
-alter table coupang_inquiries disable row level security;
+alter table coupang_inquiries enable row level security;
 
 -- 가격 규칙 — 마진 하한을 지키는 선에서만 조정을 제안/적용한다
 create table if not exists coupang_price_rules (
@@ -677,7 +683,7 @@ create table if not exists coupang_price_rules (
   primary key (user_id, vendor_item_id)
 );
 
-alter table coupang_price_rules disable row level security;
+alter table coupang_price_rules enable row level security;
 
 -- 가격 변경 제안·적용 로그 (되돌리기와 감사 추적용)
 create table if not exists coupang_price_logs (
@@ -693,7 +699,7 @@ create table if not exists coupang_price_logs (
 );
 
 create index if not exists idx_cppl_user on coupang_price_logs(user_id, created_at desc);
-alter table coupang_price_logs disable row level security;
+alter table coupang_price_logs enable row level security;
 
 -- 주간 성과 리포트 발송 이력 (중복 발송 방지 + 지난주 대비 비교)
 create table if not exists coupang_reports (
@@ -706,7 +712,7 @@ create table if not exists coupang_reports (
 );
 
 create unique index if not exists idx_cprep_uniq on coupang_reports(user_id, period_start, period_end);
-alter table coupang_reports disable row level security;
+alter table coupang_reports enable row level security;
 
 -- 일별 주문 집계 (발주서 API) — 매출인식일은 배송완료 이후라 최대 열흘 늦다.
 -- 재고 소진 예측과 순위·판매 상관에는 '주문일' 기준의 신선한 수치가 필요해
@@ -725,4 +731,41 @@ create table if not exists coupang_orders_daily (
 
 create index if not exists idx_cpod_user_date on coupang_orders_daily(user_id, order_date desc);
 create index if not exists idx_cpod_pid on coupang_orders_daily(user_id, product_id, order_date);
-alter table coupang_orders_daily disable row level security;
+alter table coupang_orders_daily enable row level security;
+
+-- ─────────────────────────────────────────────────────────────
+-- 27. 접근 차단 — RLS 전면 활성화 + anon/authenticated 권한 회수
+-- ─────────────────────────────────────────────────────────────
+-- 이 앱은 브라우저에서 Supabase에 직접 접속하지 않는다. 모든 DB 접근은
+-- 서버리스 함수(api/*)가 SUPABASE_SERVICE_KEY로 수행하고, service_role은
+-- RLS를 우회한다. 따라서 '정책 없는 RLS'를 켜면 서버 동작은 그대로면서
+-- anon 키로는 아무것도 읽거나 쓸 수 없게 된다.
+--
+-- RLS를 끄면 anon 키 하나만으로 users.password_hash, subscriptions.billing_key_enc,
+-- payments 전건, email_verifications 인증코드(계정 탈취)까지 읽고 쓸 수 있다.
+-- anon 키는 Supabase 설계상 '공개돼도 되는 키'라 언젠가는 새는 것을 전제해야 한다.
+--
+-- 위 26번까지의 테이블별 enable 문이 누락을 만들 수 있어, 여기서 public
+-- 스키마 전체를 한 번 더 훑는다. (과거 프로젝트 잔재 테이블까지 포함)
+do $$
+declare t record;
+begin
+  for t in select tablename from pg_tables where schemaname = 'public' loop
+    execute format('alter table public.%I enable row level security', t.tablename);
+  end loop;
+end $$;
+
+-- 이중 방어 — RLS가 실수로 꺼지더라도 anon 키로는 접근 불가
+revoke all on all tables in schema public from anon, authenticated;
+revoke all on all sequences in schema public from anon, authenticated;
+
+-- 앞으로 만들어질 테이블에도 같은 정책 적용
+alter default privileges in schema public revoke all on tables from anon, authenticated;
+alter default privileges in schema public revoke all on sequences from anon, authenticated;
+
+-- 확인용 — 전체테이블 = RLS켜진테이블, anon권한수 = 0 이어야 한다
+-- select
+--   (select count(*) from pg_tables where schemaname='public') as 전체테이블,
+--   (select count(*) from pg_tables where schemaname='public' and rowsecurity) as RLS켜진테이블,
+--   (select count(*) from information_schema.role_table_grants
+--      where table_schema='public' and grantee in ('anon','authenticated')) as anon권한수;
