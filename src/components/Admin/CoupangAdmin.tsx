@@ -5,8 +5,9 @@
  * 문제 있는 계정이 위로 온다.
  */
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Link2, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Link2, Loader2, RefreshCw, Plus, Trash2, Save, Server } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { coupangApi, type CoupangVendor } from '../../lib/coupang';
 
 interface AccountRow {
   userId: string;
@@ -152,6 +153,118 @@ export function CoupangAdmin() {
           </table>
           {data.accounts.length === 0 && <p className="px-5 py-10 text-center text-[13px] text-ink-3">아직 연동한 회원이 없습니다.</p>}
         </div>
+      </div>
+
+      <VendorIpManager />
+    </div>
+  );
+}
+
+/**
+ * 주문수집 업체 IP 관리
+ *
+ * 자체개발 모드에서는 IP를 여러 개 등록할 수 있어, 기존 프로그램의 IP를 훈프로
+ * IP와 함께 넣으면 둘 다 돈다. 판매자가 그 업체에 일일이 전화하지 않도록
+ * 여기서 목록을 관리하면 온보딩 화면에 바로 뜬다.
+ */
+function VendorIpManager() {
+  const [vendors, setVendors] = useState<CoupangVendor[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    coupangApi.adminVendors()
+      .then(r => setVendors(r.vendors))
+      .catch(() => setVendors([]));
+  }, []);
+
+  const save = async () => {
+    if (!vendors || saving) return;
+    setSaving(true);
+    setMsg(null);
+    try {
+      const r = await coupangApi.adminVendorsSave(vendors);
+      setVendors(r.vendors);
+      setMsg('저장했습니다. 온보딩 화면에 바로 반영됩니다.');
+    } catch (e: any) {
+      setMsg(e.message || '저장에 실패했습니다.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const patch = (i: number, next: Partial<CoupangVendor>) =>
+    setVendors(v => (v ? v.map((x, j) => (j === i ? { ...x, ...next } : x)) : v));
+
+  if (!vendors) {
+    return (
+      <div className="flex items-center gap-2 py-8 text-ink-3">
+        <Loader2 className="h-4 w-4 animate-spin" /><span className="text-[13px]">업체 목록 불러오는 중...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-panel border border-line bg-paper p-5">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <Server className="h-4 w-4 text-accent" />
+        <h3 className="text-[15px] font-semibold text-ink">주문수집 업체 IP</h3>
+      </div>
+      <p className="mb-4 text-[12.5px] leading-relaxed text-ink-2">
+        판매자가 이미 쓰는 프로그램(토글·사방넷 등)의 IP를 훈프로 IP와 <b className="text-ink">함께</b> 윙에 등록하면
+        양쪽 다 동작합니다. 여기에 업체를 넣어두면 온보딩 화면에서 판매자가 그 업체를 고르는 순간
+        IP 목록이 바로 떠서, <b className="text-ink">업체에 문의할 필요가 없어집니다.</b>
+        새 업체 IP를 확보하시면 여기 추가해주세요. (배포 없이 즉시 반영)
+      </p>
+
+      <div className="flex flex-col gap-3">
+        {vendors.map((v, i) => (
+          <div key={i} className="rounded-card border border-line bg-paper-2 p-3.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                value={v.name}
+                onChange={e => patch(i, { name: e.target.value })}
+                placeholder="업체명 (예: 사방넷)"
+                className="min-w-0 flex-1 rounded-control border border-line bg-paper px-3 py-2 text-[13px] text-ink outline-none focus:ring-2 focus:ring-accent"
+              />
+              <button
+                type="button"
+                onClick={() => setVendors(vs => (vs ? vs.filter((_, j) => j !== i) : vs))}
+                aria-label="업체 삭제"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control border border-line text-ink-3 hover:text-critical"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+            <textarea
+              value={v.ips.join('\n')}
+              onChange={e => patch(i, { ips: e.target.value.split(/[\s,]+/).map(x => x.trim()).filter(Boolean) })}
+              rows={Math.max(2, v.ips.length)}
+              placeholder={'IP를 한 줄에 하나씩\n61.251.171.79\n61.251.171.82'}
+              className="mt-2 w-full rounded-control border border-line bg-paper px-3 py-2 font-mono text-[12.5px] text-ink outline-none focus:ring-2 focus:ring-accent"
+            />
+            <p className="mt-1 text-[11.5px] text-ink-3">IP {v.ips.length}개 · 훈프로 IP 1개를 더하면 판매자가 윙에 {v.ips.length + 1}개를 등록합니다 (한도 10개)</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setVendors(vs => [...(vs ?? []), { id: `v${Date.now()}`, name: '', ips: [] }])}
+          className="flex min-h-[40px] items-center gap-1.5 rounded-control border border-line px-3.5 text-[13px] text-ink-2 hover:text-ink"
+        >
+          <Plus className="h-4 w-4" /> 업체 추가
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="flex min-h-[40px] items-center gap-2 rounded-control bg-accent px-4 text-[13px] font-bold text-ground hover:opacity-90 disabled:opacity-40"
+        >
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} 저장
+        </button>
+        {msg && <span className="text-[12.5px] text-ink-2">{msg}</span>}
       </div>
     </div>
   );

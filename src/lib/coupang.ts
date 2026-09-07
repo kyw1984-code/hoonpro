@@ -15,6 +15,14 @@ export interface CoupangStatus {
   salesDays?: number;
   /** 판매자가 윙에 등록해야 할 우리 서버 IP (중계 서버를 쓸 때만 값이 있다) */
   relayIp?: string | null;
+  /** 주문수집 업체별 IP — 기존 프로그램과 함께 쓰려면 이 IP도 같이 등록해야 한다 */
+  vendors?: { id: string; name: string; ips: string[] }[];
+}
+
+export interface CoupangVendor {
+  id: string;
+  name: string;
+  ips: string[];
 }
 
 export interface SyncSummary {
@@ -260,6 +268,9 @@ export interface PriceLog {
 
 export const coupangApi = {
   status: () => request<CoupangStatus>('status'),
+  adminVendors: () => request<{ vendors: CoupangVendor[] }>('admin-vendors'),
+  adminVendorsSave: (vendors: CoupangVendor[]) =>
+    request<{ ok: true; vendors: CoupangVendor[] }>('admin-vendors', { method: 'POST', body: { vendors } }),
   saveKey: (body: { vendorId: string; accessKey: string; secretKey: string; keyExpiresAt?: string }) =>
     request<{ ok: true; message: string }>('key-save', { method: 'POST', body }),
   deleteKey: () => request<{ ok: true }>('key-delete', { method: 'POST' }),
