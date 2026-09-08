@@ -331,12 +331,15 @@ function describeSync(s: SyncSummary): string {
     `윙 매출 ${s.sales}`,
     // 그로스는 창구가 달라 따로 센다. 합쳐 놓으면 어느 쪽이 안 들어왔는지 모른다.
     `그로스 매출 ${s.growth ?? 0}`,
+    `그로스 재고 ${s.growthInventory ?? 0}`,
     `정산 ${s.settlements}`,
     `반품 ${s.returns}`,
     `문의 ${s.inquiries}`,
   ];
+  // 취소를 뺐다는 걸 밝힌다. 윙 판매자센터 숫자와 맞춰 볼 때 이게 첫 번째 질문이다.
+  const cancelNote = s.growthCancelled ? ` (그로스 취소 ${s.growthCancelled}건 제외)` : '';
   const base = s.truncated
-    ? `수집 진행 중 — ${parts.join(' · ')}건까지 받았습니다. 나머지는 자동으로 이어받습니다`
-    : `수집 완료 — ${parts.join(' · ')}건`;
+    ? `수집 진행 중 — ${parts.join(' · ')}건까지 받았습니다${cancelNote}. 나머지는 자동으로 이어받습니다`
+    : `수집 완료 — ${parts.join(' · ')}건${cancelNote}`;
   return s.errors?.length ? `${base} (일부 실패: ${s.errors.slice(0, 2).join(' / ')})` : base;
 }

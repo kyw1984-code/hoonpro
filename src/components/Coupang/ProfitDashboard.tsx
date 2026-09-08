@@ -47,6 +47,8 @@ function delta(current: number, previous: number, hasData: boolean, higherIsBett
 
 export function ProfitDashboard({ onEditCosts }: Props) {
   const [days, setDays] = useState(30);
+  // 날짜를 직접 고른 경우. 버튼 기간과는 별개라, 어느 쪽이 살아 있는지가 분명해야 한다.
+  const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const [data, setData] = useState<ProfitResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +64,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
     const mine = ++seq.current;
     setLoading(true);
     try {
-      const d = await coupangApi.profit(days);
+      const d = range ? await coupangApi.profitRange(range.from, range.to) : await coupangApi.profit(days);
       if (mine !== seq.current) return;
       // 원가가 빈 상품은 순이익이 부풀려진 값이라, 실제 순이익 순위 사이에 섞이면
       // 가장 위에 올라와 착시를 만든다. 원가를 넣은 상품 뒤로 보낸다.
@@ -79,11 +81,25 @@ export function ProfitDashboard({ onEditCosts }: Props) {
     } finally {
       if (mine === seq.current) setLoading(false);
     }
-  }, [days]);
+  }, [days, range]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // 날짜 칸은 둘 다 채워지고 순서가 맞을 때만 조회한다. 한쪽만 고른 상태로
+  // 요청을 보내면 서버가 오늘로 채워 넣어 사용자가 고르지 않은 기간이 보인다.
+  const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const pickDate = (key: 'from' | 'to', value: string) => {
+    const next = { from: range?.from ?? data?.from ?? '', to: range?.to ?? data?.to ?? '', [key]: value };
+    if (!next.from || !next.to) return;
+    if (next.from > next.to) {
+      // 시작이 끝보다 뒤면 뒤집는다. 오류로 막으면 날짜 두 개 고르는 일이 짜증이 된다.
+      const t = next.from; next.from = next.to; next.to = t;
+    }
+    adTouched.current = false;
+    setRange({ from: next.from, to: next.to > today ? today : next.to });
+  };
 
   // 광고비는 상품별로 나눌 수 없으므로 포트폴리오 합계에만 반영한다
   const netProfit = useMemo(() => (data ? data.totals.profit - adCost : 0), [data, adCost]);
@@ -188,15 +204,36 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               // 기간이 바뀌면 광고비도 그 기간 값으로 다시 채운다. 한 번 손댔다는
               // 이유로 90일 화면에 7일치 광고비가 남아 있으면 순이익이 틀린다.
               adTouched.current = false;
+              setRange(null);
               setDays(p.days);
             }}
             className={`rounded-control border px-3 py-1.5 text-[12px] font-medium transition-colors ${
-              days === p.days ? 'border-accent bg-accent-soft text-ink' : 'border-line text-ink-3 hover:border-line-strong hover:text-ink'
+              !range && days === p.days ? 'border-accent bg-accent-soft text-ink' : 'border-line text-ink-3 hover:border-line-strong hover:text-ink'
             }`}
           >
             {p.label}
           </button>
         ))}
+        {/* 날짜 직접 고르기 — 세일 기간, 특정 주만 따로 보고 싶을 때 */}
+        <div className={`flex items-center gap-1.5 rounded-control border px-2 py-1 ${range ? 'border-accent bg-accent-soft' : 'border-line'}`}>
+          <input
+            type="date"
+            value={range?.from ?? data.from}
+            max={today}
+            onChange={e => pickDate('from', e.target.value)}
+            aria-label="시작일"
+            className="bg-transparent text-[12px] tabular-nums text-ink outline-none"
+          />
+          <span className="text-[11px] text-ink-3">~</span>
+          <input
+            type="date"
+            value={range?.to ?? data.to}
+            max={today}
+            onChange={e => pickDate('to', e.target.value)}
+            aria-label="종료일"
+            className="bg-transparent text-[12px] tabular-nums text-ink outline-none"
+          />
+        </div>
         <span className="ml-auto text-[11.5px] text-ink-3">
           {data.from} ~ {data.to}
         </span>
