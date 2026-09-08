@@ -926,3 +926,26 @@ revoke all on coupang_ad_costs_items from anon, authenticated;
 -- 있다. 사용자에게 화면을 찍어 보내 달라고 하는 대신 열 이름과 보고서 단위를
 -- 여기 남긴다. 광고비 값 자체는 남기지 않는다.
 alter table coupang_accounts add column if not exists last_ad_report_note text;
+
+-- ─────────────────────────────────────────────────────────────
+-- 37. 주문별 쿠폰 — 로켓그로스 주문에는 할인 항목이 없다
+-- ─────────────────────────────────────────────────────────────
+-- 윙 발주서는 주문 건마다 쿠폰 할인을 나눠 주지만, 로켓그로스 주문 API는
+-- vendorItemId·수량·단가만 준다(실측). 대신 쿠팡에 "이 주문에 적용된 쿠폰"을
+-- 주문번호로 묻는 API(fms .../{orderId}/coupons)가 있어, 그로스 주문마다 물어
+-- 여기에 쌓는다. 한 번 물은 주문은 다시 묻지 않는다. 한 주문에 옵션이 여럿이면
+-- 옵션 금액 비율로 나눠 붙인다 — 상품별 표에 쿠폰을 붙이려면 옵션 단위여야 한다.
+create table if not exists coupang_order_coupons (
+  user_id uuid not null references users(id) on delete cascade,
+  order_id text not null,
+  vendor_item_id text not null,
+  channel text not null default 'growth',
+  sale_date date not null,
+  discount bigint not null default 0,
+  coupon_types text,                     -- 쿠팡이 준 쿠폰 종류들 (진단용)
+  fetched_at timestamptz default now(),
+  primary key (user_id, order_id, vendor_item_id)
+);
+create index if not exists idx_coc_user_date on coupang_order_coupons(user_id, sale_date);
+alter table coupang_order_coupons enable row level security;
+revoke all on coupang_order_coupons from anon, authenticated;
