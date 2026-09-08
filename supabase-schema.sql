@@ -823,3 +823,33 @@ alter table sourcing_product_obs add column if not exists delivery_type text;
 alter table sourcing_product_obs add column if not exists snapshot_at timestamptz;
 
 create index if not exists idx_spo_kw_snap on sourcing_product_obs(keyword, snapshot_at desc);
+
+-- ─────────────────────────────────────────────────────────────
+-- 31. 로켓그로스 매출 — 윙(마켓플레이스) 매출과 섞이지 않게 채널을 나눈다
+-- ─────────────────────────────────────────────────────────────
+-- 로켓그로스는 rg_open_api라는 별도 창구로만 조회된다. 마켓플레이스 매출내역
+-- (revenue-history)에는 한 건도 들어오지 않아, 그로스 매출이 통째로 빠져 있었다.
+--
+-- 두 채널은 회계 기준이 다르다.
+--   마켓플레이스 — 매출인식일 기준, 정산예정액(수수료 차감 후)이 확정값으로 온다
+--   로켓그로스   — 주문만 조회되므로 결제일 기준이고 정산예정액은 추정값이다
+-- 한 통에 부으면 성격이 다른 숫자가 소리 없이 섞인다. channel로 갈라 두고
+-- 화면에서도 따로 보여준다.
+--
+-- 기본키에 channel이 들어가야 한다. 빠지면 같은 상품·같은 날 두 채널이
+-- 서로를 덮어써 한쪽 매출이 사라진다.
+alter table coupang_sales_daily add column if not exists channel text not null default 'marketplace';
+
+do $$
+begin
+  if exists (
+    select 1 from pg_constraint
+    where conname = 'coupang_sales_daily_pkey'
+      and array_length(conkey, 1) = 3
+  ) then
+    alter table coupang_sales_daily drop constraint coupang_sales_daily_pkey;
+    alter table coupang_sales_daily add primary key (user_id, sale_date, vendor_item_id, channel);
+  end if;
+end $$;
+
+create index if not exists idx_cpsd_channel on coupang_sales_daily(user_id, channel, sale_date desc);

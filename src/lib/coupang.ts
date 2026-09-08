@@ -29,6 +29,7 @@ export interface SyncSummary {
   items: number;
   orders: number;
   sales: number;
+  growth?: number;
   settlements: number;
   returns: number;
   inquiries: number;
@@ -99,6 +100,14 @@ export interface ProfitResponse {
   };
   missingCost: number;
   costCoverage: number;
+  /**
+   * 채널별 매출. 윙(마켓플레이스)은 매출인식일·정산예정액 기준이고,
+   * 로켓그로스는 주문(결제일) 기준이라 성격이 달라 나눠 보여준다.
+   */
+  channels?: {
+    marketplace: { quantity: number; salesAmount: number };
+    growth: { quantity: number; salesAmount: number };
+  };
   /** 기간 안의 모든 날짜. 판매가 없던 날도 0으로 채워져 있다 */
   daily: ProfitDay[];
   // 광고 보고서에서 받아 둔 이 기간 광고비. 하루도 없으면 null이다

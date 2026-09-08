@@ -328,7 +328,9 @@ function describeSync(s: SyncSummary): string {
   const parts = [
     `상품 ${s.items}`,
     `주문 ${s.orders}`,
-    `매출 ${s.sales}`,
+    `윙 매출 ${s.sales}`,
+    // 그로스는 창구가 달라 따로 센다. 합쳐 놓으면 어느 쪽이 안 들어왔는지 모른다.
+    `그로스 매출 ${s.growth ?? 0}`,
     `정산 ${s.settlements}`,
     `반품 ${s.returns}`,
     `문의 ${s.inquiries}`,

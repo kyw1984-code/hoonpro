@@ -155,6 +155,9 @@ async function coupangCall<T = any>(
   const headers: Record<string, string> = {
     Authorization: auth,
     'Content-Type': 'application/json;charset=UTF-8',
+    // 로켓그로스(rg_open_api)는 이 헤더가 없으면 거절한다. 다른 계열은 무시하므로
+    // 공통으로 붙여 둔다.
+    'X-MARKET': 'KR',
   };
 
   try {
@@ -338,6 +341,8 @@ const EP = {
   exchangeRequests: (vendorId: string) => `/v2/providers/openapi/apis/api/v1/vendors/${vendorId}/exchangeRequests`,
   ordersheets: (vendorId: string) => `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/ordersheets`,
   revenueHistory: '/v2/providers/openapi/apis/api/v1/revenue-history',
+  // 로켓그로스는 완전히 다른 창구다. 마켓플레이스 매출내역에는 한 건도 안 온다.
+  rgOrders: (vendorId: string) => `/v2/providers/rg_open_api/apis/api/v1/vendors/${vendorId}/rg/orders`,
   settlementHistories: '/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories',
   returnRequests: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/returnRequests`,
   onlineInquiries: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/onlineInquiries`,
@@ -360,12 +365,18 @@ const LIMITS = {
   returnsDaysIncr: 30,
   inquiryDays: 7,          // 문의 조회는 최대 7일 구간
   chunkDays: 30,           // 조회 구간 분할 단위
+  rgDaysFull: 60,
+  rgDaysIncr: 30,
+  rgChunkDays: 30,         // 로켓그로스는 한 번에 30일까지만 조회된다
+  rgGapMs: 1300,           // 분당 50회 한도. 1300ms면 약 46회/분으로 아래를 유지한다
 };
 
 export interface SyncSummary {
   items: number;
   orders: number;
   sales: number;
+  /** 로켓그로스 매출 — 창구가 달라 마켓플레이스 매출과 따로 센다 */
+  growth: number;
   settlements: number;
   returns: number;
   inquiries: number;
@@ -377,7 +388,7 @@ export interface SyncSummary {
 
 function emptySummary(): SyncSummary {
   return {
-    items: 0, orders: 0, sales: 0, settlements: 0, returns: 0, inquiries: 0,
+    items: 0, orders: 0, sales: 0, growth: 0, settlements: 0, returns: 0, inquiries: 0,
     errors: [], authFailed: false, truncated: false,
   };
 }
@@ -702,6 +713,7 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
             sale_date: date,
             vendor_item_id: vendorItemId,
             product_name: pickStr(it, ['vendorItemName', 'productName', 'sellerProductName']),
+            channel: 'marketplace',
             quantity: 0,
             sales_amount: 0,
             commission: 0,
@@ -733,12 +745,161 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
       .from('coupang_sales_daily')
       .delete()
       .eq('user_id', userId)
+      // 채널을 좁히지 않으면 마켓플레이스 재수집이 같은 기간의 그로스 행까지
+      // 쓸어버린다. 그로스는 조회 창구가 달라 이 회차에서 다시 채워지지 않는다.
+      .eq('channel', 'marketplace')
       .gte('sale_date', from)
       .lte('sale_date', to);
   }
-  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id');
+  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
   if (err) sum.errors.push(err);
   sum.sales = rows.length;
+}
+
+// ── 로켓그로스 매출 동기화 ────────────────────────────────────
+//
+// 로켓그로스는 rg_open_api라는 별도 창구로만 조회된다. 마켓플레이스 매출내역
+// (revenue-history)에는 한 건도 들어오지 않아, 그로스 매출이 통째로 빠져 있었다.
+//
+// 회계 기준이 마켓플레이스와 다르다는 점이 중요하다.
+//   마켓플레이스 — 매출인식일 기준, 정산예정액이 확정값으로 온다
+//   로켓그로스   — 주문만 조회되므로 결제일 기준이고, 정산예정액은 추정이다
+// 그래서 channel을 나눠 저장하고 화면에서도 따로 보여준다. 한 통에 부으면
+// 성격이 다른 숫자가 소리 없이 섞인다.
+//
+// 제약 세 가지 — 지키지 않으면 조용히 실패한다.
+//   · 분당 50회 한도 (다른 API보다 훨씬 빡빡하다)
+//   · 한 번에 30일까지
+//   · X-MARKET 헤더 필수 (coupangCall에 공통으로 넣어 뒀다)
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * 조회 기간 파라미터 이름이 문서·구현마다 갈린다(createdAt* / paidDate*).
+ * 실제로 불러 봐야 알 수 있어서, 한쪽이 파라미터 없다고 거절하면 다른 쪽으로
+ * 한 번 더 시도한다. 맞는 이름을 찾으면 그 회차 내내 그것만 쓴다.
+ */
+const RG_DATE_PARAMS: Array<[string, string]> = [
+  ['createdAtFrom', 'createdAtTo'],
+  ['paidDateFrom', 'paidDateTo'],
+];
+
+function rgQuery(pair: [string, string], from: string, to: string, token: string): string {
+  return `${pair[0]}=${from}&${pair[1]}=${to}&maxPerPage=100${token ? `&nextToken=${token}` : ''}`;
+}
+
+async function syncRocketGrowth(
+  userId: string,
+  creds: CoupangCreds,
+  from: string,
+  to: string,
+  sum: SyncSummary,
+  deadline: number,
+): Promise<void> {
+  if (!supabase) return;
+
+  const agg = new Map<string, any>();
+  let failedThisRun = false;
+  let paramPair: [string, string] | null = null;
+  let lastCallAt = 0;
+
+  const call = async (pair: [string, string], cFrom: string, cTo: string, token: string) => {
+    // 분당 50회 한도를 지킨다. 몰아 치면 429가 나고, 그 회차 그로스 매출이 빈다.
+    const wait = LIMITS.rgGapMs - (Date.now() - lastCallAt);
+    if (wait > 0) await sleep(wait);
+    lastCallAt = Date.now();
+    return coupangCall(creds, 'GET', EP.rgOrders(creds.vendorId), rgQuery(pair, cFrom, cTo, token));
+  };
+
+  for (const [cFrom, cTo] of dateChunks(from, to, LIMITS.rgChunkDays)) {
+    let token = '';
+    for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
+      if (outOfTime(deadline, sum)) {
+        failedThisRun = true;
+        break;
+      }
+
+      let r = await call(paramPair ?? RG_DATE_PARAMS[0], cFrom, cTo, token);
+
+      // 파라미터 이름이 틀렸으면 다른 이름으로 한 번만 더 시도한다
+      if (!r.ok && !paramPair && /parameter|MISSING_PARAMETER|not present/i.test(r.error ?? '')) {
+        r = await call(RG_DATE_PARAMS[1], cFrom, cTo, token);
+        if (r.ok) paramPair = RG_DATE_PARAMS[1];
+      } else if (r.ok && !paramPair) {
+        paramPair = RG_DATE_PARAMS[0];
+      }
+
+      if (!r.ok) {
+        if (r.authFailed) {
+          sum.authFailed = true;
+          return;
+        }
+        // 로켓그로스를 안 쓰는 판매자는 권한이 없어 실패한다. 이건 고장이 아니라
+        // 해당 없음이므로 오류 목록에 올려 불안하게 만들지 않는다.
+        if (r.status === 403 || r.status === 404) return;
+        sum.errors.push(`그로스 매출: ${r.error}`);
+        failedThisRun = true;
+        break;
+      }
+
+      for (const order of listOf(r.data)) {
+        const orderDate = pickDate(order, ['paidAt', 'paidDate', 'orderedAt', 'createdAt', 'orderDate']);
+        const items = Array.isArray(order?.orderItems)
+          ? order.orderItems
+          : Array.isArray(order?.items) ? order.items : [order];
+        for (const it of items) {
+          const vendorItemId = pickStr(it, ['vendorItemId', 'vendorItemID']);
+          const date = pickDate(it, ['paidAt', 'paidDate', 'orderedAt', 'createdAt']) || orderDate;
+          if (!vendorItemId || !date) continue;
+
+          const key = `${date}:${vendorItemId}`;
+          const cur = agg.get(key) ?? {
+            user_id: userId,
+            sale_date: date,
+            vendor_item_id: vendorItemId,
+            product_name: pickStr(it, ['vendorItemName', 'productName', 'sellerProductName']),
+            channel: 'growth',
+            quantity: 0,
+            sales_amount: 0,
+            commission: 0,
+            settlement_amount: 0,
+          };
+          cur.quantity += pickNum(it, ['shippingCount', 'quantity', 'saleCount'], 0);
+          cur.sales_amount += pickNum(it, ['orderPrice', 'salePrice', 'saleAmount', 'totalSalePrice'], 0);
+          cur.commission += Math.abs(pickNum(it, ['serviceFee', 'commission', 'saleCommission'], 0));
+          cur.settlement_amount += pickNum(it, ['settlementAmount', 'settleAmount', 'payoutAmount'], 0);
+          agg.set(key, cur);
+        }
+      }
+
+      token = nextTokenOf(r.data);
+      if (!token) break;
+    }
+    if (failedThisRun) break;
+  }
+
+  // 정산예정액이 안 오면 판매금액 − 수수료로 채운다. 마켓플레이스와 달리
+  // 그로스는 이 값이 확정이 아니라 추정이라는 점을 화면에서 밝힌다.
+  const rows = [...agg.values()].map(r => ({
+    ...r,
+    settlement_amount: r.settlement_amount || Math.max(0, r.sales_amount - r.commission),
+    updated_at: new Date().toISOString(),
+  }));
+
+  // 실패한 회차에는 기존 구간을 지우지 않는다 — 불완전한 결과로 덮으면 매출이 준다
+  if (!failedThisRun) {
+    await supabase
+      .from('coupang_sales_daily')
+      .delete()
+      .eq('user_id', userId)
+      .eq('channel', 'growth')
+      .gte('sale_date', from)
+      .lte('sale_date', to);
+  }
+
+  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
+  if (err) sum.errors.push(err);
+  sum.growth = rows.length;
 }
 
 // ── 지급내역 동기화 (캐시플로) ────────────────────────────────
@@ -1037,6 +1198,13 @@ async function syncUser(
     userId, creds,
     addDays(today, -(full ? LIMITS.salesDaysFull : LIMITS.salesDaysIncr)),
     addDays(today, -1),
+    sum, deadline,
+  );
+  // 로켓그로스는 별도 창구다. 이걸 안 부르면 그로스 매출이 통째로 빠진다.
+  await syncRocketGrowth(
+    userId, creds,
+    addDays(today, -(full ? LIMITS.rgDaysFull : LIMITS.rgDaysIncr)),
+    today,
     sum, deadline,
   );
   if (sum.authFailed) return sum;
@@ -1857,6 +2025,15 @@ export async function computeProfit(
 
   const missingCost = rows.filter(r => r.quantity > 0 && !r.costEntered).length;
 
+  // 윙(마켓플레이스)과 로켓그로스는 회계 기준이 다르다. 합계 하나로 뭉치면
+  // 확정 정산과 주문 기준 추정이 소리 없이 섞이므로 따로 낸다.
+  const byChannel = { marketplace: { quantity: 0, salesAmount: 0 }, growth: { quantity: 0, salesAmount: 0 } };
+  for (const sale of salesRes.rows) {
+    const bucket = sale.channel === 'growth' ? byChannel.growth : byChannel.marketplace;
+    bucket.quantity += Number(sale.quantity) || 0;
+    bucket.salesAmount += Number(sale.sales_amount) || 0;
+  }
+
   // ── 일별 추이 ──
   // 합계 하나로는 "지금 오르는 중인지 꺾이는 중인지"를 알 수 없다. 같은 300만원도
   // 우상향이면 재고를 늘려야 하고 우하향이면 원인을 찾아야 한다.
@@ -1925,6 +2102,16 @@ export async function computeProfit(
     },
     missingCost,
     daily,
+    channels: {
+      marketplace: {
+        quantity: byChannel.marketplace.quantity,
+        salesAmount: Math.round(byChannel.marketplace.salesAmount),
+      },
+      growth: {
+        quantity: byChannel.growth.quantity,
+        salesAmount: Math.round(byChannel.growth.salesAmount),
+      },
+    },
     // 원가를 하나도 안 넣었으면 순이익이 매출과 같아 보여 오해를 부른다. 화면에서 경고한다.
     costCoverage: rows.length > 0 ? ((rows.length - missingCost) / rows.length) * 100 : 0,
     // 데이터가 하루도 없으면 0이 아니라 null이다. 0을 주면 화면이
