@@ -24,6 +24,7 @@ import {
   rgOrdersQuery,
   sellerProductsQuery,
   selectAll,
+  sellerDiscountOf,
   signedDate,
   slope,
   toIso,
@@ -216,4 +217,22 @@ test('광고 보고서 주소: 쿠팡·쿠팡 저장소만, https 만', () => {
   assert.equal(isAllowedReportHost('https://coupang.com.evil.com/'), false);
   assert.equal(isAllowedReportHost('https://169.254.169.254/latest/meta-data'), false);
   assert.equal(isAllowedReportHost('not a url'), false);
+});
+
+// ── 발주서 쿠폰 할인 ───────────────────────────────────────────
+// 판매가 39,800원에 즉시할인쿠폰 10,000원이면 실제 판매가는 29,800원이다.
+// 판매자 부담(즉시할인·다운로드쿠폰)만 빼고 쿠팡 부담은 빼지 않는다.
+test('쿠폰 할인: 판매자 부담과 쿠팡 부담을 가른다', () => {
+  assert.deepEqual(
+    sellerDiscountOf({ discountPrice: 13000, instantCouponDiscount: 10000, downloadableCouponDiscount: 2000, coupangDiscount: 1000 }),
+    { seller: 12000, coupang: 1000 },
+  );
+  // v5는 금액이 { units, nanos } 로 온다
+  assert.deepEqual(
+    sellerDiscountOf({ instantCouponDiscount: { units: 5000, nanos: 0 }, downloadableCouponDiscount: { units: 0, nanos: 0 }, coupangDiscount: { units: 0, nanos: 0 } }),
+    { seller: 5000, coupang: 0 },
+  );
+  // 부담 항목이 없고 총액만 있으면 전부 판매자 부담으로 본다 — 실매출을 크게 보는 쪽이 더 나쁘다
+  assert.deepEqual(sellerDiscountOf({ discountPrice: '3,000' }), { seller: 3000, coupang: 0 });
+  assert.deepEqual(sellerDiscountOf({}), { seller: 0, coupang: 0 });
 });

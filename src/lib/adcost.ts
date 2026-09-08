@@ -94,3 +94,36 @@ export function rowsFromMatrix(matrix: any[][]): Record<string, any>[] {
   }
   return out;
 }
+
+// 광고 보고서의 옵션ID 열. 상품별 순이익에 광고비를 붙이려면 이 열이 있어야 한다.
+export const AD_OPTION_COLUMNS = ["광고집행 옵션ID", "광고집행 옵션 ID", "옵션ID", "옵션 ID", "vendorItemId"];
+
+/**
+ * 보고서에서 날짜·옵션별 광고비를 뽑는다. 일자 열이나 옵션ID 열이 없으면 null.
+ * 옵션ID가 비어 있는 행(캠페인 단위로만 잡힌 광고비)은 옵션에 붙일 수 없어 건너뛴다 —
+ * 그 몫은 일자별 합계에는 들어가고 옵션별 합계와의 차이로 남는다.
+ */
+export function extractItemAdCost(rawData: any[]): { date: string; vendorItemId: string; cost: number }[] | null {
+  if (!rawData || rawData.length === 0) return null;
+  const cols = new Set<string>();
+  for (const row of rawData.slice(0, 20)) Object.keys(row ?? {}).forEach(k => cols.add(k.trim()));
+  const dateCol = AD_DATE_COLUMNS.find(c => cols.has(c));
+  const optCol = AD_OPTION_COLUMNS.find(c => cols.has(c));
+  if (!dateCol || !optCol || !cols.has("광고비")) return null;
+
+  const map = new Map<string, number>();
+  for (const raw of rawData) {
+    const row: any = {};
+    Object.keys(raw).forEach(k => { row[k.trim()] = raw[k]; });
+    const date = toISODate(row[dateCol]);
+    const opt = String(row[optCol] ?? "").replace(/\.0$/, "").trim();
+    if (!date || !/^\d+$/.test(opt)) continue;
+    const key = `${date}|${opt}`;
+    map.set(key, (map.get(key) ?? 0) + toNumber(row["광고비"]));
+  }
+  if (map.size === 0) return null;
+  return [...map.entries()].map(([k, cost]) => {
+    const [date, vendorItemId] = k.split("|");
+    return { date, vendorItemId, cost: Math.round(cost) };
+  });
+}

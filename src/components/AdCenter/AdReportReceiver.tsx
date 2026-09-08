@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, Megaphone, Upload, XCircle } from 'lucide-react';
 import { AD_CENTER_ORIGIN, ymdToIso } from '../../lib/adCollector';
 import { parseAdReportBuffer } from '../../lib/adReport';
-import { extractDailyAdCost } from '../../lib/adcost';
+import { extractDailyAdCost, extractItemAdCost } from '../../lib/adcost';
 import { coupangApi, won } from '../../lib/coupang';
 
 type Phase =
@@ -44,7 +44,7 @@ export function AdReportReceiver() {
     const daily = extractDailyAdCost(rows);
     if (daily) {
       // 보고서 안의 날짜가 기준이다. 요청 기간보다 좁을 수 있다(집행 없는 날).
-      const r = await coupangApi.adCostSave({ from, to, daily: daily.days, source: 'report' });
+      const r = await coupangApi.adCostSave({ from, to, daily: daily.days, source: 'report', items: extractItemAdCost(rows) ?? [] });
       return { days: r.days, total: r.total, estimated: false, columns: cols };
     }
     // 일자 컬럼이 없으면 합계라도 기간에 나눠 넣는다. 아예 없는 것보다 낫지만 화면에는 '추정'으로 표시되고,
@@ -144,8 +144,9 @@ export function AdReportReceiver() {
   };
 
   const goHome = () => {
-    // 이 창은 북마클릿이 연 창이라 원래 탭이 따로 있다. 여기서 순이익을 바로 보여준다.
-    window.location.href = '/';
+    // 이 창은 북마클릿이 연 창이라 원래 탭이 따로 있다. 여기서 순이익 화면으로 바로 보낸다 —
+    // 홈으로 보내면 "순이익 보러 가기"를 눌렀는데 홈이 떠서 다시 찾아 들어가야 한다.
+    window.location.href = '/?tab=coupang';
   };
 
   return (

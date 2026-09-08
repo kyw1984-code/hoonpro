@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { Upload, Save, TrendingUp, X, Loader2 } from "lucide-react";
 import { getToken } from "../../lib/auth";
 import { coupangApi } from "../../lib/coupang";
-import { extractDailyAdCost } from "../../lib/adcost";
+import { extractDailyAdCost, extractItemAdCost } from "../../lib/adcost";
 import { parseAdReportBuffer } from "../../lib/adReport";
 import { AdCenterConnect } from "../AdCenter/AdCenterConnect";
 
@@ -574,7 +574,7 @@ export function AnalyzerDashboard() {
       if (adFrom && adTo && adFrom <= adTo) {
         try {
           const r = adDaily
-            ? await coupangApi.adCostSave({ from: adFrom, to: adTo, daily: adDaily.days })
+            ? await coupangApi.adCostSave({ from: adFrom, to: adTo, daily: adDaily.days, items: extractItemAdCost(rawData) ?? [] })
             : await coupangApi.adCostSave({ from: adFrom, to: adTo, total: Math.round(summary.totalCost) });
           adMsg = adDaily
             ? ` 광고비 ${r.days}일치(${r.total.toLocaleString()}원)가 순이익 화면에 자동 반영됩니다.`

@@ -83,8 +83,14 @@ const getTabButtonClass = (active: boolean): string => (
   }`
 );
 
-const initialTab = (): Tab =>
-  window.location.search.includes('billingAuth') ? 'billing' : 'home';
+// 주소의 tab= 으로 첫 화면을 고를 수 있다. 광고센터 수신 창의 [순이익 보러 가기]처럼
+// 다른 창에서 특정 화면으로 보내야 할 때 쓴다. 모르는 값이면 홈이다.
+const initialTab = (): Tab => {
+  if (window.location.search.includes('billingAuth')) return 'billing';
+  const wanted = new URLSearchParams(window.location.search).get('tab');
+  if (wanted && (TABS as ReadonlyArray<{ id: string }>).some(t => t.id === wanted)) return wanted as Tab;
+  return 'home';
+};
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);

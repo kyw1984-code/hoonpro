@@ -886,3 +886,35 @@ create table if not exists coupang_growth_inventory (
 );
 alter table coupang_growth_inventory enable row level security;
 revoke all on coupang_growth_inventory from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 34. 주문의 쿠폰 할인 — 판매가와 실제 판매가는 다르다
+-- ─────────────────────────────────────────────────────────────
+-- 판매가 39,800원에 즉시할인쿠폰 10,000원이면 실제로 받는 돈은 29,800원이다.
+-- 발주서는 주문 건마다 이 할인을 나눠 준다:
+--   discountPrice(총) = instantCouponDiscount(즉시할인) + downloadableCouponDiscount(다운로드쿠폰)
+--                     + coupangDiscount(쿠팡 지원)
+-- 앞 둘은 판매자 부담이라 매출에서 빠지고, 마지막은 쿠팡이 메워 주므로 안 빠진다.
+-- order_amount는 할인 전 주문금액 그대로 두고, 판매자 부담분을 따로 둔다.
+-- 실매출 = order_amount − seller_discount.
+alter table coupang_orders_daily add column if not exists seller_discount bigint not null default 0;
+alter table coupang_orders_daily add column if not exists coupang_discount bigint not null default 0;
+
+-- ─────────────────────────────────────────────────────────────
+-- 35. 옵션별 광고비 — 상품별 순이익에서 광고비를 빼려면 옵션 단위가 필요하다
+-- ─────────────────────────────────────────────────────────────
+-- 광고 보고서에는 행마다 '광고집행 옵션ID'가 있다. 일자별 합계(coupang_ad_costs)만
+-- 두면 순이익 합계에서만 광고비가 빠지고 상품별 표에는 못 붙인다. 옵션별로도
+-- 쌓아 두고, 합계와의 차이(옵션에 못 붙는 광고비)는 화면에서 밝힌다.
+create table if not exists coupang_ad_costs_items (
+  user_id uuid not null,
+  ad_date date not null,
+  vendor_item_id text not null,
+  cost numeric not null default 0,
+  batch_id text,
+  updated_at timestamptz default now(),
+  primary key (user_id, ad_date, vendor_item_id)
+);
+create index if not exists idx_caci_user_date on coupang_ad_costs_items(user_id, ad_date);
+alter table coupang_ad_costs_items enable row level security;
+revoke all on coupang_ad_costs_items from anon, authenticated;

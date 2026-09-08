@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
 import { tabDisabledMessage } from '../lib/feature-gate.js';
 import * as XLSX from 'xlsx';
-import { extractDailyAdCost, rowsFromMatrix } from '../src/lib/adcost.js';
+import { extractDailyAdCost, extractItemAdCost, rowsFromMatrix } from '../src/lib/adcost.js';
 
 export const config = { maxDuration: 300 };
 
@@ -479,6 +479,32 @@ async function upsertChunked(table: string, rows: any[], onConflict: string): Pr
 // 목록 조회로 등록상품을 훑고, 상세는 회차당 상한만큼만 가져온다.
 // 상세를 오래 못 받은 상품부터 채우므로 몇 회차 안에 전체가 최신화된다.
 /**
+ * 발주서 한 품목의 쿠폰 할인.
+ *
+ * 판매가 39,800원에 즉시할인쿠폰 10,000원이면 실제로 받는 돈은 29,800원이다.
+ * 발주서는 할인을 부담 주체별로 나눠 준다:
+ *   discountPrice(총) = instantCouponDiscount + downloadableCouponDiscount + coupangDiscount
+ * 앞 둘은 판매자 부담이라 매출에서 빠지고, coupangDiscount는 쿠팡이 메워 주므로 안 빠진다.
+ * 부담 항목이 없고 총액만 있으면 전부 판매자 부담으로 본다 — 실매출을 크게 보는 쪽이
+ * 작게 보는 쪽보다 나쁘다.
+ * 금액이 { units, nanos } 객체로 오는 버전(v5)도 있어 둘 다 읽는다.
+ */
+export function sellerDiscountOf(item: any): { seller: number; coupang: number } {
+  const money = (v: any): number => {
+    if (v && typeof v === 'object' && 'units' in v) return Number(v.units) || 0;
+    const n = Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  };
+  const instant = money(item?.instantCouponDiscount);
+  const download = money(item?.downloadableCouponDiscount);
+  const coupang = money(item?.coupangDiscount);
+  const total = money(item?.discountPrice);
+  let seller = instant + download;
+  if (seller === 0 && coupang === 0 && total > 0) seller = total;
+  return { seller: Math.max(0, seller), coupang: Math.max(0, coupang) };
+}
+
+/**
  * 등록상품 목록 질의문.
  *
  * nextToken은 값이 비어도 반드시 보낸다. 빼면 쿠팡이 오류 없이 빈 목록을 돌려줘
@@ -700,6 +726,7 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
             const key = `${orderDate}:${vendorItemId}`;
             const qty = pickNum(it, ['shippingCount', 'quantity'], 1);
             const amount = pickNum(it, ['orderPrice', 'salesPrice', 'unitPrice']) || 0;
+            const discount = sellerDiscountOf(it);
             const cur = agg.get(key) ?? {
               user_id: userId,
               order_date: orderDate,
@@ -708,9 +735,13 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
               product_name: pickStr(it, ['vendorItemName', 'sellerProductName', 'productName']),
               quantity: 0,
               order_amount: 0,
+              seller_discount: 0,
+              coupang_discount: 0,
             };
             cur.quantity += qty;
             cur.order_amount += amount;
+            cur.seller_discount += discount.seller;
+            cur.coupang_discount += discount.coupang;
             agg.set(key, cur);
           }
         }
@@ -800,7 +831,11 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
             settlement_amount: 0,
           };
           cur.quantity += pickNum(it, ['quantity', 'saleCount', 'shippingCount'], 0);
-          cur.sales_amount += pickNum(it, ['salePrice', 'saleAmount', 'totalSalePrice', 'settlementTargetAmount'], 0);
+          // saleAmount(금액)가 있으면 그것, 없으면 단가 × 수량. 단가를 먼저 집으면
+          // 한 행에 수량이 2 이상일 때 매출이 그만큼 덜 잡힌다.
+          cur.sales_amount +=
+            pickNum(it, ['saleAmount', 'totalSalePrice', 'settlementTargetAmount'], 0) ||
+            pickNum(it, ['salePrice'], 0) * (pickNum(it, ['quantity', 'saleCount', 'shippingCount'], 0) || 1);
           // 수수료는 음수로 오는 경우가 있어 절대값으로 통일한다.
           cur.commission += Math.abs(pickNum(it, ['serviceFee', 'commission', 'saleCommission', 'coupangCommission'], 0));
           cur.settlement_amount += pickNum(it, ['settlementAmount', 'settleAmount', 'payoutAmount'], 0);
@@ -1019,6 +1054,8 @@ async function syncRocketGrowth(
           const unit = pickNum(it, ['unitSalesPrice', 'salePrice', 'unitPrice'], 0);
           cur.quantity += qty;
           cur.sales_amount += pickNum(it, ['orderPrice', 'totalSalePrice'], 0) || qty * unit;
+          // 그로스 주문에 같은 할인 항목이 실려 오면 판매자 부담분을 매출에서 뺀다
+          cur.sales_amount -= sellerDiscountOf(it).seller;
           agg.set(key, cur);
         }
       }
@@ -2128,6 +2165,10 @@ interface ProfitRow {
   salesAmount: number;
   commission: number;
   settlementAmount: number;
+  /** 같은 기간 주문에서 판매자가 부담한 쿠폰 할인. 판매가와 실제 판매가의 차이다 */
+  couponDiscount: number;
+  /** 이 옵션에 붙은 광고비 (보고서의 광고집행 옵션ID 기준) */
+  adCost: number;
   unitCostTotal: number;
   returnCount: number;
   returnCost: number;
@@ -2159,7 +2200,7 @@ export async function computeProfit(
   opts: { totalsOnly?: boolean } = {},
 ) {
   const lite = opts.totalsOnly === true;
-  const [salesRes, costRes, itemRes, returnRes, adRes] = await Promise.all([
+  const [salesRes, costRes, itemRes, returnRes, adRes, adItemRes, orderRes] = await Promise.all([
     selectAll((f, t) => supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId)
       .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
     selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
@@ -2181,6 +2222,15 @@ export async function computeProfit(
     lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_ad_costs')
       .select('ad_date, cost, source').eq('user_id', userId)
       .gte('ad_date', from).lte('ad_date', to).order('ad_date').range(f, t)),
+    // 옵션별 광고비 — 상품별 순이익에서 광고비를 빼기 위한 것
+    lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_ad_costs_items')
+      .select('vendor_item_id, cost').eq('user_id', userId)
+      .gte('ad_date', from).lte('ad_date', to).order('ad_date').range(f, t)),
+    // 같은 기간 주문의 쿠폰 할인. 매출내역(인식일)과 주문(주문일)은 기준이 달라
+    // 상품별로는 근사지만, 판매자가 "실제로 얼마에 팔렸나"를 보는 데는 이 값이 답이다.
+    selectAll((f, t) => supabase!.from('coupang_orders_daily')
+      .select('vendor_item_id, quantity, order_amount, seller_discount, coupang_discount').eq('user_id', userId)
+      .gte('order_date', from).lte('order_date', to).order('order_date').range(f, t)),
   ]);
 
   const costs = new Map<string, any>();
@@ -2188,6 +2238,24 @@ export async function computeProfit(
 
   const items = new Map<string, any>();
   for (const it of itemRes.rows) items.set(String(it.vendor_item_id), it);
+
+  const adItemAgg = new Map<string, number>();
+  for (const a of adItemRes.rows) {
+    const id = String(a.vendor_item_id ?? '');
+    adItemAgg.set(id, (adItemAgg.get(id) ?? 0) + (Number(a.cost) || 0));
+  }
+
+  const couponAgg = new Map<string, number>();
+  const coupon = { orderAmount: 0, sellerDiscount: 0, coupangDiscount: 0, orderQuantity: 0 };
+  for (const o of orderRes.rows) {
+    const id = String(o.vendor_item_id ?? '');
+    const seller = Number(o.seller_discount) || 0;
+    couponAgg.set(id, (couponAgg.get(id) ?? 0) + seller);
+    coupon.orderAmount += Number(o.order_amount) || 0;
+    coupon.sellerDiscount += seller;
+    coupon.coupangDiscount += Number(o.coupang_discount) || 0;
+    coupon.orderQuantity += Number(o.quantity) || 0;
+  }
 
   const returnAgg = new Map<string, number>();
   for (const r of returnRes.rows) {
@@ -2211,6 +2279,8 @@ export async function computeProfit(
         salesAmount: 0,
         commission: 0,
         settlementAmount: 0,
+        couponDiscount: 0,
+        adCost: 0,
         unitCostTotal: 0,
         returnCount: 0,
         returnCost: 0,
@@ -2235,7 +2305,7 @@ export async function computeProfit(
       vendorItemId: id,
       productName: item?.product_name ?? '(상품명 미확인)',
       optionName: item?.option_name ?? '',
-      quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0,
+      quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, couponDiscount: 0, adCost: 0,
       unitCostTotal: 0, returnCount: count, returnCost: 0, profit: 0, marginRate: 0,
       costEntered: false, stock: item?.stock ?? null, salePrice: item?.sale_price ?? null,
     });
@@ -2249,7 +2319,12 @@ export async function computeProfit(
     row.unitCostTotal = perUnit * row.quantity;
     row.returnCount = returnAgg.get(row.vendorItemId) ?? 0;
     row.returnCost = row.returnCount * (c ? Number(c.return_shipping_cost) || 0 : 0);
-    row.profit = row.settlementAmount - row.unitCostTotal - row.returnCost;
+    row.couponDiscount = couponAgg.get(row.vendorItemId) ?? 0;
+    row.adCost = adItemAgg.get(row.vendorItemId) ?? 0;
+    // 순이익 = 매출 − 수수료 − 원가·배송 − 반품 − 광고비. 정산예정액이 이미 수수료를
+    // 뺀 값이라 거기서 나머지를 뺀다. 광고비는 옵션에 붙은 몫만 — 옵션 없이 캠페인
+    // 단위로만 잡힌 광고비는 합계 카드에서만 빠지고, 그 차이를 화면에 밝힌다.
+    row.profit = row.settlementAmount - row.unitCostTotal - row.returnCost - row.adCost;
     row.marginRate = row.salesAmount > 0 ? (row.profit / row.salesAmount) * 100 : 0;
     rows.push(row);
   }
@@ -2266,9 +2341,11 @@ export async function computeProfit(
       t.returnCount += r.returnCount;
       t.returnCost += r.returnCost;
       t.profit += r.profit;
+      t.couponDiscount += r.couponDiscount;
+      t.adCost += r.adCost;
       return t;
     },
-    { quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, unitCostTotal: 0, returnCount: 0, returnCost: 0, profit: 0 },
+    { quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, unitCostTotal: 0, returnCount: 0, returnCost: 0, profit: 0, couponDiscount: 0, adCost: 0 },
   );
 
   const missingCost = rows.filter(r => r.quantity > 0 && !r.costEntered).length;
@@ -2350,6 +2427,8 @@ export async function computeProfit(
     },
     missingCost,
     daily,
+    // 판매가 기준 주문금액과 판매자 부담 쿠폰. 실매출 = orderAmount − sellerDiscount.
+    coupon,
     channels: {
       marketplace: {
         quantity: byChannel.marketplace.quantity,
@@ -2639,9 +2718,36 @@ async function persistAdCosts(
     .neq('batch_id', batchId);
   if (delErr) return res.status(500).json({ error: `정리 실패: ${delErr.message}` });
 
+  // 옵션별 광고비. 상품별 순이익에 붙이려면 옵션 단위가 필요하다. 보고서에 옵션ID
+  // 열이 있을 때만 오고, 같은 기간의 옛 옵션 행은 일자별과 같은 방식으로 정리한다.
+  const items = Array.isArray(body.items) ? body.items : [];
+  let attributed = 0;
+  if (items.length > 0) {
+    const itemRows = items
+      .map((it: any) => ({
+        user_id: userId,
+        ad_date: String(it?.date ?? ''),
+        vendor_item_id: String(it?.vendorItemId ?? '').trim(),
+        cost: clamp(it?.cost),
+        batch_id: batchId,
+        updated_at: new Date().toISOString(),
+      }))
+      .filter((r: any) => AD_DATE_RE.test(r.ad_date) && r.ad_date >= from && r.ad_date <= to && /^\d+$/.test(r.vendor_item_id));
+    if (itemRows.length > 0) {
+      const e2 = await upsertChunked('coupang_ad_costs_items', itemRows, 'user_id,ad_date,vendor_item_id');
+      if (e2) return res.status(500).json({ error: `옵션별 광고비 저장 실패: ${e2}` });
+      attributed = itemRows.reduce((a: number, r: any) => a + r.cost, 0);
+    }
+    await supabase!
+      .from('coupang_ad_costs_items').delete()
+      .eq('user_id', userId).gte('ad_date', from).lte('ad_date', to)
+      .neq('batch_id', batchId);
+  }
+
   return res.status(200).json({
     ok: true, from, to, days: rows.length, source,
     total: rows.reduce((a, r) => a + r.cost, 0),
+    attributed,
   });
 }
 
@@ -2710,7 +2816,7 @@ async function handleAdImportUrl(userId: string, req: VercelRequest, res: Vercel
   const daily = extractDailyAdCost(rows);
   let out;
   if (daily) {
-    out = await persistAdCosts(userId, { from, to, daily: daily.days, source: 'report' });
+    out = await persistAdCosts(userId, { from, to, daily: daily.days, source: 'report', items: extractItemAdCost(rows) ?? [] });
   } else {
     const cols = Object.keys(rows[0] ?? {});
     const costCol = cols.find(c => String(c).trim() === '광고비');
@@ -2931,10 +3037,13 @@ async function sendWeeklyReport(
 
   // 광고비까지 뺀 값이 진짜 순이익이다. 광고 보고서를 올려 둔 주에만
   // 값이 있고, 안 올린 주는 0이라 예전과 같은 숫자가 나간다.
+  // 상품에 붙은 광고비는 상품별 순이익(totals.profit)에서 이미 빠졌다. 옵션에 못 붙은
+  // 나머지만 더 뺀다. 둘 다 빼면 광고비가 두 번 빠진다. 직전 주는 상품별을 안 뽑는
+  // 가벼운 계산이라(totalsOnly) 옵션별 광고비가 0이고, 합계를 그대로 뺀다.
   const adCost = cur.adCostHint ?? 0;
   const prevAdCost = prev.adCostHint ?? 0;
-  const netProfit = cur.totals.profit - adCost;
-  const prevNetProfit = prev.totals.profit - prevAdCost;
+  const netProfit = cur.totals.profit - Math.max(0, adCost - (cur.totals.adCost ?? 0));
+  const prevNetProfit = prev.totals.profit - Math.max(0, prevAdCost - (prev.totals.adCost ?? 0));
   const netMargin = cur.totals.salesAmount > 0 ? (netProfit / cur.totals.salesAmount) * 100 : 0;
 
   const summary = {
