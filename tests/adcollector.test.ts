@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAdBookmarklet, ymdToIso, AD_CENTER_ORIGIN } from '../src/lib/adCollector.ts';
-import { extractDailyAdCost, extractItemAdCost, rowsFromMatrix } from '../src/lib/adcost.ts';
+import { extractDailyAdCost, extractItemAdCost, rowsFromMatrix, toISODate } from '../src/lib/adcost.ts';
 
 test('북마클릿: javascript: 주소이고 광고센터 요청 경로를 전부 담는다', () => {
   const url = buildAdBookmarklet('https://hoonproai.com');
@@ -91,4 +91,16 @@ test('extractItemAdCost: 날짜·옵션별로 합치고 옵션ID 없는 행은 �
     ],
   );
   assert.equal(extractItemAdCost([{ 날짜: '2026-09-06', 광고비: 1 }]), null);
+});
+
+// ── 날짜 형식 ───────────────────────────────────────────────────
+// 광고센터 보고서의 날짜는 20260906 처럼 구분자가 없다. 실제로 이 형식을 못 읽어
+// 30일치 광고비가 통째로 균등 분배됐다.
+test('toISODate: 구분자 없는 yyyyMMdd (숫자·문자열)', () => {
+  assert.equal(toISODate(20260906), '2026-09-06');
+  assert.equal(toISODate('20260906'), '2026-09-06');
+  assert.equal(toISODate('2026-09-06'), '2026-09-06');
+  assert.equal(toISODate('2026.9.6'), '2026-09-06');
+  assert.equal(toISODate('20261399'), null);
+  assert.equal(toISODate('abc'), null);
 });

@@ -322,7 +322,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               <Stat
                 label="쿠폰 할인 (판매자 부담)"
                 value={`− ${won(data.coupon!.sellerDiscount)}`}
-                sub={`실매출 ${won(data.totals.salesAmount - data.coupon!.sellerDiscount)} · 윙 주문의 쿠폰`}
+                sub={`실매출 ${won(data.totals.salesAmount - data.coupon!.sellerDiscount)} · 윙·그로스 주문 기준`}
                 tone="critical"
               />
             )}

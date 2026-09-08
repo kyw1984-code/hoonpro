@@ -348,6 +348,9 @@ const EP = {
   rgOrders: (vendorId: string) => `/v2/providers/rg_open_api/apis/api/v1/vendors/${vendorId}/rg/orders`,
   // 로켓창고 재고 — 옵션별 판매가능수량과 쿠팡 자체 집계 30일 판매수
   rgInventory: (vendorId: string) => `/v2/providers/rg_open_api/apis/api/v1/vendors/${vendorId}/rg/inventory/summaries`,
+  // 주문에 적용된 쿠폰. 그로스 주문에는 할인 항목이 없어 이걸로 묻는다.
+  orderCoupons: (vendorId: string, orderId: string) =>
+    `/v2/providers/fms/apis/api/v2/vendors/${vendorId}/${encodeURIComponent(orderId)}/coupons`,
   settlementHistories: '/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories',
   returnRequests: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/returnRequests`,
   onlineInquiries: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/onlineInquiries`,
@@ -376,6 +379,8 @@ const LIMITS = {
   rgDaysIncr: 30,
   rgChunkDays: 30,         // 로켓그로스는 한 번에 30일까지만 조회된다
   rgGapMs: 1300,           // 분당 50회 한도. 1300ms면 약 46회/분으로 아래를 유지한다
+  couponGapMs: 250,        // 주문별 쿠폰 조회 간격
+  couponPerRun: 80,        // 회차당 쿠폰을 물을 주문 수. 나머지는 다음 회차가 이어받는다
 };
 
 export interface SyncSummary {
@@ -1001,6 +1006,8 @@ async function syncRocketGrowth(
   let lastCallAt = 0;
   let cancelled = 0;
   let firstOrderShape = '';
+  // 주문별 쿠폰을 물으려면 주문번호와 옵션별 금액이 필요하다
+  const orderMeta = new Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number }> }>();
 
   const call = async (cFrom: string, cTo: string, token: string) => {
     // 분당 50회 한도를 지킨다. 몰아 치면 429가 나고, 그 회차 그로스 매출이 빈다.
@@ -1072,11 +1079,17 @@ async function syncRocketGrowth(
           // 수량 × 개당 판매가. unitSalesPrice는 "4900.0" 같은 문자열로 온다.
           const qty = pickNum(it, ['salesQuantity', 'shippingCount', 'quantity'], 0);
           const unit = pickNum(it, ['unitSalesPrice', 'salePrice', 'unitPrice'], 0);
+          const lineAmount = pickNum(it, ['orderPrice', 'totalSalePrice'], 0) || qty * unit;
           cur.quantity += qty;
-          cur.sales_amount += pickNum(it, ['orderPrice', 'totalSalePrice'], 0) || qty * unit;
-          // 그로스 주문에 같은 할인 항목이 실려 오면 판매자 부담분을 매출에서 뺀다
-          cur.sales_amount -= sellerDiscountOf(it).seller;
+          cur.sales_amount += lineAmount;
           agg.set(key, cur);
+
+          const orderId = pickStr(order, ['orderId', 'orderID']);
+          if (orderId) {
+            const meta = orderMeta.get(orderId) ?? { date, items: [] };
+            meta.items.push({ vendorItemId, amount: lineAmount });
+            orderMeta.set(orderId, meta);
+          }
         }
       }
 
@@ -1120,6 +1133,84 @@ async function syncRocketGrowth(
   if (err) sum.errors.push(err);
   sum.growth = rows.length;
   sum.growthCancelled = cancelled;
+
+  await syncGrowthOrderCoupons(userId, creds, orderMeta, sum, deadline);
+}
+
+// ── 그로스 주문별 쿠폰 ────────────────────────────────────────
+//
+// 그로스 주문 API에는 할인 항목이 없다(실측: vendorItemId·productName·salesQuantity·
+// unitSalesPrice·currency 뿐). 쿠팡에 "이 주문에 적용된 쿠폰"을 주문번호로 묻는
+// API가 따로 있어 그걸 쓴다. 한 번 물은 주문은 다시 묻지 않고, 회차당 상한을 두어
+// 시간 예산 안에 끝낸다 — 나머지는 다음 회차가 이어받는다.
+async function syncGrowthOrderCoupons(
+  userId: string,
+  creds: CoupangCreds,
+  orderMeta: Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number }> }>,
+  sum: SyncSummary,
+  deadline: number,
+): Promise<void> {
+  if (!supabase || orderMeta.size === 0) return;
+
+  const ids = [...orderMeta.keys()];
+  const { rows: done } = await selectAll<{ order_id: string }>((f, t) =>
+    supabase!.from('coupang_order_coupons').select('order_id').eq('user_id', userId).in('order_id', ids).range(f, t));
+  const seen = new Set(done.map(d => String(d.order_id)));
+  const todo = ids.filter(id => !seen.has(id)).slice(0, LIMITS.couponPerRun);
+  if (todo.length === 0) return;
+
+  const rows: any[] = [];
+  let lastCallAt = 0;
+  let typesSeen = new Set<string>();
+  for (const orderId of todo) {
+    if (outOfTime(deadline, sum)) break;
+    const wait = LIMITS.couponGapMs - (Date.now() - lastCallAt);
+    if (wait > 0) await sleep(wait);
+    lastCallAt = Date.now();
+
+    const r = await coupangCall(creds, 'GET', EP.orderCoupons(creds.vendorId, orderId), '');
+    if (!r.ok) {
+      if (r.authFailed) {
+        sum.authFailed = true;
+        return;
+      }
+      // 권한이 없거나 API가 닫혀 있으면 그로스 쿠폰은 알 수 없다. 오류 한 번만 남기고 멈춘다.
+      sum.errors.push(`그로스 쿠폰: ${r.error}`);
+      break;
+    }
+    const list = listOf(r.data);
+    // 쿠팡 부담으로 표시된 것은 뺀다. 나머지는 판매자 부담으로 본다 — 실매출을
+    // 크게 보는 쪽이 작게 보는 쪽보다 나쁘다.
+    let discount = 0;
+    const types: string[] = [];
+    for (const c of list) {
+      const type = pickStr(c, ['type', 'couponType', 'discountType']);
+      types.push(type);
+      typesSeen.add(type);
+      if (/COUPANG|쿠팡/i.test(type)) continue;
+      discount += pickNum(c, ['discount', 'discountAmount', 'amount'], 0);
+    }
+    const meta = orderMeta.get(orderId)!;
+    const totalAmount = meta.items.reduce((n, it) => n + it.amount, 0);
+    // 한 주문에 옵션이 여럿이면 금액 비율로 나눈다. 마지막 옵션이 나머지를 가져가
+    // 합계가 정확히 맞는다.
+    let allocated = 0;
+    meta.items.forEach((it, i) => {
+      const share = i === meta.items.length - 1
+        ? discount - allocated
+        : totalAmount > 0 ? Math.round((discount * it.amount) / totalAmount) : 0;
+      allocated += share;
+      rows.push({
+        user_id: userId, order_id: orderId, vendor_item_id: it.vendorItemId, channel: 'growth',
+        sale_date: meta.date, discount: Math.max(0, share), coupon_types: types.join(',') || null,
+        fetched_at: new Date().toISOString(),
+      });
+    });
+  }
+  if (rows.length === 0) return;
+  const err = await upsertChunked('coupang_order_coupons', rows, 'user_id,order_id,vendor_item_id');
+  if (err) sum.errors.push(err);
+  if (typesSeen.size > 0) console.info('coupang order coupon types —', [...typesSeen].join(','));
 }
 
 // ── 로켓창고 재고 동기화 ──────────────────────────────────────
@@ -2295,7 +2386,7 @@ export async function computeProfit(
   opts: { totalsOnly?: boolean } = {},
 ) {
   const lite = opts.totalsOnly === true;
-  const [salesRes, costRes, itemRes, returnRes, adRes, adItemRes, orderRes] = await Promise.all([
+  const [salesRes, costRes, itemRes, returnRes, adRes, adItemRes, growthCouponRes, orderRes] = await Promise.all([
     selectAll((f, t) => supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId)
       .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
     selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
@@ -2321,6 +2412,10 @@ export async function computeProfit(
     lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_ad_costs_items')
       .select('vendor_item_id, cost').eq('user_id', userId)
       .gte('ad_date', from).lte('ad_date', to).order('ad_date').range(f, t)),
+    // 그로스 주문별 쿠폰 (윙은 발주서에서, 그로스는 주문별 쿠폰 조회에서 온다)
+    selectAll((f, t) => supabase!.from('coupang_order_coupons')
+      .select('vendor_item_id, discount').eq('user_id', userId)
+      .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
     // 같은 기간 주문의 쿠폰 할인. 매출내역(인식일)과 주문(주문일)은 기준이 달라
     // 상품별로는 근사지만, 판매자가 "실제로 얼마에 팔렸나"를 보는 데는 이 값이 답이다.
     selectAll((f, t) => supabase!.from('coupang_orders_daily')
@@ -2350,6 +2445,12 @@ export async function computeProfit(
     coupon.sellerDiscount += seller;
     coupon.coupangDiscount += Number(o.coupang_discount) || 0;
     coupon.orderQuantity += Number(o.quantity) || 0;
+  }
+  for (const g of growthCouponRes.rows) {
+    const id = String(g.vendor_item_id ?? '');
+    const d = Number(g.discount) || 0;
+    couponAgg.set(id, (couponAgg.get(id) ?? 0) + d);
+    coupon.sellerDiscount += d;
   }
 
   const returnAgg = new Map<string, number>();
