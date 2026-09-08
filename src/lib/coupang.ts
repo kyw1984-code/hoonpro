@@ -337,6 +337,11 @@ export const coupangApi = {
   adCosts: (days: number) => request<AdCostsResponse>(`ad-costs&days=${days}`),
   adCostSave: (body: { from: string; to: string; daily?: { date: string; cost: number }[]; total?: number; source?: 'report' | 'manual' }) =>
     request<{ ok: true; from: string; to: string; days: number; source: string; total: number }>('ad-cost-save', { method: 'POST', body }),
+  /** 광고센터가 준 파일 주소(S3 등)를 서버가 대신 받아 광고비를 저장한다 — 브라우저는 다른 도메인이라 못 읽는다 */
+  adImportUrl: (url: string, from: string, to: string) =>
+    request<{ ok: true; from: string; to: string; days: number; source: string; total: number }>('ad-import-url', {
+      method: 'POST', body: { url, from, to },
+    }),
   adCostDelete: (from: string, to: string) =>
     request<{ ok: true }>('ad-cost-delete', { method: 'POST', body: { from, to } }),
   saveCosts: (items: Array<Partial<CostRow> & { vendorItemId: string }>) =>

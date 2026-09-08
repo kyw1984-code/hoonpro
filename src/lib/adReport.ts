@@ -6,11 +6,20 @@
  */
 import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
+import { rowsFromMatrix } from './adcost';
 
 /** 앞 두 바이트가 'PK'면 zip 계열(xlsx)이다 */
 function looksLikeZip(buf: ArrayBuffer): boolean {
   const b = new Uint8Array(buf.slice(0, 2));
   return b[0] === 0x50 && b[1] === 0x4b;
+}
+
+/** 첫 시트를 헤더 탐지와 함께 객체 행으로. cellDates가 없으면 날짜가 45000 같은 시리얼 숫자로 들어온다 */
+function sheetRows(buf: ArrayBuffer): any[] {
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null }) as any[][];
+  return rowsFromMatrix(matrix);
 }
 
 export function parseAdReportBuffer(buf: ArrayBuffer, hint?: { filename?: string; contentType?: string }): any[] {
@@ -26,16 +35,11 @@ export function parseAdReportBuffer(buf: ArrayBuffer, hint?: { filename?: string
     if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
     if (!looksLikeZip(buf) && !/[,\t;]/.test(text.slice(0, 2000))) {
       // 구분자가 없으면 표가 아니다 — 엑셀로 한 번 더 시도한다
-      const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      return XLSX.utils.sheet_to_json(ws) as any[];
+      return sheetRows(buf);
     }
-    const out = Papa.parse<Record<string, unknown>>(text, { header: true, skipEmptyLines: true });
-    return out.data as any[];
+    // 제목 줄이 헤더 위에 있을 수 있어 헤더 없이 읽고 '광고비' 줄을 찾는다
+    const out = Papa.parse<string[]>(text, { header: false, skipEmptyLines: true });
+    return rowsFromMatrix(out.data as any[][]);
   }
-
-  // cellDates가 없으면 날짜 셀이 45000 같은 시리얼 숫자로 들어와 일자별 광고비를 뽑을 수 없다
-  const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(ws) as any[];
+  return sheetRows(buf);
 }

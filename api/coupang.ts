@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
 import { tabDisabledMessage } from '../lib/feature-gate.js';
+import * as XLSX from 'xlsx';
+import { extractDailyAdCost, rowsFromMatrix } from '../src/lib/adcost.js';
 
 export const config = { maxDuration: 300 };
 
@@ -1897,6 +1899,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'ad-costs': return await handleAdCosts(userId, req, res);
       case 'ad-cost-save': return await handleAdCostSave(userId, req, res);
       case 'ad-cost-delete': return await handleAdCostDelete(userId, req, res);
+      case 'ad-import-url': return await handleAdImportUrl(userId, req, res);
       case 'settlement': return await handleSettlement(userId, res);
       case 'reports': return await handleReports(userId, res);
       case 'inventory': return await handleInventory(userId, req, res);
@@ -2569,8 +2572,20 @@ async function handleAdCosts(userId: string, req: VercelRequest, res: VercelResp
  */
 async function handleAdCostSave(userId: string, req: VercelRequest, res: VercelResponse) {
   const body = req.body ?? {};
+  const out = await persistAdCosts(userId, body);
+  return res.status(out.status).json(out.body);
+}
+
+/** 광고비 저장 본체. 화면 업로드·북마클릿·서버 대리 수신이 모두 이 길로 온다. */
+async function persistAdCosts(
+  userId: string,
+  body: any,
+): Promise<{ status: number; body: any }> {
   const from = String(body.from ?? '');
   const to = String(body.to ?? '');
+  const res = {
+    status: (code: number) => ({ json: (b: any) => ({ status: code, body: b }) }),
+  };
   if (!AD_DATE_RE.test(from) || !AD_DATE_RE.test(to)) {
     return res.status(400).json({ error: '기간을 YYYY-MM-DD 형식으로 보내주세요.' });
   }
@@ -2628,6 +2643,82 @@ async function handleAdCostSave(userId: string, req: VercelRequest, res: VercelR
     ok: true, from, to, days: rows.length, source,
     total: rows.reduce((a, r) => a + r.cost, 0),
   });
+}
+
+/**
+ * 광고센터가 준 파일 주소를 허용된 곳에서만 받는다. 사용자가 보낸 주소를 서버가
+ * 그대로 열면 내부망·메타데이터 주소를 찌르는 통로가 된다.
+ */
+export function isAllowedReportHost(url: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:') return false;
+  const h = u.hostname.toLowerCase();
+  return (
+    h === 'coupang.com' || h.endsWith('.coupang.com') ||
+    h.endsWith('.coupangcdn.com') ||
+    h.endsWith('.amazonaws.com')
+  );
+}
+
+const AD_IMPORT_MAX_BYTES = 25 * 1024 * 1024;
+
+async function handleAdImportUrl(userId: string, req: VercelRequest, res: VercelResponse) {
+  const url = String(req.body?.url ?? '');
+  const from = String(req.body?.from ?? '');
+  const to = String(req.body?.to ?? '');
+  if (!isAllowedReportHost(url)) {
+    return res.status(400).json({ error: '허용되지 않은 파일 주소입니다. (쿠팡 또는 쿠팡이 쓰는 저장소 주소만 받습니다)' });
+  }
+  if (!AD_DATE_RE.test(from) || !AD_DATE_RE.test(to)) {
+    return res.status(400).json({ error: '기간을 YYYY-MM-DD 형식으로 보내주세요.' });
+  }
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 25_000);
+  let buf: Buffer;
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, redirect: 'follow' });
+    if (!r.ok) return res.status(502).json({ error: `파일 주소에서 받지 못했습니다 (HTTP ${r.status}). 주소가 만료됐을 수 있으니 다시 눌러주세요.` });
+    const len = Number(r.headers.get('content-length') || 0);
+    if (len > AD_IMPORT_MAX_BYTES) return res.status(413).json({ error: '보고서 파일이 너무 큽니다 (25MB 초과).' });
+    buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > AD_IMPORT_MAX_BYTES) return res.status(413).json({ error: '보고서 파일이 너무 큽니다 (25MB 초과).' });
+  } catch (e: any) {
+    return res.status(502).json({ error: `파일을 받는 중 실패했습니다: ${e?.name === 'AbortError' ? '시간 초과' : e?.message ?? e}` });
+  } finally {
+    clearTimeout(timer);
+  }
+
+  // xlsx 는 엑셀·CSV 를 모두 읽는다. cellDates 가 없으면 날짜가 45000 같은 시리얼 숫자로
+  // 들어와 일자별 광고비를 못 뽑는다.
+  let rows: any[];
+  try {
+    const wb = XLSX.read(buf, { type: 'buffer', cellDates: true, codepage: 949 });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    // 제목 줄이 헤더 위에 올 수 있어 헤더 없이 읽고 '광고비' 줄을 찾는다
+    rows = rowsFromMatrix(XLSX.utils.sheet_to_json(ws, { header: 1, defval: null }) as any[][]);
+  } catch (e: any) {
+    return res.status(400).json({ error: `보고서를 읽지 못했습니다: ${e?.message ?? e}` });
+  }
+  if (rows.length === 0) return res.status(400).json({ error: '보고서가 비어 있습니다. 이 기간에 광고 집행이 없었을 수 있습니다.' });
+
+  const daily = extractDailyAdCost(rows);
+  let out;
+  if (daily) {
+    out = await persistAdCosts(userId, { from, to, daily: daily.days, source: 'report' });
+  } else {
+    const cols = Object.keys(rows[0] ?? {});
+    const costCol = cols.find(c => String(c).trim() === '광고비');
+    if (!costCol) return res.status(400).json({ error: `보고서에 '광고비' 열이 없습니다. (열: ${cols.slice(0, 8).join(', ')})` });
+    const total = rows.reduce((n, r) => n + (Number(String(r[costCol] ?? '').replace(/[^0-9.-]/g, '')) || 0), 0);
+    out = await persistAdCosts(userId, { from, to, total: Math.round(total) });
+  }
+  return res.status(out.status).json(out.body);
 }
 
 async function handleAdCostDelete(userId: string, req: VercelRequest, res: VercelResponse) {

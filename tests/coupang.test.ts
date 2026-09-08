@@ -13,6 +13,7 @@ import {
   dateChunks,
   floorPriceFor,
   isActiveReturn,
+  isAllowedReportHost,
   lastWeekRange,
   median,
   monthEnd,
@@ -202,4 +203,17 @@ test('지급내역 월 목록: 이번 달을 넘기지 않는다', () => {
   assert.equal(months[months.length - 1], '2026-09');
   assert.equal(months[0], '2026-05');
   assert.ok(!months.some(m => m > '2026-09'), months.join(','));
+});
+
+// ── 광고 보고서 주소 허용 목록 ─────────────────────────────────
+// 사용자가 보낸 주소를 서버가 그대로 열면 내부망·메타데이터 주소를 찌르는 통로가 된다.
+test('광고 보고서 주소: 쿠팡·쿠팡 저장소만, https 만', () => {
+  assert.equal(isAllowedReportHost('https://advertising.coupang.com/x'), true);
+  assert.equal(isAllowedReportHost('https://img1a.coupangcdn.com/report.xlsx'), true);
+  assert.equal(isAllowedReportHost('https://cmg-report.s3.ap-northeast-2.amazonaws.com/a.xlsx?X-Amz-Signature=1'), true);
+  assert.equal(isAllowedReportHost('http://advertising.coupang.com/x'), false);
+  assert.equal(isAllowedReportHost('https://evil.com/coupang.com'), false);
+  assert.equal(isAllowedReportHost('https://coupang.com.evil.com/'), false);
+  assert.equal(isAllowedReportHost('https://169.254.169.254/latest/meta-data'), false);
+  assert.equal(isAllowedReportHost('not a url'), false);
 });

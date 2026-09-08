@@ -98,7 +98,9 @@ function collector(origin: string, days: number) {
     });
   };
 
+  var step = '시작';
   var run = async function () {
+    step = '캠페인 목록';
     say('캠페인 목록을 읽는 중...');
     var c = await gql({
       operationName: 'GetCampaignListInBillboard',
@@ -115,6 +117,7 @@ function collector(origin: string, days: number) {
     // 일별 보고서를 요청한다. 화면이 '합계'로 보낼 때 dateGroup이 "total"이었으니
     // 일별 값도 소문자일 가능성이 높지만 정확한 이름은 모른다. 후보를 차례로
     // 넣어 보고 쿠팡이 거절하면 다음으로 넘어간다.
+    step = '보고서 요청';
     say('일별 보고서를 요청하는 중...');
     var groups = ['daily', 'date', 'day', 'DAILY', 'DATE'];
     var report: any = null;
@@ -145,8 +148,11 @@ function collector(origin: string, days: number) {
     }
     if (!report || !report.id) throw new Error('보고서를 만들지 못했습니다. ' + (lastErr || '응답에 id가 없습니다.'));
     var id = String(report.id);
+    // 어떤 단위로 만들어졌는지 같이 넘긴다. 일자 열이 안 나오면 이 값이 단서다.
+    var dateGroup = String(report.dateGroup || groups[g] || '');
 
     // 완료될 때까지 목록을 다시 읽는다. 화면도 같은 방식으로 기다린다.
+    step = '완료 확인';
     var done = false;
     var status = String(report.status || '');
     for (var t = 0; t < 60 && !done; t++) {
@@ -171,41 +177,58 @@ function collector(origin: string, days: number) {
     }
     if (!done) throw new Error('3분이 지나도 보고서가 완료되지 않았습니다 (상태: ' + status + '). 잠시 후 다시 눌러주세요.');
 
+    step = '파일 받기';
     say('보고서 파일을 받는 중...');
-    var res = await fetch(EXCEL + encodeURIComponent(id), {
-      credentials: 'include',
-      headers: { accept: 'application/json, text/plain, */*' },
-    });
-    if (!res.ok) throw new Error('파일을 받지 못했습니다 (HTTP ' + res.status + ').');
-    var ctype = String(res.headers.get('content-type') || '');
-    var buf: ArrayBuffer;
-    if (/json/i.test(ctype)) {
-      // 파일 대신 주소를 주는 경우 — 그 주소에서 한 번 더 받는다
-      var j = await res.json();
-      var url = '';
-      var stack: any[] = [j];
-      while (stack.length && !url) {
-        var cur = stack.pop();
-        if (typeof cur === 'string' && /^https?:\/\//.test(cur)) url = cur;
-        else if (cur && typeof cur === 'object') for (var key in cur) stack.push(cur[key]);
+    var excelUrl = EXCEL + encodeURIComponent(id);
+    var payload: any = null; // { buffer } 또는 { url } 또는 { download: true }
+    try {
+      var res = await fetch(excelUrl, {
+        credentials: 'include',
+        headers: { accept: 'application/json, text/plain, */*' },
+      });
+      if (!res.ok) throw new Error('파일을 받지 못했습니다 (HTTP ' + res.status + ').');
+      var ctype = String(res.headers.get('content-type') || '');
+      if (/json/i.test(ctype)) {
+        // 파일 대신 주소를 준다. 그 주소는 다른 도메인(S3)이라 브라우저에서는 못 읽고
+        // 훈프로 서버가 대신 받는다. 주소는 몇 분만 유효하니 바로 넘긴다.
+        var j = await res.json();
+        var url = '';
+        var stack: any[] = [j];
+        while (stack.length && !url) {
+          var cur = stack.pop();
+          if (typeof cur === 'string' && /^https?:\/\//.test(cur)) url = cur;
+          else if (cur && typeof cur === 'object') for (var key in cur) stack.push(cur[key]);
+        }
+        if (!url) throw new Error('파일 주소를 찾지 못했습니다: ' + JSON.stringify(j).slice(0, 200));
+        payload = { url: url, contentType: ctype };
+      } else {
+        payload = { buffer: await res.arrayBuffer(), contentType: ctype };
       }
-      if (!url) throw new Error('파일 주소를 찾지 못했습니다: ' + JSON.stringify(j).slice(0, 200));
-      var r2 = await fetch(url, { credentials: 'include' });
-      if (!r2.ok) throw new Error('파일 주소에서 받지 못했습니다 (HTTP ' + r2.status + ').');
-      buf = await r2.arrayBuffer();
-    } else {
-      buf = await res.arrayBuffer();
+    } catch (e) {
+      // 같은 도메인 요청인데도 막혔다면(다른 도메인으로 튕기는 등) 브라우저가 평소
+      // 하던 대로 파일을 내려받게 하고, 훈프로 창에 그 파일을 끌어다 놓게 한다.
+      // 자동은 아니지만 보고서를 만들고 기다리는 일은 이미 끝났다.
+      say('브라우저가 직접 읽지 못해 파일로 내려받습니다...');
+      window.open(excelUrl, '_blank');
+      payload = { download: true, reason: (e && (e as any).message) || String(e) };
     }
 
+    step = '훈프로 전달';
     say('훈프로로 보내는 중...');
     for (var w = 0; w < 90 && !ready; w++) {
       if (win.closed) throw new Error('훈프로 창이 닫혔습니다. 다시 눌러주세요.');
       await sleep(1000);
     }
     if (!ready) throw new Error('훈프로 창이 응답하지 않습니다. 훈프로에 로그인돼 있는지 확인하고 다시 눌러주세요.');
-    win.postMessage({ type: 'hoonpro-ad-report', buffer: buf, from: S, to: E, contentType: ctype }, origin, [buf]);
+    if (payload.buffer) {
+      win.postMessage({ type: 'hoonpro-ad-report', buffer: payload.buffer, from: S, to: E, contentType: payload.contentType, dateGroup: dateGroup }, origin, [payload.buffer]);
+    } else if (payload.url) {
+      win.postMessage({ type: 'hoonpro-ad-report-url', url: payload.url, from: S, to: E, dateGroup: dateGroup }, origin);
+    } else {
+      win.postMessage({ type: 'hoonpro-ad-report-download', from: S, to: E, reason: payload.reason, dateGroup: dateGroup }, origin);
+    }
     box.style.background = '#14532d';
-    say('보냈습니다. 훈프로 창에서 결과를 확인하세요.');
+    say(payload.download ? '파일을 내려받았습니다. 훈프로 창에 그 파일을 끌어다 놓으세요.' : '보냈습니다. 훈프로 창에서 결과를 확인하세요.');
     setTimeout(function () {
       if (box.parentNode) box.parentNode.removeChild(box);
     }, 6000);
@@ -217,7 +240,7 @@ function collector(origin: string, days: number) {
   };
 
   run().catch(function (e) {
-    fail((e && e.message) || String(e));
+    fail('[' + step + '] ' + ((e && e.message) || String(e)));
   });
 }
 

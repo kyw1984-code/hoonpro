@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAdBookmarklet, ymdToIso, AD_CENTER_ORIGIN } from '../src/lib/adCollector.ts';
+import { extractDailyAdCost, rowsFromMatrix } from '../src/lib/adcost.ts';
 
 test('북마클릿: javascript: 주소이고 광고센터 요청 경로를 전부 담는다', () => {
   const url = buildAdBookmarklet('https://hoonproai.com');
@@ -46,4 +47,29 @@ test('yyyyMMdd 숫자 → ISO 날짜', () => {
   assert.equal(ymdToIso('20260101'), '2026-01-01');
   assert.equal(ymdToIso('2026-09-07'), '');
   assert.equal(ymdToIso(''), '');
+});
+
+// ── 헤더 줄 탐지 ───────────────────────────────────────────────
+// 쿠팡 보고서는 제목 줄이 헤더 위에 온다. 첫 줄을 헤더로 읽으면 일자 열을 못 찾고
+// 광고비가 기간에 균등 분배되는 쪽으로 조용히 떨어진다.
+test('rowsFromMatrix: 제목 줄 아래의 헤더를 찾는다', () => {
+  const rows = rowsFromMatrix([
+    ['광고 보고서', null, null],
+    ['기간: 2026-08-10 ~ 2026-09-08', null, null],
+    [],
+    ['날짜', '캠페인명', '광고비'],
+    ['2026-09-06', 'A', '15,000'],
+    ['2026-09-07', 'B', 20000],
+  ]);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(Object.keys(rows[0]), ['날짜', '캠페인명', '광고비']);
+  const daily = extractDailyAdCost(rows);
+  assert.ok(daily);
+  assert.deepEqual(daily!.days, [{ date: '2026-09-06', cost: 15000 }, { date: '2026-09-07', cost: 20000 }]);
+});
+
+test('rowsFromMatrix: 헤더가 첫 줄이면 그대로', () => {
+  const rows = rowsFromMatrix([['날짜', '광고비'], ['2026-09-01', 100]]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]['광고비'], 100);
 });
