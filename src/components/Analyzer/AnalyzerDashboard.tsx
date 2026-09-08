@@ -1,10 +1,9 @@
 import React, { useState, useMemo, useEffect } from "react";
-import * as XLSX from "xlsx";
-import Papa from "papaparse";
 import { Upload, Save, TrendingUp, X, Loader2 } from "lucide-react";
 import { getToken } from "../../lib/auth";
 import { coupangApi } from "../../lib/coupang";
 import { extractDailyAdCost } from "../../lib/adcost";
+import { parseAdReportBuffer } from "../../lib/adReport";
 import { AdCenterConnect } from "../AdCenter/AdCenterConnect";
 
 // ─── 지면 분류 헬퍼 ("비검색"이 "검색"을 포함하는 substring 함정 방지) ───
@@ -77,31 +76,10 @@ export function AnalyzerDashboard() {
     setFileName(file.name);
     setError("");
     try {
-      if (file.name.endsWith(".csv")) {
-        const buffer = await file.arrayBuffer();
-        // 쿠팡 보고서는 EUC-KR로 내려오는 경우가 많다. UTF-8로 읽어 대체문자(U+FFFD)가
-        // 섞이면 EUC-KR로 다시 읽는다.
-        // 예전에는 이 대체문자가 소스에서 사라져 includes("")가 되어 있었다. 빈 문자열은
-        // 항상 포함되므로 UTF-8 파일까지 EUC-KR로 잘못 읽었고, 컬럼명이 깨져
-        // "판매수량 컬럼을 찾을 수 없습니다"가 떴다.
-        let text = new TextDecoder("utf-8").decode(buffer);
-        if (text.includes("\uFFFD")) text = new TextDecoder("euc-kr").decode(buffer);
-        // BOM이 남으면 첫 열 이름이 "\uFEFF날짜"가 되어 어떤 컬럼 탐지에도 걸리지 않는다
-        if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-        Papa.parse(text, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (results) => setRawData(results.data as any[]),
-          error: (err: any) => setError(`CSV 파싱 오류: ${err.message}`),
-        });
-      } else {
-        const buffer = await file.arrayBuffer();
-        // cellDates가 없으면 날짜 셀이 45000 같은 시리얼 숫자로 들어와
-        // 일자별 광고비를 뽑을 수 없다.
-        const wb = XLSX.read(buffer, { type: "array", cellDates: true });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        setRawData(XLSX.utils.sheet_to_json(ws) as any[]);
-      }
+      // 파싱은 광고센터 북마클릿과 같은 곳(adReport)에서 한다. 제목 줄이 헤더 위에 있는
+      // 보고서, EUC-KR, BOM 처리를 한 군데서만 고치면 양쪽에 같이 반영된다.
+      const buffer = await file.arrayBuffer();
+      setRawData(parseAdReportBuffer(buffer, { filename: file.name, contentType: file.type }));
     } catch (err: any) {
       setError(`파일 처리 중 오류 발생: ${err.message}`);
     }

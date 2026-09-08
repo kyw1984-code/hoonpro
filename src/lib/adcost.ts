@@ -68,3 +68,29 @@ export function extractDailyAdCost(rawData: any[]): { days: { date: string; cost
   return { days, from: days[0].date, to: days[days.length - 1].date };
 }
 
+
+/**
+ * 표를 2차원 배열로 받아 헤더 줄을 찾아 객체 행으로 바꾼다.
+ *
+ * 쿠팡 광고 보고서는 맨 위에 제목·기간 같은 줄이 몇 개 있고 그 아래에 진짜
+ * 헤더가 온다. 첫 줄을 헤더로 읽으면 열 이름이 "__EMPTY"나 제목 문구가 되어
+ * 일자 열을 못 찾고, 광고비가 기간에 균등 분배되는 쪽으로 조용히 떨어진다.
+ * '광고비'가 들어 있는 첫 줄을 헤더로 본다. 없으면 첫 줄이 헤더다.
+ */
+export function rowsFromMatrix(matrix: any[][]): Record<string, any>[] {
+  if (!matrix || matrix.length === 0) return [];
+  let headerIdx = matrix.findIndex(r => Array.isArray(r) && r.some(c => String(c ?? "").trim() === "광고비"));
+  if (headerIdx < 0) headerIdx = 0;
+  const header = (matrix[headerIdx] ?? []).map(c => String(c ?? "").trim());
+  const out: Record<string, any>[] = [];
+  for (let i = headerIdx + 1; i < matrix.length; i++) {
+    const r = matrix[i];
+    if (!Array.isArray(r) || r.every(c => c === null || c === undefined || String(c).trim() === "")) continue;
+    const obj: Record<string, any> = {};
+    header.forEach((h, j) => {
+      if (h) obj[h] = r[j];
+    });
+    out.push(obj);
+  }
+  return out;
+}
