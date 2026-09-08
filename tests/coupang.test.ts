@@ -12,9 +12,11 @@ import {
   authorization,
   couponForRow,
   dateChunks,
+  definitionUnit,
   floorPriceFor,
   isActiveReturn,
   isAllowedReportHost,
+  isTransient,
   lastWeekRange,
   median,
   monthEnd,
@@ -250,4 +252,35 @@ test('쿠폰 행 계산: 채널별 단가 × 수량, 매출을 넘지 않는다'
   // 매출 상한
   assert.equal(couponForRow(10, 0, 50000, 0, 120000), 120000);
   assert.equal(couponForRow(0, 0, 100, 100, 1000), 0);
+});
+
+// ── 쿠폰 설정값 → 개당 할인 ─────────────────────────────────────
+// 판매자가 아는 숫자와 맞아야 한다: 1건당 11,500원이면 2건에 23,000원.
+test('definitionUnit: 정액은 그대로, 정률은 단가 × 비율(최대할인 상한)', () => {
+  const fixed = { coupon_type: 'PRICE', discount: 11500, max_discount: null, status: 'APPLIED', start_at: null, end_at: null };
+  assert.equal(definitionUnit([fixed], 41400, '2026-09-01', '2026-09-08'), 11500);
+  assert.equal(couponForRow(2, 0, definitionUnit([fixed], 41400, '2026-09-01', '2026-09-08'), 0, 82800), 23000);
+  const rate = { coupon_type: 'RATE', discount: 10, max_discount: 3000, status: 'APPLIED', start_at: null, end_at: null };
+  assert.equal(definitionUnit([rate], 41400, '2026-09-01', '2026-09-08'), 3000);
+  assert.equal(definitionUnit([{ ...rate, max_discount: null }], 41400, '2026-09-01', '2026-09-08'), 4140);
+  // 정액 + 정률이 같이 붙으면 더한다
+  assert.equal(definitionUnit([fixed, rate], 41400, '2026-09-01', '2026-09-08'), 14500);
+});
+
+test('definitionUnit: 기간 밖·종료 상태 쿠폰은 뺀다', () => {
+  const base = { coupon_type: 'FIXED_WITH_QUANTITY', discount: 5000, max_discount: null, status: 'APPLIED' };
+  assert.equal(definitionUnit([{ ...base, start_at: '2026-09-10T00:00:00+09:00', end_at: null }], 10000, '2026-09-01', '2026-09-08'), 0);
+  assert.equal(definitionUnit([{ ...base, start_at: null, end_at: '2026-08-30T23:59:59+09:00' }], 10000, '2026-09-01', '2026-09-08'), 0);
+  assert.equal(definitionUnit([{ ...base, start_at: '2026-09-05', end_at: '2026-09-06' }], 10000, '2026-09-01', '2026-09-08'), 5000);
+  assert.equal(definitionUnit([{ ...base, status: 'EXPIRED', start_at: null, end_at: null }], 10000, '2026-09-01', '2026-09-08'), 0);
+  assert.equal(definitionUnit([], 10000, '2026-09-01', '2026-09-08'), 0);
+});
+
+test('isTransient: 망 오류·중계 5xx만 다시 시도한다', () => {
+  assert.equal(isTransient({ ok: false, status: 0 }), true);
+  assert.equal(isTransient({ ok: false, status: 502, relayError: true }), true);
+  assert.equal(isTransient({ ok: false, status: 502 }), false);
+  assert.equal(isTransient({ ok: false, status: 400 }), false);
+  assert.equal(isTransient({ ok: false, status: 401, authFailed: true }), false);
+  assert.equal(isTransient({ ok: true, status: 200 }), false);
 });

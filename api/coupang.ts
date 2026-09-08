@@ -152,6 +152,34 @@ async function coupangCall<T = any>(
   query = '',
   body?: any,
 ): Promise<CoupangResult<T>> {
+  // 중계 서버나 망이 잠깐 끊기면 'fetch failed'로 떨어진다. 한 번 그러면 그 회차의
+  // 발주서·상품 목록이 통째로 비고, 뒤따르는 쿠폰 조회까지 건너뛴다. 조회(GET)는
+  // 다시 불러도 해가 없으니 짧게 쉬고 두 번 더 시도한다. 쿠팡이 4xx로 거절한 것은
+  // 다시 물어도 같으므로 그대로 돌려준다.
+  let last: CoupangResult<T> | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await sleep(600 * attempt);
+    const r = await coupangCallOnce<T>(creds, method, path, query, body);
+    if (r.ok || method !== 'GET' || !isTransient(r)) return r;
+    last = r;
+  }
+  return last!;
+}
+
+/** 망 오류(status 0)나 중계 서버의 5xx만 일시적이라고 본다 */
+export function isTransient(r: { ok: boolean; status: number; relayError?: boolean; authFailed?: boolean }): boolean {
+  if (r.ok || r.authFailed) return false;
+  if (r.status === 0) return true;
+  return Boolean(r.relayError) && r.status >= 500;
+}
+
+async function coupangCallOnce<T = any>(
+  creds: CoupangCreds,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  path: string,
+  query = '',
+  body?: any,
+): Promise<CoupangResult<T>> {
   const auth = authorization(method, path, query, creds.accessKey, creds.secretKey);
   const url = `${COUPANG_HOST}${path}${query ? `?${query}` : ''}`;
   const headers: Record<string, string> = {
@@ -351,6 +379,10 @@ const EP = {
   // 주문에 적용된 쿠폰. 그로스 주문에는 할인 항목이 없어 이걸로 묻는다.
   orderCoupons: (vendorId: string, orderId: string) =>
     `/v2/providers/fms/apis/api/v2/vendors/${vendorId}/${encodeURIComponent(orderId)}/coupons`,
+  // 쿠폰 관리에 등록된 쿠폰 자체(즉시할인 정액·정률)와 그 쿠폰이 붙은 옵션들
+  coupons: (vendorId: string) => `/v2/providers/fms/apis/api/v1/vendors/${vendorId}/coupons`,
+  couponItems: (vendorId: string, couponId: string) =>
+    `/v2/providers/fms/apis/api/v1/vendors/${vendorId}/coupons/${encodeURIComponent(couponId)}/items`,
   settlementHistories: '/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories',
   returnRequests: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/returnRequests`,
   onlineInquiries: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/onlineInquiries`,
@@ -381,6 +413,8 @@ const LIMITS = {
   rgGapMs: 1300,           // 분당 50회 한도. 1300ms면 약 46회/분으로 아래를 유지한다
   couponGapMs: 250,        // 주문별 쿠폰 조회 간격
   couponPerRun: 80,        // 회차당 쿠폰을 물을 주문 수. 나머지는 다음 회차가 이어받는다
+  couponDefsPerRun: 40,    // 회차당 옵션 목록을 물을 쿠폰 수
+  couponItemPages: 10,     // 쿠폰 하나의 옵션 목록 페이지 상한
 };
 
 export interface SyncSummary {
@@ -396,6 +430,8 @@ export interface SyncSummary {
   settlements: number;
   returns: number;
   inquiries: number;
+  /** 쿠폰 관리에서 받아 온 쿠폰-옵션 조합 수 */
+  couponDefs: number;
   errors: string[];
   authFailed: boolean;
   /** 시간 예산에 걸려 중간에 멈췄다. 남은 몫은 다음 회차가 이어받는다. */
@@ -404,7 +440,7 @@ export interface SyncSummary {
 
 function emptySummary(): SyncSummary {
   return {
-    items: 0, orders: 0, sales: 0, growth: 0, growthCancelled: 0, growthInventory: 0, settlements: 0, returns: 0, inquiries: 0,
+    items: 0, orders: 0, sales: 0, growth: 0, growthCancelled: 0, growthInventory: 0, settlements: 0, returns: 0, inquiries: 0, couponDefs: 0,
     errors: [], authFailed: false, truncated: false,
   };
 }
@@ -528,6 +564,48 @@ export function couponForRow(
 ): number {
   const raw = Math.round(qtyMarket * Math.max(0, wingUnit) + qtyGrowth * Math.max(0, growthUnit));
   return Math.max(0, Math.min(raw, Math.max(0, cap)));
+}
+
+/** 쿠폰 관리에서 받아 둔 쿠폰-옵션 한 줄 */
+export interface CouponDef {
+  coupon_type: string | null;
+  discount: number;
+  max_discount: number | null;
+  status: string | null;
+  start_at: string | null;
+  end_at: string | null;
+}
+
+/**
+ * 쿠폰 설정으로 본 옵션의 개당 쿠폰 할인.
+ *
+ * 판매자가 쿠폰 관리에 등록한 값 그대로다 — "이 상품은 1건당 11,500원 할인"이면
+ * 11,500. 주문에서 역산한 값은 다운로드쿠폰이 섞이거나 쿠폰을 바꾼 날이 끼면
+ * 들쭉날쭉해지는데, 설정값은 그럴 일이 없다.
+ * - 정액(PRICE·FIXED·FIXED_WITH_QUANTITY)은 금액 그대로
+ * - 정률(RATE·PERCENT)은 판매 단가 × 비율, 최대할인이 있으면 거기서 자른다
+ * - 기간이 [from, to]와 하나도 안 겹치는 쿠폰과 종료·삭제 상태는 뺀다
+ */
+export function definitionUnit(defs: CouponDef[], unitPrice: number, from: string, to: string): number {
+  let total = 0;
+  for (const d of defs) {
+    if (d.status && /EXPIRE|DELETE|CANCEL|END|PAUSE|STOP|만료|삭제|중지/i.test(d.status)) continue;
+    const start = d.start_at ? String(d.start_at).slice(0, 10) : '';
+    const end = d.end_at ? String(d.end_at).slice(0, 10) : '';
+    if (start && start > to) continue;
+    if (end && end < from) continue;
+    const amount = Number(d.discount) || 0;
+    if (amount <= 0) continue;
+    if (/RATE|PERCENT|정률/i.test(d.coupon_type ?? '')) {
+      let v = (unitPrice * amount) / 100;
+      const cap = Number(d.max_discount) || 0;
+      if (cap > 0) v = Math.min(v, cap);
+      total += v;
+    } else {
+      total += amount;
+    }
+  }
+  return Math.max(0, Math.round(total));
 }
 
 /**
@@ -738,7 +816,7 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
   let failedThisRun = false;
   // 발주서의 할인 항목은 의미가 애매하다(같은 상품인데 주문마다 개당 9천~1만9천원).
   // 쿠팡이 "이 주문에 적용된 쿠폰"을 직접 알려주는 주문별 쿠폰 조회를 윙에도 쓴다.
-  const orderMeta = new Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number }> }>();
+  const orderMeta = new Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>();
   let sampleLogged = false;
 
   for (const [cFrom, cTo] of dateChunks(from, to)) {
@@ -795,7 +873,7 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
 
             if (orderId) {
               const meta = orderMeta.get(orderId) ?? { date: orderDate, items: [] };
-              meta.items.push({ vendorItemId, amount });
+              meta.items.push({ vendorItemId, amount, qty });
               orderMeta.set(orderId, meta);
             }
             // 발주서 할인 항목의 실제 모양을 한 번만 남긴다 (금액만, 개인정보 없음)
@@ -1050,7 +1128,7 @@ async function syncRocketGrowth(
   let cancelled = 0;
   let firstOrderShape = '';
   // 주문별 쿠폰을 물으려면 주문번호와 옵션별 금액이 필요하다
-  const orderMeta = new Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number }> }>();
+  const orderMeta = new Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>();
 
   const call = async (cFrom: string, cTo: string, token: string) => {
     // 분당 50회 한도를 지킨다. 몰아 치면 429가 나고, 그 회차 그로스 매출이 빈다.
@@ -1131,7 +1209,7 @@ async function syncRocketGrowth(
           const orderId = pickStr(order, ['orderId', 'orderID']);
           if (orderId) {
             const meta = orderMeta.get(orderId) ?? { date, items: [] };
-            meta.items.push({ vendorItemId, amount: lineAmount });
+            meta.items.push({ vendorItemId, amount: lineAmount, qty });
             orderMeta.set(orderId, meta);
           }
         }
@@ -1190,7 +1268,7 @@ async function syncRocketGrowth(
 async function syncOrderCoupons(
   userId: string,
   creds: CoupangCreds,
-  orderMeta: Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number }> }>,
+  orderMeta: Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>,
   channel: 'growth' | 'marketplace',
   sum: SyncSummary,
   deadline: number,
@@ -1201,7 +1279,11 @@ async function syncOrderCoupons(
   const { rows: done } = await selectAll<{ order_id: string }>((f, t) =>
     supabase!.from('coupang_order_coupons').select('order_id').eq('user_id', userId).in('order_id', ids).range(f, t));
   const seen = new Set(done.map(d => String(d.order_id)));
-  const todo = ids.filter(id => !seen.has(id)).slice(0, LIMITS.couponPerRun);
+  // 최근 주문부터 묻는다. 회차 상한에 걸려 일부만 물어도 지금 쓰는 쿠폰이 먼저 잡힌다.
+  const todo = ids
+    .filter(id => !seen.has(id))
+    .sort((a, b) => (orderMeta.get(b)!.date < orderMeta.get(a)!.date ? -1 : orderMeta.get(b)!.date > orderMeta.get(a)!.date ? 1 : 0))
+    .slice(0, LIMITS.couponPerRun);
   if (todo.length === 0) return;
 
   const rows: any[] = [];
@@ -1247,7 +1329,8 @@ async function syncOrderCoupons(
       allocated += share;
       rows.push({
         user_id: userId, order_id: orderId, vendor_item_id: it.vendorItemId, channel,
-        sale_date: meta.date, discount: Math.max(0, share), coupon_types: types.join(',') || null,
+        sale_date: meta.date, discount: Math.max(0, share), quantity: Math.max(0, it.qty || 0),
+        coupon_types: types.join(',') || null,
         fetched_at: new Date().toISOString(),
       });
     });
@@ -1256,6 +1339,116 @@ async function syncOrderCoupons(
   const err = await upsertChunked('coupang_order_coupons', rows, 'user_id,order_id,vendor_item_id');
   if (err) sum.errors.push(err);
   if (typesSeen.size > 0) console.info('coupang order coupon types —', [...typesSeen].join(','));
+}
+
+// ── 쿠폰 설정 동기화 (쿠폰 관리) ──────────────────────────────
+//
+// 순이익의 쿠폰은 "판매자가 설정한 개당 할인 × 판매수량"이어야 판매자가 아는
+// 숫자와 맞는다(1건당 11,500원이면 2건에 23,000원). 주문에서 역산하면 다운로드
+// 쿠폰이 섞이거나 쿠폰을 바꾼 날이 끼어 개당 값이 흔들린다. 그래서 쿠폰 관리에
+// 등록된 쿠폰과 그 쿠폰이 붙은 옵션 목록을 그대로 받아 둔다. 윙·그로스 모두
+// 같은 방식으로 옵션ID를 붙여 발행하므로 채널 구분 없이 옵션 단위로 쓴다.
+async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: SyncSummary, deadline: number): Promise<void> {
+  if (!supabase) return;
+
+  // 목록 질의 형식이 계정마다 다를 수 있어 차례로 시도한다. 첫 성공을 쓴다.
+  const queries = ['status=APPLIED', 'status=APPLIED&page=1&size=100', 'page=1&size=100&status=APPLIED'];
+  let list: any[] | null = null;
+  let listPayload: any = null;
+  let lastErr = '';
+  for (const q of queries) {
+    if (outOfTime(deadline, sum)) return;
+    const r = await coupangCall(creds, 'GET', EP.coupons(creds.vendorId), q);
+    if (r.ok) {
+      list = listOf(r.data);
+      listPayload = r.data;
+      break;
+    }
+    // 이 API는 오픈API 권한 항목이 따로 있다. 거절돼도 판매자 키가 잘못된 것은
+    // 아니므로 계정을 건드리지 않고 안내만 남긴다.
+    if (r.status === 401 || r.status === 403 || r.status === 404) {
+      sum.errors.push(`쿠폰 설정: ${r.error} — 윙 > 판매자 정보 > 추가판매정보 > 오픈API에서 쿠폰 조회 권한을 확인해주세요`);
+      return;
+    }
+    lastErr = r.error || `HTTP ${r.status}`;
+    if (r.status !== 400) break;
+  }
+  if (!list) {
+    if (lastErr) sum.errors.push(`쿠폰 설정: ${lastErr}`);
+    return;
+  }
+  if (list.length === 0) {
+    // 적용 중인 쿠폰이 없다. 예전에 받아 둔 것도 이제 유효하지 않으니 지운다.
+    await supabase.from('coupang_coupon_items').delete().eq('user_id', userId);
+    sum.couponDefs = 0;
+    return;
+  }
+  console.info('coupang coupon list shape —', `응답키=${Object.keys(listPayload ?? {}).slice(0, 10).join(',')} / 쿠폰키=${Object.keys(list[0] ?? {}).slice(0, 20).join(',')} / ${list.length}건`);
+
+  const rows: any[] = [];
+  let complete = true;
+  let itemShapeLogged = false;
+  let itemsFailed = false;
+  let lastCallAt = 0;
+  const coupons = list.slice(0, LIMITS.couponDefsPerRun);
+  if (list.length > coupons.length) complete = false;
+
+  for (const c of coupons) {
+    const couponId = pickStr(c, ['couponId', 'id', 'promotionId']);
+    if (!couponId) continue;
+    const type = pickStr(c, ['type', 'couponType', 'discountType', 'discountMethod']) || null;
+    const discount = pickNum(c, ['discount', 'discountPrice', 'discountAmount', 'discountRate', 'discountValue'], 0);
+    const maxDiscount = pickNum(c, ['maxDiscountPrice', 'maxDiscount', 'maxDiscountAmount'], 0) || null;
+    const name = pickStr(c, ['name', 'couponName', 'title']) || null;
+    const status = pickStr(c, ['status', 'couponStatus']) || null;
+    const startAt = toIso(pickRaw(c, ['startAt', 'startDate', 'startDateTime', 'validStartAt']));
+    const endAt = toIso(pickRaw(c, ['endAt', 'endDate', 'endDateTime', 'validEndAt']));
+
+    let token = '';
+    for (let page = 0; page < LIMITS.couponItemPages; page++) {
+      if (outOfTime(deadline, sum)) { complete = false; break; }
+      const wait = LIMITS.couponGapMs - (Date.now() - lastCallAt);
+      if (wait > 0) await sleep(wait);
+      lastCallAt = Date.now();
+
+      const r = await coupangCall(creds, 'GET', EP.couponItems(creds.vendorId, couponId), token ? `nextToken=${token}` : '');
+      if (!r.ok) {
+        // 한 번 거절되면 나머지 쿠폰도 같은 이유로 거절된다. 오류 하나만 남기고 멈춘다.
+        sum.errors.push(`쿠폰 옵션 목록: ${r.error}`);
+        complete = false;
+        itemsFailed = true;
+        break;
+      }
+      const items = listOf(r.data);
+      if (!itemShapeLogged && items[0]) {
+        itemShapeLogged = true;
+        console.info('coupang coupon item shape —', `응답키=${Object.keys(r.data ?? {}).slice(0, 10).join(',')} / 옵션키=${Object.keys(items[0]).slice(0, 20).join(',')}`);
+      }
+      for (const it of items) {
+        const vendorItemId = findVendorItemId(it);
+        if (!vendorItemId) continue;
+        // 옵션마다 다른 할인이 실려 오면 그것을 우선한다
+        const itemDiscount = pickNum(it, ['discount', 'discountPrice', 'discountAmount'], 0);
+        rows.push({
+          user_id: userId, coupon_id: couponId, vendor_item_id: vendorItemId,
+          coupon_name: name, coupon_type: type, discount: itemDiscount > 0 ? itemDiscount : discount,
+          max_discount: maxDiscount, status, start_at: startAt, end_at: endAt,
+          fetched_at: new Date().toISOString(),
+        });
+      }
+      token = nextTokenOf(r.data);
+      if (!token) break;
+    }
+    if (itemsFailed || (!complete && outOfTime(deadline, sum))) break;
+  }
+
+  // 전부 받았을 때만 이전 것을 지운다. 일부만 받고 지우면 멀쩡하던 옵션의 쿠폰이 빠진다.
+  if (complete) await supabase.from('coupang_coupon_items').delete().eq('user_id', userId);
+  if (rows.length > 0) {
+    const err = await upsertChunked('coupang_coupon_items', rows, 'user_id,coupon_id,vendor_item_id');
+    if (err) sum.errors.push(err);
+  }
+  sum.couponDefs = rows.length;
 }
 
 // ── 로켓창고 재고 동기화 ──────────────────────────────────────
@@ -1697,6 +1890,9 @@ async function syncUser(
 
   await syncOrders(userId, creds, addDays(today, -(full ? LIMITS.ordersDaysFull : LIMITS.ordersDaysIncr)), today, sum, deadline);
   if (sum.authFailed) return sum;
+
+  // 쿠폰 관리에 등록된 쿠폰 설정. 순이익의 쿠폰은 이 값 × 판매수량이 기본이다.
+  await syncCouponDefinitions(userId, creds, sum, deadline);
 
   // 매출내역은 종료일이 '어제 이하'여야 한다. 오늘을 넣으면 쿠팡이
   // 'To date must be before or equal to yesterday'로 구간 전체를 거절해
@@ -2398,6 +2594,8 @@ interface ProfitRow {
   settlementAmount: number;
   /** 같은 기간 주문에서 판매자가 부담한 쿠폰 할인. 판매가와 실제 판매가의 차이다 */
   couponDiscount: number;
+  /** 쿠폰 단가의 출처. setting=쿠폰 관리 설정값, order=주문별 쿠폰 조회, sheet=발주서 할인 항목 */
+  couponSource?: 'setting' | 'order' | 'sheet' | null;
   /** 이 옵션에 붙은 광고비 (보고서의 광고집행 옵션ID 기준) */
   adCost: number;
   /** 이 행의 판매가 어느 채널에서 났는지. 둘 다면 'both' */
@@ -2439,7 +2637,7 @@ export async function computeProfit(
   opts: { totalsOnly?: boolean } = {},
 ) {
   const lite = opts.totalsOnly === true;
-  const [salesRes, costRes, itemRes, returnRes, adRes, adItemRes, growthCouponRes, orderRes] = await Promise.all([
+  const [salesRes, costRes, itemRes, returnRes, adRes, adItemRes, growthCouponRes, orderRes, couponDefRes] = await Promise.all([
     selectAll((f, t) => supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId)
       .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
     selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
@@ -2467,14 +2665,27 @@ export async function computeProfit(
       .gte('ad_date', from).lte('ad_date', to).order('ad_date').range(f, t)),
     // 그로스 주문별 쿠폰 (윙은 발주서에서, 그로스는 주문별 쿠폰 조회에서 온다)
     selectAll((f, t) => supabase!.from('coupang_order_coupons')
-      .select('vendor_item_id, channel, discount').eq('user_id', userId)
+      .select('vendor_item_id, channel, discount, quantity').eq('user_id', userId)
       .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
     // 같은 기간 주문의 쿠폰 할인. 매출내역(인식일)과 주문(주문일)은 기준이 달라
     // 상품별로는 근사지만, 판매자가 "실제로 얼마에 팔렸나"를 보는 데는 이 값이 답이다.
     selectAll((f, t) => supabase!.from('coupang_orders_daily')
       .select('vendor_item_id, quantity, order_amount, seller_discount, coupang_discount').eq('user_id', userId)
       .gte('order_date', from).lte('order_date', to).order('order_date').range(f, t)),
+    // 쿠폰 관리에 등록된 쿠폰 설정(옵션별 개당 할인). 있으면 이게 쿠폰의 기준이다.
+    selectAll((f, t) => supabase!.from('coupang_coupon_items')
+      .select('vendor_item_id, coupon_type, discount, max_discount, status, start_at, end_at').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
   ]);
+
+  const couponDefs = new Map<string, CouponDef[]>();
+  for (const d of couponDefRes.rows) {
+    const id = String(d.vendor_item_id ?? '');
+    if (!id) continue;
+    const arr = couponDefs.get(id) ?? [];
+    arr.push(d as CouponDef);
+    couponDefs.set(id, arr);
+  }
 
   const costs = new Map<string, any>();
   for (const c of costRes.rows) costs.set(String(c.vendor_item_id), c);
@@ -2505,17 +2716,24 @@ export async function computeProfit(
   }
   // 주문별 쿠폰 조회 결과. 윙은 이게 있으면 발주서 할인 항목 대신 쓴다 —
   // 쿠팡이 "이 주문에 적용된 쿠폰"이라고 직접 알려준 값이라 더 믿을 만하다.
+  // 물어본 주문의 수량도 같이 더한다. 회차 상한 때문에 일부 주문만 물었을 때
+  // 전체 주문수량으로 나누면 개당 쿠폰이 실제보다 작아진다.
   const growthCouponAgg = new Map<string, number>();
+  const growthCouponQty = new Map<string, number>();
   const wingApiAgg = new Map<string, number>();
+  const wingApiQty = new Map<string, number>();
   const wingApiOrders = new Set<string>();
   for (const g of growthCouponRes.rows) {
     const id = String(g.vendor_item_id ?? '');
     const d = Number(g.discount) || 0;
+    const q = g.quantity === null || g.quantity === undefined ? null : Number(g.quantity) || 0;
     if (g.channel === 'marketplace') {
       wingApiAgg.set(id, (wingApiAgg.get(id) ?? 0) + d);
+      if (q !== null) wingApiQty.set(id, (wingApiQty.get(id) ?? 0) + q);
       wingApiOrders.add(id);
     } else {
       growthCouponAgg.set(id, (growthCouponAgg.get(id) ?? 0) + d);
+      if (q !== null) growthCouponQty.set(id, (growthCouponQty.get(id) ?? 0) + q);
     }
   }
   // 그로스 주문수량 — 쿠폰과 같은 결제일 기준이라 매출 행의 그로스 수량이 곧 주문수량이다
@@ -2557,6 +2775,7 @@ export async function computeProfit(
         commission: 0,
         settlementAmount: 0,
         couponDiscount: 0,
+        couponSource: null,
         adCost: 0,
         channel: 'marketplace',
         returnAmount: 0,
@@ -2584,7 +2803,7 @@ export async function computeProfit(
       vendorItemId: id,
       productName: item?.product_name ?? '(상품명 미확인)',
       optionName: item?.option_name ?? '',
-      quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, couponDiscount: 0, adCost: 0, channel: 'marketplace', returnAmount: 0,
+      quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, couponDiscount: 0, couponSource: null, adCost: 0, channel: 'marketplace', returnAmount: 0,
       unitCostTotal: 0, returnCount: count, returnCost: 0, profit: 0, marginRate: 0,
       costEntered: false, stock: item?.stock ?? null, salePrice: item?.sale_price ?? null,
     });
@@ -2600,11 +2819,31 @@ export async function computeProfit(
     row.returnCost = row.returnCount * (c ? Number(c.return_shipping_cost) || 0 : 0);
     const rq = rowQty.get(row.vendorItemId) ?? { market: 0, growth: 0 };
     const wing = wingAgg.get(row.vendorItemId);
-    // 주문별 쿠폰 조회가 있는 옵션은 그 합계를, 없으면 발주서 할인 항목을 주문수량으로 나눈다
-    const wingSd = wingApiOrders.has(row.vendorItemId) ? (wingApiAgg.get(row.vendorItemId) ?? 0) : wing?.sd ?? 0;
-    const wingUnit = wing && wing.qty > 0 ? wingSd / wing.qty : 0;
-    const gQty = growthQtyAgg.get(row.vendorItemId) ?? 0;
-    const growthUnit = gQty > 0 ? (growthCouponAgg.get(row.vendorItemId) ?? 0) / gQty : 0;
+    // 개당 쿠폰의 출처는 셋이고 앞의 것이 있으면 그것을 쓴다.
+    //  1) 쿠폰 관리의 설정값 — 판매자가 아는 바로 그 숫자 (1건당 11,500원)
+    //  2) 주문별 쿠폰 조회 — 쿠팡이 "이 주문에 적용된 쿠폰"이라고 알려준 값 ÷ 그 주문들의 수량
+    //  3) 발주서 할인 항목 ÷ 주문수량
+    const unitPrice = row.quantity > 0 ? row.salesAmount / row.quantity : row.salePrice ?? 0;
+    const defUnit = definitionUnit(couponDefs.get(row.vendorItemId) ?? [], unitPrice, from, to);
+    let wingUnit = 0;
+    let growthUnit = 0;
+    if (defUnit > 0) {
+      wingUnit = defUnit;
+      growthUnit = defUnit;
+      row.couponSource = 'setting';
+    } else {
+      if (wingApiOrders.has(row.vendorItemId)) {
+        const q = wingApiQty.get(row.vendorItemId) ?? 0;
+        const denom = q > 0 ? q : wing?.qty ?? 0;
+        wingUnit = denom > 0 ? (wingApiAgg.get(row.vendorItemId) ?? 0) / denom : 0;
+      } else if (wing && wing.qty > 0) {
+        wingUnit = wing.sd / wing.qty;
+      }
+      const gApiQty = growthCouponQty.get(row.vendorItemId) ?? 0;
+      const gQty = gApiQty > 0 ? gApiQty : growthQtyAgg.get(row.vendorItemId) ?? 0;
+      growthUnit = gQty > 0 ? (growthCouponAgg.get(row.vendorItemId) ?? 0) / gQty : 0;
+      row.couponSource = wingApiOrders.has(row.vendorItemId) || growthCouponAgg.has(row.vendorItemId) ? 'order' : wingUnit > 0 ? 'sheet' : null;
+    }
     row.couponDiscount = couponForRow(rq.market, rq.growth, wingUnit, growthUnit, row.salesAmount);
     row.channel = rq.growth > 0 && rq.market > 0 ? 'both' : rq.growth > 0 ? 'growth' : 'marketplace';
     // 반품액 = 실판매가 × 반품수량. 이 기간 판매가 없으면 등록 판매가에서 쿠폰 단가를 뺀다.
@@ -2643,6 +2882,14 @@ export async function computeProfit(
 
   // 카드의 쿠폰 합계도 행과 같은 기준(단가 × 판매수량)이어야 실매출이 매출과 같은 기준이 된다
   coupon.sellerDiscount = totals.couponDiscount;
+  // 쿠폰의 출처를 화면에 밝힌다. 설정값으로 계산된 옵션이 몇 개인지 알아야
+  // "왜 이 상품만 다르게 나오나"에 답할 수 있다.
+  const couponSources = {
+    setting: rows.filter(r => r.couponSource === 'setting').length,
+    order: rows.filter(r => r.couponSource === 'order').length,
+    sheet: rows.filter(r => r.couponSource === 'sheet').length,
+    definedOptions: couponDefs.size,
+  };
 
   const missingCost = rows.filter(r => r.quantity > 0 && !r.costEntered).length;
 
@@ -2724,7 +2971,7 @@ export async function computeProfit(
     missingCost,
     daily,
     // 판매가 기준 주문금액과 판매자 부담 쿠폰. 실매출 = orderAmount − sellerDiscount.
-    coupon,
+    coupon: { ...coupon, sources: couponSources },
     channels: {
       marketplace: {
         quantity: byChannel.marketplace.quantity,
