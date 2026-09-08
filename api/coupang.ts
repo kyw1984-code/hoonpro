@@ -505,6 +505,25 @@ export function sellerDiscountOf(item: any): { seller: number; coupang: number }
 }
 
 /**
+ * 옵션ID를 찾는다. 보통은 items[].vendorItemId 인데, 로켓그로스 상품은 그 자리가
+ * 비어 있고 안쪽 객체에 들어 있을 수 있다. 한 단계 안쪽까지 이름에 vendorItemId가
+ * 들어간 키를 찾는다. 값이 없으면 빈 문자열이다.
+ */
+export function findVendorItemId(item: any): string {
+  if (!item || typeof item !== 'object') return '';
+  const direct = pickStr(item, ['vendorItemId', 'vendorItemID']);
+  if (direct) return direct;
+  for (const [k, v] of Object.entries(item)) {
+    if (/vendorItemId/i.test(k) && v !== null && v !== undefined && v !== '') return String(v);
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const inner = pickStr(v, ['vendorItemId', 'vendorItemID']);
+      if (inner) return inner;
+    }
+  }
+  return '';
+}
+
+/**
  * 등록상품 목록 질의문.
  *
  * nextToken은 값이 비어도 반드시 보낸다. 빼면 쿠팡이 오류 없이 빈 목록을 돌려줘
@@ -612,15 +631,16 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
     const detail = (r.data as any)?.data ?? r.data;
     const productId = pickStr(detail, ['productId', 'displayProductId']);
     if (!firstDetailShape) {
-      // 값은 남기지 않는다. 키 이름만 있어도 어디서 어긋났는지 보인다.
+      // 값은 남기지 않는다. 키 이름만 있어도 어디서 어긋났는지 보인다. 앞에서 잘라 버리면
+      // 정작 찾는 키가 뒤에 있는지 없는지를 알 수 없다.
       const items = Array.isArray(detail?.items) ? detail.items : null;
       firstDetailShape =
-        `키=${Object.keys(detail ?? {}).slice(0, 12).join(',')}` +
+        `키=${Object.keys(detail ?? {}).join(',')}` +
         ` / items=${items ? `${items.length}건` : '없음'}` +
-        (items && items[0] ? ` / item키=${Object.keys(items[0]).slice(0, 12).join(',')}` : '');
+        (items && items[0] ? ` / item키=${Object.keys(items[0]).join(',')}` : '');
     }
     for (const it of Array.isArray(detail?.items) ? detail.items : []) {
-      const vendorItemId = pickStr(it, ['vendorItemId', 'vendorItemID']);
+      const vendorItemId = findVendorItemId(it);
       if (!vendorItemId) continue;
       rows.push({
         user_id: userId,
@@ -1163,6 +1183,75 @@ async function syncGrowthInventory(userId: string, creds: CoupangCreds, sum: Syn
 }
 
 
+// ── 관측 데이터로 상품 목록 채우기 ─────────────────────────────
+//
+// 등록상품 상세에 옵션ID가 없으면 coupang_items가 비고, 원가 입력·가격 관리·재고
+// 예측이 통째로 빈다. 그런데 옵션ID는 로켓창고 재고·매출·주문에 전부 실려 온다.
+// 거기서 본 옵션을 상품 목록에 넣되, 상세에서 제대로 받은 행은 건드리지 않는다
+// (같은 옵션이면 상세가 이긴다). 이렇게 넣은 행은 seller_product_id가 없어
+// '목록에서 사라진 상품 정리'에 걸리지 않는다.
+async function backfillItemsFromObservations(userId: string, sum: SyncSummary): Promise<void> {
+  if (!supabase) return;
+  const { rows: existing } = await selectAll<{ vendor_item_id: string }>((f, t) =>
+    supabase!.from('coupang_items').select('vendor_item_id').eq('user_id', userId).order('vendor_item_id').range(f, t));
+  const have = new Set(existing.map(e => String(e.vendor_item_id)));
+
+  const today = kstToday();
+  const [invRes, salesRes] = await Promise.all([
+    selectAll<any>((f, t) => supabase!.from('coupang_growth_inventory')
+      .select('vendor_item_id, product_name, external_sku, orderable_qty').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_sales_daily')
+      .select('vendor_item_id, product_name, channel, quantity, sales_amount, sale_date').eq('user_id', userId)
+      .gte('sale_date', addDays(today, -90)).order('sale_date', { ascending: false }).range(f, t)),
+  ]);
+
+  // 매출에서 본 이름·평균 판매가(최근 것 우선)
+  const seen = new Map<string, { name: string; price: number | null; channel: string }>();
+  for (const s of salesRes.rows) {
+    const id = String(s.vendor_item_id);
+    if (seen.has(id)) continue;
+    const qty = Number(s.quantity) || 0;
+    const amt = Number(s.sales_amount) || 0;
+    seen.set(id, {
+      name: String(s.product_name ?? ''),
+      price: qty > 0 ? Math.round(amt / qty) : null,
+      channel: String(s.channel ?? 'marketplace'),
+    });
+  }
+
+  const rows: any[] = [];
+  const now = new Date().toISOString();
+  for (const inv of invRes.rows) {
+    const id = String(inv.vendor_item_id);
+    if (have.has(id)) continue;
+    have.add(id);
+    const s = seen.get(id);
+    rows.push({
+      user_id: userId, vendor_item_id: id, seller_product_id: null, product_id: null,
+      product_name: inv.product_name || s?.name || `옵션 ${id}`,
+      option_name: inv.external_sku || '',
+      sale_price: s?.price ?? null,
+      stock: Number(inv.orderable_qty) || 0,
+      status: 'observed', business_type: 'growth', synced_at: now,
+    });
+  }
+  for (const [id, s] of seen) {
+    if (have.has(id)) continue;
+    have.add(id);
+    rows.push({
+      user_id: userId, vendor_item_id: id, seller_product_id: null, product_id: null,
+      product_name: s.name || `옵션 ${id}`, option_name: '',
+      sale_price: s.price, stock: null,
+      status: 'observed', business_type: s.channel === 'growth' ? 'growth' : 'marketplace', synced_at: now,
+    });
+  }
+  if (rows.length === 0) return;
+  const err = await upsertChunked('coupang_items', rows, 'user_id,vendor_item_id');
+  if (err) sum.errors.push(`상품 목록 보완: ${err}`);
+  else sum.items += rows.length;
+}
+
 // ── 지급내역 동기화 (캐시플로) ────────────────────────────────
 async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
@@ -1265,7 +1354,8 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
   const seenReceipt = new Set<string>();
   let returnErrorLogged = false;
   for (const status of RETURN_STATUSES) {
-  for (const [cFrom, cTo] of dateChunks(from, to)) {
+  // 60일을 한 번에 물으면 'Request timed out'이 난다. 14일씩 나눈다.
+  for (const [cFrom, cTo] of dateChunks(from, to, 14)) {
     let nextToken = '';
     for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
       if (outOfTime(deadline, sum)) break;
@@ -1492,6 +1582,11 @@ async function syncUser(
 
   await syncGrowthInventory(userId, creds, sum, deadline);
   if (sum.authFailed) return sum;
+
+  // 상품 상세에 옵션ID가 안 오는 계정이 있다(로켓그로스 전용 상품). 그래도 재고·매출·
+  // 주문에는 옵션ID가 다 실려 오므로, 거기서 본 옵션을 상품 목록에 채운다.
+  // 원가 입력·가격 관리·재고 예측이 상세 API 하나에 볼모로 잡히지 않게 한다.
+  await backfillItemsFromObservations(userId, sum);
 
   await syncSettlements(userId, creds, sum, deadline);
   if (sum.authFailed) return sum;

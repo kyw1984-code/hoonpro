@@ -28,6 +28,8 @@ interface Props {
 
 interface Delta { text: string; good: boolean; bad: boolean }
 
+type SortKey = 'quantity' | 'salesAmount' | 'couponDiscount' | 'commission' | 'adCost' | 'unitCostTotal' | 'returnCount' | 'profit' | 'marginRate';
+
 /**
  * 직전 같은 길이 기간과의 증감.
  * 비용(수수료·원가)은 늘어난 쪽이 나쁘므로 higherIsBetter로 색을 뒤집는다.
@@ -50,6 +52,9 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   const [days, setDays] = useState(30);
   // 날짜를 직접 고른 경우. 버튼 기간과는 별개라, 어느 쪽이 살아 있는지가 분명해야 한다.
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
+  // 표 정렬. 기본은 순이익 내림차순(원가 미입력은 아래). 열 제목을 누르면 그 열로 바꾸고,
+  // 같은 열을 다시 누르면 방향이 뒤집힌다.
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(null);
   const [data, setData] = useState<ProfitResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -135,6 +140,28 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   // 보고서 파일에서 받은 날짜만 채워지고, 빠진 날은 순이익을 부풀린다.
   const ac = data.adCost;
   const ch = data.channels;
+  // 서버가 준 순서(순이익 내림차순, 원가 미입력은 아래)를 기본으로 두고, 사용자가 고른 열이 있으면 그걸로 다시 정렬한다
+  const sortedRows = sort
+    ? [...data.rows].sort((a, b) => {
+        const av = Number(a[sort.key] ?? 0);
+        const bv = Number(b[sort.key] ?? 0);
+        return sort.dir === 'asc' ? av - bv : bv - av;
+      })
+    : data.rows;
+  const toggleSort = (key: SortKey) =>
+    setSort(cur => (cur && cur.key === key ? { key, dir: cur.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }));
+  const SortTh = ({ k, label, className = 'px-3' }: { k: SortKey; label: string; className?: string }) => (
+    <th className={`${className} py-2.5 text-right font-medium`}>
+      <button
+        onClick={() => toggleSort(k)}
+        className={`inline-flex items-center gap-0.5 hover:text-ink ${sort?.key === k ? 'text-ink' : ''}`}
+        title="누르면 이 열로 정렬합니다. 다시 누르면 방향이 바뀝니다"
+      >
+        {label}
+        <span className="text-[10px]">{sort?.key === k ? (sort.dir === 'desc' ? '▼' : '▲') : '⇅'}</span>
+      </button>
+    </th>
+  );
   // 쿠폰 열은 한 상품이라도 쿠폰 할인이 있을 때만 보인다. 없는데 '0원' 열을 두면 표만 넓어진다
   const hasCoupon = data.rows.some(r => (r.couponDiscount ?? 0) > 0);
   const adNote = (() => {
@@ -295,7 +322,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               <Stat
                 label="쿠폰 할인 (판매자 부담)"
                 value={`− ${won(data.coupon!.sellerDiscount)}`}
-                sub={`실매출 ${won(data.coupon!.orderAmount - data.coupon!.sellerDiscount)} · 주문 기준`}
+                sub={`실매출 ${won(data.totals.salesAmount - data.coupon!.sellerDiscount)} · 윙 주문의 쿠폰`}
                 tone="critical"
               />
             )}
@@ -424,19 +451,19 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                 <thead>
                   <tr className="border-b border-line text-[11.5px] text-ink-3">
                     <th className="px-4 py-2.5 text-left font-medium">상품</th>
-                    <th className="px-3 py-2.5 text-right font-medium">판매</th>
-                    <th className="px-3 py-2.5 text-right font-medium">매출</th>
-                    {hasCoupon && <th className="px-3 py-2.5 text-right font-medium">쿠폰</th>}
-                    <th className="px-3 py-2.5 text-right font-medium">수수료</th>
-                    <th className="px-3 py-2.5 text-right font-medium">광고비</th>
-                    <th className="px-3 py-2.5 text-right font-medium">원가</th>
-                    <th className="px-3 py-2.5 text-right font-medium">반품</th>
-                    <th className="px-3 py-2.5 text-right font-medium">순이익</th>
-                    <th className="px-4 py-2.5 text-right font-medium">이익률</th>
+                    <SortTh k="quantity" label="판매" />
+                    <SortTh k="salesAmount" label="매출" />
+                    {hasCoupon && <SortTh k="couponDiscount" label="쿠폰" />}
+                    <SortTh k="commission" label="수수료" />
+                    <SortTh k="adCost" label="광고비" />
+                    <SortTh k="unitCostTotal" label="원가" />
+                    <SortTh k="returnCount" label="반품" />
+                    <SortTh k="profit" label="순이익" />
+                    <SortTh k="marginRate" label="이익률" className="px-4" />
                   </tr>
                 </thead>
                 <tbody>
-                  {data.rows.map(r => (
+                  {sortedRows.map(r => (
                     <tr key={r.vendorItemId} className="border-b border-line/60 last:border-0">
                       <td className="max-w-[300px] px-4 py-2.5">
                         <p className="truncate text-ink">{r.productName}</p>
