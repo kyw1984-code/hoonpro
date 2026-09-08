@@ -8,6 +8,7 @@ import { LimitsAdmin } from './LimitsAdmin';
 import { CostsAdmin } from './CostsAdmin';
 import { CoupangAdmin } from './CoupangAdmin';
 import { QAManager } from './QAManager';
+import { ErrorLog } from './ErrorLog';
 import { CompanyInfoConfig } from './CompanyInfoConfig';
 
 interface UserRow {
@@ -35,7 +36,9 @@ const STATUS_COLOR: Record<string, string> = {
 const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
-  const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'limits' | 'stats' | 'config' | 'taborder' | 'company' | 'qa' | 'coupang'>('users');
+  // 다른 탭을 보고 있어도 오류가 났다는 걸 알아야 한다. 탭 라벨에 건수를 띄운다.
+  const [openErrors, setOpenErrors] = useState(0);
+  const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'limits' | 'stats' | 'config' | 'taborder' | 'company' | 'qa' | 'coupang' | 'errors'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -124,6 +127,13 @@ export function AdminPanel() {
     rejected: users.filter(u => u.status === 'rejected').length,
   };
 
+  useEffect(() => {
+    fetch('/api/admin?action=errors', { headers: { Authorization: `Bearer ${getToken()}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => setOpenErrors(d?.openCount ?? 0))
+      .catch(() => setOpenErrors(0));
+  }, [tab]);
+
   return (
     <div className="max-w-5xl mx-auto px-6 py-8">
       {/* 탭 네비게이션 */}
@@ -211,9 +221,18 @@ export function AdminPanel() {
         >
           <ShoppingBag className="w-4 h-4" /> 쿠팡 연동
         </button>
+        {/* 오류는 맨 끝에 두되, 열린 오류가 있으면 라벨이 빨갛게 눈에 띈다 */}
+        <button
+          onClick={() => setTab('errors')}
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'errors' ? 'border-accent text-accent' : openErrors > 0 ? 'border-transparent text-critical' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <AlertTriangle className="w-4 h-4" /> 서버 오류{openErrors > 0 ? ` ${openErrors}` : ''}
+        </button>
       </div>
 
-      {tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
+      {tab === 'errors' ? <ErrorLog showToast={showToast} /> : tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <ImageConfigTab showToast={showToast} />
       ) : tab === 'taborder' ? (
         <TabOrderConfig showToast={showToast} />

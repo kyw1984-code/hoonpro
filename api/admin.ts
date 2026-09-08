@@ -28,6 +28,61 @@ function verifyAdmin(req: VercelRequest): boolean {
   }
 }
 
+// ─── 서버 오류 ─────────────────────────────────────────────
+//
+// 중계 서버가 90분 죽어 있었는데 아무도 몰랐다. 로그는 Vercel에만 남고 운영자는
+// 그걸 열어 볼 이유가 없기 때문이다. 여기서 바로 보이면 알아챌 수 있다.
+async function handleErrors(req: VercelRequest, res: VercelResponse) {
+  if (!supabase) return res.status(500).json({ error: '서버 저장소가 설정되지 않았습니다.' });
+  const includeResolved = String(req.query.all || '') === 'true';
+
+  let q = supabase
+    .from('system_errors')
+    .select('id, area, message, detail, severity, count, first_seen_at, last_seen_at, resolved_at, users(email, name)')
+    .order('last_seen_at', { ascending: false })
+    .limit(100);
+  if (!includeResolved) q = q.is('resolved_at', null);
+
+  const { data, error } = await q;
+  if (error) {
+    // 표가 아직 없으면 그렇게 말해 준다. '서버 오류'로 뭉뚱그리면 원인을 못 찾는다.
+    if (error.code === '42P01') {
+      return res.status(400).json({ error: 'system_errors 테이블이 없습니다. supabase-schema.sql의 41번 절을 실행해주세요.' });
+    }
+    return res.status(500).json({ error: `오류 목록 조회 실패: ${error.message}` });
+  }
+
+  const rows = (data ?? []).map((e: any) => ({
+    id: e.id,
+    area: e.area,
+    message: e.message,
+    detail: e.detail,
+    severity: e.severity,
+    count: e.count,
+    firstSeenAt: e.first_seen_at,
+    lastSeenAt: e.last_seen_at,
+    resolvedAt: e.resolved_at,
+    userEmail: e.users?.email ?? null,
+  }));
+  return res.status(200).json({
+    errors: rows,
+    openCount: rows.filter(r => !r.resolvedAt).length,
+  });
+}
+
+async function handleErrorResolve(req: VercelRequest, res: VercelResponse) {
+  if (!supabase) return res.status(500).json({ error: '서버 저장소가 설정되지 않았습니다.' });
+  const id = String(req.query.id || '');
+  const all = String(req.query.all || '') === 'true';
+  if (!id && !all) return res.status(400).json({ error: '처리할 오류를 지정해주세요.' });
+
+  const now = new Date().toISOString();
+  const q = supabase.from('system_errors').update({ resolved_at: now });
+  const { error } = all ? await q.is('resolved_at', null) : await q.eq('id', id);
+  if (error) return res.status(500).json({ error: `처리 실패: ${error.message}` });
+  return res.status(200).json({ ok: true });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -47,6 +102,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'stats') return await handleStats(req, res);
     if (action === 'costs') return await handleCosts(req, res);
     if (action === 'limits') return await handleLimits(req, res);
+    if (action === 'errors') return await handleErrors(req, res);
+    if (action === 'error-resolve') return await handleErrorResolve(req, res);
     return res.status(400).json({ error: '알 수 없는 action입니다.' });
   } catch (e) {
     console.error('[admin]', action, e);

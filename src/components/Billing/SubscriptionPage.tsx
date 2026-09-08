@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { withVat } from '../../lib/vat';
 import { CreditCard, BadgeCheck, AlertTriangle, Ticket, Loader2, CalendarClock, Receipt, Gift } from 'lucide-react';
 import { getToken, removeToken } from '../../lib/auth';
 import {
@@ -172,7 +173,7 @@ export function SubscriptionPage() {
   // 플랜 목록 — 연간 우선. DB 마이그레이션 전에는 기본값으로 표시
   const plans = status?.plans?.length ? status.plans : [
     { id: 'yearly', name: '훈프로 연간', price: 357600, interval: 'year' as const },
-    { id: 'standard', name: '훈프로 월간', price: 39800, interval: 'month' as const },
+    { id: 'standard', name: '훈프로 월간', price: 39800, chargedPrice: withVat(39800).total, vat: withVat(39800).vat, interval: 'month' as const },
   ];
   const yearlyPlan = plans.find(p => p.interval === 'year');
   const monthlyPlan = plans.find(p => p.interval === 'month');
@@ -337,6 +338,15 @@ export function SubscriptionPage() {
                   {(selectedPlan.interval === 'year' ? Math.round(selectedPlan.price / 12) : selectedPlan.price).toLocaleString()}
                   <span className="ml-0.5 text-[13px] font-medium text-ink-3">원/월</span>
                 </span>
+                {/* 사업자 대상이라 부가세 별도로 적되, 실제로 카드에 찍히는 금액을
+                    반드시 함께 보여준다. 결제창에서 처음 보면 속았다고 느낀다. */}
+                <span className="block text-[12px] text-ink-3">부가세 별도</span>
+                {selectedPlan.chargedPrice !== undefined && (
+                  <span className="block text-[12px] font-medium text-ink-2">
+                    실제 결제 {selectedPlan.chargedPrice.toLocaleString()}원
+                    {selectedPlan.interval === 'year' ? ' (연 1회)' : '/월'}
+                  </span>
+                )}
                 {selectedPlan.interval === 'year' && (
                   <span className="block text-[12px] text-ink-3">연 {selectedPlan.price.toLocaleString()}원 일시 결제</span>
                 )}
@@ -390,7 +400,7 @@ export function SubscriptionPage() {
           >
             {couponPreview?.type === 'free_period'
               ? `카드 등록하고 ${couponPreview.value}일 무료로 시작하기`
-              : `카드 등록하고 시작하기 — ${(couponPreview?.firstAmount ?? selectedPlan.price).toLocaleString()}원${selectedPlan.interval === 'year' ? ' (연 1회)' : '/월'}`}
+              : `카드 등록하고 시작하기 — ${(couponPreview?.firstAmount ?? selectedPlan.chargedPrice ?? selectedPlan.price).toLocaleString()}원${selectedPlan.interval === 'year' ? ' (연 1회)' : '/월'}`}
           </button>
           {!tossConfigured() && (
             <p className="mt-2 text-center text-[12px] text-caution">결제 설정이 아직 완료되지 않았습니다. 관리자에게 문의하세요.</p>
@@ -584,7 +594,15 @@ export function SubscriptionPage() {
                       <tr key={i} className="border-b border-line last:border-0">
                         <td className="whitespace-nowrap py-2.5 pr-4 text-ink-2">{fmtDate(p.approved_at ?? p.created_at)}</td>
                         <td className="py-2.5 pr-4 text-ink">{p.order_name}{p.discount > 0 && <span className="ml-1 text-positive">(-{p.discount.toLocaleString()}원)</span>}</td>
-                        <td className="whitespace-nowrap py-2.5 pr-4 text-right font-medium tabular-nums text-ink">{p.amount.toLocaleString()}원</td>
+                        {/* 매출전표가 적격증빙이 되려면 공급가액과 세액이 보여야 한다 */}
+                        <td className="whitespace-nowrap py-2.5 pr-4 text-right tabular-nums">
+                          <span className="font-medium text-ink">{p.amount.toLocaleString()}원</span>
+                          {p.supply_amount != null && p.vat_amount != null && (
+                            <span className="block text-[11px] text-ink-3">
+                              공급가액 {p.supply_amount.toLocaleString()} · 부가세 {p.vat_amount.toLocaleString()}
+                            </span>
+                          )}
+                        </td>
                         <td className="whitespace-nowrap py-2.5 pr-4">
                           <span className={p.status === 'paid' ? 'text-positive' : p.status === 'failed' ? 'text-critical' : 'text-ink-2'}>
                             {PAYMENT_LABEL[p.status] ?? p.status}
@@ -600,6 +618,10 @@ export function SubscriptionPage() {
                     ))}
                   </tbody>
                 </table>
+                <p className="mt-3 text-[11.5px] leading-relaxed text-ink-3">
+                  신용카드 매출전표가 부가가치세법상 적격증빙입니다. 매입세액 공제는 매출전표로 하시면 되고,
+                  같은 거래에 세금계산서가 중복 발급되지는 않습니다. 세금계산서가 꼭 필요하시면 고객센터로 문의해주세요.
+                </p>
               </div>
             )}
           </div>

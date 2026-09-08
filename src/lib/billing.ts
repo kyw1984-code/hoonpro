@@ -13,7 +13,9 @@ export interface SubscriptionInfo {
 
 export interface PaymentRow {
   order_name: string;
-  amount: number;
+  amount: number;          // 실제 청구액 (공급가액 + 부가세)
+  supply_amount?: number | null;
+  vat_amount?: number | null;
   discount: number;
   status: string;
   fail_reason: string | null;
@@ -25,8 +27,11 @@ export interface PaymentRow {
 export interface Plan {
   id: string;
   name: string;
-  price: number;       // 결제 1회 청구 금액 (연간은 12개월치)
+  price: number;         // 공급가액 (부가세 별도, 연간은 12개월치)
   interval: 'month' | 'year';
+  /** 실제로 카드에 청구되는 금액 = 공급가액 + 부가세 */
+  chargedPrice?: number;
+  vat?: number;
 }
 
 export interface BillingStatus {
