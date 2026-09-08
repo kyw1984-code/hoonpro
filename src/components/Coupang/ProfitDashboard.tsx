@@ -256,6 +256,10 @@ export function ProfitDashboard({ onEditCosts }: Props) {
         </div>
       )}
 
+      {/* 광고센터 연결 — 원가 경고 바로 아래. 둘 다 "순이익이 맞으려면 이걸 해야 한다"는
+          같은 성격의 할 일이라 한 자리에 둔다. 표 아래에 두면 스크롤해야 보인다. */}
+      <AdCenterConnect />
+
       {noSales ? (
         <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">
           <Wallet className="mb-4 h-12 w-12 opacity-20" />
@@ -365,9 +369,6 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               {adNote}
             </p>
           </div>
-
-          {/* 광고센터 연결 — 파일 올리기 없이 버튼 하나로 광고비를 가져온다 */}
-          <AdCenterConnect />
 
           {/* 상품별 표 */}
           <div className="rounded-panel border border-line bg-paper">
