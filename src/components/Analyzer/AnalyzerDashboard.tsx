@@ -5,6 +5,7 @@ import { Upload, Save, TrendingUp, X, Loader2 } from "lucide-react";
 import { getToken } from "../../lib/auth";
 import { coupangApi } from "../../lib/coupang";
 import { extractDailyAdCost } from "../../lib/adcost";
+import { AdCenterConnect } from "../AdCenter/AdCenterConnect";
 
 // ─── 지면 분류 헬퍼 ("비검색"이 "검색"을 포함하는 substring 함정 방지) ───
 function isSearchPlatform(platform: string): boolean {
@@ -696,6 +697,11 @@ export function AnalyzerDashboard() {
             </label>
             {fileName && <p className="mt-2 text-sm text-positive font-medium">선택된 파일: {fileName}</p>}
             {error && <p className="mt-2 text-sm text-critical font-medium">{error}</p>}
+          </div>
+
+          {/* 광고비만 필요하면 파일을 내려받을 필요가 없다 — 광고센터에서 버튼 하나로 들어온다 */}
+          <div className="mb-8">
+            <AdCenterConnect compact />
           </div>
 
           {processedData && !("error" in processedData) && (
