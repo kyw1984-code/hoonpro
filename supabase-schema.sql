@@ -918,3 +918,11 @@ create table if not exists coupang_ad_costs_items (
 create index if not exists idx_caci_user_date on coupang_ad_costs_items(user_id, ad_date);
 alter table coupang_ad_costs_items enable row level security;
 revoke all on coupang_ad_costs_items from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 36. 마지막 광고 보고서의 모양 — 값은 없고 열 이름만
+-- ─────────────────────────────────────────────────────────────
+-- 광고비가 일자별로 안 붙고 '추정'으로 떨어질 때, 어떤 열이 왔는지 알아야 고칠 수
+-- 있다. 사용자에게 화면을 찍어 보내 달라고 하는 대신 열 이름과 보고서 단위를
+-- 여기 남긴다. 광고비 값 자체는 남기지 않는다.
+alter table coupang_accounts add column if not exists last_ad_report_note text;

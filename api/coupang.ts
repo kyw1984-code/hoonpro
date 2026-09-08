@@ -2794,6 +2794,13 @@ async function persistAdCosts(
     source = 'spread';
   }
 
+  // 어떤 열이 왔고 어떤 단위였는지 남긴다. '추정'으로 떨어진 이유를 화면 캡처 없이
+  // 알 수 있어야 한다. 값은 남기지 않는다.
+  if (Array.isArray(body.columns) && body.columns.length > 0) {
+    const note = `${new Date().toISOString().slice(0, 16)} ${source} unit=${String(body.dateGroup ?? '')} cols=${body.columns.slice(0, 40).map((c: any) => String(c)).join('|')}`;
+    await supabase!.from('coupang_accounts').update({ last_ad_report_note: note.slice(0, 2000) }).eq('user_id', userId);
+  }
+
   const batchId = crypto.randomBytes(8).toString('hex');
   const rows = [...byDate.entries()].map(([ad_date, cost]) => ({
     user_id: userId, ad_date, cost, source, batch_id: batchId,

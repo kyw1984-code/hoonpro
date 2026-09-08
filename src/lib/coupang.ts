@@ -356,6 +356,9 @@ export const coupangApi = {
     from: string; to: string; daily?: { date: string; cost: number }[]; total?: number; source?: 'report' | 'manual';
     /** 옵션별 광고비 — 보고서에 광고집행 옵션ID가 있을 때 */
     items?: { date: string; vendorItemId: string; cost: number }[];
+    /** 진단용 — 보고서의 열 이름과 단위. 값은 보내지 않는다 */
+    columns?: string[];
+    dateGroup?: string;
   }) =>
     request<{ ok: true; from: string; to: string; days: number; source: string; total: number; attributed?: number }>('ad-cost-save', { method: 'POST', body }),
   /** 광고센터가 준 파일 주소(S3 등)를 서버가 대신 받아 광고비를 저장한다 — 브라우저는 다른 도메인이라 못 읽는다 */
