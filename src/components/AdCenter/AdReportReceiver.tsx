@@ -37,14 +37,14 @@ export function AdReportReceiver() {
   };
 
   /** 파일(버퍼)에서 날짜별 광고비를 뽑아 저장한다 — 북마클릿이 준 것이든 끌어다 놓은 것이든 같다 */
-  const saveBuffer = useCallback(async (buf: ArrayBuffer, from: string, to: string, hint?: { filename?: string; contentType?: string }) => {
+  const saveBuffer = useCallback(async (buf: ArrayBuffer, from: string, to: string, hint?: { filename?: string; contentType?: string; dateGroup?: string }) => {
     const rows = parseAdReportBuffer(buf, hint);
     if (rows.length === 0) throw new Error('보고서가 비어 있습니다. 이 기간에 광고 집행이 없었을 수 있습니다.');
     const cols = Object.keys(rows[0] ?? {});
     const daily = extractDailyAdCost(rows);
     if (daily) {
       // 보고서 안의 날짜가 기준이다. 요청 기간보다 좁을 수 있다(집행 없는 날).
-      const r = await coupangApi.adCostSave({ from, to, daily: daily.days, source: 'report', items: extractItemAdCost(rows) ?? [] });
+      const r = await coupangApi.adCostSave({ from, to, daily: daily.days, source: 'report', items: extractItemAdCost(rows) ?? [], columns: cols, dateGroup: hint?.dateGroup });
       return { days: r.days, total: r.total, estimated: false, columns: cols };
     }
     // 일자 컬럼이 없으면 합계라도 기간에 나눠 넣는다. 아예 없는 것보다 낫지만 화면에는 '추정'으로 표시되고,
@@ -52,7 +52,7 @@ export function AdReportReceiver() {
     const costCol = cols.find(c => c.trim() === '광고비');
     if (!costCol) throw new Error(`보고서에 '광고비' 열이 없습니다. (열: ${cols.slice(0, 8).join(', ')})`);
     const total = rows.reduce((n, r) => n + (Number(String(r[costCol] ?? '').replace(/[^0-9.-]/g, '')) || 0), 0);
-    const r = await coupangApi.adCostSave({ from, to, total: Math.round(total) });
+    const r = await coupangApi.adCostSave({ from, to, total: Math.round(total), columns: cols, dateGroup: hint?.dateGroup });
     return { days: r.days, total: r.total, estimated: true, columns: cols };
   }, []);
 
@@ -113,7 +113,7 @@ export function AdReportReceiver() {
           result = { days: r.days, total: r.total, estimated: r.source === 'spread', columns: [] };
         } else {
           if (!(data.buffer instanceof ArrayBuffer)) throw new Error('보고서 파일이 비어 있습니다.');
-          result = await saveBuffer(data.buffer, from, to, { contentType: data.contentType });
+          result = await saveBuffer(data.buffer, from, to, { contentType: data.contentType, dateGroup });
         }
         setPhase({ kind: 'done', ...result, from, to, dateGroup });
       } catch (e: any) {
