@@ -2,6 +2,8 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 import { createHmac } from "crypto";
 import jwt from "jsonwebtoken";
+// ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
+import { tabDisabledMessage } from "../lib/feature-gate.js";
 
 export const config = { maxDuration: 60 };
 
@@ -950,7 +952,7 @@ async function recordObservations(keyword: string, products: ParsedProduct[]): P
   }
 }
 
-// ─── 내 상품 순위 추적 ────────────────────────────────────────────────────────
+// ─── 관심 상품 순위 추적 (내 상품 + 소싱AI에서 담은 경쟁 상품) ────────────────────────────────────────────────────────
 // 이 키워드를 순위 추적 중인 상품이 있으면, 방금 파싱한 검색 결과에서 순위를 찾아 기록
 async function recordRankObservations(keyword: string, parsed: ParsedProduct[]): Promise<void> {
   if (!supabase || parsed.length === 0) return;
@@ -1756,7 +1758,7 @@ async function sendRankAlerts(): Promise<number> {
     ).join("");
     await sendEmail(
       u.email,
-      "[훈프로] 내 상품 순위가 하락했습니다",
+      "[훈프로] 관심 상품 순위가 하락했습니다",
       `<p>${esc(u.name || "")}님, 추적 중인 상품의 검색 순위가 하락했습니다.</p><ul>${rows}</ul>` +
       `<p>순위 하락은 보통 경쟁 상품의 광고 강화나 리뷰 역전이 원인입니다. 훈프로의 [순위 추적]과 [광고 성과 분석]에서 원인을 점검해보세요.</p>` +
       '<p style="color:#888;font-size:12px">알림 메일은 훈프로 앱의 [구독 관리] 탭에서 언제든 끌 수 있습니다.</p>',
@@ -1766,7 +1768,7 @@ async function sendRankAlerts(): Promise<number> {
   return sent;
 }
 
-// 주 1회(월요일 새벽 KST) 요약: 내 상품 순위 현황 + 이번 주 추천 소싱 키워드
+// 주 1회(월요일 새벽 KST) 요약: 관심 상품 순위 현황 + 이번 주 추천 소싱 키워드
 async function sendWeeklyDigest(): Promise<number> {
   if (!supabase) return 0;
   const states = await collectRankStates();
@@ -1801,9 +1803,9 @@ async function sendWeeklyDigest(): Promise<number> {
     }).join("");
     await sendEmail(
       u.email,
-      "[훈프로] 주간 리포트 — 내 상품 순위와 이번 주 추천 키워드",
+      "[훈프로] 주간 리포트 — 관심 상품 순위와 이번 주 추천 키워드",
       `<p>${esc(u.name || "")}님, 이번 주 훈프로 요약입니다.</p>` +
-      `<p><b>내 상품 순위 현황</b></p><ul>${rows}</ul>${pickHtml}` +
+      `<p><b>관심 상품 순위 현황</b></p><ul>${rows}</ul>${pickHtml}` +
       `<p>자세한 내용은 훈프로 앱의 홈 대시보드에서 확인하세요.</p>` +
       '<p style="color:#888;font-size:12px">알림 메일은 훈프로 앱의 [구독 관리] 탭에서 언제든 끌 수 있습니다.</p>',
     );
@@ -1935,6 +1937,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
     }
+  }
+
+  // 이 엔드포인트 하나가 화면 셋을 담당한다. 관리자가 끈 화면은 서버에서도
+  // 막는다 — 감추기만 하면 열려 있던 브라우저 탭이 계속 호출한다.
+  const TAB_OF_TYPE: Record<string, "sourcing" | "ranktracker" | "review"> = {
+    keywords: "sourcing", trend: "sourcing", briefing: "sourcing",
+    products: "sourcing", favorites: "sourcing",
+    reviews: "review",
+    rankwatch: "ranktracker",
+  };
+  const tab = TAB_OF_TYPE[type];
+  if (tab) {
+    const blocked = await tabDisabledMessage(supabase, tab, decoded?.isAdmin === true);
+    if (blocked) return res.status(403).json({ error: blocked });
   }
 
   if (type === "keywords") return handleKeywords(req, res);

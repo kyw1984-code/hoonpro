@@ -2,6 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+// ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
+import { tabDisabledMessage } from '../lib/feature-gate.js';
 
 export const config = { maxDuration: 300 };
 
@@ -1409,6 +1411,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
   }
+
+  // 관리자가 끈 화면은 서버에서도 막는다
+  const tabBlocked = await tabDisabledMessage(supabase, 'coupang', decoded.isAdmin === true);
+  if (tabBlocked) return res.status(403).json({ error: tabBlocked });
 
   try {
     switch (action) {

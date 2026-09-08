@@ -20,6 +20,8 @@ const BADGE = 'inline-flex items-center rounded-control border px-1.5 py-0.5 tex
 
 interface Props {
   onNavigate: (tab: string) => void;
+  /** 관리자가 숨긴 기능. 홈에서도 그 기능으로 가는 길을 내보이지 않는다 */
+  hiddenTabs?: string[];
 }
 
 // 다크 테마: 각 액션 카드에 개별 액센트 컬러 지정
@@ -34,7 +36,7 @@ const ACTION_ACCENTS = [
 // 순서는 '핵심 가치 → 재방문 이유 → 즉각적인 결과물' 로 잡았다.
 const ONBOARDING_STEPS = [
   { key: 'sourcing',  tab: 'sourcing',    title: '팔 상품 찾기',   desc: '소싱AI에서 키워드를 ★로 저장해보세요' },
-  { key: 'rank',      tab: 'ranktracker', title: '내 상품 등록',   desc: '순위 추적에 등록하면 매일 순위가 갱신됩니다' },
+  { key: 'rank',      tab: 'ranktracker', title: '관심 상품 등록', desc: '순위 추적에 등록하면 매일 순위가 갱신됩니다' },
   { key: 'thumbnail', tab: 'thumbnail',   title: '썸네일 만들기',  desc: 'AI로 썸네일 이미지를 하나 생성해보세요' },
   { key: 'coupang',   tab: 'coupang',     title: '쿠팡 연동',      desc: '윙 API 키를 넣으면 매출·정산·순이익이 자동으로 들어옵니다' },
 ] as const;
@@ -45,7 +47,10 @@ interface Onboarding {
   dismissed: boolean;
 }
 
-export function HomeDashboard({ onNavigate }: Props) {
+export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
+  // 숨긴 기능으로 가는 카드·링크를 남겨두면 눌렀을 때 홈으로 튕겨 나온다.
+  // 고장난 것처럼 보이므로 길 자체를 지운다.
+  const shown = (tab: string) => !hiddenTabs.includes(tab);
   const [onboarding, setOnboarding] = useState<Onboarding | null>(null);
   const [watches, setWatches] = useState<any[] | null>(null);
   const [report, setReport] = useState<any[] | null>(null);
@@ -107,7 +112,7 @@ export function HomeDashboard({ onNavigate }: Props) {
     { tab: 'thumbnail', label: '썸네일 제작', desc: 'AI 썸네일 만들기', icon: ImageIcon },
     { tab: 'detail', label: '상세페이지 제작', desc: '기획안부터 이미지까지', icon: LayoutTemplate },
     { tab: 'analyzer', label: '광고 성과 분석', desc: '보고서 올리고 코칭 받기', icon: BarChart3 },
-  ];
+  ].filter(q => shown(q.tab));
 
   return (
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-5 px-6">
@@ -143,14 +148,17 @@ export function HomeDashboard({ onNavigate }: Props) {
       `}</style>
 
       {/* 시작 안내 — 3단계를 다 끝내거나 닫으면 사라진다 */}
-      {onboarding && !onboarding.done && !onboarding.dismissed && (() => {
-        const doneCount = ONBOARDING_STEPS.filter(s => onboarding.steps[s.key]).length;
+      {/* steps까지 확인한다. 응답이 비거나 형태가 어긋나면 아래에서 onboarding.steps[...]가
+          터지면서 홈 화면 전체가 백스크린이 된다 — 카드 하나 때문에 첫 화면을 잃을 수는 없다. */}
+      {onboarding && onboarding.steps && !onboarding.done && !onboarding.dismissed && (() => {
+        const steps = ONBOARDING_STEPS.filter(st => shown(st.tab));
+        const doneCount = steps.filter(st => onboarding.steps[st.key]).length;
         return (
           <div className="rounded-card border border-accent-line bg-accent-soft p-5">
             <div className="mb-4 flex items-center gap-3">
               <h3 className="text-[15px] font-bold text-ink">훈프로 시작하기</h3>
               <span className="text-[12px] font-semibold tabular-nums text-accent">
-                {doneCount}/{ONBOARDING_STEPS.length} 완료
+                {doneCount}/{steps.length} 완료
               </span>
               <button
                 type="button"
@@ -162,7 +170,7 @@ export function HomeDashboard({ onNavigate }: Props) {
               </button>
             </div>
             <ul className="flex flex-col gap-2">
-              {ONBOARDING_STEPS.map(step => {
+              {steps.map(step => {
                 const isDone = onboarding.steps[step.key];
                 return (
                   <li key={step.key} className="flex items-center gap-3 rounded-control border border-line bg-paper px-3.5 py-3">
@@ -222,11 +230,12 @@ export function HomeDashboard({ onNavigate }: Props) {
       </div>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* 내 상품 순위 */}
+        {/* 관심 상품 순위 — 내 상품과 소싱AI에서 담은 경쟁 상품이 함께 들어온다 */}
+        {shown('ranktracker') && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="mb-3 flex items-center gap-2">
             <ListOrdered className="h-4 w-4" style={{ color: '#8b7bff' }} />
-            <h3 className="text-sm font-semibold text-ink">내 상품 순위</h3>
+            <h3 className="text-sm font-semibold text-ink">관심 상품 순위</h3>
             <button onClick={() => onNavigate('ranktracker')} className="ml-auto flex items-center gap-0.5 text-[12px] font-medium text-ink-2 hover:text-accent">
               전체 보기 <ChevronRight className="h-3.5 w-3.5" />
             </button>
@@ -235,7 +244,7 @@ export function HomeDashboard({ onNavigate }: Props) {
             <div className="flex items-center gap-2 py-6 text-ink-3"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-[12px]">불러오는 중...</span></div>
           ) : watches.length === 0 ? (
             <p className="py-4 text-[13px] text-ink-2">
-              추적 중인 상품이 없습니다. <button onClick={() => onNavigate('ranktracker')} className="font-semibold text-accent hover:underline">순위 추적</button>에 내 상품을 등록하면 매일 순위 변화가 여기 표시됩니다.
+              추적 중인 상품이 없습니다. <button onClick={() => onNavigate('ranktracker')} className="font-semibold text-accent hover:underline">순위 추적</button>에 내 상품이나 소싱AI에서 찾은 상품을 등록하면 매일 순위 변화가 여기 표시됩니다.
             </p>
           ) : (
             <div className="flex flex-col gap-2">
@@ -261,7 +270,10 @@ export function HomeDashboard({ onNavigate }: Props) {
           )}
         </div>
 
+        )}
+
         {/* 리뷰 급증 상품 */}
+        {shown('sourcing') && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="mb-3 flex items-center gap-2">
             <TrendingUp className="h-4 w-4" style={{ color: '#3ee7a3' }} />
@@ -290,6 +302,7 @@ export function HomeDashboard({ onNavigate }: Props) {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* 이번 주 추천 소싱 키워드 — 시안·보라 그라디언트 배너 */}

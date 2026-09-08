@@ -1,5 +1,6 @@
 /**
- * 내 상품 순위 추적 — 등록한 상품이 키워드 검색 결과 몇 위인지
+ * 관심 상품 순위 추적 — 등록한 상품이 키워드 검색 결과 몇 위인지
+ * (내 상품만이 아니라 소싱AI에서 찾은 경쟁 상품도 함께 담긴다)
  * 매일 새벽 크론이 자동 기록하고 여기서 추이를 확인한다.
  * (오가닉 기준, 1페이지 60위까지 · 사용자당 최대 20개)
  */
@@ -103,10 +104,10 @@ export function RankTracker() {
       <div className="rounded-panel border border-line bg-paper p-6">
         <div className="mb-1 flex items-center gap-2">
           <ListOrdered className="h-4 w-4 text-accent" />
-          <h2 className="text-base font-semibold text-ink">내 상품 순위 추적</h2>
+          <h2 className="text-base font-semibold text-ink">관심 상품 순위 추적</h2>
         </div>
         <p className="mb-4 text-[12px] leading-relaxed text-ink-2">
-          내 상품(또는 경쟁 상품)이 <b>키워드 검색 결과 몇 위</b>인지 매일 새벽 자동으로 기록합니다.
+          내 상품과 소싱AI에서 찾은 관심 상품이 <b>키워드 검색 결과 몇 위</b>인지 매일 새벽 자동으로 기록합니다.
           광고를 제외한 오가닉 순위가 기준이고, 광고를 포함한 실제 노출 순서도 함께 기록합니다. 1페이지(60위)까지 추적합니다. 훈프로 소싱AI의 상품 카드 [순위 추적]으로도 등록됩니다. (최대 20개)
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -140,7 +141,7 @@ export function RankTracker() {
           <div className="flex flex-col items-center justify-center py-14 text-ink-3">
             <ListOrdered className="mb-4 h-12 w-12 opacity-20" />
             <p className="text-sm font-semibold">추적 중인 상품이 없습니다</p>
-            <p className="mt-1.5 text-[12px]">내 상품 URL과 대표 키워드를 등록하면 매일 순위 변화를 볼 수 있습니다</p>
+            <p className="mt-1.5 text-[12px]">상품 URL과 대표 키워드를 등록하면 매일 순위 변화를 볼 수 있습니다</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">

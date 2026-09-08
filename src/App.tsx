@@ -40,6 +40,16 @@ const TABS: TabDef[] = [
 ];
 
 const TAB_ORDER_KEY = 'hoonpro_tab_order';
+const HIDDEN_TABS_KEY = 'hoonpro_hidden_tabs';
+
+const loadCachedHiddenTabs = (): string[] => {
+  try {
+    const v = JSON.parse(localStorage.getItem(HIDDEN_TABS_KEY) || '[]');
+    return Array.isArray(v) ? v.map(String) : [];
+  } catch {
+    return [];
+  }
+};
 
 const loadCachedTabOrder = (): string[] | null => {
   try {
@@ -80,19 +90,40 @@ export default function App() {
   const [remainingCalls, setRemainingCalls] = useState<number | null>(null);
   const [qaVisible, setQaVisible] = useState(false);
   const [tabOrder, setTabOrder] = useState<string[] | null>(loadCachedTabOrder);
+  // 관리자가 숨긴 기능. 캐시로 먼저 그려야 새로고침할 때마다 숨긴 탭이
+  // 잠깐 보였다 사라지는 깜빡임이 없다.
+  const [hiddenTabs, setHiddenTabs] = useState<string[]>(loadCachedHiddenTabs);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await fetch('/api/admin?action=config');
         const data = await res.json();
-        if (res.ok && Array.isArray(data.tabOrder)) {
+        if (!res.ok) return;
+        if (Array.isArray(data.tabOrder)) {
           setTabOrder(data.tabOrder);
           localStorage.setItem(TAB_ORDER_KEY, JSON.stringify(data.tabOrder));
         }
-      } catch { /* 실패 시 기본 순서 유지 */ }
+        if (Array.isArray(data.hiddenTabs)) {
+          setHiddenTabs(data.hiddenTabs.map(String));
+          localStorage.setItem(HIDDEN_TABS_KEY, JSON.stringify(data.hiddenTabs));
+        }
+      } catch { /* 실패 시 기본 순서·표시 유지 */ }
     })();
   }, []);
+
+  // 관리자는 숨긴 기능도 볼 수 있어야 한다. 수강생에게 열기 전에 직접
+  // 써 보고 판단해야 하므로, 감추는 대신 '숨김' 표시만 붙인다.
+  const isHidden = (id: string) => !user?.isAdmin && hiddenTabs.includes(id);
+
+  // 보고 있던 탭이 숨겨지면 빈 화면에 남는다. 홈으로 돌려보낸다.
+  useEffect(() => {
+    if (isHidden(activeTab)) setActiveTab('home');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hiddenTabs, activeTab, user]);
+
+  // 위 효과가 돌기 전 한 프레임 동안 숨긴 화면이 비치는 것을 막는다
+  const shownTab: Tab = isHidden(activeTab) ? 'home' : activeTab;
 
   useEffect(() => {
     if (!user) return;
@@ -252,7 +283,10 @@ export default function App() {
           {/* 아래 줄 — 탭 */}
           <div className="border-t border-line">
             <nav className="mx-auto flex max-w-[1240px] gap-1 overflow-x-auto px-4 sm:px-6" aria-label="주요 기능">
-              {applyTabOrder(tabOrder).filter(tab => tab.id !== 'qa' || qaVisible).map(tab => (
+              {applyTabOrder(tabOrder)
+                .filter(tab => tab.id !== 'qa' || qaVisible)
+                .filter(tab => !isHidden(tab.id))
+                .map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
@@ -260,6 +294,14 @@ export default function App() {
                   className={getTabButtonClass(activeTab === tab.id)}
                 >
                   <tab.icon className="h-4 w-4 shrink-0" />{tab.label}
+                  {user.isAdmin && hiddenTabs.includes(tab.id) && (
+                    <span
+                      className="rounded-control border border-line px-1 py-0.5 text-[9.5px] font-semibold text-ink-3"
+                      title="수강생에게는 보이지 않습니다"
+                    >
+                      숨김
+                    </span>
+                  )}
                 </button>
               ))}
               <button
@@ -295,16 +337,16 @@ export default function App() {
             </div>
           ) : (
             <>
-              {activeTab === 'home' && <HomeDashboard onNavigate={(t) => setActiveTab(t as Tab)} />}
-              {activeTab === 'thumbnail' && <ThumbnailGenerator />}
-              {activeTab === 'detail' && <DetailPlanner />}
-              {activeTab === 'sourcing' && <SourcingFinder />}
-              {activeTab === 'ranktracker' && <RankTracker />}
-              {activeTab === 'review' && <ReviewAnalyzer />}
-              {activeTab === 'analyzer' && <AdAnalyzer />}
-              {activeTab === 'coupang' && <CoupangDashboard />}
-              {activeTab === 'works' && <WorksLibrary />}
-              {activeTab === 'qa' && qaVisible && <AskHoonpro />}
+              {shownTab === 'home' && <HomeDashboard onNavigate={(t) => setActiveTab(t as Tab)} hiddenTabs={user.isAdmin ? [] : hiddenTabs} />}
+              {shownTab === 'thumbnail' && <ThumbnailGenerator />}
+              {shownTab === 'detail' && <DetailPlanner />}
+              {shownTab === 'sourcing' && <SourcingFinder />}
+              {shownTab === 'ranktracker' && <RankTracker />}
+              {shownTab === 'review' && <ReviewAnalyzer />}
+              {shownTab === 'analyzer' && <AdAnalyzer />}
+              {shownTab === 'coupang' && <CoupangDashboard />}
+              {shownTab === 'works' && <WorksLibrary />}
+              {shownTab === 'qa' && qaVisible && <AskHoonpro />}
               {activeTab === 'billing' && <SubscriptionPage />}
               {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
             </>

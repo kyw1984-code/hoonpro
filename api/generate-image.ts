@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+// ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
+import { tabDisabledMessage } from '../lib/feature-gate.js';
 import { GoogleGenAI } from '@google/genai';
 
 const supabase = createClient(
@@ -165,6 +167,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const apiKey = process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY;
 
   const { prompt, images, aspectRatio, feature, quality, inputFidelity, variantCount, referenceRoles } = req.body ?? {};
+
+  // 관리자가 끈 기능은 서버에서도 막는다. 화면에서만 감추면 이미 열려 있던
+  // 브라우저 탭이 계속 호출해 호출당 비용이 그대로 나간다.
+  const imageTab = String(feature || '').startsWith('thumbnail') || aspectRatio === '1:1' ? 'thumbnail' : 'detail';
+  const blocked = await tabDisabledMessage(supabase, imageTab, decoded.isAdmin === true);
+  if (blocked) return res.status(403).json({ error: blocked });
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: '프롬프트가 필요합니다.' });
   }

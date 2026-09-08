@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+// ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
+import { clearFeatureGateCache } from '../lib/feature-gate.js';
 
 // 관리자 통합 엔드포인트 — Vercel 함수 개수 제한 대응으로 4개 함수를 action으로 통합
 //   action=users        (GET)      회원 목록 + 오늘 사용량
@@ -277,7 +279,9 @@ const ALLOWED_MODELS = [
 const ALLOWED_QUALITY = ['low', 'medium', 'high'];
 const DEFAULTS = { imageModel: 'gpt-image-2', imageQuality: 'high', aiIntegratedTextEnabled: false };
 // 탭 순서 설정에 허용되는 탭 id (App.tsx TABS와 일치해야 함)
-const TAB_IDS = ['home', 'thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'qa', 'works'];
+// App.tsx의 TABS, lib/feature-gate.ts의 FeatureTab과 같은 목록이어야 한다.
+// (coupang이 빠져 있어 쿠팡 탭은 순서를 바꿀 수 없었다 — 추가했다)
+const TAB_IDS = ['home', 'thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'coupang', 'qa', 'works'];
 
 // 사업자 정보 항목 (프론트 src/lib/company.ts CompanyInfo와 일치)
 const COMPANY_KEYS = ['name', 'ceo', 'bizNumber', 'mailOrderNumber', 'address', 'email', 'phone', 'effectiveDate', 'dbRegion'];
@@ -306,11 +310,11 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
     const { data, error } = await supabase
       .from('app_config')
       .select('key, value')
-      .in('key', ['image_model', 'image_quality', 'ai_integrated_text_enabled', 'tab_order', 'company_info']);
+      .in('key', ['image_model', 'image_quality', 'ai_integrated_text_enabled', 'tab_order', 'hidden_tabs', 'company_info']);
 
     if (error) {
       if (isMissingTable(error)) {
-        return res.status(200).json(isAdmin ? { ...DEFAULTS, tabOrder: null, company: {}, migrated: false } : { tabOrder: null, company: {} });
+        return res.status(200).json(isAdmin ? { ...DEFAULTS, tabOrder: null, hiddenTabs: [], company: {}, migrated: false } : { tabOrder: null, hiddenTabs: [], company: {} });
       }
       return res.status(500).json({ error: '서버 오류' });
     }
@@ -322,10 +326,17 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
       if (Array.isArray(parsed)) tabOrder = parsed.filter((t) => TAB_IDS.includes(t));
     } catch { /* 잘못 저장된 값은 기본 순서로 */ }
 
+    // 숨긴 탭 — 순서와 마찬가지로 모든 사용자 화면이 알아야 하므로 함께 내려준다
+    let hiddenTabs: string[] = [];
+    try {
+      const parsed = JSON.parse(map.hidden_tabs || '[]');
+      if (Array.isArray(parsed)) hiddenTabs = parsed.filter((t) => TAB_IDS.includes(t));
+    } catch { /* 잘못 저장된 값은 아무것도 숨기지 않은 것으로 본다 */ }
+
     // 사업자 정보는 법적으로 공개 표기 의무가 있는 값이라 비관리자(푸터·약관 페이지)에도 공개
     const company = parseCompany(map.company_info);
 
-    if (!isAdmin) return res.status(200).json({ tabOrder, company });
+    if (!isAdmin) return res.status(200).json({ tabOrder, hiddenTabs, company });
 
     return res.status(200).json({
       company,
@@ -333,6 +344,7 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
       imageQuality: ALLOWED_QUALITY.includes(map.image_quality) ? map.image_quality : DEFAULTS.imageQuality,
       aiIntegratedTextEnabled: map.ai_integrated_text_enabled === 'true',
       tabOrder,
+      hiddenTabs,
       migrated: true,
     });
   }
@@ -341,7 +353,7 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
 
   // 설정 변경 — 이미지 설정과 탭 순서를 각각 부분 저장할 수 있다
   if (req.method === 'POST') {
-    const { imageModel, imageQuality, aiIntegratedTextEnabled, tabOrder, company } = req.body ?? {};
+    const { imageModel, imageQuality, aiIntegratedTextEnabled, tabOrder, hiddenTabs, company } = req.body ?? {};
     const now = new Date().toISOString();
     const rows: { key: string; value: string; updated_at: string }[] = [];
 
@@ -365,6 +377,19 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
         return res.status(400).json({ error: '올바르지 않은 탭 순서입니다.' });
       }
       rows.push({ key: 'tab_order', value: JSON.stringify(tabOrder), updated_at: now });
+    }
+
+    if (hiddenTabs !== undefined) {
+      if (!Array.isArray(hiddenTabs) || hiddenTabs.some((t) => !TAB_IDS.includes(t))) {
+        return res.status(400).json({ error: '올바르지 않은 탭 목록입니다.' });
+      }
+      // 홈은 끌 수 없다. 첫 화면이 사라지면 로그인 직후 빈 화면이 뜬다.
+      if (hiddenTabs.includes('home')) {
+        return res.status(400).json({ error: '홈은 숨길 수 없습니다.' });
+      }
+      rows.push({ key: 'hidden_tabs', value: JSON.stringify([...new Set(hiddenTabs)]), updated_at: now });
+      // 서버 게이트가 60초 캐시를 쓰므로, 저장 즉시 반영되도록 비운다
+      clearFeatureGateCache();
     }
 
     if (company !== undefined) {
