@@ -25,7 +25,10 @@ export function InventoryForecast() {
   const [cover, setCover] = useState(30);
   const [data, setData] = useState<InventoryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [onlyRisk, setOnlyRisk] = useState(true);
+  // 보기: 부족한 것만(기본) / 전체 / 카드 하나(품절·7일·14일·과잉). 카드를 누르면
+  // 그 상태만 남고, 다시 누르면 기본으로 돌아간다.
+  const [view, setView] = useState<'risky' | 'all' | StockRisk>('risky');
+  const onlyRisk = view === 'risky';
 
   // 입력 한 글자마다 요청이 나가면 '14'를 '21'로 고치는 동안 세 번 조회되고,
   // 늦게 온 응답이 마지막에 도착하면 입력과 다른 값이 표에 남는다.
@@ -62,15 +65,16 @@ export function InventoryForecast() {
   }
 
   const risky = data.rows.filter(r => r.risk === 'out' || r.risk === 'urgent' || r.risk === 'watch');
-  const shown = onlyRisk ? risky : data.rows;
+  const shown = view === 'risky' ? risky : view === 'all' ? data.rows : data.rows.filter(r => r.risk === view);
+  const pick = (risk: StockRisk) => setView(cur => (cur === risk ? 'risky' : risk));
 
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="품절" value={`${data.counts.out ?? 0}개`} tone={(data.counts.out ?? 0) > 0 ? 'critical' : undefined} />
-        <Stat label="7일 이내 소진" value={`${data.counts.urgent ?? 0}개`} tone={(data.counts.urgent ?? 0) > 0 ? 'critical' : undefined} />
-        <Stat label="14일 이내" value={`${data.counts.watch ?? 0}개`} />
-        <Stat label="과잉 재고" value={`${data.counts.excess ?? 0}개`} sub="90일치 이상 · 자금이 묶인다" />
+        <Stat label="품절" value={`${data.counts.out ?? 0}개`} tone={(data.counts.out ?? 0) > 0 ? 'critical' : undefined} active={view === 'out'} onClick={() => pick('out')} />
+        <Stat label="7일 이내 소진" value={`${data.counts.urgent ?? 0}개`} tone={(data.counts.urgent ?? 0) > 0 ? 'critical' : undefined} active={view === 'urgent'} onClick={() => pick('urgent')} />
+        <Stat label="14일 이내" value={`${data.counts.watch ?? 0}개`} active={view === 'watch'} onClick={() => pick('watch')} />
+        <Stat label="과잉 재고" value={`${data.counts.excess ?? 0}개`} sub="90일치 이상 · 자금이 묶인다" active={view === 'excess'} onClick={() => pick('excess')} />
       </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-panel border border-line bg-paper px-5 py-4">
@@ -107,7 +111,7 @@ export function InventoryForecast() {
           재고는 쿠팡 로켓창고의 판매가능수량이고, 판매 속도는 그로스 주문 기준입니다.
         </p>
         <label className="flex items-center gap-2 text-[12.5px] text-ink-2">
-          <input type="checkbox" checked={onlyRisk} onChange={e => setOnlyRisk(e.target.checked)} className="h-4 w-4" />
+          <input type="checkbox" checked={onlyRisk} onChange={e => setView(e.target.checked ? 'risky' : 'all')} className="h-4 w-4" />
           부족한 것만 보기
         </label>
       </div>
@@ -122,7 +126,7 @@ export function InventoryForecast() {
       {shown.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">
           <Boxes className="mb-4 h-12 w-12 opacity-20" />
-          <p className="text-sm font-semibold">{onlyRisk ? '재고가 부족한 상품이 없습니다' : '재고 데이터가 없습니다'}</p>
+          <p className="text-sm font-semibold">{view === 'all' ? '재고 데이터가 없습니다' : onlyRisk ? '재고가 부족한 상품이 없습니다' : '이 상태의 상품이 없습니다'}</p>
           <p className="mt-1.5 text-[12px]">
             {onlyRisk ? '14일 이내 소진될 상품이 없습니다.' : '로켓창고 재고가 아직 없습니다. [지금 수집]을 누르면 쿠팡에서 가져옵니다. 로켓그로스를 쓰지 않는 계정이면 이 화면은 비어 있습니다.'}
           </p>
@@ -180,12 +184,23 @@ export function InventoryForecast() {
   );
 }
 
-function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: 'critical' }) {
+function Stat({
+  label, value, sub, tone, active, onClick,
+}: { label: string; value: string; sub?: string; tone?: 'critical'; active?: boolean; onClick?: () => void }) {
+  // 카드가 곧 필터다. 누르면 그 상태의 상품만 남고, 눌린 카드는 테두리로 표시한다.
   return (
-    <div className="rounded-panel border border-line bg-paper px-4 py-4">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={active ? '다시 누르면 부족한 것만 보기로 돌아갑니다' : '누르면 이 상태의 상품만 봅니다'}
+      className={`rounded-panel border px-4 py-4 text-left transition-colors ${
+        active ? 'border-accent bg-accent-soft' : 'border-line bg-paper hover:border-line-strong'
+      }`}
+    >
       <p className="text-[11.5px] text-ink-3">{label}</p>
       <p className={`mt-1 text-[19px] font-semibold tabular-nums ${tone === 'critical' ? 'text-critical' : 'text-ink'}`}>{value}</p>
       {sub && <p className="mt-0.5 text-[11px] leading-tight text-ink-3">{sub}</p>}
-    </div>
+    </button>
   );
 }

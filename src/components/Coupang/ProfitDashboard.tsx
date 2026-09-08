@@ -260,6 +260,8 @@ export function ProfitDashboard({ onEditCosts }: Props) {
             max={today}
             onChange={e => pickDate('from', e.target.value)}
             aria-label="시작일"
+            // 어두운 배경에서 브라우저 기본 달력 아이콘이 검게 그려져 안 보인다. 어두운 배색을 알려준다
+            style={{ colorScheme: 'dark' }}
             className="bg-transparent text-[12px] tabular-nums text-ink outline-none"
           />
           <span className="text-[11px] text-ink-3">~</span>
@@ -269,6 +271,8 @@ export function ProfitDashboard({ onEditCosts }: Props) {
             max={today}
             onChange={e => pickDate('to', e.target.value)}
             aria-label="종료일"
+            // 어두운 배경에서 브라우저 기본 달력 아이콘이 검게 그려져 안 보인다. 어두운 배색을 알려준다
+            style={{ colorScheme: 'dark' }}
             className="bg-transparent text-[12px] tabular-nums text-ink outline-none"
           />
         </div>
