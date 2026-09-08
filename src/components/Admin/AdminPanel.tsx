@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Building2, Wallet, SlidersHorizontal, ShoppingBag } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Eye, EyeOff, Building2, Wallet, SlidersHorizontal, ShoppingBag } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
@@ -185,7 +185,7 @@ export function AdminPanel() {
             tab === 'taborder' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
-          <ListOrdered className="w-4 h-4" /> 탭 순서
+          <ListOrdered className="w-4 h-4" /> 탭 표시·순서
         </button>
         <button
           onClick={() => setTab('company')}
@@ -411,6 +411,7 @@ const TAB_LABELS: { id: string; label: string }[] = [
   { id: 'ranktracker', label: '순위 추적' },
   { id: 'review', label: '리뷰 분석' },
   { id: 'analyzer', label: '광고 성과 분석' },
+  { id: 'coupang', label: '쿠팡 매출·정산' },
   { id: 'qa', label: '훈프로 코칭AI' },
   { id: 'works', label: '내 작업' },
 ];
@@ -418,6 +419,9 @@ const TAB_LABELS: { id: string; label: string }[] = [
 function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
   const defaultOrder = TAB_LABELS.map(t => t.id);
   const [order, setOrder] = useState<string[]>(defaultOrder);
+  // 숨긴 탭 — "보일 것"이 아니라 "숨긴 것"을 저장한다. 반대로 하면 새 기능을
+  // 배포할 때마다 켜 주기 전까지 아무에게도 안 보여 배포 사고처럼 보인다.
+  const [hidden, setHidden] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -430,6 +434,9 @@ function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
           // 저장된 순서 + 이후 추가된 새 탭은 뒤에 이어붙임
           const saved = data.tabOrder.filter((id: string) => defaultOrder.includes(id));
           setOrder([...saved, ...defaultOrder.filter(id => !saved.includes(id))]);
+        }
+        if (res.ok && Array.isArray(data.hiddenTabs)) {
+          setHidden(data.hiddenTabs.filter((id: string) => defaultOrder.includes(id)));
         }
       } catch { /* 기본 순서 유지 */ }
     })();
@@ -451,13 +458,18 @@ function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
       const res = await fetch('/api/admin?action=config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ tabOrder: order }),
+        body: JSON.stringify({ tabOrder: order, hiddenTabs: hidden }),
       });
       const data = await res.json();
       if (!res.ok) return showToast(data.error || '저장 실패');
       localStorage.setItem('hoonpro_tab_order', JSON.stringify(order));
+      localStorage.setItem('hoonpro_hidden_tabs', JSON.stringify(hidden));
       setDirty(false);
-      showToast('탭 순서가 저장됐습니다. 사용자는 새로고침 시 적용됩니다.');
+      showToast(
+        hidden.length > 0
+          ? `저장됐습니다. ${hidden.length}개 기능이 수강생에게 숨겨집니다 (새로고침 시 적용).`
+          : '저장됐습니다. 사용자는 새로고침 시 적용됩니다.',
+      );
     } finally {
       setSaving(false);
     }
@@ -467,18 +479,46 @@ function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
     <div className="max-w-2xl">
       <div className="flex items-center gap-2 mb-2">
         <ListOrdered className="w-5 h-5 text-accent" />
-        <h2 className="text-lg font-semibold text-ink">탭 순서 설정</h2>
+        <h2 className="text-lg font-semibold text-ink">탭 표시·순서 설정</h2>
       </div>
-      <p className="text-sm text-ink-2 mb-5">
-        상단 탭이 <b>모든 사용자</b>에게 이 순서로 표시됩니다. '훈프로 코칭AI'는 공개 OFF 상태면 수강생에게 숨겨진 채 순서만 유지됩니다.
+      <p className="text-sm leading-relaxed text-ink-2 mb-1.5">
+        상단 탭이 <b>모든 사용자</b>에게 이 순서로 표시됩니다. 오른쪽 스위치를 끄면 수강생에게 그 기능이 보이지 않고,
+        서버에서도 호출이 막힙니다 — 화면에서만 감추면 이미 열려 있던 브라우저 탭이 계속 호출해 비용이 나갑니다.
+      </p>
+      <p className="text-sm leading-relaxed text-ink-3 mb-5">
+        <b className="text-ink-2">관리자에게는 계속 보입니다</b>(옆에 '숨김' 표시). 수강생에게 열기 전에 직접 써 보고 판단하시라는 뜻입니다.
+        '훈프로 코칭AI'는 공개 OFF 상태면 이 설정과 별개로 수강생에게 숨겨집니다.
       </p>
       <div className="bg-paper rounded-card border border-line overflow-hidden">
         {order.map((id, idx) => {
           const label = TAB_LABELS.find(t => t.id === id)?.label || id;
+          const off = hidden.includes(id);
+          // 홈은 첫 화면이라 끌 수 없다. 끄면 로그인 직후 빈 화면이 뜬다.
+          const locked = id === 'home';
           return (
-            <div key={id} className="flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0">
+            <div key={id} className={`flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0 ${off ? 'bg-paper-2' : ''}`}>
               <span className="w-6 text-center font-mono text-[12px] text-ink-3 tabular-nums">{idx + 1}</span>
-              <span className="flex-1 text-sm font-medium text-ink">{label}</span>
+              <span className={`flex-1 text-sm font-medium ${off ? 'text-ink-3 line-through' : 'text-ink'}`}>{label}</span>
+
+              <button
+                onClick={() => {
+                  if (locked) return;
+                  setHidden(off ? hidden.filter(h => h !== id) : [...hidden, id]);
+                  setDirty(true);
+                }}
+                disabled={locked}
+                role="switch"
+                aria-checked={!off}
+                aria-label={`${label} 표시`}
+                title={locked ? '홈은 끌 수 없습니다' : off ? '수강생에게 숨김 — 눌러서 켜기' : '수강생에게 표시 중 — 눌러서 끄기'}
+                className={`flex items-center gap-1.5 rounded-control border px-2 py-1 text-[11.5px] font-semibold transition-colors disabled:opacity-30 ${
+                  off ? 'border-line text-ink-3 hover:border-line-strong' : 'border-positive/35 bg-positive-soft text-positive'
+                }`}
+              >
+                {off ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {off ? '숨김' : '표시'}
+              </button>
+
               <button onClick={() => move(idx, -1)} disabled={idx === 0}
                 className="rounded-control border border-line p-1.5 text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-30">
                 <ArrowUp className="h-3.5 w-3.5" />
@@ -494,7 +534,7 @@ function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
       <button onClick={handleSave} disabled={saving || !dirty}
         className="mt-4 flex items-center gap-2 rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-        순서 저장
+        저장
       </button>
     </div>
   );

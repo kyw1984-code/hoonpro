@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+// ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
+import { tabDisabledMessage } from '../lib/feature-gate.js';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 작업 보관함 — 상세페이지 기획안·썸네일 결과물을 서버에 저장해 다시 본다.
@@ -31,6 +33,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch {
     return res.status(401).json({ error: '유효하지 않은 토큰입니다. 다시 로그인해주세요.' });
   }
+
+  // 관리자가 끈 화면은 서버에서도 막는다
+  const tabBlocked = await tabDisabledMessage(supabase, 'works', decoded.isAdmin === true);
+  if (tabBlocked) return res.status(403).json({ error: tabBlocked });
 
   // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 사용 불가 (api/qa.ts와 동일 기준)
   if (!decoded.isAdmin) {

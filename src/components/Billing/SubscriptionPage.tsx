@@ -633,7 +633,7 @@ export function SubscriptionPage() {
           <div>
             <h3 className="text-[15px] font-semibold text-ink">알림 이메일</h3>
             <p className="mt-1 text-[12.5px] text-ink-2">
-              내 상품 순위 급락 알림과 주간 리포트를 이메일로 받습니다. 결제 관련 안내 메일은 이 설정과 무관하게 항상 발송됩니다.
+              관심 상품 순위 급락 알림과 주간 리포트를 이메일로 받습니다. 결제 관련 안내 메일은 이 설정과 무관하게 항상 발송됩니다.
             </p>
           </div>
           <button onClick={toggleEmailPref} disabled={prefBusy} role="switch" aria-checked={!emailOptOut}

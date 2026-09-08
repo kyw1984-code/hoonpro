@@ -155,7 +155,7 @@ export function SourcingFinder() {
   const [reviewTarget, setReviewTarget] = useState<Product | null>(null);
   const [reviewData, setReviewData] = useState<any | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
-  // 내 상품 순위 추적 (목록·관리는 '순위 추적' 탭, 여기선 원클릭 등록만)
+  // 관심 상품 순위 추적 (목록·관리는 '순위 추적' 탭, 여기선 원클릭 등록만)
   const [rankAdded, setRankAdded] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -395,7 +395,7 @@ export function SourcingFinder() {
     } catch { /* 브리핑 실패는 조용히 무시 */ }
   };
 
-  // ─── API: 내 상품 순위 추적 (원클릭 등록 — 관리는 '순위 추적' 탭에서) ────────
+  // ─── API: 관심 상품 순위 추적 (원클릭 등록 — 관리는 '순위 추적' 탭에서) ────────
   const addRankWatch = async (keyword: string, product: string, name = ''): Promise<boolean> => {
     const params = new URLSearchParams({ type: 'rankwatch', action: 'add', keyword: keyword.trim(), product: product.trim() });
     if (name) params.set('name', name.slice(0, 150));
