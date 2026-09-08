@@ -68,6 +68,8 @@ export interface ProfitRow {
   settlementAmount: number;
   /** 같은 기간 주문에서 판매자가 부담한 쿠폰 할인 (즉시할인·다운로드쿠폰) */
   couponDiscount: number;
+  /** 이 옵션에 붙은 광고비. 순이익(profit)에서 이미 뺀 값이다 */
+  adCost: number;
   unitCostTotal: number;
   returnCount: number;
   returnCost: number;
@@ -102,6 +104,8 @@ export interface ProfitResponse {
     profit: number;
     marginRate: number;
     couponDiscount: number;
+    /** 옵션에 붙은 광고비 합. 일자별 합계(adCost.total)보다 작을 수 있다 */
+    adCost: number;
   };
   /**
    * 판매가 기준 주문금액과 쿠폰. 판매가 39,800원에 쿠폰 10,000원이면 실제 판매가는
@@ -348,8 +352,12 @@ export const coupangApi = {
   profitRange: (from: string, to: string) => request<ProfitResponse>(`profit&from=${from}&to=${to}`),
   costs: () => request<{ rows: CostRow[] }>('costs'),
   adCosts: (days: number) => request<AdCostsResponse>(`ad-costs&days=${days}`),
-  adCostSave: (body: { from: string; to: string; daily?: { date: string; cost: number }[]; total?: number; source?: 'report' | 'manual' }) =>
-    request<{ ok: true; from: string; to: string; days: number; source: string; total: number }>('ad-cost-save', { method: 'POST', body }),
+  adCostSave: (body: {
+    from: string; to: string; daily?: { date: string; cost: number }[]; total?: number; source?: 'report' | 'manual';
+    /** 옵션별 광고비 — 보고서에 광고집행 옵션ID가 있을 때 */
+    items?: { date: string; vendorItemId: string; cost: number }[];
+  }) =>
+    request<{ ok: true; from: string; to: string; days: number; source: string; total: number; attributed?: number }>('ad-cost-save', { method: 'POST', body }),
   /** 광고센터가 준 파일 주소(S3 등)를 서버가 대신 받아 광고비를 저장한다 — 브라우저는 다른 도메인이라 못 읽는다 */
   adImportUrl: (url: string, from: string, to: string) =>
     request<{ ok: true; from: string; to: string; days: number; source: string; total: number }>('ad-import-url', {

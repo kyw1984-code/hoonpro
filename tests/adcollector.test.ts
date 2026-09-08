@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAdBookmarklet, ymdToIso, AD_CENTER_ORIGIN } from '../src/lib/adCollector.ts';
-import { extractDailyAdCost, rowsFromMatrix } from '../src/lib/adcost.ts';
+import { extractDailyAdCost, extractItemAdCost, rowsFromMatrix } from '../src/lib/adcost.ts';
 
 test('북마클릿: javascript: 주소이고 광고센터 요청 경로를 전부 담는다', () => {
   const url = buildAdBookmarklet('https://hoonproai.com');
@@ -72,4 +72,23 @@ test('rowsFromMatrix: 헤더가 첫 줄이면 그대로', () => {
   const rows = rowsFromMatrix([['날짜', '광고비'], ['2026-09-01', 100]]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0]['광고비'], 100);
+});
+
+// ── 옵션별 광고비 ───────────────────────────────────────────────
+test('extractItemAdCost: 날짜·옵션별로 합치고 옵션ID 없는 행은 건너뛴다', () => {
+  const rows = [
+    { 날짜: '2026-09-06', '광고집행 옵션ID': 111, 광고비: '1,000' },
+    { 날짜: '2026-09-06', '광고집행 옵션ID': 111, 광고비: 500 },
+    { 날짜: '2026-09-06', '광고집행 옵션ID': 222, 광고비: 300 },
+    { 날짜: '2026-09-07', '광고집행 옵션ID': '', 광고비: 999 },
+  ];
+  const out = extractItemAdCost(rows)!;
+  assert.deepEqual(
+    out.sort((a, b) => (a.vendorItemId < b.vendorItemId ? -1 : 1)),
+    [
+      { date: '2026-09-06', vendorItemId: '111', cost: 1500 },
+      { date: '2026-09-06', vendorItemId: '222', cost: 300 },
+    ],
+  );
+  assert.equal(extractItemAdCost([{ 날짜: '2026-09-06', 광고비: 1 }]), null);
 });

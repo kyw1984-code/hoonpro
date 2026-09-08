@@ -103,7 +103,12 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   };
 
   // 광고비는 상품별로 나눌 수 없으므로 포트폴리오 합계에만 반영한다
-  const netProfit = useMemo(() => (data ? data.totals.profit - adCost : 0), [data, adCost]);
+  // 상품에 붙은 광고비는 상품별 순이익(totals.profit)에서 이미 빠졌다. 여기서는 옵션에
+  // 못 붙은 나머지(캠페인 단위 광고비)만 더 뺀다. 둘 다 빼면 광고비가 두 번 빠진다.
+  const netProfit = useMemo(
+    () => (data ? data.totals.profit - Math.max(0, adCost - (data.totals.adCost ?? 0)) : 0),
+    [data, adCost],
+  );
   const netMargin = useMemo(
     () => (data && data.totals.salesAmount > 0 ? (netProfit / data.totals.salesAmount) * 100 : 0),
     [data, netProfit],
@@ -158,6 +163,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
       매출: Math.round(r.salesAmount),
       쿠폰할인_판매자부담: Math.round(r.couponDiscount ?? 0),
       쿠팡수수료: Math.round(r.commission),
+      광고비: Math.round(r.adCost ?? 0),
       원가: r.costEntered ? Math.round(r.unitCostTotal) : blank,
       반품건수: r.returnCount,
       반품비용: Math.round(r.returnCost),
@@ -276,7 +282,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
       ) : (
         <>
           {/* 핵심 지표 */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className={`grid grid-cols-2 gap-3 md:grid-cols-3 ${(data.coupon?.sellerDiscount ?? 0) > 0 ? 'xl:grid-cols-6' : 'xl:grid-cols-5'}`}>
             <Stat
               label="매출"
               value={won(data.totals.salesAmount)}
@@ -293,6 +299,18 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                 tone="critical"
               />
             )}
+            {/* 광고비를 따로 보여준다. 매출 − 광고비 − 수수료 − 원가·배송 = 순이익이
+                한눈에 읽혀야 한다. 상품별 표에 붙은 몫과 합계의 차이도 여기서 밝힌다. */}
+            <Stat
+              label="광고비"
+              value={`− ${won(adCost)}`}
+              sub={
+                adCost > 0 && data.totals.adCost < adCost
+                  ? `상품에 붙은 ${won(data.totals.adCost)} · 나머지는 캠페인 단위`
+                  : adCost > 0 ? '상품별로 붙음' : '광고비 없음'
+              }
+              tone="critical"
+            />
             <Stat
               label="쿠팡 수수료"
               value={`− ${won(data.totals.commission)}`}
@@ -410,6 +428,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                     <th className="px-3 py-2.5 text-right font-medium">매출</th>
                     {hasCoupon && <th className="px-3 py-2.5 text-right font-medium">쿠폰</th>}
                     <th className="px-3 py-2.5 text-right font-medium">수수료</th>
+                    <th className="px-3 py-2.5 text-right font-medium">광고비</th>
                     <th className="px-3 py-2.5 text-right font-medium">원가</th>
                     <th className="px-3 py-2.5 text-right font-medium">반품</th>
                     <th className="px-3 py-2.5 text-right font-medium">순이익</th>
@@ -437,6 +456,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                         </td>
                       )}
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{won(r.commission)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.adCost > 0 ? won(r.adCost) : '-'}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.costEntered ? won(r.unitCostTotal) : '-'}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.returnCount > 0 ? `${r.returnCount}건` : '-'}</td>
                       <td

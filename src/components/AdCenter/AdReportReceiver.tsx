@@ -16,7 +16,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Loader2, Megaphone, Upload, XCircle } from 'lucide-react';
 import { AD_CENTER_ORIGIN, ymdToIso } from '../../lib/adCollector';
 import { parseAdReportBuffer } from '../../lib/adReport';
-import { extractDailyAdCost } from '../../lib/adcost';
+import { extractDailyAdCost, extractItemAdCost } from '../../lib/adcost';
 import { coupangApi, won } from '../../lib/coupang';
 
 type Phase =
@@ -44,7 +44,7 @@ export function AdReportReceiver() {
     const daily = extractDailyAdCost(rows);
     if (daily) {
       // 보고서 안의 날짜가 기준이다. 요청 기간보다 좁을 수 있다(집행 없는 날).
-      const r = await coupangApi.adCostSave({ from, to, daily: daily.days, source: 'report' });
+      const r = await coupangApi.adCostSave({ from, to, daily: daily.days, source: 'report', items: extractItemAdCost(rows) ?? [] });
       return { days: r.days, total: r.total, estimated: false, columns: cols };
     }
     // 일자 컬럼이 없으면 합계라도 기간에 나눠 넣는다. 아예 없는 것보다 낫지만 화면에는 '추정'으로 표시되고,
