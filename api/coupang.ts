@@ -510,6 +510,27 @@ export function sellerDiscountOf(item: any): { seller: number; coupang: number }
 }
 
 /**
+ * 한 상품 행의 쿠폰 할인 = 쿠폰 단가 × 그 행의 판매수량.
+ *
+ * 판매수량(매출인식일 기준)과 쿠폰(주문일 기준)은 같은 기간이라도 건수가 다르다.
+ * 주문 기준 쿠폰 합계를 그대로 붙이면 7개 팔린 행에 37개 주문의 쿠폰이 붙어
+ * 쿠폰이 매출을 넘는 숫자가 나온다. 쿠폰은 판매가 이하로만 설정되니 그럴 수 없다.
+ * 주문에서는 단가(할인 ÷ 주문수량)만 뽑고, 그 행의 실제 판매수량에 곱한다.
+ * 채널별로 단가가 다르므로 윙 수량에는 윙 단가를, 그로스 수량에는 그로스 단가를 쓴다.
+ * 어떤 경우에도 매출을 넘지 않게 자른다.
+ */
+export function couponForRow(
+  qtyMarket: number,
+  qtyGrowth: number,
+  wingUnit: number,
+  growthUnit: number,
+  cap: number,
+): number {
+  const raw = Math.round(qtyMarket * Math.max(0, wingUnit) + qtyGrowth * Math.max(0, growthUnit));
+  return Math.max(0, Math.min(raw, Math.max(0, cap)));
+}
+
+/**
  * 옵션ID를 찾는다. 보통은 items[].vendorItemId 인데, 로켓그로스 상품은 그 자리가
  * 비어 있고 안쪽 객체에 들어 있을 수 있다. 한 단계 안쪽까지 이름에 vendorItemId가
  * 들어간 키를 찾는다. 값이 없으면 빈 문자열이다.
@@ -1061,8 +1082,9 @@ async function syncRocketGrowth(
         for (const it of items) {
           const vendorItemId = pickStr(it, ['vendorItemId', 'vendorItemID']);
           const date = kstDateOf(it?.paidAt) || orderDate;
-          // 종료일을 하루 넘겨 요청했으니 요청 구간 밖은 버린다
-          if (!vendorItemId || !date || date < from || date > to) continue;
+          // 종료일을 하루 넘겨 요청했으니 이 구간 밖은 버린다. 전체 기간이 아니라
+          // 구간 경계로 걸러야 한다 — 다음 구간의 첫날이 두 번 집계된다.
+          if (!vendorItemId || !date || date < cFrom || date > cTo) continue;
 
           const key = `${date}:${vendorItemId}`;
           const cur = agg.get(key) ?? {
@@ -2355,6 +2377,14 @@ interface ProfitRow {
   couponDiscount: number;
   /** 이 옵션에 붙은 광고비 (보고서의 광고집행 옵션ID 기준) */
   adCost: number;
+  /** 이 행의 판매가 어느 채널에서 났는지. 둘 다면 'both' */
+  channel: 'marketplace' | 'growth' | 'both';
+  /**
+   * 반품된 물건의 값 — 실판매가(판매가 − 쿠폰) × 반품수량. 매출내역에는 반품이
+   * 애초에 잡히지 않으므로(구매확정 뒤에만 매출이 되고 반품은 대부분 그 전이다)
+   * 순이익에서 다시 빼지 않는다. 얼마어치가 돌아왔는지 보여주는 값이다.
+   */
+  returnAmount: number;
   unitCostTotal: number;
   returnCount: number;
   returnCost: number;
@@ -2435,22 +2465,40 @@ export async function computeProfit(
     adItemAgg.set(id, (adItemAgg.get(id) ?? 0) + (Number(a.cost) || 0));
   }
 
-  const couponAgg = new Map<string, number>();
+  // 쿠폰은 주문 기준이라 판매수량(매출인식 기준)과 건수가 다르다. 주문에서는
+  // 채널별 단가(할인 ÷ 주문수량)만 뽑고, 아래에서 각 행의 판매수량에 곱한다.
+  const wingAgg = new Map<string, { sd: number; qty: number }>();
   const coupon = { orderAmount: 0, sellerDiscount: 0, coupangDiscount: 0, orderQuantity: 0 };
   for (const o of orderRes.rows) {
     const id = String(o.vendor_item_id ?? '');
     const seller = Number(o.seller_discount) || 0;
-    couponAgg.set(id, (couponAgg.get(id) ?? 0) + seller);
+    const cur = wingAgg.get(id) ?? { sd: 0, qty: 0 };
+    cur.sd += seller;
+    cur.qty += Number(o.quantity) || 0;
+    wingAgg.set(id, cur);
     coupon.orderAmount += Number(o.order_amount) || 0;
-    coupon.sellerDiscount += seller;
     coupon.coupangDiscount += Number(o.coupang_discount) || 0;
     coupon.orderQuantity += Number(o.quantity) || 0;
   }
+  const growthCouponAgg = new Map<string, number>();
   for (const g of growthCouponRes.rows) {
     const id = String(g.vendor_item_id ?? '');
-    const d = Number(g.discount) || 0;
-    couponAgg.set(id, (couponAgg.get(id) ?? 0) + d);
-    coupon.sellerDiscount += d;
+    growthCouponAgg.set(id, (growthCouponAgg.get(id) ?? 0) + (Number(g.discount) || 0));
+  }
+  // 그로스 주문수량 — 쿠폰과 같은 결제일 기준이라 매출 행의 그로스 수량이 곧 주문수량이다
+  const growthQtyAgg = new Map<string, number>();
+  const rowQty = new Map<string, { market: number; growth: number }>();
+  for (const sale of salesRes.rows) {
+    const id = String(sale.vendor_item_id);
+    const q = Number(sale.quantity) || 0;
+    const rq = rowQty.get(id) ?? { market: 0, growth: 0 };
+    if (sale.channel === 'growth') {
+      rq.growth += q;
+      growthQtyAgg.set(id, (growthQtyAgg.get(id) ?? 0) + q);
+    } else {
+      rq.market += q;
+    }
+    rowQty.set(id, rq);
   }
 
   const returnAgg = new Map<string, number>();
@@ -2477,6 +2525,8 @@ export async function computeProfit(
         settlementAmount: 0,
         couponDiscount: 0,
         adCost: 0,
+        channel: 'marketplace',
+        returnAmount: 0,
         unitCostTotal: 0,
         returnCount: 0,
         returnCost: 0,
@@ -2501,7 +2551,7 @@ export async function computeProfit(
       vendorItemId: id,
       productName: item?.product_name ?? '(상품명 미확인)',
       optionName: item?.option_name ?? '',
-      quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, couponDiscount: 0, adCost: 0,
+      quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, couponDiscount: 0, adCost: 0, channel: 'marketplace', returnAmount: 0,
       unitCostTotal: 0, returnCount: count, returnCost: 0, profit: 0, marginRate: 0,
       costEntered: false, stock: item?.stock ?? null, salePrice: item?.sale_price ?? null,
     });
@@ -2515,7 +2565,18 @@ export async function computeProfit(
     row.unitCostTotal = perUnit * row.quantity;
     row.returnCount = returnAgg.get(row.vendorItemId) ?? 0;
     row.returnCost = row.returnCount * (c ? Number(c.return_shipping_cost) || 0 : 0);
-    row.couponDiscount = couponAgg.get(row.vendorItemId) ?? 0;
+    const rq = rowQty.get(row.vendorItemId) ?? { market: 0, growth: 0 };
+    const wing = wingAgg.get(row.vendorItemId);
+    const wingUnit = wing && wing.qty > 0 ? wing.sd / wing.qty : 0;
+    const gQty = growthQtyAgg.get(row.vendorItemId) ?? 0;
+    const growthUnit = gQty > 0 ? (growthCouponAgg.get(row.vendorItemId) ?? 0) / gQty : 0;
+    row.couponDiscount = couponForRow(rq.market, rq.growth, wingUnit, growthUnit, row.salesAmount);
+    row.channel = rq.growth > 0 && rq.market > 0 ? 'both' : rq.growth > 0 ? 'growth' : 'marketplace';
+    // 반품액 = 실판매가 × 반품수량. 이 기간 판매가 없으면 등록 판매가에서 쿠폰 단가를 뺀다.
+    const unitNet = row.quantity > 0
+      ? (row.salesAmount - row.couponDiscount) / row.quantity
+      : Math.max(0, (row.salePrice ?? 0) - Math.max(wingUnit, growthUnit));
+    row.returnAmount = Math.round(row.returnCount * unitNet);
     row.adCost = adItemAgg.get(row.vendorItemId) ?? 0;
     // 순이익 = 매출 − 수수료 − 원가·배송 − 반품 − 광고비. 정산예정액이 이미 수수료를
     // 뺀 값이라 거기서 나머지를 뺀다. 광고비는 옵션에 붙은 몫만 — 옵션 없이 캠페인
@@ -2539,10 +2600,14 @@ export async function computeProfit(
       t.profit += r.profit;
       t.couponDiscount += r.couponDiscount;
       t.adCost += r.adCost;
+      t.returnAmount += r.returnAmount;
       return t;
     },
-    { quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, unitCostTotal: 0, returnCount: 0, returnCost: 0, profit: 0, couponDiscount: 0, adCost: 0 },
+    { quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, unitCostTotal: 0, returnCount: 0, returnCost: 0, profit: 0, couponDiscount: 0, adCost: 0, returnAmount: 0 },
   );
+
+  // 카드의 쿠폰 합계도 행과 같은 기준(단가 × 판매수량)이어야 실매출이 매출과 같은 기준이 된다
+  coupon.sellerDiscount = totals.couponDiscount;
 
   const missingCost = rows.filter(r => r.quantity > 0 && !r.costEntered).length;
 

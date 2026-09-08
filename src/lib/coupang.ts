@@ -70,6 +70,10 @@ export interface ProfitRow {
   couponDiscount: number;
   /** 이 옵션에 붙은 광고비. 순이익(profit)에서 이미 뺀 값이다 */
   adCost: number;
+  /** 이 행의 판매가 난 채널. 둘 다면 'both' */
+  channel: 'marketplace' | 'growth' | 'both';
+  /** 반품된 물건의 값(실판매가 × 반품수량). 매출에 애초에 안 잡힌 것이라 순이익에서 또 빼지 않는다 */
+  returnAmount: number;
   unitCostTotal: number;
   returnCount: number;
   returnCost: number;
@@ -106,6 +110,7 @@ export interface ProfitResponse {
     couponDiscount: number;
     /** 옵션에 붙은 광고비 합. 일자별 합계(adCost.total)보다 작을 수 있다 */
     adCost: number;
+    returnAmount: number;
   };
   /**
    * 판매가 기준 주문금액과 쿠폰. 판매가 39,800원에 쿠폰 10,000원이면 실제 판매가는

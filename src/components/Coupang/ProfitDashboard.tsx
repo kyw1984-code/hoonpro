@@ -28,7 +28,7 @@ interface Props {
 
 interface Delta { text: string; good: boolean; bad: boolean }
 
-type SortKey = 'quantity' | 'salesAmount' | 'couponDiscount' | 'commission' | 'adCost' | 'unitCostTotal' | 'returnCount' | 'profit' | 'marginRate';
+type SortKey = 'quantity' | 'salesAmount' | 'couponDiscount' | 'commission' | 'adCost' | 'unitCostTotal' | 'returnAmount' | 'profit' | 'marginRate';
 
 /**
  * 직전 같은 길이 기간과의 증감.
@@ -193,6 +193,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
       광고비: Math.round(r.adCost ?? 0),
       원가: r.costEntered ? Math.round(r.unitCostTotal) : blank,
       반품건수: r.returnCount,
+      반품액_실판매가기준: Math.round(r.returnAmount ?? 0),
       반품비용: Math.round(r.returnCost),
       순이익: r.costEntered ? Math.round(r.profit) : blank,
       '이익률(%)': r.costEntered ? Number(r.marginRate.toFixed(1)) : blank,
@@ -322,7 +323,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               <Stat
                 label="쿠폰 할인 (판매자 부담)"
                 value={`− ${won(data.coupon!.sellerDiscount)}`}
-                sub={`실매출 ${won(data.totals.salesAmount - data.coupon!.sellerDiscount)} · 윙·그로스 주문 기준`}
+                sub={`실매출 ${won(data.totals.salesAmount - data.coupon!.sellerDiscount)} · 쿠폰 단가 × 판매수량`}
                 tone="critical"
               />
             )}
@@ -347,7 +348,11 @@ export function ProfitDashboard({ onEditCosts }: Props) {
             <Stat
               label="원가 + 배송"
               value={`− ${won(data.totals.unitCostTotal + data.totals.returnCost)}`}
-              sub={`반품 ${data.totals.returnCount}건 포함`}
+              sub={
+                data.totals.returnCount > 0
+                  ? `반품 ${data.totals.returnCount}건 · 배송비만 포함 (반품액 ${won(data.totals.returnAmount)}은 매출에서 이미 제외)`
+                  : '반품 0건'
+              }
             />
             <Stat
               label="순이익"
@@ -457,7 +462,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                     <SortTh k="commission" label="수수료" />
                     <SortTh k="adCost" label="광고비" />
                     <SortTh k="unitCostTotal" label="원가" />
-                    <SortTh k="returnCount" label="반품" />
+                    <SortTh k="returnAmount" label="반품" />
                     <SortTh k="profit" label="순이익" />
                     <SortTh k="marginRate" label="이익률" className="px-4" />
                   </tr>
@@ -466,7 +471,17 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                   {sortedRows.map(r => (
                     <tr key={r.vendorItemId} className="border-b border-line/60 last:border-0">
                       <td className="max-w-[300px] px-4 py-2.5">
-                        <p className="truncate text-ink">{r.productName}</p>
+                        <p className="truncate text-ink">
+                          {/* 채널 표기 — 그로스와 판매자배송은 수수료·정산 기준이 달라 한눈에 구분돼야 한다 */}
+                          <span
+                            className={`mr-1.5 rounded-control border px-1 py-0.5 align-middle text-[9.5px] ${
+                              r.channel === 'growth' ? 'border-[#c47a2c]/50 text-[#c47a2c]' : r.channel === 'both' ? 'border-line text-ink-2' : 'border-accent/40 text-accent'
+                            }`}
+                          >
+                            {r.channel === 'growth' ? '그로스' : r.channel === 'both' ? '윙+그로스' : '판매자배송'}
+                          </span>
+                          {r.productName}
+                        </p>
                         {r.optionName && <p className="truncate text-[11px] text-ink-3">{r.optionName}</p>}
                         {!r.costEntered && r.quantity > 0 && (
                           <span className="mt-0.5 inline-flex items-center gap-1 rounded-control border border-line px-1.5 py-0.5 text-[10px] text-ink-3">
@@ -485,7 +500,14 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{won(r.commission)}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.adCost > 0 ? won(r.adCost) : '-'}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.costEntered ? won(r.unitCostTotal) : '-'}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.returnCount > 0 ? `${r.returnCount}건` : '-'}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">
+                        {r.returnCount > 0 ? (
+                          <>
+                            <span className="text-ink-2">{won(r.returnAmount)}</span>
+                            <span className="block text-[10.5px]">{r.returnCount}건</span>
+                          </>
+                        ) : '-'}
+                      </td>
                       <td
                         className={`px-3 py-2.5 text-right font-semibold tabular-nums ${
                           !r.costEntered ? 'text-ink-3' : r.profit >= 0 ? 'text-positive' : 'text-critical'
