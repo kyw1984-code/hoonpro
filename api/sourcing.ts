@@ -1196,6 +1196,128 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
     });
   }
 
+  // 시장 변화 — 이미 쌓아 둔 관측 기록에서 "지난번 대비 무엇이 달라졌나"를 낸다.
+  //
+  // 같은 키워드를 다시 볼 때 눈으로 비교하기는 어렵다. 가격을 내린 경쟁 상품과
+  // 새로 들어온 상품은 지금 시장에서 벌어지는 일을 그대로 보여주는 신호인데,
+  // 데이터는 이미 있고 화면에만 없었다.
+  if (action === "changes") {
+    const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
+    if (!keyword) return res.status(400).json({ error: "keyword가 필요합니다." });
+
+    const { data: rows } = await supabase
+      .from("sourcing_product_obs")
+      .select("product_id, product_name, rank, price, review_count, is_ad, delivery_type, captured_at")
+      .eq("keyword", keyword)
+      .order("captured_at", { ascending: true })
+      .limit(4000);
+
+    // 관측일이 하루뿐이면 비교할 대상이 없다. 없는 걸 지어내지 않는다.
+    const days = [...new Set((rows ?? []).map(r => String(r.captured_at).slice(0, 10)))].sort();
+    if (days.length < 2) {
+      return res.status(200).json({
+        keyword, days: days.length,
+        hint: "one-day",
+        priceChanges: [], newcomers: [], surging: [], gone: [],
+      });
+    }
+
+    const latestDay = days[days.length - 1];
+    const prevDay = days[days.length - 2];
+
+    // 하루에 여러 번 수집될 수 있어 상품별로 그날 마지막 관측을 쓴다
+    const pick = (day: string) => {
+      const m = new Map<string, any>();
+      for (const r of rows ?? []) {
+        if (String(r.captured_at).slice(0, 10) !== day) continue;
+        m.set(String(r.product_id), r);
+      }
+      return m;
+    };
+    const now = pick(latestDay);
+    const before = pick(prevDay);
+
+    // 두 관측 사이의 날수. 리뷰 증가를 하루치로 환산하는 데 쓴다.
+    const spanDays = Math.max(1, Math.round((Date.parse(latestDay) - Date.parse(prevDay)) / 86400000));
+
+    const priceChanges: any[] = [];
+    const newcomers: any[] = [];
+    // 리뷰는 빨리 느는데 순위가 안 오르는 상품 — 광고로 밀고 있다는 신호다.
+    // 자연 순위가 그대로인데 판매가 늘고 있다면 그 판매는 광고에서 왔을 가능성이 크다.
+    const surging: any[] = [];
+    for (const [pid, cur] of now) {
+      const old = before.get(pid);
+      if (!old) {
+        newcomers.push({
+          productId: pid,
+          productName: cur.product_name,
+          rank: cur.rank,
+          price: cur.price,
+          reviewCount: cur.review_count,
+          isAd: cur.is_ad === true,
+          deliveryType: cur.delivery_type,
+        });
+        continue;
+      }
+      // 리뷰 증가 ≒ 판매속도. 순위 변화와 함께 봐야 의미가 생긴다.
+      const reviewsAdded = (Number(cur.review_count) || 0) - (Number(old.review_count) || 0);
+      const rankFrom = old.rank ?? null;
+      const rankTo = cur.rank ?? null;
+      if (reviewsAdded >= 3) {
+        const stalled = rankFrom !== null && rankTo !== null && rankTo >= rankFrom;
+        surging.push({
+          productId: pid,
+          productName: cur.product_name,
+          reviewsAdded,
+          perDay: Math.round((reviewsAdded / spanDays) * 10) / 10,
+          rankFrom, rankTo,
+          isAd: cur.is_ad === true,
+          // 순위가 그대로인데 리뷰가 는다 = 광고로 판매를 만들고 있다
+          adSuspect: stalled,
+        });
+      }
+
+      const from = Number(old.price) || 0;
+      const to = Number(cur.price) || 0;
+      if (from > 0 && to > 0 && from !== to) {
+        priceChanges.push({
+          productId: pid,
+          productName: cur.product_name,
+          priceFrom: from,
+          priceTo: to,
+          // 내림이 음수. 값을 그대로 두고 화면이 방향을 판단한다.
+          changePct: Math.round(((to - from) / from) * 1000) / 10,
+          rankFrom: old.rank ?? null,
+          rankTo: cur.rank ?? null,
+          deliveryType: cur.delivery_type,
+        });
+      }
+    }
+    // 사라진 상품 — 60위 밖으로 밀렸거나 판매를 접었다
+    const gone = [...before.keys()]
+      .filter(pid => !now.has(pid))
+      .map(pid => {
+        const r = before.get(pid);
+        return { productId: pid, productName: r.product_name, rank: r.rank ?? null };
+      });
+
+    // 많이 내린 순. 가격을 내리고 순위가 오른 상품이 지금 무슨 일이 벌어지는지 말해 준다.
+    priceChanges.sort((a, b) => a.changePct - b.changePct);
+    newcomers.sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
+    surging.sort((a, b) => b.perDay - a.perDay);
+
+    return res.status(200).json({
+      keyword,
+      from: prevDay,
+      to: latestDay,
+      days: days.length,
+      priceChanges: priceChanges.slice(0, 20),
+      newcomers: newcomers.slice(0, 20),
+      surging: surging.slice(0, 10),
+      gone: gone.slice(0, 20),
+    });
+  }
+
   if (action === "competitors") {
     const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
     if (!keyword) return res.status(400).json({ error: "keyword가 필요합니다." });

@@ -8,6 +8,8 @@
  *  4) 심층 확장 · 관심 키워드 · 1688 이미지 소싱 · 마진 계산기 · CSV
  */
 import React, { useState, useEffect, useRef } from 'react';
+import { SourcingProfit } from './Sourcing/SourcingProfit';
+import { MarketChanges } from './Sourcing/MarketChanges';
 import {
   Search, DollarSign, ChevronRight, Loader2, ExternalLink, Sparkles,
   Download, X, ArrowUpDown, KeyRound, RefreshCw, Star, Calculator,
@@ -1132,6 +1134,14 @@ export function SourcingFinder() {
                         <p className="text-xl font-semibold text-caution">{market.avgPrice.toLocaleString()}원</p>
                         <p className="mt-1 text-[12px] text-ink-3">{market.minPrice.toLocaleString()} ~ {market.maxPrice.toLocaleString()}원</p>
                       </div>
+                    </div>
+
+                    {/* 검색량·경쟁까지 봤으면 다음 질문은 "그래서 얼마 남나"다.
+                        내 실제 정산 비율로 원가 상한을 낸다 — 경쟁사는 못 하는 계산이다. */}
+                    <div className="mt-4 flex flex-col gap-3">
+                      <SourcingProfit avgPrice={market.avgPrice} />
+                      {/* 이 키워드를 전에도 본 적 있으면 그 사이 무엇이 달라졌는지 짚어 준다 */}
+                      <MarketChanges keyword={activeKeyword ?? ""} />
                     </div>
                   </div>
 
