@@ -2140,6 +2140,51 @@ async function verifyCreds(creds: CoupangCreds): Promise<{ ok: boolean; error?: 
   return { ok: false, error: r.error || '키 확인에 실패했습니다.' };
 }
 
+/**
+ * 서버 오류를 관리자 화면에 남긴다.
+ *
+ * Vercel 로그에만 남기면 운영자는 볼 이유가 없어 알아채지 못한다. 실제로 중계
+ * 서버가 90분 죽어 있는 동안 아무도 몰랐다. 같은 오류가 반복되면 행을 늘리지
+ * 않고 횟수만 올린다 — 같은 줄 100개는 목록을 못 쓰게 만든다.
+ *
+ * 기록 자체가 실패해도 본래 작업을 막지 않는다. 오류를 남기려다 오류를 내는 건
+ * 최악이다.
+ */
+async function logSystemError(
+  area: string,
+  message: string,
+  opts: { detail?: string; userId?: string | null; severity?: 'error' | 'warn' } = {},
+): Promise<void> {
+  if (!supabase) return;
+  try {
+    const msg = String(message).slice(0, 500);
+    const { data: existing } = await supabase
+      .from('system_errors')
+      .select('id, count')
+      .eq('area', area)
+      .eq('message', msg)
+      .is('resolved_at', null)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from('system_errors')
+        .update({ count: (existing.count ?? 1) + 1, last_seen_at: new Date().toISOString(), detail: opts.detail?.slice(0, 2000) ?? null })
+        .eq('id', existing.id);
+      return;
+    }
+    await supabase.from('system_errors').insert({
+      area,
+      message: msg,
+      detail: opts.detail?.slice(0, 2000) ?? null,
+      user_id: opts.userId ?? null,
+      severity: opts.severity ?? 'error',
+    });
+  } catch {
+    /* 기록 실패는 삼킨다 */
+  }
+}
+
 async function setAccountStatus(userId: string, status: string, error: string | null): Promise<void> {
   if (!supabase) return;
   const { data: before } = await supabase
@@ -2163,9 +2208,9 @@ async function setAccountStatus(userId: string, status: string, error: string | 
       status === 'expired' ? '[훈프로] 쿠팡 API 키가 만료됐습니다' : '[훈프로] 쿠팡 수집이 멈췄습니다',
       wrapEmail(
         status === 'expired' ? '쿠팡 API 키 만료' : '쿠팡 연동 확인 필요',
-        `<p>${escapeHtml(String((before as any)?.users?.name ?? ''))}님, 쿠팡 매출·정산 자동 수집이 멈췄습니다.</p>` +
+        `<p>${escapeHtml(String((before as any)?.users?.name ?? ''))}님, 훈프로 정산AI 자동 수집이 멈췄습니다.</p>` +
           `<p style="color:#ffb454;">${escapeHtml(error ?? '')}</p>` +
-          `<p>윙에서 키와 등록 IP를 확인한 뒤 훈프로의 [쿠팡 매출·정산 → 연동 설정]에서 다시 등록해주세요. ` +
+          `<p>윙에서 키와 등록 IP를 확인한 뒤 [훈프로 정산AI → 연동 설정]에서 다시 등록해주세요. ` +
           `이미 다른 주문수집 프로그램을 쓰신다면 키를 새로 발급하지 말고 기존 키를 그대로 넣어야 그쪽 연동이 끊기지 않습니다.</p>` +
           emailButtonLink('연동 설정 열기'),
       ),
@@ -2314,6 +2359,9 @@ async function cronSync(res: VercelResponse) {
   await notifyRelayState(!preflight.ok, preflight.reason ?? '');
   if (!preflight.ok) {
     console.error('coupang cron aborted:', preflight.reason);
+    await logSystemError('중계 서버', '중계 서버에 닿지 못해 전체 수집이 중단됐습니다', {
+      detail: preflight.reason,
+    });
     return res.status(200).json({ ok: false, reason: preflight.reason });
   }
 
@@ -2370,6 +2418,9 @@ async function cronSync(res: VercelResponse) {
       else result.processed++;
     } catch (e: any) {
       result.errors.push(`${acc.user_id}: ${e?.message ?? 'sync failed'}`);
+      await logSystemError('쿠팡 수집', '수집 중 예외가 발생했습니다', {
+        detail: e?.message ?? String(e), userId: acc.user_id,
+      });
     }
   }
 
@@ -2722,6 +2773,9 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
   // 원인이 훈프로도 쿠팡 키도 아니라는 것을 그 자리에서 알려준다.
   const relay = await relayPreflight();
   if (!relay.ok) {
+    await logSystemError('중계 서버', '중계 서버에 닿지 못해 수집을 시작하지 못했습니다', {
+      detail: relay.reason, userId,
+    });
     await supabase!
       .from('coupang_accounts')
       .update({ last_sync_error: `중계 서버 점검 실패: ${relay.reason}`, updated_at: new Date().toISOString() })

@@ -36,7 +36,7 @@ const TABS: TabDef[] = [
   { id: 'ranktracker', label: '순위 추적', icon: ListOrdered },
   { id: 'review', label: '리뷰 분석', icon: MessageSquareText },
   { id: 'analyzer', label: '광고 성과 분석', icon: BarChart3 },
-  { id: 'coupang', label: '쿠팡 매출·정산', icon: ShoppingBag },
+  { id: 'coupang', label: '훈프로 정산AI', icon: ShoppingBag },
   { id: 'qa', label: '훈프로 코칭AI', icon: MessageCircleQuestion },
   { id: 'works', label: '내 작업', icon: FolderOpen },
 ];

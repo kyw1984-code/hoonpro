@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { withVat } from '../src/lib/vat.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 
@@ -205,6 +206,51 @@ function couponPrice(coupon: CouponRow | null, price: number): { amount: number;
   return { amount: price, discount: 0 }; // free_period는 결제 없이 무료 기간 부여
 }
 
+/**
+ * 서버 오류를 관리자 화면에 남긴다.
+ *
+ * Vercel 로그에만 남기면 운영자는 볼 이유가 없어 알아채지 못한다. 실제로 중계
+ * 서버가 90분 죽어 있는 동안 아무도 몰랐다. 같은 오류가 반복되면 행을 늘리지
+ * 않고 횟수만 올린다 — 같은 줄 100개는 목록을 못 쓰게 만든다.
+ *
+ * 기록 자체가 실패해도 본래 작업을 막지 않는다. 오류를 남기려다 오류를 내는 건
+ * 최악이다.
+ */
+async function logSystemError(
+  area: string,
+  message: string,
+  opts: { detail?: string; userId?: string | null; severity?: 'error' | 'warn' } = {},
+): Promise<void> {
+  if (!supabase) return;
+  try {
+    const msg = String(message).slice(0, 500);
+    const { data: existing } = await supabase
+      .from('system_errors')
+      .select('id, count')
+      .eq('area', area)
+      .eq('message', msg)
+      .is('resolved_at', null)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from('system_errors')
+        .update({ count: (existing.count ?? 1) + 1, last_seen_at: new Date().toISOString(), detail: opts.detail?.slice(0, 2000) ?? null })
+        .eq('id', existing.id);
+      return;
+    }
+    await supabase.from('system_errors').insert({
+      area,
+      message: msg,
+      detail: opts.detail?.slice(0, 2000) ?? null,
+      user_id: opts.userId ?? null,
+      severity: opts.severity ?? 'error',
+    });
+  } catch {
+    /* 기록 실패는 삼킨다 */
+  }
+}
+
 // ── 토스 API ──────────────────────────────────────────────
 
 async function tossIssueBillingKey(authKey: string, customerKey: string) {
@@ -278,7 +324,9 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
     const { data } = await supabase.from('coupons').select('*').eq('id', sub.coupon_id).maybeSingle();
     if (data && data.type !== 'free_period') coupon = data as CouponRow;
   }
-  const { amount, discount } = couponPrice(coupon, plan.price);
+  const { amount: supplyAmount, discount } = couponPrice(coupon, plan.price);
+  // 요금표 가격은 공급가액이다. 실제로 카드에 청구되는 금액은 세액을 더한 값이다.
+  const { supply, vat, total: amount } = withVat(supplyAmount);
   const orderId = newOrderId();
   const orderName = `${plan.name} 구독`;
 
@@ -305,6 +353,8 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
     order_id: orderId,
     order_name: orderName,
     amount,
+    supply_amount: supply,
+    vat_amount: vat,
     discount,
     status: result.ok ? 'paid' : 'failed',
     payment_key: result.paymentKey ?? null,
@@ -312,6 +362,13 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
     receipt_url: result.receiptUrl ?? null,
     approved_at: result.approvedAt ?? null,
   });
+
+  if (!result.ok) {
+    // 자동결제 실패는 그대로 두면 구독이 조용히 끊긴다. 운영자가 먼저 알아야 한다.
+    await logSystemError('자동결제', `정기결제가 실패했습니다: ${result.failReason ?? '사유 불명'}`, {
+      userId: sub.user_id, severity: 'warn',
+    });
+  }
 
   const today = kstToday();
   if (result.ok) {
@@ -331,6 +388,8 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
     await sendEmail(user.email, `[훈프로] 결제 완료 — ${won(amount)}`, wrapEmail(
       `결제가 완료됐습니다`,
       `<p>${user.name}님, ${orderName} <b style="color:#e8ecf5;">${won(amount)}</b> 결제가 완료됐습니다.</p>` +
+      `<p style="color:#b9c2d8;font-size:13px;">공급가액 ${won(supply)} + 부가세 ${won(vat)}<br>` +
+      `신용카드 매출전표가 부가가치세법상 적격증빙입니다 — 매입세액 공제에 그대로 쓰실 수 있습니다.</p>` +
       `<p>다음 결제 예정일: <b style="color:#e8ecf5;">${nextBilling}</b></p>` +
       (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('구독 관리 열기'))));
     return { ok: true };
@@ -386,7 +445,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .from('plans').select('id, name, price, interval')
         .eq('active', true).order('price', { ascending: false });
       return res.status(200).json({
-        plans: (data ?? []).map(p => ({ ...p, interval: p.interval ?? 'month' })),
+        // price는 공급가액, chargedPrice는 실제 카드에 찍히는 금액이다.
+        // 화면에서 둘을 함께 보여줘야 "부가세 별도"가 숫자로 확인된다.
+        plans: (data ?? []).map(p => ({
+          ...p,
+          interval: p.interval ?? 'month',
+          chargedPrice: withVat(p.price).total,
+          vat: withVat(p.price).vat,
+        })),
+        vatSeparate: true,
       });
     }
 
@@ -431,14 +498,17 @@ async function getStatus(user: any, res: VercelResponse) {
     supabase.from('plans').select('*').eq('active', true).order('price', { ascending: false }),
     supabase.from('app_config').select('value').eq('key', 'billing_enforced').maybeSingle(),
   ]);
-  const plans = (planRows ?? []).map(p => ({ id: p.id, name: p.name, price: p.price, interval: p.interval ?? 'month' }));
+  const plans = (planRows ?? []).map(p => ({
+    id: p.id, name: p.name, price: p.price, interval: p.interval ?? 'month',
+    chargedPrice: withVat(p.price).total, vat: withVat(p.price).vat,
+  }));
   const plan = plans.find(p => p.id === sub?.plan_id) ?? null;
 
   let payments: any[] = [];
   if (sub) {
     const { data } = await supabase
       .from('payments')
-      .select('order_name, amount, discount, status, fail_reason, receipt_url, approved_at, created_at')
+      .select('order_name, amount, supply_amount, vat_amount, discount, status, fail_reason, receipt_url, approved_at, created_at')
       .eq('user_id', user.userId)
       .order('created_at', { ascending: false })
       .limit(12);
@@ -478,17 +548,20 @@ async function couponValidate(user: any, req: VercelRequest, res: VercelResponse
 
   const c = coupon as CouponRow;
   const intervalLabel = plan.interval === 'year' ? '연' : '월';
-  const { amount, discount } = couponPrice(c, plan.price);
+  const { amount: supplyAmount, discount } = couponPrice(c, plan.price);
+  const charged = withVat(supplyAmount);
+  const planCharged = withVat(plan.price);
   return res.status(200).json({
     valid: true,
     type: c.type,
     value: c.value,
     durationCycles: c.duration_cycles,
-    firstAmount: c.type === 'free_period' ? 0 : amount,
+    // 화면에 보이는 숫자는 실제로 카드에 찍히는 금액이어야 한다
+    firstAmount: c.type === 'free_period' ? 0 : charged.total,
     discount,
     description: c.type === 'free_period'
-      ? `${c.value}일 무료 이용 후 ${won(plan.price)}/${intervalLabel} 자동결제`
-      : `첫 ${c.duration_cycles === null ? '매' : c.duration_cycles + '회'} 결제 ${won(amount)} (${won(discount)} 할인)`,
+      ? `${c.value}일 무료 이용 후 ${won(planCharged.total)}/${intervalLabel} 자동결제 (부가세 포함)`
+      : `첫 ${c.duration_cycles === null ? '매' : c.duration_cycles + '회'} 결제 ${won(charged.total)} (${won(discount)} 할인 · 부가세 포함)`,
   });
 }
 
@@ -524,7 +597,8 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
   const today = kstToday();
   const isTrial = coupon?.type === 'free_period';
   const periodEnd = isTrial ? addDays(today, coupon!.value) : addMonths(today, planMonths(plan));
-  const { amount, discount } = couponPrice(coupon, plan.price);
+  const { amount: supplyAmount, discount } = couponPrice(coupon, plan.price);
+  const { supply, vat, total: amount } = withVat(supplyAmount);
 
   const subFields = {
     user_id: user.userId,
@@ -570,6 +644,8 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
       order_id: orderId,
       order_name: orderName,
       amount,
+      supply_amount: supply,
+      vat_amount: vat,
       discount,
       status: result.ok ? 'paid' : 'failed',
       payment_key: result.paymentKey ?? null,
@@ -773,7 +849,9 @@ async function refund(user: any, res: VercelResponse) {
       // 환불액 = 연간 결제액 − (월간 요금 ÷ 30 × 사용일수, 사용일은 올림)
       const { data: monthlyPlan } = await supabase
         .from('plans').select('price').eq('interval', 'month').eq('active', true).maybeSingle();
-      const monthlyPrice = monthlyPlan?.price ?? 39800;
+      // 결제액(payment.amount)이 세액 포함이므로 차감할 월간 요금도 같은 기준으로 맞춘다.
+      // 공급가액으로 빼면 사용료를 실제보다 적게 떼어 환불이 과다해진다.
+      const monthlyPrice = withVat(monthlyPlan?.price ?? 39800).total;
       const usedDays = Math.max(1, Math.ceil((Date.now() - approvedAt.getTime()) / 86400000));
       const usedCharge = Math.floor((monthlyPrice / 30) * usedDays);
       refundAmount = Math.max(0, payment.amount - usedCharge);

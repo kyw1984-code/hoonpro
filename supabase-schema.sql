@@ -1007,3 +1007,39 @@ create table if not exists coupang_coupons (
 create index if not exists idx_cc_user on coupang_coupons(user_id);
 alter table coupang_coupons enable row level security;
 revoke all on coupang_coupons from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 40. 부가세 분리 + 사업자 정보
+-- ─────────────────────────────────────────────────────────────
+-- 요금표의 가격은 공급가액이고 실제 청구액은 세액을 더한 값이다. 카드 매출전표가
+-- 매입세액 공제의 적격증빙이 되려면 공급가액과 세액이 나뉘어 있어야 한다.
+alter table payments add column if not exists supply_amount int;
+alter table payments add column if not exists vat_amount int;
+
+-- 영수증·거래명세서에 표기할 사업자 정보
+alter table users add column if not exists business_number text;
+alter table users add column if not exists business_name text;
+
+-- ─────────────────────────────────────────────────────────────
+-- 41. 서버 오류 기록 — 관리자가 화면에서 바로 본다
+-- ─────────────────────────────────────────────────────────────
+-- 중계 서버가 90분 죽어 있었는데 아무도 몰랐다. 로그는 Vercel에만 남고, 운영자는
+-- 그걸 열어 볼 이유가 없기 때문이다. 오류를 여기에 쌓아 관리자 화면에 띄운다.
+-- 같은 오류가 반복되면 행을 늘리지 않고 count만 올린다 — 100줄짜리 같은 오류는
+-- 목록을 못 쓰게 만든다. resolved_at을 찍으면 목록에서 내려간다.
+create table if not exists system_errors (
+  id uuid default gen_random_uuid() primary key,
+  area text not null,                       -- 어디서 났나 (coupang-cron, billing-charge 등)
+  message text not null,
+  detail text,
+  user_id uuid references users(id) on delete set null,
+  severity text not null default 'error',   -- error | warn
+  count int not null default 1,
+  first_seen_at timestamptz default now(),
+  last_seen_at timestamptz default now(),
+  resolved_at timestamptz
+);
+create index if not exists idx_sys_err_open on system_errors(resolved_at, last_seen_at desc);
+create index if not exists idx_sys_err_dedupe on system_errors(area, message) where resolved_at is null;
+alter table system_errors enable row level security;
+revoke all on system_errors from anon, authenticated;
