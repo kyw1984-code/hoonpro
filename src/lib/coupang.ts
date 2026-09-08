@@ -146,10 +146,14 @@ export interface CostRow {
   salePrice: number | null;
   stock: number | null;
   status: string;
+  /** 'growth'면 로켓그로스 상품이다 — 입출고비 칸이 이 상품에만 뜬다 */
+  businessType: string;
   soldLast30: number;
   unitCost: number;
   packagingCost: number;
   shippingCost: number;
+  /** 로켓그로스 입출고비 (개당). 판매자배송 상품에는 없는 비용이다. */
+  fulfillmentCost: number;
   returnShippingCost: number;
   memo: string;
 }

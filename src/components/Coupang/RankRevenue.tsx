@@ -49,6 +49,7 @@ function targetRanks(current: number, observedBest: number): number[] {
 export function RankRevenue() {
   const [items, setItems] = useState<RankRevenueItem[] | null>(null);
   const [minPairs, setMinPairs] = useState(10);
+  const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,6 +58,7 @@ export function RankRevenue() {
       .then(r => {
         setItems(r.items);
         setMinPairs(r.minPairs);
+        setHint(r.hint ?? null);
       })
       .catch(e => setError(e.message));
   }, []);
@@ -74,14 +76,31 @@ export function RankRevenue() {
   }
 
   if (items.length === 0) {
+    // 추적 목록에는 소싱AI에서 담은 관심 상품이 섞여 있다. 이 화면은 내가 파는
+    // 상품만 다루므로, 둘을 구분해서 다음에 무엇을 하면 되는지 말해 준다.
+    const ownOnly = hint === 'no-own-product';
     return (
       <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">
         <ListOrdered className="mb-4 h-12 w-12 opacity-20" />
-        <p className="text-sm font-semibold">추적 중인 키워드가 없습니다</p>
+        <p className="text-sm font-semibold">
+          {ownOnly ? '추적 중인 상품 가운데 내가 파는 상품이 없습니다' : '추적 중인 키워드가 없습니다'}
+        </p>
         <p className="mt-1.5 text-center text-[12px] leading-relaxed">
-          [순위 추적] 탭에서 내 상품과 대표 키워드를 등록하면
-          <br />
-          순위 변화가 판매로 얼마나 이어지는지 계산해 드립니다.
+          {ownOnly ? (
+            <>
+              지금 추적 중인 것은 소싱AI에서 담은 관심 상품입니다. 이 화면은
+              <br />
+              내 판매 실적과 순위를 맞춰 보는 곳이라 관심 상품은 다루지 않습니다.
+              <br />
+              [순위 추적] 탭에서 <b className="text-ink-2">내가 파는 상품</b>을 대표 키워드와 함께 등록해주세요.
+            </>
+          ) : (
+            <>
+              [순위 추적] 탭에서 내 상품과 대표 키워드를 등록하면
+              <br />
+              순위 변화가 판매로 얼마나 이어지는지 계산해 드립니다.
+            </>
+          )}
         </p>
       </div>
     );
@@ -92,7 +111,8 @@ export function RankRevenue() {
       <div className="flex items-start gap-2 rounded-panel border border-line bg-paper px-5 py-4">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
         <p className="text-[12.5px] leading-relaxed text-ink-2">
-          순위 추적 기록과 실제 주문을 날짜로 맞춰 관계를 봅니다. 최소 {minPairs}일치가 겹쳐야 계산합니다.
+          <b className="text-ink">내가 파는 상품</b>만 다룹니다 — 순위 추적 기록과 실제 주문을 날짜로 맞춰 관계를 봅니다.
+          최소 {minPairs}일치가 겹쳐야 계산합니다.
           관계가 보인다고 해서 순위가 판매를 만든 것이라고 단정할 수는 없습니다. 시즌이나 광고가 둘을 동시에 움직였을 수도 있습니다.
         </p>
       </div>

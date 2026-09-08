@@ -18,6 +18,7 @@ const SHEET_COLUMNS = {
   unitCost: '매입원가',
   packagingCost: '부자재',
   shippingCost: '출고배송',
+  fulfillmentCost: '입출고비',
   returnShippingCost: '반품배송',
 } as const;
 
@@ -45,10 +46,12 @@ function parseSheet(file: File): Promise<Array<Partial<CostRow> & { vendorItemId
             const unit = pick(r, SHEET_COLUMNS.unitCost);
             const pack = pick(r, SHEET_COLUMNS.packagingCost);
             const ship = pick(r, SHEET_COLUMNS.shippingCost);
+            const ful = pick(r, SHEET_COLUMNS.fulfillmentCost);
             const ret = pick(r, SHEET_COLUMNS.returnShippingCost);
             if (unit) patch.unitCost = unit.value;
             if (pack) patch.packagingCost = pack.value;
             if (ship) patch.shippingCost = ship.value;
+            if (ful) patch.fulfillmentCost = ful.value;
             if (ret) patch.returnShippingCost = ret.value;
             return patch;
           })
@@ -65,12 +68,17 @@ function parseSheet(file: File): Promise<Array<Partial<CostRow> & { vendorItemId
 
 type Draft = Record<string, Partial<CostRow>>;
 
-const FIELDS: Array<{ key: keyof CostRow; label: string; hint: string }> = [
+// growthOnly인 항목은 로켓그로스 상품에만 입력칸이 뜬다. 판매자배송 상품에
+// 입출고비 칸을 띄우면 0을 넣게 만들고, 안 넣은 것과 구분이 안 된다.
+const FIELDS: Array<{ key: keyof CostRow; label: string; hint: string; growthOnly?: boolean }> = [
   { key: 'unitCost', label: '매입원가', hint: '개당 사입가' },
   { key: 'packagingCost', label: '부자재', hint: '박스·완충재' },
   { key: 'shippingCost', label: '출고배송', hint: '개당 택배비' },
+  { key: 'fulfillmentCost', label: '입출고비', hint: '그로스 개당', growthOnly: true },
   { key: 'returnShippingCost', label: '반품배송', hint: '1건 왕복' },
 ];
+
+const isGrowth = (r: CostRow) => r.businessType === 'growth';
 
 export function CostEditor({ onSaved }: { onSaved?: () => void }) {
   const [rows, setRows] = useState<CostRow[] | null>(null);
@@ -118,6 +126,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
           unitCost: patch.unitCost ?? base?.unitCost ?? 0,
           packagingCost: patch.packagingCost ?? base?.packagingCost ?? 0,
           shippingCost: patch.shippingCost ?? base?.shippingCost ?? 0,
+          fulfillmentCost: patch.fulfillmentCost ?? base?.fulfillmentCost ?? 0,
           returnShippingCost: patch.returnShippingCost ?? base?.returnShippingCost ?? 0,
         };
       });
@@ -144,6 +153,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
       [SHEET_COLUMNS.unitCost]: r.unitCost,
       [SHEET_COLUMNS.packagingCost]: r.packagingCost,
       [SHEET_COLUMNS.shippingCost]: r.shippingCost,
+      [SHEET_COLUMNS.fulfillmentCost]: r.fulfillmentCost,
       [SHEET_COLUMNS.returnShippingCost]: r.returnShippingCost,
     }));
     const ws = XLSX.utils.json_to_sheet(data);
@@ -192,6 +202,11 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
     return rows.filter(r => `${r.productName} ${r.optionName}`.toLowerCase().includes(needle));
   }, [rows, q]);
 
+  // 로켓그로스 상품이 하나도 없는 판매자에게 입출고비 열은 빈 칸만 늘린다.
+  // 검색 결과가 아니라 전체 목록으로 판단해야 검색할 때마다 열이 사라지지 않는다.
+  const hasGrowth = useMemo(() => (rows ?? []).some(isGrowth), [rows]);
+  const shownFields = useMemo(() => FIELDS.filter(f => !f.growthOnly || hasGrowth), [hasGrowth]);
+
   if (error) {
     return <div className="rounded-panel border border-critical/35 bg-critical-soft p-5 text-[13px] text-ink-2">{error}</div>;
   }
@@ -211,6 +226,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
         <p className="text-[12.5px] leading-relaxed text-ink-2">
           한 번만 넣으면 이후 순이익이 자동으로 계산됩니다. 최근 30일 판매가 많은데 원가가 비어 있는 옵션을 위로 올렸습니다.
           부자재·배송비를 모르면 매입원가만 넣어도 됩니다.
+          {hasGrowth && ' 로켓그로스 상품에는 입출고비 칸이 따로 있습니다 — 쿠팡 물류센터 입고·출고·포장에 개당 나가는 돈입니다.'}
         </p>
       </div>
 
@@ -263,13 +279,13 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
 
       <div className="rounded-panel border border-line bg-paper">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-[12.5px]">
+          <table className={`w-full text-[12.5px] ${hasGrowth ? 'min-w-[960px]' : 'min-w-[860px]'}`}>
             <thead>
               <tr className="border-b border-line text-[11.5px] text-ink-3">
                 <th className="px-4 py-2.5 text-left font-medium">상품</th>
                 <th className="px-3 py-2.5 text-right font-medium">판매가</th>
                 <th className="px-3 py-2.5 text-right font-medium">30일 판매</th>
-                {FIELDS.map(f => (
+                {shownFields.map(f => (
                   <th key={String(f.key)} className="px-3 py-2.5 text-right font-medium">
                     {f.label}
                     <span className="block text-[10px] font-normal text-ink-3">{f.hint}</span>
@@ -280,29 +296,42 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
             </thead>
             <tbody>
               {filtered.map(r => {
-                const totalCost = FIELDS.filter(f => f.key !== 'returnShippingCost').reduce(
-                  (n, f) => n + valueOf(r, f.key),
-                  0,
-                );
+                const growth = isGrowth(r);
+                const totalCost = shownFields
+                  .filter(f => f.key !== 'returnShippingCost' && (!f.growthOnly || growth))
+                  .reduce((n, f) => n + valueOf(r, f.key), 0);
                 // 수수료율은 상품마다 달라 여기서는 원가만 뺀 값을 보여준다.
                 const gross = (r.salePrice ?? 0) - totalCost;
                 return (
                   <tr key={r.vendorItemId} className="border-b border-line/60 last:border-0">
                     <td className="max-w-[280px] px-4 py-2">
-                      <p className="truncate text-ink">{r.productName}</p>
+                      <p className="truncate text-ink">
+                        {growth && (
+                          <span className="mr-1.5 rounded-control border border-line px-1 py-0.5 text-[9.5px] align-middle text-ink-3">
+                            그로스
+                          </span>
+                        )}
+                        {r.productName}
+                      </p>
                       {r.optionName && <p className="truncate text-[11px] text-ink-3">{r.optionName}</p>}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink-2">{r.salePrice ? won(r.salePrice) : '-'}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink-3">{r.soldLast30.toLocaleString('ko-KR')}</td>
-                    {FIELDS.map(f => (
+                    {shownFields.map(f => (
                       <td key={String(f.key)} className="px-3 py-2 text-right">
-                        <input
-                          type="number"
-                          min={0}
-                          value={valueOf(r, f.key)}
-                          onChange={e => edit(r.vendorItemId, f.key, Number(e.target.value))}
-                          className="w-[86px] rounded-control border border-line bg-paper-2 px-2 py-1.5 text-right text-[12px] tabular-nums outline-none focus:ring-2 focus:ring-accent"
-                        />
+                        {f.growthOnly && !growth ? (
+                          // 판매자배송 상품에는 입출고비가 없다. 0이 든 칸을 두면
+                          // '아직 안 넣음'과 '정말 0원'이 구분되지 않는다.
+                          <span className="inline-block w-[86px] text-center text-ink-3">–</span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            value={valueOf(r, f.key)}
+                            onChange={e => edit(r.vendorItemId, f.key, Number(e.target.value))}
+                            className="w-[86px] rounded-control border border-line bg-paper-2 px-2 py-1.5 text-right text-[12px] tabular-nums outline-none focus:ring-2 focus:ring-accent"
+                          />
+                        )}
                       </td>
                     ))}
                     <td className={`px-4 py-2 text-right font-semibold tabular-nums ${gross >= 0 ? 'text-ink' : 'text-critical'}`}>

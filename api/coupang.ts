@@ -467,36 +467,73 @@ async function upsertChunked(table: string, rows: any[], onConflict: string): Pr
 // ── 상품(옵션) 동기화 ─────────────────────────────────────────
 // 목록 조회로 등록상품을 훑고, 상세는 회차당 상한만큼만 가져온다.
 // 상세를 오래 못 받은 상품부터 채우므로 몇 회차 안에 전체가 최신화된다.
+/**
+ * 등록상품 목록 질의문.
+ *
+ * nextToken은 값이 비어도 반드시 보낸다. 빼면 쿠팡이 오류 없이 빈 목록을 돌려줘
+ * '상품 0건인데 오류도 없음'이 되고, 원가·재고·반품·가격 화면이 통째로 빈다.
+ * 매출내역의 token과 같은 함정이다.
+ */
+export function sellerProductsQuery(vendorId: string, nextToken: string, businessTypes = ''): string {
+  return (
+    `vendorId=${vendorId}&nextToken=${nextToken}&maxPerPage=100` +
+    (businessTypes ? `&businessTypes=${businessTypes}` : '')
+  );
+}
+
 async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
 
-  const sellerProductIds: Array<{ id: string; name: string; status: string }> = [];
+  const sellerProductIds: Array<{ id: string; name: string; status: string; businessType: string }> = [];
+  const seenProductId = new Set<string>();
   let listingComplete = false;
-  let nextToken = '';
-  for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
-    if (outOfTime(deadline, sum)) return;
-    const query = `vendorId=${creds.vendorId}&maxPerPage=100${nextToken ? `&nextToken=${nextToken}` : ''}`;
-    const r = await coupangCall(creds, 'GET', EP.sellerProducts, query);
-    if (!r.ok) {
-      if (r.authFailed) sum.authFailed = true;
-      sum.errors.push(`상품 목록: ${r.error}`);
-      return;
+
+  // 등록상품 목록을 한 바퀴 읽는다. businessTypes를 주면 그 판매방식만 온다.
+  const listPage = async (
+    businessTypes: string,
+    businessType: string,
+  ): Promise<{ ok: boolean; complete: boolean; error?: string }> => {
+    let nextToken = '';
+    for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
+      if (outOfTime(deadline, sum)) return { ok: true, complete: false };
+      // nextToken은 값이 비어도 반드시 보낸다. 빼면 쿠팡이 오류 없이 빈 목록을
+      // 돌려줘 "상품 0건인데 오류도 없음"이 된다 — 매출내역의 token과 같은 함정이다.
+      const query = sellerProductsQuery(creds.vendorId, nextToken, businessTypes);
+      const r = await coupangCall(creds, 'GET', EP.sellerProducts, query);
+      if (!r.ok) {
+        if (r.authFailed) sum.authFailed = true;
+        return { ok: false, complete: false, error: r.error };
+      }
+      for (const p of listOf(r.data)) {
+        const id = pickStr(p, ['sellerProductId', 'sellerProductID']);
+        if (!id || seenProductId.has(id)) continue;
+        seenProductId.add(id);
+        sellerProductIds.push({
+          id,
+          name: pickStr(p, ['sellerProductName', 'displayProductName', 'productName']),
+          status: pickStr(p, ['statusName', 'status']),
+          businessType,
+        });
+      }
+      nextToken = nextTokenOf(r.data);
+      if (!nextToken) return { ok: true, complete: true };
     }
-    for (const p of listOf(r.data)) {
-      const id = pickStr(p, ['sellerProductId', 'sellerProductID']);
-      if (!id) continue;
-      sellerProductIds.push({
-        id,
-        name: pickStr(p, ['sellerProductName', 'displayProductName', 'productName']),
-        status: pickStr(p, ['statusName', 'status']),
-      });
-    }
-    nextToken = nextTokenOf(r.data);
-    if (!nextToken) {
-      listingComplete = true;
-      break;
-    }
+    return { ok: true, complete: false };
+  };
+
+  // 로켓그로스를 먼저 훑는다. 순서가 뒤바뀌면 그로스 상품이 기본 목록에서
+  // 먼저 잡혀 'marketplace'로 표시되고, 원가 입력에 입출고비 칸이 안 뜬다.
+  // 이 조회가 실패해도 마켓플레이스 상품까지 버릴 이유는 없어 조용히 넘어가되,
+  // 목록이 불완전해졌으니 아래 '사라진 상품 정리'는 하지 않는다.
+  const growth = await listPage('rocketGrowth', 'growth');
+  if (sum.authFailed) return;
+
+  const base = await listPage('', 'marketplace');
+  if (!base.ok) {
+    sum.errors.push(`상품 목록: ${base.error}`);
+    return;
   }
+  listingComplete = base.complete && growth.ok && growth.complete;
 
   // 상세를 가져올 대상 — 아직 한 번도 못 받았거나 가장 오래된 것 우선
   const { rows: known } = await selectAll<{ seller_product_id: string | null; synced_at: string | null }>((f, t) =>
@@ -513,6 +550,8 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
   );
 
   const rows: any[] = [];
+  let detailFailed = 0;
+  let detailError = '';
   for (const sp of ordered.slice(0, LIMITS.itemDetailPerRun)) {
     // 상세는 건당 1호출이라 여기서 시간이 가장 많이 든다. 예산이 끝나면
     // 지금까지 받은 것만 저장하고 나머지는 다음 회차가 이어받는다.
@@ -526,7 +565,11 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
         sum.authFailed = true;
         return;
       }
-      continue; // 개별 상품 실패는 건너뛴다 — 다음 회차에 다시 시도된다
+      // 개별 상품 실패는 건너뛰고 다음 회차에 다시 시도한다. 다만 조용히 넘기면
+      // 전부 실패했을 때 '상품 0건, 오류 없음'이 되어 원인을 알 수 없다.
+      detailFailed += 1;
+      if (!detailError) detailError = r.error ?? `HTTP ${r.status}`;
+      continue;
     }
     const detail = (r.data as any)?.data ?? r.data;
     const productId = pickStr(detail, ['productId', 'displayProductId']);
@@ -543,6 +586,7 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
         sale_price: pickNum(it, ['salePrice', 'originalPrice']),
         stock: pickNum(it, ['maximumBuyCount', 'stockQuantity', 'quantity']),
         status: pickStr(it, ['saleStatus', 'itemStatus'], sp.status),
+        business_type: sp.businessType,
         synced_at: new Date().toISOString(),
       });
     }
@@ -551,6 +595,15 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
   const err = await upsertChunked('coupang_items', rows, 'user_id,vendor_item_id');
   if (err) sum.errors.push(err);
   sum.items = rows.length;
+
+  // 목록은 받았는데 상세가 전부 막혔다면 그건 넘어갈 일이 아니다. 원가·재고·
+  // 반품·가격 화면이 통째로 비는데 화면에는 아무 이유도 안 뜬다.
+  if (detailFailed > 0 && rows.length === 0) {
+    sum.errors.push(`상품 상세: ${detailError} (${detailFailed}건 실패)`);
+  }
+  if (sellerProductIds.length === 0) {
+    sum.errors.push('상품 목록: 쿠팡이 등록상품을 한 건도 주지 않았습니다. 윙에 판매중인 상품이 있는지 확인해주세요.');
+  }
 
   // 목록에서 사라진 등록상품은 삭제됐거나 단종된 것이다. 남겨 두면 재고 화면과
   // 가격 규칙에 계속 등장하고, 자동 반영이 없는 상품에 매일 가격을 넣으려다
@@ -763,29 +816,92 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
 //
 // 회계 기준이 마켓플레이스와 다르다는 점이 중요하다.
 //   마켓플레이스 — 매출인식일 기준, 정산예정액이 확정값으로 온다
-//   로켓그로스   — 주문만 조회되므로 결제일 기준이고, 정산예정액은 추정이다
+//   로켓그로스   — 주문만 조회되므로 결제일 기준이고, 수수료·물류비는 오지 않는다
 // 그래서 channel을 나눠 저장하고 화면에서도 따로 보여준다. 한 통에 부으면
 // 성격이 다른 숫자가 소리 없이 섞인다.
 //
-// 제약 세 가지 — 지키지 않으면 조용히 실패한다.
-//   · 분당 50회 한도 (다른 API보다 훨씬 빡빡하다)
-//   · 한 번에 30일까지
+// 이 API의 규칙 (실제 호출로 확인된 것들)
+//   · 날짜는 하이픈 없는 yyyyMMdd다. 2026-08-10처럼 보내면 Bad Request다
+//   · 파라미터는 paidDateFrom / paidDateTo이고 maxPerPage는 받지 않는다
+//   · paidDateTo는 사실상 포함되지 않아, from == to로 하루만 조회하면 항상 빈
+//     결과가 온다. 그래서 구간을 하루 넉넉히 잡고 응답의 paidAt으로 날짜를 가른다
+//   · 분당 50회, 한 번에 30일까지
 //   · X-MARKET 헤더 필수 (coupangCall에 공통으로 넣어 뒀다)
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-/**
- * 조회 기간 파라미터 이름이 문서·구현마다 갈린다(createdAt* / paidDate*).
- * 실제로 불러 봐야 알 수 있어서, 한쪽이 파라미터 없다고 거절하면 다른 쪽으로
- * 한 번 더 시도한다. 맞는 이름을 찾으면 그 회차 내내 그것만 쓴다.
- */
-const RG_DATE_PARAMS: Array<[string, string]> = [
-  ['createdAtFrom', 'createdAtTo'],
-  ['paidDateFrom', 'paidDateTo'],
-];
+/** 2026-08-10 → 20260810. 이 API만 하이픈 없는 형식을 받는다. */
+export function rgDate(iso: string): string {
+  return iso.replace(/-/g, '');
+}
 
-function rgQuery(pair: [string, string], from: string, to: string, token: string): string {
-  return `${pair[0]}=${from}&${pair[1]}=${to}&maxPerPage=100${token ? `&nextToken=${token}` : ''}`;
+/**
+ * 로켓그로스 주문 질의문.
+ *
+ * 날짜는 하이픈 없는 yyyyMMdd이고, 파라미터는 paidDateFrom/paidDateTo다.
+ * maxPerPage는 받지 않는다 — 붙이면 Bad Request로 거절당한다.
+ */
+export function rgOrdersQuery(from: string, to: string, token: string): string {
+  return `paidDateFrom=${rgDate(from)}&paidDateTo=${rgDate(to)}` + (token ? `&nextToken=${token}` : '');
+}
+
+/** epoch millis(또는 날짜 문자열) → 한국 날짜 YYYY-MM-DD */
+function kstDateOf(value: unknown): string | null {
+  if (typeof value === 'number' || (typeof value === 'string' && /^\d{10,}$/.test(value))) {
+    const ms = Number(value);
+    if (!Number.isFinite(ms)) return null;
+    // 초 단위로 오는 경우도 방어한다
+    const t = ms < 1e12 ? ms * 1000 : ms;
+    return new Date(t + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  }
+  // 문자열로 오는 경우 — pickDate가 이미 한국 날짜 문자열을 그대로 뽑아 준다
+  return pickDate({ v: value }, ['v']);
+}
+
+/**
+ * 윙(마켓플레이스) 실적에서 관측된 판매수수료율.
+ *
+ * 로켓그로스 주문 API는 수수료를 주지 않지만, 판매수수료율 자체는 윙과 같다.
+ * 카테고리마다 요율이 다르므로 상품별로 뽑고, 그 상품의 윙 실적이 없으면
+ * 이 판매자의 전체 평균을 쓴다. 윙 실적이 하나도 없으면 null을 돌려준다 —
+ * 업계 평균 같은 걸 끌어다 쓰면 순이익이 조용히 틀린다.
+ */
+async function marketplaceCommissionRates(
+  userId: string,
+): Promise<{ byItem: Map<string, number>; overall: number | null }> {
+  const byItem = new Map<string, number>();
+  if (!supabase) return { byItem, overall: null };
+
+  const { rows } = await selectAll<{ vendor_item_id: string; sales_amount: number; commission: number }>((f, t) =>
+    supabase!
+      .from('coupang_sales_daily')
+      .select('vendor_item_id, sales_amount, commission')
+      .eq('user_id', userId)
+      .eq('channel', 'marketplace')
+      .order('vendor_item_id').range(f, t));
+
+  const acc = new Map<string, { sales: number; fee: number }>();
+  let totalSales = 0;
+  let totalFee = 0;
+  for (const r of rows) {
+    const sales = Number(r.sales_amount) || 0;
+    const fee = Number(r.commission) || 0;
+    if (sales <= 0) continue;
+    const id = String(r.vendor_item_id);
+    const cur = acc.get(id) ?? { sales: 0, fee: 0 };
+    cur.sales += sales;
+    cur.fee += fee;
+    acc.set(id, cur);
+    totalSales += sales;
+    totalFee += fee;
+  }
+  for (const [id, v] of acc) {
+    // 수수료가 0으로만 쌓인 상품은 아직 확정 전이다. 0%로 굳히면 그 상품
+    // 그로스 매출이 수수료 없는 매출로 잡힌다.
+    if (v.fee > 0) byItem.set(id, v.fee / v.sales);
+  }
+  const overall = totalSales > 0 && totalFee > 0 ? totalFee / totalSales : null;
+  return { byItem, overall };
 }
 
 async function syncRocketGrowth(
@@ -800,18 +916,19 @@ async function syncRocketGrowth(
 
   const agg = new Map<string, any>();
   let failedThisRun = false;
-  let paramPair: [string, string] | null = null;
   let lastCallAt = 0;
 
-  const call = async (pair: [string, string], cFrom: string, cTo: string, token: string) => {
+  const call = async (cFrom: string, cTo: string, token: string) => {
     // 분당 50회 한도를 지킨다. 몰아 치면 429가 나고, 그 회차 그로스 매출이 빈다.
     const wait = LIMITS.rgGapMs - (Date.now() - lastCallAt);
     if (wait > 0) await sleep(wait);
     lastCallAt = Date.now();
-    return coupangCall(creds, 'GET', EP.rgOrders(creds.vendorId), rgQuery(pair, cFrom, cTo, token));
+    return coupangCall(creds, 'GET', EP.rgOrders(creds.vendorId), rgOrdersQuery(cFrom, cTo, token));
   };
 
   for (const [cFrom, cTo] of dateChunks(from, to, LIMITS.rgChunkDays)) {
+    // 종료일이 포함되지 않으므로 하루 더 요청하고, 넘어온 건은 아래에서 걸러낸다
+    const queryTo = addDays(cTo, 1);
     let token = '';
     for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
       if (outOfTime(deadline, sum)) {
@@ -819,16 +936,7 @@ async function syncRocketGrowth(
         break;
       }
 
-      let r = await call(paramPair ?? RG_DATE_PARAMS[0], cFrom, cTo, token);
-
-      // 파라미터 이름이 틀렸으면 다른 이름으로 한 번만 더 시도한다
-      if (!r.ok && !paramPair && /parameter|MISSING_PARAMETER|not present/i.test(r.error ?? '')) {
-        r = await call(RG_DATE_PARAMS[1], cFrom, cTo, token);
-        if (r.ok) paramPair = RG_DATE_PARAMS[1];
-      } else if (r.ok && !paramPair) {
-        paramPair = RG_DATE_PARAMS[0];
-      }
-
+      const r = await call(cFrom, queryTo, token);
       if (!r.ok) {
         if (r.authFailed) {
           sum.authFailed = true;
@@ -843,31 +951,33 @@ async function syncRocketGrowth(
       }
 
       for (const order of listOf(r.data)) {
-        const orderDate = pickDate(order, ['paidAt', 'paidDate', 'orderedAt', 'createdAt', 'orderDate']);
+        const orderDate = kstDateOf(order?.paidAt ?? order?.paidDate ?? order?.orderedAt ?? order?.createdAt);
         const items = Array.isArray(order?.orderItems)
           ? order.orderItems
           : Array.isArray(order?.items) ? order.items : [order];
         for (const it of items) {
           const vendorItemId = pickStr(it, ['vendorItemId', 'vendorItemID']);
-          const date = pickDate(it, ['paidAt', 'paidDate', 'orderedAt', 'createdAt']) || orderDate;
-          if (!vendorItemId || !date) continue;
+          const date = kstDateOf(it?.paidAt) || orderDate;
+          // 종료일을 하루 넘겨 요청했으니 요청 구간 밖은 버린다
+          if (!vendorItemId || !date || date < from || date > to) continue;
 
           const key = `${date}:${vendorItemId}`;
           const cur = agg.get(key) ?? {
             user_id: userId,
             sale_date: date,
             vendor_item_id: vendorItemId,
-            product_name: pickStr(it, ['vendorItemName', 'productName', 'sellerProductName']),
+            product_name: pickStr(it, ['productName', 'vendorItemName', 'sellerProductName']),
             channel: 'growth',
             quantity: 0,
             sales_amount: 0,
             commission: 0,
             settlement_amount: 0,
           };
-          cur.quantity += pickNum(it, ['shippingCount', 'quantity', 'saleCount'], 0);
-          cur.sales_amount += pickNum(it, ['orderPrice', 'salePrice', 'saleAmount', 'totalSalePrice'], 0);
-          cur.commission += Math.abs(pickNum(it, ['serviceFee', 'commission', 'saleCommission'], 0));
-          cur.settlement_amount += pickNum(it, ['settlementAmount', 'settleAmount', 'payoutAmount'], 0);
+          // 수량 × 개당 판매가. unitSalesPrice는 "4900.0" 같은 문자열로 온다.
+          const qty = pickNum(it, ['salesQuantity', 'shippingCount', 'quantity'], 0);
+          const unit = pickNum(it, ['unitSalesPrice', 'salePrice', 'unitPrice'], 0);
+          cur.quantity += qty;
+          cur.sales_amount += pickNum(it, ['orderPrice', 'totalSalePrice'], 0) || qty * unit;
           agg.set(key, cur);
         }
       }
@@ -878,13 +988,24 @@ async function syncRocketGrowth(
     if (failedThisRun) break;
   }
 
-  // 정산예정액이 안 오면 판매금액 − 수수료로 채운다. 마켓플레이스와 달리
-  // 그로스는 이 값이 확정이 아니라 추정이라는 점을 화면에서 밝힌다.
-  const rows = [...agg.values()].map(r => ({
-    ...r,
-    settlement_amount: r.settlement_amount || Math.max(0, r.sales_amount - r.commission),
-    updated_at: new Date().toISOString(),
-  }));
+  // 수수료는 이 API로 오지 않는다. 다만 로켓그로스의 판매수수료율은 윙과 같아서,
+  // 이미 들어와 있는 윙 실적에서 상품별 실제 요율을 뽑아 그대로 쓸 수 있다.
+  // 카테고리마다 요율이 다르므로 상품별 요율이 있으면 그것을, 없으면 이 판매자의
+  // 전체 평균을 쓴다. 둘 다 없으면(윙 실적이 아직 없으면) 수수료를 지어내지 않는다.
+  // 그로스 주문이 한 건도 없으면 요율을 뽑을 이유가 없다 (매출 테이블 전체 조회다)
+  const rate = agg.size > 0
+    ? await marketplaceCommissionRates(userId)
+    : { byItem: new Map<string, number>(), overall: null as number | null };
+  const rows = [...agg.values()].map(r => {
+    const pct = rate.byItem.get(String(r.vendor_item_id)) ?? rate.overall;
+    const commission = pct === null ? 0 : Math.round(r.sales_amount * pct);
+    return {
+      ...r,
+      commission,
+      settlement_amount: Math.max(0, r.sales_amount - commission),
+      updated_at: new Date().toISOString(),
+    };
+  });
 
   // 실패한 회차에는 기존 구간을 지우지 않는다 — 불완전한 결과로 덮으면 매출이 준다
   if (!failedThisRun) {
@@ -902,13 +1023,18 @@ async function syncRocketGrowth(
   sum.growth = rows.length;
 }
 
+
 // ── 지급내역 동기화 (캐시플로) ────────────────────────────────
 async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
 
   const today = kstToday();
   const from = addDays(today, -120);
-  const to = addDays(today, 60); // 지급 예정분까지 본다
+  // 지급내역은 매출인식월 기준이라 '이번 달'까지만 조회할 수 있다. 앞선 달을
+  // 넣으면 400 '해당월까지만 조회할 수 있습니다'로 거절당한다. 아직 오지 않은
+  // 달에는 인식된 매출 자체가 없으니 잃는 것도 없다. 지급 예정분은 이미
+  // 인식된 매출의 예정일로 함께 내려온다.
+  const to = monthEnd(today.slice(0, 7));
 
   // 지급내역은 revenueRecognitionYearMonth(YYYY-MM) 하나만 받는다. 날짜 범위를
   // 보내면 'MISSING_PARAMETER: revenueRecognitionYearMonth ... is not present'로
@@ -973,7 +1099,9 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
       // 조회 단위가 월이므로 지우는 범위도 월 경계에 맞춘다. 날짜로 자르면
       // 첫 달·마지막 달의 바깥 날짜가 지워지지 않고 남는다.
       .gte('settlement_date', `${months[0]}-01`)
-      .lte('settlement_date', monthEnd(months[months.length - 1]));
+      // 지급일은 매출인식월보다 뒤다. 인식월 경계에서 끊으면 이번 달 매출의
+      // 다음 달 지급 예정 행이 지워지지 않고 남아 캐시플로가 두 배로 잡힌다.
+      .lte('settlement_date', addDays(monthEnd(months[months.length - 1]), 120));
   }
 
   const err = await upsertChunked('coupang_settlements', rows, 'user_id,settlement_key');
@@ -1996,7 +2124,7 @@ export async function computeProfit(
   const rows: ProfitRow[] = [];
   for (const row of agg.values()) {
     const c = costs.get(row.vendorItemId);
-    const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) : 0;
+    const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (Number(c.fulfillment_cost) || 0) : 0;
     row.costEntered = Boolean(c) && perUnit > 0;
     row.unitCostTotal = perUnit * row.quantity;
     row.returnCount = returnAgg.get(row.vendorItemId) ?? 0;
@@ -2049,7 +2177,7 @@ export async function computeProfit(
     const d = String(sale.sale_date ?? '').slice(0, 10);
     if (!d) continue;
     const c = costs.get(String(sale.vendor_item_id));
-    const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) : 0;
+    const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (Number(c.fulfillment_cost) || 0) : 0;
     const qty = Number(sale.quantity) || 0;
     const cur = dayOf(d);
     cur.quantity += qty;
@@ -2191,10 +2319,14 @@ async function handleCosts(userId: string, res: VercelResponse) {
       salePrice: it.sale_price ?? null,
       stock: it.stock ?? null,
       status: it.status ?? '',
+      // 로켓그로스 상품에만 입출고비 칸을 띄운다 — 판매자배송 상품에 0을
+      // 넣게 만들면 안 넣은 것과 구분이 안 된다.
+      businessType: String(it.business_type ?? 'marketplace'),
       soldLast30: sold.get(String(it.vendor_item_id)) ?? 0,
       unitCost: c?.unit_cost ?? 0,
       packagingCost: c?.packaging_cost ?? 0,
       shippingCost: c?.shipping_cost ?? 0,
+      fulfillmentCost: c?.fulfillment_cost ?? 0,
       returnShippingCost: c?.return_shipping_cost ?? 0,
       memo: c?.memo ?? '',
     };
@@ -2228,6 +2360,7 @@ async function handleCostSave(userId: string, req: VercelRequest, res: VercelRes
     if (it.unitCost !== undefined) row.unit_cost = clamp(it.unitCost);
     if (it.packagingCost !== undefined) row.packaging_cost = clamp(it.packagingCost);
     if (it.shippingCost !== undefined) row.shipping_cost = clamp(it.shippingCost);
+    if (it.fulfillmentCost !== undefined) row.fulfillment_cost = clamp(it.fulfillmentCost);
     if (it.returnShippingCost !== undefined) row.return_shipping_cost = clamp(it.returnShippingCost);
     if (typeof it.memo === 'string') row.memo = it.memo.slice(0, 200);
     keyed.set(id, row);
@@ -3260,7 +3393,7 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
     .eq('user_id', userId);
 
   if (!watches || watches.length === 0) {
-    return res.status(200).json({ items: [], hint: 'no-watch' });
+    return res.status(200).json({ items: [], minPairs: MIN_PAIRS_FOR_CORRELATION, hint: 'no-watch' });
   }
 
   const productIds = [...new Set(watches.map(w => String(w.product_id)))];
@@ -3296,6 +3429,14 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
   for (const o of orderLinks) addLink(String(o.product_id ?? ''), String(o.vendor_item_id));
 
   const allVendorItems = [...vendorItemsByProduct.values()].flat();
+
+  // 순위 추적에는 소싱AI에서 담은 관심 상품이 함께 들어 있다. 이 화면은 "순위
+  // 한 계단이 내 매출로 얼마인가"를 답하는 곳이라, 내가 팔지 않는 상품은
+  // 답할 수 있는 질문 자체가 없다. 내 상품(등록상품이거나 주문이 있는 것)만 남긴다.
+  const mine = watches.filter(w => vendorItemsByProduct.has(String(w.product_id)));
+  if (mine.length === 0) {
+    return res.status(200).json({ items: [], minPairs: MIN_PAIRS_FOR_CORRELATION, hint: 'no-own-product' });
+  }
 
   const [rankRes, orderRes] = await Promise.all([
     selectAll((f, t) => supabase!
@@ -3356,7 +3497,7 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
     ordersByProduct.set(pid, perDay);
   }
 
-  const results = watches.map(w => {
+  const results = mine.map(w => {
     const key = `${w.keyword}::${w.product_id}`;
     const rankDays = rankByKey.get(key) ?? new Map();
     const orderDays = ordersByProduct.get(String(w.product_id)) ?? new Map();
@@ -3552,7 +3693,8 @@ async function buildPriceSuggestions(userId: string): Promise<PriceSuggestion[]>
     const rule = rules.get(id);
     const cost = costs.get(id);
     const unitCost =
-      (Number(cost?.unit_cost) || 0) + (Number(cost?.packaging_cost) || 0) + (Number(cost?.shipping_cost) || 0);
+      (Number(cost?.unit_cost) || 0) + (Number(cost?.packaging_cost) || 0) + (Number(cost?.shipping_cost) || 0)
+      + (Number(cost?.fulfillment_cost) || 0);
     const costEntered = unitCost > 0;
 
     const fee = feeAgg.get(id);
