@@ -406,9 +406,9 @@ const EP = {
   // 쿠폰 관리에 등록된 쿠폰 자체(즉시할인 정액·정률)와 그 쿠폰이 붙은 옵션들.
   // 목록은 v2, 옵션 목록은 v1이다. 버전이 갈려 있어 v1으로 목록을 부르면
   // 'Endpoint not found'로 떨어진다 — 권한 문제로 오해하기 쉽다.
-  coupons: (vendorId: string) => `/v2/providers/fms/apis/api/v2/vendors/${vendorId}/coupons`,
-  couponItems: (vendorId: string, couponId: string) =>
-    `/v2/providers/fms/apis/api/v1/vendors/${vendorId}/coupons/${encodeURIComponent(couponId)}/items`,
+  coupons: (vendorId: string, v = 'v2') => `/v2/providers/fms/apis/api/${v}/vendors/${vendorId}/coupons`,
+  couponItems: (vendorId: string, couponId: string, v = 'v1') =>
+    `/v2/providers/fms/apis/api/${v}/vendors/${vendorId}/coupons/${encodeURIComponent(couponId)}/items`,
   settlementHistories: '/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories',
   returnRequests: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/returnRequests`,
   onlineInquiries: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/onlineInquiries`,
@@ -1390,7 +1390,9 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
       sum.errors.push('쿠폰 설정: 이번 회차 시간이 부족해 건너뛰었습니다 (다음 회차가 이어받습니다)');
       return;
     }
-    const r = await coupangCall(creds, 'GET', EP.coupons(creds.vendorId), q);
+    // 문서와 계정에 따라 목록이 v2이기도 v1이기도 하다. 한쪽이 404면 다른 쪽을
+    // 바로 시도한다 — 판매자가 수집을 다시 누르게 만들지 않는다.
+    const r = await coupangCallVersioned(creds, 'GET', v => EP.coupons(creds.vendorId, v), q, ['v2', 'v1'], 'coupons');
     if (r.ok) {
       list = listOf(r.data);
       listPayload = r.data;
@@ -1411,6 +1413,9 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
     if (r.status !== 400) break;
   }
   if (!list) {
+    // 어느 경로·질의로도 안 되면 마지막 응답을 그대로 남긴다. 문구를 다듬으면
+    // 원인을 못 찾는다 — 오늘 'Endpoint not found'에 권한 안내를 붙였다가
+    // 엉뚱한 곳을 보게 만들었다.
     if (lastErr) sum.errors.push(`쿠폰 설정: ${lastErr}`);
     return;
   }
@@ -1448,7 +1453,10 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
       if (wait > 0) await sleep(wait);
       lastCallAt = Date.now();
 
-      const r = await coupangCall(creds, 'GET', EP.couponItems(creds.vendorId, couponId), token ? `nextToken=${token}` : '');
+      const r = await coupangCallVersioned(
+        creds, 'GET', v => EP.couponItems(creds.vendorId, couponId, v),
+        token ? `nextToken=${token}` : '', ['v1', 'v2'], 'couponItems',
+      );
       if (!r.ok) {
         // 한 번 거절되면 나머지 쿠폰도 같은 이유로 거절된다. 오류 하나만 남기고 멈춘다.
         sum.errors.push(`쿠폰 옵션 목록: ${r.error}`);
