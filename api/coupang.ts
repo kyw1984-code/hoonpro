@@ -56,6 +56,32 @@ export function addDays(dateStr: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+/** 그 달의 마지막 날 (YYYY-MM-DD). 다음 달 1일에서 하루 빼면 윤년도 알아서 맞는다. */
+export function monthEnd(yearMonth: string): string {
+  const y = Number(yearMonth.slice(0, 4));
+  const m = Number(yearMonth.slice(5, 7));
+  const nextY = m === 12 ? y + 1 : y;
+  const nextM = m === 12 ? 1 : m + 1;
+  return addDays(`${nextY}-${String(nextM).padStart(2, '0')}-01`, -1);
+}
+
+/** YYYY-MM 목록. 지급내역 API가 월 단위로만 조회되기 때문에 필요하다. */
+export function monthsBetween(from: string, to: string): string[] {
+  const out: string[] = [];
+  let y = Number(from.slice(0, 4));
+  let m = Number(from.slice(5, 7));
+  const endKey = to.slice(0, 7);
+  // 상한을 둔다. 잘못된 입력으로 무한 루프가 돌면 함수가 타임아웃까지 매달린다.
+  for (let i = 0; i < 60; i++) {
+    const key = `${y}-${String(m).padStart(2, '0')}`;
+    out.push(key);
+    if (key >= endKey) break;
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
+}
+
 function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86400000);
 }
@@ -723,6 +749,11 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
   const from = addDays(today, -120);
   const to = addDays(today, 60); // 지급 예정분까지 본다
 
+  // 지급내역은 revenueRecognitionYearMonth(YYYY-MM) 하나만 받는다. 날짜 범위를
+  // 보내면 'MISSING_PARAMETER: revenueRecognitionYearMonth ... is not present'로
+  // 거절당해 정산 캘린더가 영영 비어 있게 된다.
+  const months = monthsBetween(from, to);
+
   const rows: any[] = [];
   // 같은 (지급일·유형·인식월)로 여러 건이 지급되는 일이 흔하므로 조회 순서를
   // 키에 섞는다. 원본 내용을 키에 넣으면 안 된다. 지급 상태가 '예정'에서
@@ -731,12 +762,12 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
   const ordinal = new Map<string, number>();
   let failedThisRun = false;
 
-  for (const [cFrom, cTo] of dateChunks(from, to)) {
+  for (const month of months) {
     if (outOfTime(deadline, sum)) {
       failedThisRun = true;
       break;
     }
-    const query = `vendorId=${creds.vendorId}&revenueRecognitionDateFrom=${cFrom}&revenueRecognitionDateTo=${cTo}`;
+    const query = `vendorId=${creds.vendorId}&revenueRecognitionYearMonth=${month}`;
     const r = await coupangCall(creds, 'GET', EP.settlementHistories, query);
     if (!r.ok) {
       if (r.authFailed) {
@@ -778,8 +809,10 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
       .from('coupang_settlements')
       .delete()
       .eq('user_id', userId)
-      .gte('settlement_date', from)
-      .lte('settlement_date', to);
+      // 조회 단위가 월이므로 지우는 범위도 월 경계에 맞춘다. 날짜로 자르면
+      // 첫 달·마지막 달의 바깥 날짜가 지워지지 않고 남는다.
+      .gte('settlement_date', `${months[0]}-01`)
+      .lte('settlement_date', monthEnd(months[months.length - 1]));
   }
 
   const err = await upsertChunked('coupang_settlements', rows, 'user_id,settlement_key');
@@ -997,7 +1030,15 @@ async function syncUser(
   await syncOrders(userId, creds, addDays(today, -(full ? LIMITS.ordersDaysFull : LIMITS.ordersDaysIncr)), today, sum, deadline);
   if (sum.authFailed) return sum;
 
-  await syncSales(userId, creds, addDays(today, -(full ? LIMITS.salesDaysFull : LIMITS.salesDaysIncr)), today, sum, deadline);
+  // 매출내역은 종료일이 '어제 이하'여야 한다. 오늘을 넣으면 쿠팡이
+  // 'To date must be before or equal to yesterday'로 구간 전체를 거절해
+  // 그 회차 매출이 통째로 비어 버린다.
+  await syncSales(
+    userId, creds,
+    addDays(today, -(full ? LIMITS.salesDaysFull : LIMITS.salesDaysIncr)),
+    addDays(today, -1),
+    sum, deadline,
+  );
   if (sum.authFailed) return sum;
 
   await syncSettlements(userId, creds, sum, deadline);

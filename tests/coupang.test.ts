@@ -15,6 +15,8 @@ import {
   isActiveReturn,
   lastWeekRange,
   median,
+  monthEnd,
+  monthsBetween,
   pearson,
   revenueHistoryQuery,
   selectAll,
@@ -137,4 +139,20 @@ test('매출내역 질의: 첫 조회에도 token= 을 반드시 붙인다', () 
 
   const next = revenueHistoryQuery('A01653410', '2026-08-10', '2026-09-08', 'abc123');
   assert.match(next, /&token=abc123&/);
+});
+
+// 지급내역은 날짜 범위가 아니라 revenueRecognitionYearMonth(YYYY-MM)로만 조회된다.
+// 월 목록을 잘못 만들면 정산 캘린더에 구멍이 생긴다.
+test('지급내역 월 목록: 해를 넘겨도 이어진다', () => {
+  assert.deepEqual(monthsBetween('2026-11-15', '2027-02-03'), ['2026-11', '2026-12', '2027-01', '2027-02']);
+  assert.deepEqual(monthsBetween('2026-09-08', '2026-09-30'), ['2026-09']);
+  // 끝이 시작보다 앞서도 최소 한 달은 돌려준다 (빈 배열이면 조회를 통째로 건너뛴다)
+  assert.deepEqual(monthsBetween('2026-09-08', '2026-08-01'), ['2026-09']);
+});
+
+test('월 마지막 날: 윤년·12월 경계', () => {
+  assert.equal(monthEnd('2026-09'), '2026-09-30');
+  assert.equal(monthEnd('2026-12'), '2026-12-31');
+  assert.equal(monthEnd('2024-02'), '2024-02-29');
+  assert.equal(monthEnd('2026-02'), '2026-02-28');
 });
