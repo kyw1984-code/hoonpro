@@ -853,3 +853,16 @@ begin
 end $$;
 
 create index if not exists idx_cpsd_channel on coupang_sales_daily(user_id, channel, sale_date desc);
+
+-- ─────────────────────────────────────────────────────────────
+-- 32. 로켓그로스 입출고비 + 상품의 판매방식
+-- ─────────────────────────────────────────────────────────────
+-- 로켓그로스는 판매수수료 외에 입출고비(쿠팡 물류센터 입고·출고·포장)가
+-- 개당 따로 나간다. 윙(판매자배송)에는 없는 비용이라 기존 원가 항목으로는
+-- 담기지 않고, 안 담으면 그로스 상품의 순이익이 실제보다 높게 나온다.
+alter table coupang_costs add column if not exists fulfillment_cost int not null default 0;
+
+-- 어느 상품이 그로스인지 알아야 원가 입력에서 입출고비 칸을 그 상품에만
+-- 띄울 수 있다. 모든 상품에 띄우면 판매자배송 상품에 0을 넣게 만들고,
+-- 아무 상품에도 안 띄우면 그로스 원가를 넣을 방법이 없다.
+alter table coupang_items add column if not exists business_type text not null default 'marketplace';

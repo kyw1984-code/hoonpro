@@ -19,6 +19,9 @@ import {
   monthsBetween,
   pearson,
   revenueHistoryQuery,
+  rgDate,
+  rgOrdersQuery,
+  sellerProductsQuery,
   selectAll,
   signedDate,
   slope,
@@ -155,4 +158,48 @@ test('월 마지막 날: 윤년·12월 경계', () => {
   assert.equal(monthEnd('2026-12'), '2026-12-31');
   assert.equal(monthEnd('2024-02'), '2024-02-29');
   assert.equal(monthEnd('2026-02'), '2026-02-28');
+});
+
+// ── 상품 목록 질의 ────────────────────────────────────────────
+// nextToken을 빼면 쿠팡이 오류 없이 빈 목록을 돌려준다. 그러면 '상품 0건인데
+// 오류도 없음'이 되어 원가·재고·반품·가격 화면이 통째로 비는데 이유가 안 뜬다.
+test('상품 목록 질의: 첫 페이지에도 nextToken을 빈 값으로 붙인다', () => {
+  const first = sellerProductsQuery('A01653410', '');
+  assert.ok(first.includes('nextToken='), `nextToken이 빠졌다: ${first}`);
+  assert.equal(first, 'vendorId=A01653410&nextToken=&maxPerPage=100');
+
+  const next = sellerProductsQuery('A01653410', 'tok9');
+  assert.ok(next.includes('nextToken=tok9'));
+
+  // 로켓그로스 상품은 businessTypes로 한 번 더 훑는다
+  const growth = sellerProductsQuery('A01653410', '', 'rocketGrowth');
+  assert.ok(growth.endsWith('&businessTypes=rocketGrowth'), growth);
+});
+
+// ── 로켓그로스 주문 질의 ──────────────────────────────────────
+// 이 API만 하이픈 없는 날짜를 받고 maxPerPage를 받지 않는다. 둘 중 하나만
+// 틀려도 Bad Request라 그로스 매출이 통째로 0이 된다.
+test('로켓그로스 주문 질의: 하이픈 없는 날짜, maxPerPage 없음', () => {
+  assert.equal(rgDate('2026-08-10'), '20260810');
+
+  const q = rgOrdersQuery('2026-08-10', '2026-09-09', '');
+  assert.equal(q, 'paidDateFrom=20260810&paidDateTo=20260909');
+  assert.ok(!q.includes('maxPerPage'), `maxPerPage가 붙으면 거절당한다: ${q}`);
+  assert.ok(!q.includes('-'), `날짜에 하이픈이 남아 있다: ${q}`);
+
+  assert.equal(
+    rgOrdersQuery('2026-08-10', '2026-09-09', 'tok1'),
+    'paidDateFrom=20260810&paidDateTo=20260909&nextToken=tok1',
+  );
+});
+
+// ── 지급내역 조회 월 ──────────────────────────────────────────
+// 매출인식월은 '이번 달'까지만 조회할 수 있다. 앞선 달을 넣으면 400
+// '해당월까지만 조회할 수 있습니다'로 거절당한다.
+test('지급내역 월 목록: 이번 달을 넘기지 않는다', () => {
+  const today = '2026-09-08';
+  const months = monthsBetween(addDays(today, -120), monthEnd(today.slice(0, 7)));
+  assert.equal(months[months.length - 1], '2026-09');
+  assert.equal(months[0], '2026-05');
+  assert.ok(!months.some(m => m > '2026-09'), months.join(','));
 });

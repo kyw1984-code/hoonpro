@@ -273,7 +273,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                 />
                 <ChannelRow
                   label="로켓그로스"
-                  note="결제일 기준 · 정산예정액은 추정"
+                  note="결제일 기준 · 수수료는 윙 요율로 계산"
                   amount={ch.growth.salesAmount}
                   quantity={ch.growth.quantity}
                   total={ch.marketplace.salesAmount + ch.growth.salesAmount}
@@ -282,8 +282,9 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               </div>
               <p className="mt-2.5 text-[11.5px] leading-relaxed text-ink-3">
                 두 채널은 쿠팡이 주는 데이터의 기준이 다릅니다. 윙은 매출이 확정된 뒤(구매확정·배송완료 +3일)
-                정산예정액까지 함께 옵니다. 로켓그로스는 주문만 조회돼 결제일 기준이고, 정산예정액은
-                판매금액에서 수수료를 뺀 추정값입니다 — 실제 정산과 차이가 날 수 있습니다.
+                정산예정액까지 함께 옵니다. 로켓그로스는 <b className="text-ink-2">주문만</b> 조회돼 결제일 기준이고
+                수수료가 오지 않아, 같은 상품의 윙 실적에서 나온 실제 수수료율을 그대로 적용했습니다.
+                입출고비는 [원가 입력]의 그로스 입출고비 칸에 넣으면 순이익에 함께 반영됩니다.
               </p>
             </div>
           )}
