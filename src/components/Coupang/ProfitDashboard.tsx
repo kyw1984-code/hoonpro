@@ -28,6 +28,18 @@ interface Props {
 
 interface Delta { text: string; good: boolean; bad: boolean }
 
+/**
+ * 쿠폰 단가를 어디서 가져왔는지 한 줄로. 설정값으로 계산된 옵션은 판매자가 아는
+ * 숫자(1건당 11,500원 × 2건)와 정확히 맞고, 나머지는 주문에서 역산한 근사다.
+ */
+function couponBasisText(src?: { setting: number; order: number; sheet: number; definedOptions: number }): string {
+  if (!src) return '쿠폰 단가 × 판매수량';
+  const parts: string[] = [];
+  if (src.setting > 0) parts.push(`쿠폰 설정값 ${src.setting}개 옵션`);
+  if (src.order + src.sheet > 0) parts.push(`주문 역산 ${src.order + src.sheet}개 옵션`);
+  return parts.length ? `${parts.join(' · ')} × 판매수량` : '쿠폰 단가 × 판매수량';
+}
+
 type SortKey = 'quantity' | 'salesAmount' | 'couponDiscount' | 'commission' | 'adCost' | 'unitCostTotal' | 'returnAmount' | 'profit' | 'marginRate';
 
 /**
@@ -327,7 +339,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               <Stat
                 label="쿠폰 할인 (판매자 부담)"
                 value={`− ${won(data.coupon!.sellerDiscount)}`}
-                sub={`실매출 ${won(data.totals.salesAmount - data.coupon!.sellerDiscount)} · 쿠폰 단가 × 판매수량`}
+                sub={`실매출 ${won(data.totals.salesAmount - data.coupon!.sellerDiscount)} · ${couponBasisText(data.coupon!.sources)}`}
                 tone="critical"
               />
             )}

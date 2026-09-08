@@ -32,6 +32,8 @@ export interface SyncSummary {
   growth?: number;
   growthCancelled?: number;
   growthInventory?: number;
+  /** 쿠폰 관리에서 받아 온 쿠폰-옵션 조합 수 */
+  couponDefs?: number;
   settlements: number;
   returns: number;
   inquiries: number;
@@ -68,6 +70,8 @@ export interface ProfitRow {
   settlementAmount: number;
   /** 같은 기간 주문에서 판매자가 부담한 쿠폰 할인 (즉시할인·다운로드쿠폰) */
   couponDiscount: number;
+  /** 쿠폰 단가의 출처. setting=쿠폰 관리 설정값, order=주문별 쿠폰 조회, sheet=발주서 할인 항목 */
+  couponSource?: 'setting' | 'order' | 'sheet' | null;
   /** 이 옵션에 붙은 광고비. 순이익(profit)에서 이미 뺀 값이다 */
   adCost: number;
   /** 이 행의 판매가 난 채널. 둘 다면 'both' */
@@ -121,6 +125,8 @@ export interface ProfitResponse {
     sellerDiscount: number;
     coupangDiscount: number;
     orderQuantity: number;
+    /** 쿠폰 단가를 어디서 가져왔는지 — 옵션 수 */
+    sources?: { setting: number; order: number; sheet: number; definedOptions: number };
   };
   missingCost: number;
   costCoverage: number;

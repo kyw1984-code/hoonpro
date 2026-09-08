@@ -949,3 +949,33 @@ create table if not exists coupang_order_coupons (
 create index if not exists idx_coc_user_date on coupang_order_coupons(user_id, sale_date);
 alter table coupang_order_coupons enable row level security;
 revoke all on coupang_order_coupons from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 38. 쿠폰 설정 — 판매자가 쿠폰 관리에 등록한 "옵션당 얼마" 그 자체
+-- ─────────────────────────────────────────────────────────────
+-- 순이익의 쿠폰은 판매자가 아는 숫자와 맞아야 한다(1건당 11,500원이면 2건에
+-- 23,000원). 주문에서 역산하면 다운로드쿠폰이 섞이거나 쿠폰을 바꾼 날이 끼어
+-- 개당 값이 흔들린다. 쿠폰 관리(fms .../coupons?status=APPLIED)와 그 쿠폰이 붙은
+-- 옵션 목록(.../coupons/{id}/items)을 그대로 받아 둔다. 윙·그로스 모두 옵션ID로
+-- 발행하므로 채널 구분이 없다. 회차마다 전부 받아 통째로 갈아 끼운다.
+create table if not exists coupang_coupon_items (
+  user_id uuid not null references users(id) on delete cascade,
+  coupon_id text not null,
+  vendor_item_id text not null,
+  coupon_name text,
+  coupon_type text,                      -- 정액(PRICE 등)·정률(RATE) — 쿠팡이 준 값 그대로
+  discount numeric not null default 0,   -- 정액이면 원, 정률이면 %
+  max_discount numeric,                  -- 정률의 최대 할인액
+  status text,
+  start_at timestamptz,
+  end_at timestamptz,
+  fetched_at timestamptz default now(),
+  primary key (user_id, coupon_id, vendor_item_id)
+);
+create index if not exists idx_cci_user_item on coupang_coupon_items(user_id, vendor_item_id);
+alter table coupang_coupon_items enable row level security;
+revoke all on coupang_coupon_items from anon, authenticated;
+
+-- 주문별 쿠폰에 그 주문의 수량을 함께 둔다. 회차 상한으로 일부 주문만 물었을 때
+-- 전체 주문수량으로 나누면 개당 쿠폰이 실제보다 작아진다.
+alter table coupang_order_coupons add column if not exists quantity integer;
