@@ -403,8 +403,10 @@ const EP = {
   // 주문에 적용된 쿠폰. 그로스 주문에는 할인 항목이 없어 이걸로 묻는다.
   orderCoupons: (vendorId: string, orderId: string) =>
     `/v2/providers/fms/apis/api/v2/vendors/${vendorId}/${encodeURIComponent(orderId)}/coupons`,
-  // 쿠폰 관리에 등록된 쿠폰 자체(즉시할인 정액·정률)와 그 쿠폰이 붙은 옵션들
-  coupons: (vendorId: string) => `/v2/providers/fms/apis/api/v1/vendors/${vendorId}/coupons`,
+  // 쿠폰 관리에 등록된 쿠폰 자체(즉시할인 정액·정률)와 그 쿠폰이 붙은 옵션들.
+  // 목록은 v2, 옵션 목록은 v1이다. 버전이 갈려 있어 v1으로 목록을 부르면
+  // 'Endpoint not found'로 떨어진다 — 권한 문제로 오해하기 쉽다.
+  coupons: (vendorId: string) => `/v2/providers/fms/apis/api/v2/vendors/${vendorId}/coupons`,
   couponItems: (vendorId: string, couponId: string) =>
     `/v2/providers/fms/apis/api/v1/vendors/${vendorId}/coupons/${encodeURIComponent(couponId)}/items`,
   settlementHistories: '/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories',
@@ -1376,7 +1378,9 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
   if (!supabase) return;
 
   // 목록 질의 형식이 계정마다 다를 수 있어 차례로 시도한다. 첫 성공을 쓴다.
-  const queries = ['status=APPLIED', 'status=APPLIED&page=1&size=100', 'page=1&size=100&status=APPLIED'];
+  // 쿠팡 예시는 status·page·size·sort를 함께 받는다. 계정에 따라 필수 여부가
+  // 달라 넉넉한 쪽부터 시도한다.
+  const queries = ['page=1&size=100&sort=desc&status=APPLIED', 'page=1&size=100&status=APPLIED', 'status=APPLIED'];
   let list: any[] | null = null;
   let listPayload: any = null;
   let lastErr = '';
@@ -1394,9 +1398,14 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
     }
     // 이 API는 오픈API 권한 항목이 따로 있다. 거절돼도 판매자 키가 잘못된 것은
     // 아니므로 계정을 건드리지 않고 안내만 남긴다.
-    if (r.status === 401 || r.status === 403 || r.status === 404) {
+    if (r.status === 401 || r.status === 403) {
       sum.errors.push(`쿠폰 설정: ${r.error} — 윙 > 판매자 정보 > 추가판매정보 > 오픈API에서 쿠폰 조회 권한을 확인해주세요`);
       return;
+    }
+    // 경로가 없다는 응답에 권한 안내를 붙이면 엉뚱한 곳을 보게 된다. 다음 질의 형식으로 넘어간다.
+    if (r.status === 404) {
+      lastErr = r.error || 'HTTP 404';
+      continue;
     }
     lastErr = r.error || `HTTP ${r.status}`;
     if (r.status !== 400) break;
