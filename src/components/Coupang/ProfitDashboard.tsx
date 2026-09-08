@@ -112,6 +112,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   // 광고비가 어디서 온 값인지 밝힌다. 쿠팡은 광고 API를 제공하지 않아
   // 보고서 파일에서 받은 날짜만 채워지고, 빠진 날은 순이익을 부풀린다.
   const ac = data.adCost;
+  const ch = data.channels;
   const adNote = (() => {
     if (!ac || ac.coveredDays === 0) {
       return '쿠팡은 광고 데이터를 API로 제공하지 않습니다. [광고 성과 분석]에서 광고 보고서를 올리면 이 칸이 기간에 맞춰 자동으로 채워집니다.';
@@ -257,6 +258,36 @@ export function ProfitDashboard({ onEditCosts }: Props) {
             />
           </div>
 
+          {/* 윙과 그로스는 회계 기준이 달라 한 줄로 합치지 않는다.
+              합쳐 놓으면 확정 정산과 주문 기준 추정이 소리 없이 섞인다. */}
+          {ch && (ch.marketplace.salesAmount > 0 || ch.growth.salesAmount > 0) && (
+            <div className="rounded-panel border border-line bg-paper px-5 py-4">
+              <h3 className="mb-2.5 text-sm font-semibold text-ink">채널별 매출</h3>
+              <div className="flex flex-col gap-2">
+                <ChannelRow
+                  label="윙 (판매자배송·로켓배송)"
+                  note="매출인식일 기준 · 정산예정액 확정"
+                  amount={ch.marketplace.salesAmount}
+                  quantity={ch.marketplace.quantity}
+                  total={ch.marketplace.salesAmount + ch.growth.salesAmount}
+                />
+                <ChannelRow
+                  label="로켓그로스"
+                  note="결제일 기준 · 정산예정액은 추정"
+                  amount={ch.growth.salesAmount}
+                  quantity={ch.growth.quantity}
+                  total={ch.marketplace.salesAmount + ch.growth.salesAmount}
+                  muted
+                />
+              </div>
+              <p className="mt-2.5 text-[11.5px] leading-relaxed text-ink-3">
+                두 채널은 쿠팡이 주는 데이터의 기준이 다릅니다. 윙은 매출이 확정된 뒤(구매확정·배송완료 +3일)
+                정산예정액까지 함께 옵니다. 로켓그로스는 주문만 조회돼 결제일 기준이고, 정산예정액은
+                판매금액에서 수수료를 뺀 추정값입니다 — 실제 정산과 차이가 날 수 있습니다.
+              </p>
+            </div>
+          )}
+
           {prev?.hasData && (
             <p className="-mt-1 text-[11.5px] text-ink-3">
               증감은 직전 같은 기간({prev.from} ~ {prev.to}) 대비입니다. 순이익 증감은 광고비를 빼기 전 기준입니다.
@@ -371,6 +402,36 @@ export function ProfitDashboard({ onEditCosts }: Props) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** 채널 한 줄 — 금액·수량과 함께 비중 막대를 보여준다 */
+function ChannelRow({
+  label, note, amount, quantity, total, muted,
+}: {
+  label: string;
+  note: string;
+  amount: number;
+  quantity: number;
+  total: number;
+  muted?: boolean;
+}) {
+  const share = total > 0 ? (amount / total) * 100 : 0;
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <span className="min-w-[168px] text-[12.5px] font-medium text-ink">{label}</span>
+      <span className="text-[14px] font-semibold tabular-nums text-ink">{won(amount)}</span>
+      <span className="text-[11.5px] tabular-nums text-ink-3">
+        {quantity.toLocaleString('ko-KR')}개 · {share.toFixed(0)}%
+      </span>
+      <span className="text-[11px] text-ink-3">{note}</span>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-paper-2">
+        <div
+          className="h-full rounded-full"
+          style={{ width: `${Math.max(share, amount > 0 ? 2 : 0)}%`, background: muted ? '#c47a2c' : 'var(--color-accent)' }}
+        />
+      </div>
     </div>
   );
 }
