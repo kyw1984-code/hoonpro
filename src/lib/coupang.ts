@@ -66,6 +66,8 @@ export interface ProfitRow {
   salesAmount: number;
   commission: number;
   settlementAmount: number;
+  /** 같은 기간 주문에서 판매자가 부담한 쿠폰 할인 (즉시할인·다운로드쿠폰) */
+  couponDiscount: number;
   unitCostTotal: number;
   returnCount: number;
   returnCost: number;
@@ -99,6 +101,17 @@ export interface ProfitResponse {
     returnCost: number;
     profit: number;
     marginRate: number;
+    couponDiscount: number;
+  };
+  /**
+   * 판매가 기준 주문금액과 쿠폰. 판매가 39,800원에 쿠폰 10,000원이면 실제 판매가는
+   * 29,800원인데, 매출내역만 봐서는 그게 안 보인다. 실매출 = orderAmount − sellerDiscount.
+   */
+  coupon?: {
+    orderAmount: number;
+    sellerDiscount: number;
+    coupangDiscount: number;
+    orderQuantity: number;
   };
   missingCost: number;
   costCoverage: number;

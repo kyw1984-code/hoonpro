@@ -130,6 +130,8 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   // 보고서 파일에서 받은 날짜만 채워지고, 빠진 날은 순이익을 부풀린다.
   const ac = data.adCost;
   const ch = data.channels;
+  // 쿠폰 열은 한 상품이라도 쿠폰 할인이 있을 때만 보인다. 없는데 '0원' 열을 두면 표만 넓어진다
+  const hasCoupon = data.rows.some(r => (r.couponDiscount ?? 0) > 0);
   const adNote = (() => {
     if (!ac || ac.coveredDays === 0) {
       return '쿠팡은 광고 데이터를 API로 제공하지 않습니다. 아래 [광고센터 연결]로 가져오거나 [광고 성과 분석]에서 보고서를 올리면 이 칸이 기간에 맞춰 자동으로 채워집니다.';
@@ -154,6 +156,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
       옵션ID: r.vendorItemId,
       판매수량: r.quantity,
       매출: Math.round(r.salesAmount),
+      쿠폰할인_판매자부담: Math.round(r.couponDiscount ?? 0),
       쿠팡수수료: Math.round(r.commission),
       원가: r.costEntered ? Math.round(r.unitCostTotal) : blank,
       반품건수: r.returnCount,
@@ -280,6 +283,16 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               sub={`${data.totals.quantity.toLocaleString('ko-KR')}개 판매`}
               delta={delta(data.totals.salesAmount, prev?.salesAmount ?? 0, Boolean(prev?.hasData))}
             />
+            {/* 판매가와 실제 판매가는 다르다 — 쿠폰만큼 덜 받는다. 대부분 알지만
+                실제 얼마에 팔렸는지 확인할 방법이 없던 부분이다. */}
+            {(data.coupon?.sellerDiscount ?? 0) > 0 && (
+              <Stat
+                label="쿠폰 할인 (판매자 부담)"
+                value={`− ${won(data.coupon!.sellerDiscount)}`}
+                sub={`실매출 ${won(data.coupon!.orderAmount - data.coupon!.sellerDiscount)} · 주문 기준`}
+                tone="critical"
+              />
+            )}
             <Stat
               label="쿠팡 수수료"
               value={`− ${won(data.totals.commission)}`}
@@ -395,6 +408,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                     <th className="px-4 py-2.5 text-left font-medium">상품</th>
                     <th className="px-3 py-2.5 text-right font-medium">판매</th>
                     <th className="px-3 py-2.5 text-right font-medium">매출</th>
+                    {hasCoupon && <th className="px-3 py-2.5 text-right font-medium">쿠폰</th>}
                     <th className="px-3 py-2.5 text-right font-medium">수수료</th>
                     <th className="px-3 py-2.5 text-right font-medium">원가</th>
                     <th className="px-3 py-2.5 text-right font-medium">반품</th>
@@ -417,6 +431,11 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-2">{r.quantity.toLocaleString('ko-KR')}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-2">{won(r.salesAmount)}</td>
+                      {hasCoupon && (
+                        <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">
+                          {r.couponDiscount > 0 ? `− ${won(r.couponDiscount)}` : '-'}
+                        </td>
+                      )}
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{won(r.commission)}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.costEntered ? won(r.unitCostTotal) : '-'}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.returnCount > 0 ? `${r.returnCount}건` : '-'}</td>

@@ -886,3 +886,16 @@ create table if not exists coupang_growth_inventory (
 );
 alter table coupang_growth_inventory enable row level security;
 revoke all on coupang_growth_inventory from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 34. 주문의 쿠폰 할인 — 판매가와 실제 판매가는 다르다
+-- ─────────────────────────────────────────────────────────────
+-- 판매가 39,800원에 즉시할인쿠폰 10,000원이면 실제로 받는 돈은 29,800원이다.
+-- 발주서는 주문 건마다 이 할인을 나눠 준다:
+--   discountPrice(총) = instantCouponDiscount(즉시할인) + downloadableCouponDiscount(다운로드쿠폰)
+--                     + coupangDiscount(쿠팡 지원)
+-- 앞 둘은 판매자 부담이라 매출에서 빠지고, 마지막은 쿠팡이 메워 주므로 안 빠진다.
+-- order_amount는 할인 전 주문금액 그대로 두고, 판매자 부담분을 따로 둔다.
+-- 실매출 = order_amount − seller_discount.
+alter table coupang_orders_daily add column if not exists seller_discount bigint not null default 0;
+alter table coupang_orders_daily add column if not exists coupang_discount bigint not null default 0;

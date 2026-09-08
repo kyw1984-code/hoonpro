@@ -144,8 +144,9 @@ export function AdReportReceiver() {
   };
 
   const goHome = () => {
-    // 이 창은 북마클릿이 연 창이라 원래 탭이 따로 있다. 여기서 순이익을 바로 보여준다.
-    window.location.href = '/';
+    // 이 창은 북마클릿이 연 창이라 원래 탭이 따로 있다. 여기서 순이익 화면으로 바로 보낸다 —
+    // 홈으로 보내면 "순이익 보러 가기"를 눌렀는데 홈이 떠서 다시 찾아 들어가야 한다.
+    window.location.href = '/?tab=coupang';
   };
 
   return (
