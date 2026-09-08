@@ -35,6 +35,9 @@ export function CoupangDashboard() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>('profit');
   const [syncing, setSyncing] = useState(false);
+  // 수집은 최대 1~2분 걸린다. 도는 동안 화면이 조용하면 멈춘 줄 알고 새로고침하거나
+  // 버튼을 다시 누른다. 초를 세어 보여주면 "돌고 있다"가 눈으로 확인된다.
+  const [syncElapsed, setSyncElapsed] = useState(0);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   // 수집이 끝나면 값을 올려 하위 화면을 다시 만든다. 상단 바만 "수집 완료"라
   // 하고 아래 표는 옛 숫자면 사용자는 어느 쪽을 믿어야 할지 모른다.
@@ -57,9 +60,16 @@ export function CoupangDashboard() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (!syncing) return;
+    const t = setInterval(() => setSyncElapsed(v => v + 1), 1000);
+    return () => clearInterval(t);
+  }, [syncing]);
+
   const runSync = async (full = false) => {
     if (syncing) return;
     setSyncing(true);
+    setSyncElapsed(0);
     setSyncMsg(null);
     try {
       const { summary } = await coupangApi.sync(full);
@@ -130,6 +140,7 @@ export function CoupangDashboard() {
       <ConnectionBar
         status={status}
         syncing={syncing}
+        syncElapsed={syncElapsed}
         syncMsg={syncMsg}
         onSync={runSync}
         onDisconnect={disconnect}
@@ -207,12 +218,14 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
 function ConnectionBar({
   status,
   syncing,
+  syncElapsed,
   syncMsg,
   onSync,
   onDisconnect,
 }: {
   status: CoupangStatus;
   syncing: boolean;
+  syncElapsed: number;
   syncMsg: string | null;
   onSync: (full?: boolean) => void;
   onDisconnect: () => void;
@@ -222,28 +235,50 @@ function ConnectionBar({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3 rounded-panel border border-line bg-paper px-5 py-4">
-        <Link2 className={`h-4 w-4 ${broken ? 'text-critical' : 'text-positive'}`} />
+      {/* 수집 중에는 막대 전체를 강조한다. 버튼 하나만 흐려지면 눌린 건지
+          도는 건지 알 수 없어, 사람들이 새로고침하거나 다시 누른다. */}
+      <div
+        className={`flex flex-wrap items-center gap-3 rounded-panel border px-5 py-4 transition-colors ${
+          syncing ? 'border-accent bg-accent-soft' : 'border-line bg-paper'
+        }`}
+      >
+        {syncing ? (
+          <Loader2 className="h-4 w-4 animate-spin text-accent" />
+        ) : (
+          <Link2 className={`h-4 w-4 ${broken ? 'text-critical' : 'text-positive'}`} />
+        )}
         <div className="min-w-0 flex-1">
           <p className="text-[13.5px] font-semibold text-ink">
-            {broken ? '연동에 문제가 있습니다' : '쿠팡 윙 연결됨'}
+            {syncing ? '쿠팡에서 데이터를 가져오는 중' : broken ? '연동에 문제가 있습니다' : '쿠팡 윙 연결됨'}
             <span className="ml-2 font-mono text-[11.5px] font-normal text-ink-3">{status.vendorId}</span>
           </p>
-          <p className="text-[11.5px] text-ink-3">마지막 수집 {sinceText(status.lastSyncAt)}</p>
+          {syncing ? (
+            <p className="text-[11.5px] text-ink-2">
+              상품 · 주문 · 매출 · 정산 · 반품 · 문의를 차례로 받고 있습니다 ·{' '}
+              {/* 초를 세어 보여준다. 스피너는 멈춰도 도는 것처럼 보이지만 숫자는 못 속인다 */}
+              <b className="tabular-nums text-accent">{syncElapsed}초</b> 경과 · 처음 수집은 1~2분 걸립니다
+            </p>
+          ) : (
+            <p className="text-[11.5px] text-ink-3">마지막 수집 {sinceText(status.lastSyncAt)}</p>
+          )}
         </div>
         <button
           onClick={() => onSync(false)}
           disabled={syncing}
-          className="flex items-center gap-1.5 rounded-control border border-line px-3 py-2 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+          className={`flex items-center gap-1.5 rounded-control border px-3 py-2 text-[12px] font-semibold transition-colors ${
+            syncing
+              ? 'border-accent bg-accent text-paper'
+              : 'border-line font-medium text-ink-2 hover:border-line-strong hover:text-ink'
+          }`}
         >
           <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
-          지금 수집
+          {syncing ? '수집 중...' : '지금 수집'}
         </button>
         <button
           onClick={() => onSync(true)}
           disabled={syncing}
           title="지난 60일치를 처음부터 다시 가져옵니다"
-          className="rounded-control border border-line px-3 py-2 text-[12px] font-medium text-ink-3 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-50"
+          className="rounded-control border border-line px-3 py-2 text-[12px] font-medium text-ink-3 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
         >
           전체 재수집
         </button>
@@ -274,7 +309,17 @@ function ConnectionBar({
         </div>
       )}
 
-      {syncMsg && <div className="rounded-panel border border-line bg-paper px-5 py-3 text-[12.5px] text-ink-2">{syncMsg}</div>}
+      {syncMsg && !syncing && (
+        <div
+          className={`rounded-panel border px-5 py-3 text-[12.5px] ${
+            syncMsg.startsWith('수집 완료')
+              ? 'border-positive/35 bg-positive-soft text-ink-2'
+              : 'border-line bg-paper text-ink-2'
+          }`}
+        >
+          {syncMsg}
+        </div>
+      )}
     </div>
   );
 }
