@@ -919,6 +919,9 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
 // 경쟁 분석 스냅샷으로 쓰지 않는다. (캐시 판정에 쓰는 5개보다 높게 잡은 이유는,
 // 5개짜리 표를 "1페이지 경쟁 상품"이라고 보여주면 오히려 오해를 주기 때문이다)
 const FULL_SNAPSHOT_MIN = 20;
+// 쿠팡 검색 화면 한 쪽에 보이는 상품 수. 우리는 한 번에 60개를 긁지만, 판매자가
+// "몇 페이지에 있나"를 물을 때 기준은 구매자가 실제로 보는 화면이다.
+const SEARCH_PAGE_SIZE = 36;
 
 async function recordObservations(keyword: string, products: ParsedProduct[]): Promise<void> {
   if (!supabase || products.length === 0) return;
@@ -990,8 +993,14 @@ async function recordRankObservations(keyword: string, parsed: ParsedProduct[]):
 }
 
 // 지금 즉시 순위 확인: 최근 캐시가 있으면 캐시로, 없으면 실시간 수집(사용 한도 포함) 후 기록
-async function checkRankNow(keyword: string, productId: string, decoded: any): Promise<{
-  rankChecked: boolean; currentRank?: number | null; error?: string; remaining?: number | null;
+/**
+ * 키워드 검색 결과를 가져온다 (캐시 우선, 없으면 실시간 수집).
+ *
+ * 순위 확인과 키워드 조회가 같은 일을 하므로 한 곳에 둔다. 여기서 갈라지면
+ * 한쪽에만 캐시나 한도 처리가 붙어 조용히 어긋난다.
+ */
+async function fetchSearchProducts(keyword: string, decoded: any): Promise<{
+  products: ParsedProduct[] | null; error?: string; remaining?: number | null;
 }> {
   const cacheKey = `cp:v5:${keyword.replace(/\s+/g, "")}`;
   const cached = await cacheGet(cacheKey);
@@ -1001,7 +1010,7 @@ async function checkRankNow(keyword: string, productId: string, decoded: any): P
   if (cached && cached.ageMs < 3 * 3600 * 1000) {
     products = cached.payload?.products || null;
   } else {
-    if (!BRIGHTDATA_API_TOKEN) return { rankChecked: false, error: "Bright Data 미설정" };
+    if (!BRIGHTDATA_API_TOKEN) return { products: null, error: "Bright Data 미설정" };
     // 신규 수집은 쿠팡 분석과 동일하게 일일 한도에 포함
     if (!decoded?.isAdmin && supabase) {
       try {
@@ -1010,7 +1019,7 @@ async function checkRankNow(keyword: string, productId: string, decoded: any): P
         const { data, error } = await supabase.rpc("increment_feature_usage", {
           p_user_id: decoded.userId, p_date: today, p_feature: "rank", p_limit: limit,
         });
-        if (!error && data?.exceeded) return { rankChecked: false, error: `순위 확인은 하루 ${limit}회까지입니다. 내일 새벽 자동 수집 시 기록됩니다.` };
+        if (!error && data?.exceeded) return { products: null, error: `순위 확인은 하루 ${limit}회까지입니다. 내일 새벽 자동 수집 시 기록됩니다.` };
         if (!error && typeof data?.remaining === "number") remaining = data.remaining;
       } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
     }
@@ -1028,12 +1037,20 @@ async function checkRankNow(keyword: string, productId: string, decoded: any): P
   }
 
   if (!products || products.length === 0) {
-    return { rankChecked: false, error: "검색 결과를 수집하지 못했습니다. 잠시 후 다시 시도해주세요.", remaining };
+    return { products: null, error: "검색 결과를 수집하지 못했습니다. 잠시 후 다시 시도해주세요.", remaining };
   }
   await recordRankObservations(keyword, products);
-  const organic = products.filter(p => !p.isAd);
+  return { products, remaining };
+}
+
+async function checkRankNow(keyword: string, productId: string, decoded: any): Promise<{
+  rankChecked: boolean; currentRank?: number | null; error?: string; remaining?: number | null;
+}> {
+  const r = await fetchSearchProducts(keyword, decoded);
+  if (!r.products) return { rankChecked: false, error: r.error, remaining: r.remaining };
+  const organic = r.products.filter(p => !p.isAd);
   const idx = organic.findIndex(p => p.productId === productId);
-  return { rankChecked: true, currentRank: idx >= 0 ? idx + 1 : null, remaining };
+  return { rankChecked: true, currentRank: idx >= 0 ? idx + 1 : null, remaining: r.remaining };
 }
 
 async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded: any) {
@@ -1086,6 +1103,99 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
   // 순위 추적은 "내가 몇 위인지"까지만 답한다. 순위를 올리려면 그다음 질문에
   // 답해야 한다 — 위에 있는 상품들은 얼마에 팔고, 리뷰가 몇 개이고, 로켓인가.
   // 검색 결과 60개를 이미 파싱하고 있으므로 추가 수집 비용은 없다.
+  // 키워드 하나로 "내 상품이 지금 몇 위인가 + 그 상품이 얼마나 팔렸나"를 한 번에.
+  // 순위는 옵션이 아니라 상품 단위로 매겨지므로 매출도 상품 단위로 합쳐야 짝이 맞는다.
+  // 옵션별로 흩어 놓으면 "이 키워드가 내게 얼마를 벌어 주나"에 답할 수 없다.
+  if (action === "keyword-lookup") {
+    const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
+    if (!keyword) return res.status(400).json({ error: "키워드를 입력해주세요." });
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+
+    const found = await fetchSearchProducts(keyword, decoded);
+    if (!found.products) return res.status(200).json({ keyword, error: found.error, items: [] });
+
+    // 내 상품의 노출상품ID → 옵션ID. 등록상품과 발주서 두 곳에서 모은다 —
+    // 상품 상세에 노출상품ID가 안 오는 계정이 있어 한쪽만 보면 연결이 끊긴다.
+    const vendorItemsByProduct = new Map<string, Set<string>>();
+    const nameByProduct = new Map<string, string>();
+    const link = (pid: any, vid: any, name?: any) => {
+      const p = String(pid ?? "").trim();
+      const v = String(vid ?? "").trim();
+      if (!p || !v) return;
+      const set = vendorItemsByProduct.get(p) ?? new Set<string>();
+      set.add(v);
+      vendorItemsByProduct.set(p, set);
+      if (name && !nameByProduct.has(p)) nameByProduct.set(p, String(name));
+    };
+    const [itemRows, orderRows] = await Promise.all([
+      supabase.from("coupang_items").select("vendor_item_id, product_id, product_name").eq("user_id", userId).limit(3000),
+      supabase.from("coupang_orders_daily").select("vendor_item_id, product_id, product_name").eq("user_id", userId)
+        .gte("order_date", kstAddDays(kstToday(), -days)).limit(3000),
+    ]);
+    for (const r of itemRows.data ?? []) link(r.product_id, r.vendor_item_id, r.product_name);
+    for (const r of orderRows.data ?? []) link(r.product_id, r.vendor_item_id, r.product_name);
+
+    // 검색 결과에서 내 상품만 골라낸다
+    const organic = found.products.filter(p => !p.isAd);
+    const mine = found.products.filter(p => vendorItemsByProduct.has(String(p.productId)));
+
+    // 매출은 옵션 단위로 쌓이므로 상품 단위로 되접는다
+    const allVids = [...new Set(mine.flatMap(p => [...(vendorItemsByProduct.get(String(p.productId)) ?? [])]))];
+    const salesByVendorItem = new Map<string, { qty: number; amount: number }>();
+    if (allVids.length > 0) {
+      const { data: sales } = await supabase
+        .from("coupang_sales_daily")
+        .select("vendor_item_id, quantity, sales_amount")
+        .eq("user_id", userId)
+        .in("vendor_item_id", allVids)
+        .gte("sale_date", kstAddDays(kstToday(), -days))
+        .limit(5000);
+      for (const r of sales ?? []) {
+        const v = String(r.vendor_item_id);
+        const cur = salesByVendorItem.get(v) ?? { qty: 0, amount: 0 };
+        cur.qty += Number(r.quantity) || 0;
+        cur.amount += Number(r.sales_amount) || 0;
+        salesByVendorItem.set(v, cur);
+      }
+    }
+
+    const items = mine.map(p => {
+      const pid = String(p.productId);
+      const vids = [...(vendorItemsByProduct.get(pid) ?? [])];
+      let qty = 0;
+      let amount = 0;
+      for (const v of vids) {
+        const s = salesByVendorItem.get(v);
+        if (s) { qty += s.qty; amount += s.amount; }
+      }
+      const organicIdx = organic.findIndex(o => o.productId === pid);
+      const rank = organicIdx >= 0 ? organicIdx + 1 : null;
+      return {
+        productId: pid,
+        productName: p.productName || nameByProduct.get(pid) || `상품 ${pid}`,
+        rank,
+        // 쿠팡 검색 화면은 한 쪽에 36개를 보여준다. 판매자가 "몇 페이지에 있나"를
+        // 물을 때 기준은 우리가 긁어 온 60개가 아니라 구매자가 보는 화면이다.
+        page: rank === null ? null : Math.ceil(rank / SEARCH_PAGE_SIZE),
+        rankWithAds: p.rank ?? null,
+        isAd: p.isAd === true,
+        price: p.productPrice ?? null,
+        optionCount: vids.length,
+        quantity: qty,
+        salesAmount: amount,
+      };
+    }).sort((a, b) => (a.rank ?? 9999) - (b.rank ?? 9999));
+
+    return res.status(200).json({
+      keyword,
+      days,
+      items,
+      // 내 상품이 하나도 안 걸리면 "왜 없지?"가 첫 질문이다. 몇 개를 훑었는지 밝힌다.
+      scanned: found.products.length,
+      remaining: found.remaining ?? null,
+    });
+  }
+
   if (action === "competitors") {
     const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
     if (!keyword) return res.status(400).json({ error: "keyword가 필요합니다." });
@@ -1360,6 +1470,13 @@ async function loadLimits(): Promise<Record<string, number>> {
 // 한도는 KST 자정에 초기화된다
 function kstToday(): string {
   return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** 한국 날짜에 일수를 더한다 (음수면 과거) */
+function kstAddDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: any) {

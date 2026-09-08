@@ -130,6 +130,16 @@ export interface ProfitResponse {
   };
   missingCost: number;
   costCoverage: number;
+  /** 판매자가 발행한 쿠폰 목록. 화면 숫자와 대조할 근거다 */
+  couponList?: Array<{
+    couponId: string;
+    name: string;
+    type: string;
+    status: string;
+    discount: number;
+    startAt: string | null;
+    endAt: string | null;
+  }>;
   /**
    * 채널별 매출. 윙(마켓플레이스)은 매출인식일·정산예정액 기준이고,
    * 로켓그로스는 주문(결제일) 기준이라 성격이 달라 나눠 보여준다.

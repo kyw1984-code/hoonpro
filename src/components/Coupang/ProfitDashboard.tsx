@@ -40,6 +40,77 @@ function couponBasisText(src?: { setting: number; order: number; sheet: number; 
   return parts.length ? `${parts.join(' · ')} × 판매수량` : '쿠폰 단가 × 판매수량';
 }
 
+/**
+ * 발행한 쿠폰 목록.
+ *
+ * 쿠폰은 기간마다 금액이 달라진다. 오늘 11,500원짜리를 걸어 뒀는데 30일 화면에는
+ * 19,000원으로 보이면 숫자가 틀린 것처럼 읽히지만, 그 기간에 2만원짜리 쿠폰이
+ * 걸려 있었던 것이다. 어느 쿠폰이 언제까지 얼마로 걸려 있는지 옆에 두면 그 차이가
+ * 설명된다. 계산에는 쓰지 않는다 — 순이익의 쿠폰은 주문에 실제로 적용된 금액이다.
+ */
+export /** 올해 날짜는 연도를 뗀다. 좁은 화면에서 기간이 잘리지 않게 */
+function short(d: string | null): string {
+  if (!d) return '?';
+  const year = new Date().getFullYear();
+  return d.startsWith(`${year}-`) ? d.slice(5) : d;
+}
+
+function CouponList({ rows, from, to }: {
+  rows: NonNullable<ProfitResponse['couponList']>;
+  from: string;
+  to: string;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const state = (c: { startAt: string | null; endAt: string | null }) =>
+    c.startAt && c.startAt > today ? 'upcoming' : c.endAt && c.endAt < today ? 'ended' : 'live';
+  // 보고 있는 기간과 겹치는 쿠폰이 먼저다. 그게 이 화면 숫자의 근거다.
+  const overlaps = (c: { startAt: string | null; endAt: string | null }) =>
+    (!c.startAt || c.startAt <= to) && (!c.endAt || c.endAt >= from);
+  const sorted = [...rows].sort((a, b) => {
+    const ov = Number(overlaps(b)) - Number(overlaps(a));
+    if (ov) return ov;
+    return String(b.endAt ?? '').localeCompare(String(a.endAt ?? ''));
+  });
+
+  return (
+    <div className="rounded-panel border border-line bg-paper px-5 py-4">
+      <h3 className="mb-1 text-sm font-semibold text-ink">발행한 쿠폰 {rows.length}건</h3>
+      <p className="mb-3 text-[11.5px] leading-relaxed text-ink-3">
+        쿠폰 관리에 등록된 값 그대로입니다. 위 쿠폰 금액은 이 설정이 아니라
+        <b className="text-ink-2"> 주문에 실제로 적용된 할인</b>을 더한 것이라, 기간에 따라 평균이 달라집니다.
+        기간을 좁혀 보시면 지금 걸린 쿠폰에 가까운 값이 나옵니다.
+      </p>
+      <div className="flex flex-col">
+        {sorted.map(c => {
+          const st = state(c);
+          const dim = !overlaps(c);
+          return (
+            <div
+              key={c.couponId}
+              className={`flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-t border-line/60 py-2 ${dim ? 'opacity-45' : ''}`}
+            >
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-2" title={c.name}>{c.name}</span>
+              <span className="whitespace-nowrap text-[12.5px] font-semibold text-ink tabular-nums">
+                − {c.discount.toLocaleString('ko-KR')}원
+              </span>
+              <span className="basis-full text-[11.5px] text-ink-3 tabular-nums">
+                {short(c.startAt)} ~ {short(c.endAt)}
+                <span
+                  className={`ml-1.5 rounded-control px-1.5 py-0.5 text-[11px] font-medium ${
+                    st === 'live' ? 'bg-accent-soft text-accent' : st === 'upcoming' ? 'border border-line text-ink-3' : 'text-ink-3'
+                  }`}
+                >
+                  {st === 'live' ? '진행 중' : st === 'upcoming' ? '예정' : '종료'}
+                </span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 type SortKey = 'quantity' | 'salesAmount' | 'couponDiscount' | 'commission' | 'adCost' | 'unitCostTotal' | 'returnAmount' | 'profit' | 'marginRate';
 
 /**
@@ -408,6 +479,11 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                 입출고비는 [원가 입력]의 그로스 입출고비 칸에 넣으면 순이익에 함께 반영됩니다.
               </p>
             </div>
+          )}
+
+          {/* 쿠폰 금액이 기억과 다를 때 답이 여기 있다. 쿠폰은 기간마다 금액이 달라진다. */}
+          {(data.couponList?.length ?? 0) > 0 && (
+            <CouponList rows={data.couponList!} from={data.from} to={data.to} />
           )}
 
           {prev?.hasData && (
