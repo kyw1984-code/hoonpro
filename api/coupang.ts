@@ -2828,8 +2828,11 @@ export async function computeProfit(
   }
   // 주문별 쿠폰 조회 결과. 윙은 이게 있으면 발주서 할인 항목 대신 쓴다 —
   // 쿠팡이 "이 주문에 적용된 쿠폰"이라고 직접 알려준 값이라 더 믿을 만하다.
-  // 물어본 주문의 수량도 같이 더한다. 회차 상한 때문에 일부 주문만 물었을 때
-  // 전체 주문수량으로 나누면 개당 쿠폰이 실제보다 작아진다.
+  // 개당 쿠폰 = 할인 ÷ 수량. 이때 할인과 수량은 반드시 '같은 행'에서 나와야 한다.
+  // 수량을 저장하기 전에 받아 둔 행이 섞여 있으면, 분자는 전체 행에서 오고 분모는
+  // 수량이 있는 행에서만 와서 개당 쿠폰이 부풀려진다. 실제로 그로스에서 160행 중
+  // 80행에만 수량이 있어, 3만6천원짜리 옵션의 쿠폰이 6만3천원으로 잡혔다.
+  // 수량이 없는 행은 짝이 없으므로 양쪽 모두에서 뺀다.
   const growthCouponAgg = new Map<string, number>();
   const growthCouponQty = new Map<string, number>();
   const wingApiAgg = new Map<string, number>();
@@ -2838,14 +2841,16 @@ export async function computeProfit(
   for (const g of growthCouponRes.rows) {
     const id = String(g.vendor_item_id ?? '');
     const d = Number(g.discount) || 0;
-    const q = g.quantity === null || g.quantity === undefined ? null : Number(g.quantity) || 0;
+    if (g.quantity === null || g.quantity === undefined) continue;
+    const q = Number(g.quantity) || 0;
+    if (q <= 0) continue;
     if (g.channel === 'marketplace') {
       wingApiAgg.set(id, (wingApiAgg.get(id) ?? 0) + d);
-      if (q !== null) wingApiQty.set(id, (wingApiQty.get(id) ?? 0) + q);
+      wingApiQty.set(id, (wingApiQty.get(id) ?? 0) + q);
       wingApiOrders.add(id);
     } else {
       growthCouponAgg.set(id, (growthCouponAgg.get(id) ?? 0) + d);
-      if (q !== null) growthCouponQty.set(id, (growthCouponQty.get(id) ?? 0) + q);
+      growthCouponQty.set(id, (growthCouponQty.get(id) ?? 0) + q);
     }
   }
   // 그로스 주문수량 — 쿠폰과 같은 결제일 기준이라 매출 행의 그로스 수량이 곧 주문수량이다
@@ -2946,15 +2951,20 @@ export async function computeProfit(
     } else {
       if (wingApiOrders.has(row.vendorItemId)) {
         const q = wingApiQty.get(row.vendorItemId) ?? 0;
-        const denom = q > 0 ? q : wing?.qty ?? 0;
-        wingUnit = denom > 0 ? (wingApiAgg.get(row.vendorItemId) ?? 0) / denom : 0;
+        wingUnit = q > 0 ? (wingApiAgg.get(row.vendorItemId) ?? 0) / q : 0;
       } else if (wing && wing.qty > 0) {
         wingUnit = wing.sd / wing.qty;
       }
-      const gApiQty = growthCouponQty.get(row.vendorItemId) ?? 0;
-      const gQty = gApiQty > 0 ? gApiQty : growthQtyAgg.get(row.vendorItemId) ?? 0;
+      const gQty = growthCouponQty.get(row.vendorItemId) ?? 0;
       growthUnit = gQty > 0 ? (growthCouponAgg.get(row.vendorItemId) ?? 0) / gQty : 0;
       row.couponSource = wingApiOrders.has(row.vendorItemId) || growthCouponAgg.has(row.vendorItemId) ? 'order' : wingUnit > 0 ? 'sheet' : null;
+    }
+    // 쿠폰은 판매가 이하로만 설정된다. 개당 쿠폰이 개당 판매가를 넘으면 계산이
+    // 틀린 것이므로 거기서 자른다. 행 합계만 매출로 자르면 "쿠폰 = 매출"이라
+    // 실매출이 0으로 보이는 행이 생기는데, 그건 값이 아니라 증상이다.
+    if (unitPrice > 0) {
+      wingUnit = Math.min(wingUnit, unitPrice);
+      growthUnit = Math.min(growthUnit, unitPrice);
     }
     row.couponDiscount = couponForRow(rq.market, rq.growth, wingUnit, growthUnit, row.salesAmount);
     row.channel = rq.growth > 0 && rq.market > 0 ? 'both' : rq.growth > 0 ? 'growth' : 'marketplace';
