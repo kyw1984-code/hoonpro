@@ -14,6 +14,7 @@ import { AlertTriangle, ArrowUpRight, Download, Loader2, TrendingDown, TrendingU
 import * as XLSX from 'xlsx';
 import { coupangApi, pct, won, type ProfitResponse } from '../../lib/coupang';
 import { DailyTrendChart } from './DailyTrendChart';
+import { AdCenterConnect } from '../AdCenter/AdCenterConnect';
 
 const PERIODS = [
   { days: 7, label: '최근 7일' },
@@ -131,7 +132,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   const ch = data.channels;
   const adNote = (() => {
     if (!ac || ac.coveredDays === 0) {
-      return '쿠팡은 광고 데이터를 API로 제공하지 않습니다. [광고 성과 분석]에서 광고 보고서를 올리면 이 칸이 기간에 맞춰 자동으로 채워집니다.';
+      return '쿠팡은 광고 데이터를 API로 제공하지 않습니다. 아래 [광고센터 연결]로 가져오거나 [광고 성과 분석]에서 보고서를 올리면 이 칸이 기간에 맞춰 자동으로 채워집니다.';
     }
     const missing = ac.spanDays - ac.coveredDays;
     const est = ac.estimatedDays > 0 ? ` 이 중 ${ac.estimatedDays}일은 기간 총액을 일수로 나눈 추정치입니다.` : '';
@@ -364,6 +365,9 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               {adNote}
             </p>
           </div>
+
+          {/* 광고센터 연결 — 파일 올리기 없이 버튼 하나로 광고비를 가져온다 */}
+          <AdCenterConnect />
 
           {/* 상품별 표 */}
           <div className="rounded-panel border border-line bg-paper">

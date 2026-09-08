@@ -12,6 +12,8 @@ import { ReviewAnalyzer } from './components/ReviewAnalyzer';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { AuthGate } from './components/Auth/AuthGate';
+import { AdReportReceiver } from './components/AdCenter/AdReportReceiver';
+import { AD_COLLECT_QUERY } from './lib/adCollector';
 import { AdminPanel } from './components/Admin/AdminPanel';
 import { SubscriptionPage } from './components/Billing/SubscriptionPage';
 import { AskHoonpro } from './components/QA/AskHoonpro';
@@ -189,6 +191,12 @@ export default function App() {
   if (!user) {
     // AuthGate 내부에서 다크 테마 푸터를 렌더링
     return <AuthGate onSuccess={() => setUser(getUser())} />;
+  }
+
+  // 광고센터 북마클릿이 연 창. 보고서를 받아 저장하는 것 말고는 아무것도 안 보여준다 —
+  // 여기서 탭까지 다 그리면 사용자가 원래 창과 헷갈린다.
+  if (new URLSearchParams(window.location.search).get(AD_COLLECT_QUERY) === '1') {
+    return <AdReportReceiver />;
   }
 
   return (
