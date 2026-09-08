@@ -979,3 +979,31 @@ revoke all on coupang_coupon_items from anon, authenticated;
 -- 주문별 쿠폰에 그 주문의 수량을 함께 둔다. 회차 상한으로 일부 주문만 물었을 때
 -- 전체 주문수량으로 나누면 개당 쿠폰이 실제보다 작아진다.
 alter table coupang_order_coupons add column if not exists quantity integer;
+
+-- ─────────────────────────────────────────────────────────────
+-- 39. 쿠폰 목록 — 옵션이 안 붙어도 "내 쿠폰이 무엇인지"는 보여야 한다
+-- ─────────────────────────────────────────────────────────────
+-- 쿠폰 목록 조회(fms v2)는 잘 오는데, 각 쿠폰의 옵션 목록(v1 .../items)이 비어
+-- 오는 경우가 있다. 계약 단위로 걸린 쿠폰은 특정 옵션에 붙지 않기 때문으로 보인다.
+-- 그럴 때 옵션 매핑만 저장하면 화면에는 아무것도 안 남아 "쿠폰이 없다"와 똑같이
+-- 보인다. 목록 자체를 남겨 판매자가 자기 쿠폰과 화면 숫자를 대조할 수 있게 한다.
+-- item_count가 0이면 그 쿠폰에는 옵션이 안 붙어 있다는 뜻이다.
+create table if not exists coupang_coupons (
+  user_id uuid not null references users(id) on delete cascade,
+  coupon_id text not null,
+  promotion_name text,
+  coupon_type text,
+  status text,
+  discount numeric,
+  max_discount numeric,
+  wow_exclusive boolean,
+  contract_id text,
+  start_at timestamptz,
+  end_at timestamptz,
+  item_count integer not null default 0,
+  fetched_at timestamptz default now(),
+  primary key (user_id, coupon_id)
+);
+create index if not exists idx_cc_user on coupang_coupons(user_id);
+alter table coupang_coupons enable row level security;
+revoke all on coupang_coupons from anon, authenticated;
