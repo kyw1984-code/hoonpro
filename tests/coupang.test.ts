@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   addDays,
   authorization,
+  couponForRow,
   dateChunks,
   floorPriceFor,
   isActiveReturn,
@@ -235,4 +236,18 @@ test('쿠폰 할인: 판매자 부담과 쿠팡 부담을 가른다', () => {
   // 부담 항목이 없고 총액만 있으면 전부 판매자 부담으로 본다 — 실매출을 크게 보는 쪽이 더 나쁘다
   assert.deepEqual(sellerDiscountOf({ discountPrice: '3,000' }), { seller: 3000, coupang: 0 });
   assert.deepEqual(sellerDiscountOf({}), { seller: 0, coupang: 0 });
+});
+
+// ── 행별 쿠폰 = 단가 × 판매수량 ──────────────────────────────────
+// 7개 팔린 행에 37개 주문의 쿠폰(460,600원)을 그대로 붙이면 쿠폰이 매출을 넘는다.
+test('쿠폰 행 계산: 채널별 단가 × 수량, 매출을 넘지 않는다', () => {
+  // 윙 주문 37개에 460,600원 → 단가 12,449원. 매출인식 7개면 87,143원
+  assert.equal(couponForRow(7, 0, 460600 / 37, 0, 289800), Math.round((7 * 460600) / 37));
+  // 그로스 44개 주문에 221,000원 → 5,000원 × 44
+  assert.equal(couponForRow(0, 44, 0, 5000, 1601600), 220000);
+  // 두 채널 섞임
+  assert.equal(couponForRow(3, 2, 1000, 500, 999999), 4000);
+  // 매출 상한
+  assert.equal(couponForRow(10, 0, 50000, 0, 120000), 120000);
+  assert.equal(couponForRow(0, 0, 100, 100, 1000), 0);
 });
