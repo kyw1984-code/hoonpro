@@ -624,6 +624,19 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
 // ── 매출 동기화 (매출내역) ────────────────────────────────────
 // 매출인식일(구매확정 또는 배송완료+3일) 기준이라 주문일보다 늦다.
 // 수수료·정산예정액이 여기에만 있어 순이익 계산의 근거가 된다.
+/**
+ * 매출내역 조회 질의문.
+ *
+ * token은 값이 비어도 반드시 보내야 한다. 빼면 쿠팡이 'token cannot be null'로
+ * 거절해 매출이 한 건도 안 들어온다. 주문은 멀쩡히 들어오므로 "일부만 안 되네"로
+ * 보이지 원인이 드러나지 않는다.
+ * 쿠팡 공식 예시도 첫 조회에 token= 을 빈 값으로 붙인다:
+ *   ...?vendorId=A00012345&recognitionDateFrom=...&recognitionDateTo=...&token=&maxPerPage=
+ */
+export function revenueHistoryQuery(vendorId: string, from: string, to: string, token: string): string {
+  return `vendorId=${vendorId}&recognitionDateFrom=${from}&recognitionDateTo=${to}&token=${token}&maxPerPage=100`;
+}
+
 async function syncSales(userId: string, creds: CoupangCreds, from: string, to: string, sum: SyncSummary, deadline: number): Promise<void> {
   if (!supabase) return;
 
@@ -637,9 +650,7 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
         failedThisRun = true; // 불완전한 결과로 구간을 덮어쓰지 않는다
         break;
       }
-      const query =
-        `vendorId=${creds.vendorId}&recognitionDateFrom=${cFrom}&recognitionDateTo=${cTo}&maxPerPage=100` +
-        (token ? `&token=${token}` : '');
+      const query = revenueHistoryQuery(creds.vendorId, cFrom, cTo, token);
       const r = await coupangCall(creds, 'GET', EP.revenueHistory, query);
       if (!r.ok) {
         if (r.authFailed) {
@@ -1060,7 +1071,11 @@ async function verifyCreds(creds: CoupangCreds): Promise<{ ok: boolean; error?: 
     return {
       ok: false,
       error: RELAY_URL
-        ? `쿠팡이 IP ${blockedIp}를 막았습니다. 윙 [연동 정보]에 이 IP가 등록돼 있는지 확인해주세요.`
+        // 윙에 IP를 넣어도 쿠팡 쪽 반영에 5~30분이 걸린다. 이 말을 안 해두면
+        // 방금 등록한 사람이 "잘못 넣었나" 하고 IP를 지웠다 넣기를 반복한다.
+        // 연동 정보 수정은 주 10회 제한이라 그 시행착오가 곧 한도 소진이다.
+        ? `쿠팡이 IP ${blockedIp}를 막았습니다. 윙 [연동 정보]에 이 IP가 등록돼 있는지 확인해주세요. ` +
+          '방금 등록하셨다면 쿠팡에 반영되기까지 5~30분 걸립니다 — 이 경우 IP를 다시 손대지 마시고 잠시 뒤 [연동하기]만 다시 눌러주세요.'
         : `키는 정상입니다. 다만 쿠팡이 호출 IP(${blockedIp})를 막았습니다. ` +
           '쿠팡은 윙에 등록된 IP에서 온 요청만 받는데, 지금은 고정 IP 없이 호출하고 있어 ' +
           '매번 IP가 바뀝니다. 관리자에게 고정 IP 중계 서버 설정을 요청해주세요.',

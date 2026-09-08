@@ -16,6 +16,7 @@ import {
   lastWeekRange,
   median,
   pearson,
+  revenueHistoryQuery,
   selectAll,
   signedDate,
   slope,
@@ -122,4 +123,18 @@ test('selectAll: 페이지 상한에 닿으면 truncated로 알린다', async ()
   );
   assert.equal(rows.length, 30);
   assert.equal(truncated, true);
+});
+
+// 매출내역: token이 빠지면 쿠팡이 'token cannot be null'로 거절해 매출이 0건이 된다.
+// 주문은 정상이라 "왜 매출만 안 들어오지"로만 보여 원인 찾기가 오래 걸렸다.
+test('매출내역 질의: 첫 조회에도 token= 을 반드시 붙인다', () => {
+  const first = revenueHistoryQuery('A01653410', '2026-08-10', '2026-09-08', '');
+  assert.match(first, /&token=&/, '첫 페이지에서 token이 빠지면 쿠팡이 거절한다');
+  assert.equal(
+    first,
+    'vendorId=A01653410&recognitionDateFrom=2026-08-10&recognitionDateTo=2026-09-08&token=&maxPerPage=100',
+  );
+
+  const next = revenueHistoryQuery('A01653410', '2026-08-10', '2026-09-08', 'abc123');
+  assert.match(next, /&token=abc123&/);
 });

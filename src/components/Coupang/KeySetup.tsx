@@ -14,7 +14,7 @@
  *     이유를 말해 주지 않는다. 입력하는 순간 형태를 검사해 알려준다.
  */
 import { useState } from 'react';
-import { AlertTriangle, Copy, Check, Loader2, ExternalLink, ChevronLeft } from 'lucide-react';
+import { AlertTriangle, Clock, Copy, Check, Loader2, ExternalLink, ChevronLeft } from 'lucide-react';
 import { coupangApi, type CoupangStatus } from '../../lib/coupang';
 
 interface Props {
@@ -315,6 +315,18 @@ export function KeySetup({ status, onSaved }: Props) {
                     등록되지 않습니다. 그리고 <b className="text-ink">연동 정보 수정은 일주일에 10번</b>까지만 되니 한 번에 끝내주세요.
                   </span>
                 </div>
+
+                {/* 등록 직후 바로 다음 단계로 넘어가면 십중팔구 IP 차단 오류가 난다.
+                    그때 IP를 잘못 넣었다고 오해해 지웠다 넣기를 반복하면 주 10회 한도가
+                    금방 사라진다. 넘어가기 전에 미리 알려 둔다. */}
+                <div className="mt-2.5 flex items-start gap-2 rounded-card border border-line bg-paper-2 p-3.5 text-[12.5px] leading-relaxed text-ink-2">
+                  <Clock className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
+                  <span>
+                    등록해도 <b className="text-ink">쿠팡에 반영되기까지 5~30분</b> 걸립니다. 바로 다음 단계로 넘어가면
+                    실패할 수 있는데, 그건 IP를 잘못 넣은 게 아닙니다.
+                    <b className="text-ink"> IP를 다시 손대지 마시고</b> 잠시 뒤 [연동하기]만 다시 눌러주세요.
+                  </span>
+                </div>
               </div>
             ) : (
               <div className="mt-4 rounded-card border border-critical/35 bg-critical-soft p-4 text-[12.5px] text-ink-2">
@@ -448,7 +460,9 @@ export function KeySetup({ status, onSaved }: Props) {
 
             <p className="text-[11.5px] leading-relaxed text-ink-3">
               Secret Key는 암호화해 저장하며 화면에 다시 표시되지 않습니다.
-              키를 방금 발급했다면 쿠팡 쪽 준비에 최대 하루가 걸릴 수 있어, 지금 실패해도 내일 다시 시도하면 됩니다.
+              <b className="text-ink-2">윙에 IP를 방금 등록하셨다면 반영에 5~30분 걸립니다</b> — 지금 실패해도
+              IP를 다시 손대지 마시고 잠시 뒤 [연동하기]만 다시 눌러주세요.
+              키를 방금 발급했다면 쿠팡 쪽 준비에 최대 하루가 걸릴 수 있어, 그때는 내일 다시 시도하면 됩니다.
             </p>
           </div>
         </div>
