@@ -2151,8 +2151,18 @@ function won(n: number): string {
  * 시작하지 않는다. 그 상태로 돌면 모든 호출이 실패하고, 실패 원인을 잘못
  * 읽으면 판매자 계정까지 무효화된다.
  */
-async function relayPreflight(): Promise<{ ok: boolean; reason?: string }> {
+async function relayPreflight(attempts = 2): Promise<{ ok: boolean; reason?: string }> {
   if (!RELAY_URL) return { ok: true };
+  let last: { ok: boolean; reason?: string } = { ok: false, reason: '중계 서버 점검을 하지 못했습니다' };
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await sleep(1_000);
+    last = await relayPreflightOnce();
+    if (last.ok) return last;
+  }
+  return last;
+}
+
+async function relayPreflightOnce(): Promise<{ ok: boolean; reason?: string }> {
   try {
     // 주소 끝의 /relay만 잘라내면 'https://host/' 형태에서 '//health'가 되어
     // 중계 서버가 경로를 못 알아본다. 실제 호출은 되는데 점검만 실패해 매시
@@ -2578,6 +2588,21 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
   if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
 
   const full = req.body?.full === true || String(req.query.full) === 'true' || !acc.backfill_done;
+
+  // 중계 서버부터 확인한다. 죽어 있으면 모든 호출이 연결 대기에 걸려, 판매자는
+  // 90초를 기다린 끝에 '상품 목록: fetch failed' 같은 속뜻 없는 문구를 본다.
+  // 원인이 훈프로도 쿠팡 키도 아니라는 것을 그 자리에서 알려준다.
+  const relay = await relayPreflight();
+  if (!relay.ok) {
+    await supabase!
+      .from('coupang_accounts')
+      .update({ last_sync_error: `중계 서버 점검 실패: ${relay.reason}`, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    return res.status(503).json({
+      error: `쿠팡 연결 중계 서버가 응답하지 않아 수집을 시작하지 못했습니다. 잠시 뒤 다시 시도해주세요. (${relay.reason})`,
+    });
+  }
+
   // 화면이 기다리는 요청이다. 4분 동안 스피너만 보여주지 않도록 90초에서 끊고,
   // 못 받은 몫은 truncated로 표시해 크론이 이어받게 한다.
   const sum = await syncUser(userId, credsOf(acc), full, Date.now() + 90_000);
