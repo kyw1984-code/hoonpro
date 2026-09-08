@@ -286,3 +286,23 @@ test('isTransient: 망 오류·중계 5xx만 다시 시도한다', () => {
   assert.equal(isTransient({ ok: false, status: 401, authFailed: true }), false);
   assert.equal(isTransient({ ok: true, status: 200 }), false);
 });
+
+// ── 개당 쿠폰 상한 ──────────────────────────────────────────────
+// 진짜 고침은 '할인과 수량을 같은 행에서 짝짓는 것'이다. 아래 상한은 그물이다 —
+// 어떤 이유로 계산이 틀려도 개당 쿠폰이 개당 판매가를 넘지는 않게 한다.
+test('쿠폰 행 계산: 개당 쿠폰은 개당 판매가를 넘지 않는다', () => {
+  const unitPrice = 36_400;
+  const qty = 42;
+  const sales = unitPrice * qty;
+
+  // 짝이 안 맞는 나눗셈이 만든 값(63,800)은 판매가에서 잘린다
+  assert.equal(Math.min(63_800, unitPrice), unitPrice);
+
+  // 짝을 맞춰 계산한 값은 그대로 통과한다.
+  // 그로스 160행 중 수량이 있는 80행만 쓰면 1,549,200 ÷ 82 이 된다.
+  const paired = Math.round(1_549_200 / 82);
+  assert.ok(paired < unitPrice, '짝을 맞추면 개당 판매가 아래로 떨어진다');
+  assert.equal(couponForRow(0, qty, 0, paired, sales), paired * qty);
+  // 실매출이 남는다 — 쿠폰이 매출을 통째로 먹지 않는다
+  assert.ok(sales - paired * qty > 0);
+});

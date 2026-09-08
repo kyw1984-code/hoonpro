@@ -172,14 +172,47 @@ COUPANG_RELAY_IP=Lightsail 고정 IP
 넣은 뒤에는 **재배포해야 반영된다.** Vercel 환경변수는 빌드 시점에 묶이므로, 값만 넣고
 두면 이전 배포는 계속 중계 서버를 모르는 상태로 돈다.
 
+### 스왑을 반드시 잡을 것
+
+$5 플랜은 메모리가 512MB다. 우분투와 Node와 Caddy가 함께 올라가면 여유가 거의 없고,
+스왑이 없으면 메모리가 차는 순간 **서버가 응답을 멈춘다**. 이때 Lightsail 콘솔에는
+여전히 "Running"으로 보인다. 전원은 켜져 있고 통신만 안 되는 상태라 알아채기 어렵다.
+실제로 이 문제로 한 시간 반 동안 전체 수집이 멈춘 적이 있다.
+
+```bash
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab   # 재부팅 후에도 유지
+free -h                                                      # Swap 줄에 2.0Gi가 보이면 된다
+```
+
 ### 잘 안 될 때
+
+증상을 가르는 기준은 **거부되느냐 무응답이냐**다. 둘은 원인이 다르다.
 
 | 증상 | 원인 |
 |---|---|
 | 연동 화면에서 "쿠팡이 키를 거부했습니다" | 키 오타, 발급 후 24시간 미경과, 또는 중계 IP가 윙에 미등록 |
 | 관리자 화면에 "중계 서버가 설정돼 있지 않습니다" | 환경변수 미입력, 또는 넣고 재배포를 안 함 |
 | 수집이 아무 소리 없이 안 돎 | `/health`의 `auth`가 false. 서버와 Vercel의 비밀키가 다르다 |
-| `curl`이 응답 없음 | 방화벽 443 미개방, 또는 A 레코드가 고정 IP를 안 가리킴 |
+| `curl`이 **즉시 거부**(Connection refused) | 중계 프로그램이나 Caddy가 죽었다. `sudo systemctl status coupang-relay caddy` |
+| `curl`이 **응답 없이 멈춤**(timeout) | 방화벽 443 미개방, A 레코드가 고정 IP를 안 가리킴, 또는 **메모리 고갈로 서버가 먹통** |
+
+인스턴스가 "Running"이어도 중계가 살아 있다는 뜻은 아니다. 전원과 프로그램은 별개다.
+먼저 `/health`를 열어 보고, 안 되면 SSH로 들어가 확인한다.
+
+```bash
+sudo systemctl status coupang-relay caddy   # 둘 다 active (running) 이어야 한다
+free -h                                     # 남은 메모리와 스왑
+journalctl -u coupang-relay -n 50 --no-pager
+```
+
+메모리가 원인이면 재부팅으로 일단 살아나지만 같은 일이 반복된다. 위의 스왑을 잡아야 한다.
+
+> 중계 서버가 멈추면 `ADMIN_EMAIL`로 메일이 간다. 복구되면 멈춰 있던 시간과 함께
+> 한 번 더 온다. 매시 오지는 않는다 — 상태가 바뀔 때만 보낸다.
 
 중계 서버는 목적지를 `api-gateway.coupang.com`으로 고정하고 공유 비밀키가 맞을 때만 응답한다.
 서명은 훈프로 서버에서 이미 끝난 상태로 오므로 중계는 판매자의 키를 모른다.

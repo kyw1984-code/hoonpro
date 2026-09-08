@@ -403,8 +403,10 @@ const EP = {
   // 주문에 적용된 쿠폰. 그로스 주문에는 할인 항목이 없어 이걸로 묻는다.
   orderCoupons: (vendorId: string, orderId: string) =>
     `/v2/providers/fms/apis/api/v2/vendors/${vendorId}/${encodeURIComponent(orderId)}/coupons`,
-  // 쿠폰 관리에 등록된 쿠폰 자체(즉시할인 정액·정률)와 그 쿠폰이 붙은 옵션들
-  coupons: (vendorId: string) => `/v2/providers/fms/apis/api/v1/vendors/${vendorId}/coupons`,
+  // 쿠폰 관리에 등록된 쿠폰 자체(즉시할인 정액·정률)와 그 쿠폰이 붙은 옵션들.
+  // 목록은 v2, 옵션 목록은 v1이다. 버전이 갈려 있어 v1으로 목록을 부르면
+  // 'Endpoint not found'로 떨어진다 — 권한 문제로 오해하기 쉽다.
+  coupons: (vendorId: string) => `/v2/providers/fms/apis/api/v2/vendors/${vendorId}/coupons`,
   couponItems: (vendorId: string, couponId: string) =>
     `/v2/providers/fms/apis/api/v1/vendors/${vendorId}/coupons/${encodeURIComponent(couponId)}/items`,
   settlementHistories: '/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories',
@@ -1376,7 +1378,9 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
   if (!supabase) return;
 
   // 목록 질의 형식이 계정마다 다를 수 있어 차례로 시도한다. 첫 성공을 쓴다.
-  const queries = ['status=APPLIED', 'status=APPLIED&page=1&size=100', 'page=1&size=100&status=APPLIED'];
+  // 쿠팡 예시는 status·page·size·sort를 함께 받는다. 계정에 따라 필수 여부가
+  // 달라 넉넉한 쪽부터 시도한다.
+  const queries = ['page=1&size=100&sort=desc&status=APPLIED', 'page=1&size=100&status=APPLIED', 'status=APPLIED'];
   let list: any[] | null = null;
   let listPayload: any = null;
   let lastErr = '';
@@ -1394,9 +1398,14 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
     }
     // 이 API는 오픈API 권한 항목이 따로 있다. 거절돼도 판매자 키가 잘못된 것은
     // 아니므로 계정을 건드리지 않고 안내만 남긴다.
-    if (r.status === 401 || r.status === 403 || r.status === 404) {
+    if (r.status === 401 || r.status === 403) {
       sum.errors.push(`쿠폰 설정: ${r.error} — 윙 > 판매자 정보 > 추가판매정보 > 오픈API에서 쿠폰 조회 권한을 확인해주세요`);
       return;
+    }
+    // 경로가 없다는 응답에 권한 안내를 붙이면 엉뚱한 곳을 보게 된다. 다음 질의 형식으로 넘어간다.
+    if (r.status === 404) {
+      lastErr = r.error || 'HTTP 404';
+      continue;
     }
     lastErr = r.error || `HTTP ${r.status}`;
     if (r.status !== 400) break;
@@ -2180,10 +2189,56 @@ async function relayPreflightOnce(): Promise<{ ok: boolean; reason?: string }> {
   }
 }
 
+/**
+ * 중계 서버가 멈춘 것을 운영자에게 알린다.
+ *
+ * 이 서버 하나가 죽으면 모든 판매자의 수집이 멈춘다. 그런데 크론은 로그에만
+ * 남기고 조용히 끝나서, 누가 화면을 열어 보기 전까지 아무도 모른다. 실제로
+ * 한 시간 반 동안 아무 데이터도 안 들어오는 걸 뒤늦게 알아챘다.
+ *
+ * 매시 메일이 오면 그것대로 못 쓰게 되므로, 멈춘 순간과 돌아온 순간에만 보낸다.
+ * 상태는 app_config에 남긴다 — 이 하나 때문에 표를 새로 만들 이유는 없다.
+ */
+async function notifyRelayState(down: boolean, reason: string): Promise<void> {
+  const to = (process.env.ADMIN_EMAIL || '').trim();
+  if (!supabase) return;
+
+  const { data } = await supabase.from('app_config').select('value').eq('key', 'relay_down_since').maybeSingle();
+  const downSince = (data?.value ?? '').trim();
+
+  // 상태가 그대로면 아무것도 하지 않는다
+  if (down === Boolean(downSince)) return;
+
+  const now = new Date().toISOString();
+  await supabase.from('app_config').upsert(
+    { key: 'relay_down_since', value: down ? now : '', updated_at: now },
+    { onConflict: 'key' },
+  );
+  if (!to) return;
+
+  if (down) {
+    await sendEmail(to, '[훈프로] 쿠팡 중계 서버가 응답하지 않습니다', wrapEmail(
+      '쿠팡 중계 서버 점검 필요',
+      `<p>고정 IP 중계 서버에 닿지 못해 <b>모든 판매자의 쿠팡 수집이 멈췄습니다.</b></p>` +
+        `<p style="color:#ffb454;">${escapeHtml(reason)}</p>` +
+        `<p>서버가 켜져 있어도 중계 프로그램이나 HTTPS가 죽어 있을 수 있습니다. ` +
+        `<code>/health</code> 주소를 열어 <code>{"ok":true}</code>가 나오는지 먼저 확인해주세요.</p>`,
+    ));
+  } else {
+    const minutes = downSince ? Math.round((Date.now() - Date.parse(downSince)) / 60000) : 0;
+    await sendEmail(to, '[훈프로] 쿠팡 중계 서버가 복구됐습니다', wrapEmail(
+      '쿠팡 중계 서버 복구',
+      `<p>중계 서버가 다시 응답합니다. 수집이 이어서 돕니다.</p>` +
+        (minutes > 0 ? `<p>멈춰 있던 시간: 약 ${minutes}분</p>` : ''),
+    ));
+  }
+}
+
 async function cronSync(res: VercelResponse) {
   if (!supabase) return res.status(200).json({ ok: false, reason: 'supabase 미설정' });
 
   const preflight = await relayPreflight();
+  await notifyRelayState(!preflight.ok, preflight.reason ?? '');
   if (!preflight.ok) {
     console.error('coupang cron aborted:', preflight.reason);
     return res.status(200).json({ ok: false, reason: preflight.reason });
@@ -2773,8 +2828,11 @@ export async function computeProfit(
   }
   // 주문별 쿠폰 조회 결과. 윙은 이게 있으면 발주서 할인 항목 대신 쓴다 —
   // 쿠팡이 "이 주문에 적용된 쿠폰"이라고 직접 알려준 값이라 더 믿을 만하다.
-  // 물어본 주문의 수량도 같이 더한다. 회차 상한 때문에 일부 주문만 물었을 때
-  // 전체 주문수량으로 나누면 개당 쿠폰이 실제보다 작아진다.
+  // 개당 쿠폰 = 할인 ÷ 수량. 이때 할인과 수량은 반드시 '같은 행'에서 나와야 한다.
+  // 수량을 저장하기 전에 받아 둔 행이 섞여 있으면, 분자는 전체 행에서 오고 분모는
+  // 수량이 있는 행에서만 와서 개당 쿠폰이 부풀려진다. 실제로 그로스에서 160행 중
+  // 80행에만 수량이 있어, 3만6천원짜리 옵션의 쿠폰이 6만3천원으로 잡혔다.
+  // 수량이 없는 행은 짝이 없으므로 양쪽 모두에서 뺀다.
   const growthCouponAgg = new Map<string, number>();
   const growthCouponQty = new Map<string, number>();
   const wingApiAgg = new Map<string, number>();
@@ -2783,14 +2841,16 @@ export async function computeProfit(
   for (const g of growthCouponRes.rows) {
     const id = String(g.vendor_item_id ?? '');
     const d = Number(g.discount) || 0;
-    const q = g.quantity === null || g.quantity === undefined ? null : Number(g.quantity) || 0;
+    if (g.quantity === null || g.quantity === undefined) continue;
+    const q = Number(g.quantity) || 0;
+    if (q <= 0) continue;
     if (g.channel === 'marketplace') {
       wingApiAgg.set(id, (wingApiAgg.get(id) ?? 0) + d);
-      if (q !== null) wingApiQty.set(id, (wingApiQty.get(id) ?? 0) + q);
+      wingApiQty.set(id, (wingApiQty.get(id) ?? 0) + q);
       wingApiOrders.add(id);
     } else {
       growthCouponAgg.set(id, (growthCouponAgg.get(id) ?? 0) + d);
-      if (q !== null) growthCouponQty.set(id, (growthCouponQty.get(id) ?? 0) + q);
+      growthCouponQty.set(id, (growthCouponQty.get(id) ?? 0) + q);
     }
   }
   // 그로스 주문수량 — 쿠폰과 같은 결제일 기준이라 매출 행의 그로스 수량이 곧 주문수량이다
@@ -2891,15 +2951,20 @@ export async function computeProfit(
     } else {
       if (wingApiOrders.has(row.vendorItemId)) {
         const q = wingApiQty.get(row.vendorItemId) ?? 0;
-        const denom = q > 0 ? q : wing?.qty ?? 0;
-        wingUnit = denom > 0 ? (wingApiAgg.get(row.vendorItemId) ?? 0) / denom : 0;
+        wingUnit = q > 0 ? (wingApiAgg.get(row.vendorItemId) ?? 0) / q : 0;
       } else if (wing && wing.qty > 0) {
         wingUnit = wing.sd / wing.qty;
       }
-      const gApiQty = growthCouponQty.get(row.vendorItemId) ?? 0;
-      const gQty = gApiQty > 0 ? gApiQty : growthQtyAgg.get(row.vendorItemId) ?? 0;
+      const gQty = growthCouponQty.get(row.vendorItemId) ?? 0;
       growthUnit = gQty > 0 ? (growthCouponAgg.get(row.vendorItemId) ?? 0) / gQty : 0;
       row.couponSource = wingApiOrders.has(row.vendorItemId) || growthCouponAgg.has(row.vendorItemId) ? 'order' : wingUnit > 0 ? 'sheet' : null;
+    }
+    // 쿠폰은 판매가 이하로만 설정된다. 개당 쿠폰이 개당 판매가를 넘으면 계산이
+    // 틀린 것이므로 거기서 자른다. 행 합계만 매출로 자르면 "쿠폰 = 매출"이라
+    // 실매출이 0으로 보이는 행이 생기는데, 그건 값이 아니라 증상이다.
+    if (unitPrice > 0) {
+      wingUnit = Math.min(wingUnit, unitPrice);
+      growthUnit = Math.min(growthUnit, unitPrice);
     }
     row.couponDiscount = couponForRow(rq.market, rq.growth, wingUnit, growthUnit, row.salesAmount);
     row.channel = rq.growth > 0 && rq.market > 0 ? 'both' : rq.growth > 0 ? 'growth' : 'marketplace';
