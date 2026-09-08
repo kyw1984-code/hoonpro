@@ -2822,7 +2822,7 @@ export async function computeProfit(
   opts: { totalsOnly?: boolean } = {},
 ) {
   const lite = opts.totalsOnly === true;
-  const [salesRes, costRes, itemRes, returnRes, adRes, adItemRes, growthCouponRes, orderRes, couponDefRes] = await Promise.all([
+  const [salesRes, costRes, itemRes, returnRes, adRes, adItemRes, growthCouponRes, orderRes, couponDefRes, couponListRes] = await Promise.all([
     selectAll((f, t) => supabase!.from('coupang_sales_daily').select('*').eq('user_id', userId)
       .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
     selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
@@ -2861,6 +2861,10 @@ export async function computeProfit(
     selectAll((f, t) => supabase!.from('coupang_coupon_items')
       .select('vendor_item_id, coupon_type, discount, max_discount, status, start_at, end_at').eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
+    // 판매자가 발행한 쿠폰 목록. 화면 숫자와 대조할 근거라 계산에는 쓰지 않고 그대로 보여준다.
+    lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_coupons')
+      .select('coupon_id, promotion_name, coupon_type, status, discount, start_at, end_at').eq('user_id', userId)
+      .order('end_at', { ascending: false }).range(f, t)),
   ]);
 
   const couponDefs = new Map<string, CouponDef[]>();
@@ -3167,6 +3171,17 @@ export async function computeProfit(
     daily,
     // 판매가 기준 주문금액과 판매자 부담 쿠폰. 실매출 = orderAmount − sellerDiscount.
     coupon: { ...coupon, sources: couponSources },
+    // 발행한 쿠폰 그대로. 기간이 지난 쿠폰도 준다 — 지난 기간을 볼 때 그때 걸려
+    // 있던 쿠폰이 무엇인지가 곧 그 시기 쿠폰 금액의 근거다.
+    couponList: couponListRes.rows.map((c: any) => ({
+      couponId: String(c.coupon_id),
+      name: c.promotion_name ?? '(이름 없음)',
+      type: c.coupon_type ?? '',
+      status: c.status ?? '',
+      discount: Number(c.discount) || 0,
+      startAt: c.start_at ? String(c.start_at).slice(0, 10) : null,
+      endAt: c.end_at ? String(c.end_at).slice(0, 10) : null,
+    })),
     channels: {
       marketplace: {
         quantity: byChannel.marketplace.quantity,
