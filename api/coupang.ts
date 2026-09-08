@@ -2593,6 +2593,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'inquiry-draft': return await handleInquiryDraft(userId, req, res);
       case 'inquiry-reply': return await handleInquiryReply(userId, req, res);
       case 'rank-revenue': return await handleRankRevenue(userId, res);
+      case 'my-rates': return await handleMyRates(userId, req, res);
       case 'price-rules': return await handlePriceRules(userId, res);
       case 'price-rule-save': return await handlePriceRuleSave(userId, req, res);
       case 'price-apply': return await handlePriceApply(userId, req, res);
@@ -4568,6 +4569,67 @@ export function slope(xs: number[], ys: number[]): number | null {
   }
   if (den === 0) return null;
   return num / den;
+}
+
+// ── 판매자 실측 비율 ──────────────────────────────────────────
+//
+// 소싱AI가 "이 가격에 팔면 원가가 얼마 이하여야 남나"에 답하려면 이 판매자의
+// 수수료율·광고비율·반품률·쿠폰율이 필요하다. 업계 평균이 아니라 실적에서 뽑은
+// 값이라야 공장에 부를 가격의 근거가 된다.
+//
+// 전부 '쿠폰을 뺀 실매출' 대비로 낸다. 쿠폰만 판매가 대비다 — 쿠폰은 판매가에서
+// 먼저 빠지는 항목이라 기준이 다르다.
+async function handleMyRates(userId: string, req: VercelRequest, res: VercelResponse) {
+  const days = Math.min(Math.max(Number(req.query.days) || 60, 7), 180);
+  const to = kstToday();
+  const from = addDays(to, -(days - 1));
+
+  const profit = await computeProfit(userId, from, to);
+  const t = profit.totals;
+  const sales = t.salesAmount;
+
+  // 실적이 없으면 비율을 지어내지 않는다. 화면에서 "아직 계산할 수 없다"고 말해야 한다.
+  if (sales <= 0) {
+    return res.status(200).json({
+      hasData: false,
+      from, to,
+      reason: '이 기간에 매출이 없어 비율을 계산할 수 없습니다. 수집이 끝난 뒤 다시 확인해주세요.',
+    });
+  }
+
+  const couponTotal = profit.coupon?.sellerDiscount ?? 0;
+  const netSales = Math.max(1, sales - couponTotal);
+
+  // 광고비는 옵션에 붙은 몫과 캠페인 단위 몫을 합쳐야 실제 지출이 된다
+  const adTotal = Math.max(profit.adCost?.total ?? 0, t.adCost);
+
+  return res.status(200).json({
+    hasData: true,
+    from, to,
+    rates: {
+      // 수수료·광고비·반품은 실매출 대비
+      commission: t.commission / netSales,
+      ad: adTotal / netSales,
+      returns: t.returnAmount / netSales,
+      // 쿠폰만 판매가 대비 — 판매가에서 먼저 빠지는 항목이다
+      coupon: couponTotal / sales,
+      basis: {
+        orders: t.quantity,
+        salesAmount: sales,
+        from, to,
+      },
+    },
+    // 화면에서 근거를 밝히는 데 쓴다
+    totals: {
+      salesAmount: sales,
+      netSales,
+      commission: t.commission,
+      adCost: adTotal,
+      returnAmount: t.returnAmount,
+      couponDiscount: couponTotal,
+      quantity: t.quantity,
+    },
+  });
 }
 
 async function handleRankRevenue(userId: string, res: VercelResponse) {
