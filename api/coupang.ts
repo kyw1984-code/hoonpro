@@ -1431,6 +1431,8 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
   let complete = true;
   let itemShapeLogged = false;
   let itemsFailed = false;
+  // 통하는 페이지 질의 형식을 한 번 찾으면 나머지 쿠폰에도 그대로 쓴다
+  let itemQueryStyle: number | null = null;
   let lastCallAt = 0;
   const coupons = list.slice(0, LIMITS.couponDefsPerRun);
   if (list.length > coupons.length) complete = false;
@@ -1441,50 +1443,82 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
     const type = pickStr(c, ['type', 'couponType', 'discountType', 'discountMethod']) || null;
     const discount = pickNum(c, ['discount', 'discountPrice', 'discountAmount', 'discountRate', 'discountValue'], 0);
     const maxDiscount = pickNum(c, ['maxDiscountPrice', 'maxDiscount', 'maxDiscountAmount'], 0) || null;
-    const name = pickStr(c, ['name', 'couponName', 'title']) || null;
+    const name = pickStr(c, ['promotionName', 'name', 'couponName', 'title']) || null;
     const status = pickStr(c, ['status', 'couponStatus']) || null;
     const startAt = toIso(pickRaw(c, ['startAt', 'startDate', 'startDateTime', 'validStartAt']));
     const endAt = toIso(pickRaw(c, ['endAt', 'endDate', 'endDateTime', 'validEndAt']));
 
-    let token = '';
-    for (let page = 0; page < LIMITS.couponItemPages; page++) {
-      if (outOfTime(deadline, sum)) { complete = false; break; }
-      const wait = LIMITS.couponGapMs - (Date.now() - lastCallAt);
-      if (wait > 0) await sleep(wait);
-      lastCallAt = Date.now();
+    // 옵션 목록의 페이지 질의 형식은 계정·버전에 따라 다르다. 아무 질의 없이
+    // 불렀더니 쿠폰 8개가 전부 빈 배열로 왔다 — 오류가 아니라 그냥 비어 있어서
+    // "쿠폰이 없다"와 구분이 안 됐다. 형식을 차례로 시도하고, 한 번 통한 형식은
+    // 나머지 쿠폰에도 그대로 쓴다.
+    const pageQueries: Array<(n: number, t: string) => string> = [
+      (n) => `page=${n}&size=100`,
+      (_n, t) => (t ? `nextToken=${t}` : ''),
+      () => '',
+    ];
+    const styleOrder = itemQueryStyle === null ? pageQueries.map((_, i) => i) : [itemQueryStyle];
 
-      const r = await coupangCallVersioned(
-        creds, 'GET', v => EP.couponItems(creds.vendorId, couponId, v),
-        token ? `nextToken=${token}` : '', ['v1', 'v2'], 'couponItems',
-      );
-      if (!r.ok) {
-        // 한 번 거절되면 나머지 쿠폰도 같은 이유로 거절된다. 오류 하나만 남기고 멈춘다.
-        sum.errors.push(`쿠폰 옵션 목록: ${r.error}`);
-        complete = false;
-        itemsFailed = true;
+    let token = '';
+    let got = 0;
+    for (const style of styleOrder) {
+      token = '';
+      got = 0;
+      for (let page = 1; page <= LIMITS.couponItemPages; page++) {
+        if (outOfTime(deadline, sum)) { complete = false; break; }
+        const wait = LIMITS.couponGapMs - (Date.now() - lastCallAt);
+        if (wait > 0) await sleep(wait);
+        lastCallAt = Date.now();
+
+        const r = await coupangCallVersioned(
+          creds, 'GET', v => EP.couponItems(creds.vendorId, couponId, v),
+          pageQueries[style](page, token), ['v1', 'v2'], 'couponItems',
+        );
+        if (!r.ok) {
+          sum.errors.push(`쿠폰 옵션 목록: ${r.error}`);
+          complete = false;
+          itemsFailed = true;
+          break;
+        }
+        const items = listOf(r.data);
+        // 비어 있을 때도 한 번은 모양을 남긴다. 이게 없으면 "옵션이 없다"와
+        // "우리가 못 읽는다"를 구분할 수 없다.
+        if (!itemShapeLogged) {
+          itemShapeLogged = true;
+          console.info('coupang coupon item shape —',
+            `질의=${pageQueries[style](page, token) || '(없음)'} / 응답키=${Object.keys(r.data ?? {}).slice(0, 10).join(',')}` +
+            ` / ${items.length}건${items[0] ? ` / 옵션키=${Object.keys(items[0]).slice(0, 20).join(',')}` : ''}`);
+        }
+        for (const it of items) {
+          const vendorItemId = findVendorItemId(it);
+          if (!vendorItemId) continue;
+          got++;
+          // 옵션마다 다른 할인이 실려 오면 그것을 우선한다
+          const itemDiscount = pickNum(it, ['discount', 'discountPrice', 'discountAmount'], 0);
+          rows.push({
+            user_id: userId, coupon_id: couponId, vendor_item_id: vendorItemId,
+            coupon_name: name, coupon_type: type, discount: itemDiscount > 0 ? itemDiscount : discount,
+            max_discount: maxDiscount, status, start_at: startAt, end_at: endAt,
+            fetched_at: new Date().toISOString(),
+          });
+        }
+        token = nextTokenOf(r.data);
+        // page/size 형식은 받은 게 한 페이지보다 적으면 끝이다
+        if (style === 0 ? items.length < 100 : !token) break;
+      }
+      if (itemsFailed || got > 0) {
+        if (got > 0) itemQueryStyle = style;
         break;
       }
-      const items = listOf(r.data);
-      if (!itemShapeLogged && items[0]) {
-        itemShapeLogged = true;
-        console.info('coupang coupon item shape —', `응답키=${Object.keys(r.data ?? {}).slice(0, 10).join(',')} / 옵션키=${Object.keys(items[0]).slice(0, 20).join(',')}`);
-      }
-      for (const it of items) {
-        const vendorItemId = findVendorItemId(it);
-        if (!vendorItemId) continue;
-        // 옵션마다 다른 할인이 실려 오면 그것을 우선한다
-        const itemDiscount = pickNum(it, ['discount', 'discountPrice', 'discountAmount'], 0);
-        rows.push({
-          user_id: userId, coupon_id: couponId, vendor_item_id: vendorItemId,
-          coupon_name: name, coupon_type: type, discount: itemDiscount > 0 ? itemDiscount : discount,
-          max_discount: maxDiscount, status, start_at: startAt, end_at: endAt,
-          fetched_at: new Date().toISOString(),
-        });
-      }
-      token = nextTokenOf(r.data);
-      if (!token) break;
     }
+
     if (itemsFailed || (!complete && outOfTime(deadline, sum))) break;
+  }
+
+  // 쿠폰은 있는데 옵션이 하나도 안 붙으면 조용히 0건으로 끝난다. 그러면 화면에서
+  // "쿠폰이 없다"와 "우리가 옵션 목록을 못 읽는다"가 똑같이 보인다. 구분해서 남긴다.
+  if (rows.length === 0 && coupons.length > 0 && !itemsFailed) {
+    sum.errors.push(`쿠폰 설정: 쿠폰 ${coupons.length}건은 받았지만 각 쿠폰에 붙은 옵션 목록이 비어 있습니다`);
   }
 
   // 전부 받았을 때만 이전 것을 지운다. 일부만 받고 지우면 멀쩡하던 옵션의 쿠폰이 빠진다.
