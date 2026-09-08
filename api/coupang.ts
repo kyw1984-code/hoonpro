@@ -366,6 +366,21 @@ export function toIso(v: any): string | null {
 }
 
 /** 응답 본문에서 목록을 꺼낸다 — data / data.content / 배열 그 자체 모두 대응 */
+/**
+ * 응답 속살의 '모양'만 한 줄로. 값은 남기지 않는다.
+ * 봉투(code·message·data)까지만 찍으면 정작 data 안이 배열인지 객체인지 몰라
+ * "비어 있다"와 "우리가 못 읽는다"를 구분할 수 없다.
+ */
+function describePayload(v: any, depth = 0): string {
+  if (v === null || v === undefined) return String(v);
+  if (Array.isArray(v)) return `배열(${v.length})${v.length && depth < 1 ? `<${describePayload(v[0], depth + 1)}>` : ''}`;
+  if (typeof v === 'object') {
+    const keys = Object.keys(v).slice(0, 12);
+    return depth < 1 ? `{${keys.map(k => `${k}:${describePayload(v[k], depth + 1)}`).join(',')}}` : `{${keys.join(',')}}`;
+  }
+  return typeof v;
+}
+
 function listOf(payload: any): any[] {
   if (Array.isArray(payload)) return payload;
   const d = payload?.data;
@@ -1425,7 +1440,7 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
     sum.couponDefs = 0;
     return;
   }
-  console.info('coupang coupon list shape —', `응답키=${Object.keys(listPayload ?? {}).slice(0, 10).join(',')} / 쿠폰키=${Object.keys(list[0] ?? {}).slice(0, 20).join(',')} / ${list.length}건`);
+  console.info('coupang coupon list shape —', `${list.length}건 / 모양=${describePayload(listPayload)}`);
 
   const rows: any[] = [];
   let complete = true;
@@ -1453,6 +1468,7 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
     // "쿠폰이 없다"와 구분이 안 됐다. 형식을 차례로 시도하고, 한 번 통한 형식은
     // 나머지 쿠폰에도 그대로 쓴다.
     const pageQueries: Array<(n: number, t: string) => string> = [
+      (n) => `status=APPLIED&page=${n}&size=100`,
       (n) => `page=${n}&size=100`,
       (_n, t) => (t ? `nextToken=${t}` : ''),
       () => '',
@@ -1486,8 +1502,7 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
         if (!itemShapeLogged) {
           itemShapeLogged = true;
           console.info('coupang coupon item shape —',
-            `질의=${pageQueries[style](page, token) || '(없음)'} / 응답키=${Object.keys(r.data ?? {}).slice(0, 10).join(',')}` +
-            ` / ${items.length}건${items[0] ? ` / 옵션키=${Object.keys(items[0]).slice(0, 20).join(',')}` : ''}`);
+            `질의=${pageQueries[style](page, token) || '(없음)'} / ${items.length}건 / 모양=${describePayload(r.data)}`);
         }
         for (const it of items) {
           const vendorItemId = findVendorItemId(it);
