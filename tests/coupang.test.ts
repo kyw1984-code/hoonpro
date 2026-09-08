@@ -278,6 +278,8 @@ test('definitionUnit: 기간 밖·종료 상태 쿠폰은 뺀다', () => {
 
 test('isTransient: 망 오류·중계 5xx만 다시 시도한다', () => {
   assert.equal(isTransient({ ok: false, status: 0 }), true);
+  // 시간 상한에 걸린 호출은 이미 예산을 썼다. 다시 부르면 그만큼 또 기다린다.
+  assert.equal(isTransient({ ok: false, status: 0, timedOut: true }), false);
   assert.equal(isTransient({ ok: false, status: 502, relayError: true }), true);
   assert.equal(isTransient({ ok: false, status: 502 }), false);
   assert.equal(isTransient({ ok: false, status: 400 }), false);

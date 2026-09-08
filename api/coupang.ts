@@ -139,7 +139,14 @@ export interface CoupangResult<T = any> {
   authFailed?: boolean;
   /** 쿠팡이 아니라 중계 서버가 낸 오류다. 판매자 키와 무관하므로 계정을 건드리면 안 된다. */
   relayError?: boolean;
+  /** 시간 상한에 걸려 끊었다. 이미 그만큼 시간을 썼으므로 다시 부르지 않는다. */
+  timedOut?: boolean;
 }
+
+// 호출 1건의 시간 상한. 중계 서버가 응답을 안 주면 fetch는 몇 분이고 매달려 있고,
+// 그동안 이 회차의 나머지 수집이 통째로 굶는다. 실제로 수동 수집(90초)이 상품
+// 목록 하나에 다 잡아먹혀 주문·쿠폰이 한 번도 돌지 못했다.
+const CALL_TIMEOUT_MS = 20_000;
 
 /**
  * 쿠팡 API 호출 1건.
@@ -156,6 +163,9 @@ async function coupangCall<T = any>(
   // 발주서·상품 목록이 통째로 비고, 뒤따르는 쿠폰 조회까지 건너뛴다. 조회(GET)는
   // 다시 불러도 해가 없으니 짧게 쉬고 두 번 더 시도한다. 쿠팡이 4xx로 거절한 것은
   // 다시 물어도 같으므로 그대로 돌려준다.
+  //
+  // 단, 시간 상한에 걸려 끊은 호출은 다시 부르지 않는다. 이미 20초를 썼는데 세 번
+  // 시도하면 1분이고, 수동 수집의 90초 예산이 첫 단계 하나에 다 들어간다.
   let last: CoupangResult<T> | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await sleep(600 * attempt);
@@ -166,9 +176,13 @@ async function coupangCall<T = any>(
   return last!;
 }
 
-/** 망 오류(status 0)나 중계 서버의 5xx만 일시적이라고 본다 */
-export function isTransient(r: { ok: boolean; status: number; relayError?: boolean; authFailed?: boolean }): boolean {
-  if (r.ok || r.authFailed) return false;
+/**
+ * 다시 불러 볼 만한 실패인가.
+ * 곧바로 떨어진 망 오류와 중계 서버의 5xx만 그렇다. 시간 상한에 걸린 호출은
+ * 이미 예산을 썼으므로 제외한다 — 다시 걸리면 그만큼 또 기다린다.
+ */
+export function isTransient(r: { ok: boolean; status: number; relayError?: boolean; authFailed?: boolean; timedOut?: boolean }): boolean {
+  if (r.ok || r.authFailed || r.timedOut) return false;
   if (r.status === 0) return true;
   return Boolean(r.relayError) && r.status >= 500;
 }
@@ -201,12 +215,14 @@ async function coupangCallOnce<T = any>(
           ...(RELAY_SECRET ? { 'X-Relay-Secret': RELAY_SECRET } : {}),
         },
         body: JSON.stringify({ method, url, headers, body: body ?? null }),
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       });
     } else {
       res = await fetch(url, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       });
     }
 
@@ -240,7 +256,15 @@ async function coupangCallOnce<T = any>(
 
     return { ok: true, status: res.status, data: parsed as T };
   } catch (e: any) {
-    return { ok: false, status: 0, error: e?.message || '쿠팡 API 호출 실패' };
+    // AbortSignal.timeout은 TimeoutError로 떨어진다. 이 둘을 구분해야 재시도를
+    // 걸지 말지 정할 수 있다.
+    const timedOut = e?.name === 'TimeoutError' || /aborted|timeout/i.test(String(e?.message ?? ''));
+    return {
+      ok: false,
+      status: 0,
+      timedOut,
+      error: timedOut ? `응답이 ${CALL_TIMEOUT_MS / 1000}초 안에 오지 않았습니다` : e?.message || '쿠팡 API 호출 실패',
+    };
   }
 }
 
@@ -1357,7 +1381,11 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
   let listPayload: any = null;
   let lastErr = '';
   for (const q of queries) {
-    if (outOfTime(deadline, sum)) return;
+    if (outOfTime(deadline, sum)) {
+      // 조용히 0건으로 끝나면 "권한이 없나?"와 구분이 안 된다
+      sum.errors.push('쿠폰 설정: 이번 회차 시간이 부족해 건너뛰었습니다 (다음 회차가 이어받습니다)');
+      return;
+    }
     const r = await coupangCall(creds, 'GET', EP.coupons(creds.vendorId), q);
     if (r.ok) {
       list = listOf(r.data);
@@ -1885,14 +1913,18 @@ async function syncUser(
   const sum = emptySummary();
   const today = kstToday();
 
+  // 쿠폰 설정을 맨 앞에 둔다. 호출이 몇 건뿐인데 순이익의 쿠폰 금액이 여기에
+  // 달려 있다. 상품 상세는 회차당 120건까지 부르므로 중계 서버가 느린 날에는
+  // 그 하나가 수동 수집의 90초를 다 쓴다 — 실제로 그렇게 되어 쿠폰 설정이 한 번도
+  // 돌지 못했다. 주문·매출·상품은 매시 크론(240초)이 어차피 다시 채운다.
+  await syncCouponDefinitions(userId, creds, sum, deadline);
+  if (sum.authFailed) return sum;
+
   await syncItems(userId, creds, sum, deadline);
   if (sum.authFailed) return sum;
 
   await syncOrders(userId, creds, addDays(today, -(full ? LIMITS.ordersDaysFull : LIMITS.ordersDaysIncr)), today, sum, deadline);
   if (sum.authFailed) return sum;
-
-  // 쿠폰 관리에 등록된 쿠폰 설정. 순이익의 쿠폰은 이 값 × 판매수량이 기본이다.
-  await syncCouponDefinitions(userId, creds, sum, deadline);
 
   // 매출내역은 종료일이 '어제 이하'여야 한다. 오늘을 넣으면 쿠팡이
   // 'To date must be before or equal to yesterday'로 구간 전체를 거절해
