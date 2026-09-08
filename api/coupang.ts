@@ -373,10 +373,10 @@ export function toIso(v: any): string | null {
  */
 function describePayload(v: any, depth = 0): string {
   if (v === null || v === undefined) return String(v);
-  if (Array.isArray(v)) return `배열(${v.length})${v.length && depth < 1 ? `<${describePayload(v[0], depth + 1)}>` : ''}`;
+  if (Array.isArray(v)) return `배열(${v.length})${v.length && depth < 2 ? `<${describePayload(v[0], depth + 1)}>` : ''}`;
   if (typeof v === 'object') {
     const keys = Object.keys(v).slice(0, 12);
-    return depth < 1 ? `{${keys.map(k => `${k}:${describePayload(v[k], depth + 1)}`).join(',')}}` : `{${keys.join(',')}}`;
+    return depth < 2 ? `{${keys.map(k => `${k}:${describePayload(v[k], depth + 1)}`).join(',')}}` : `{${keys.join(',')}}`;
   }
   return typeof v;
 }
@@ -1443,6 +1443,9 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
   console.info('coupang coupon list shape —', `${list.length}건 / 모양=${describePayload(listPayload)}`);
 
   const rows: any[] = [];
+  // 쿠폰 목록 자체도 남긴다. 옵션이 안 붙는 쿠폰(계약 단위·와우 전용 등)이라도
+  // 판매자는 "내 쿠폰이 무엇이고 얼마짜리인지"를 봐야 화면 숫자와 대조할 수 있다.
+  const couponRows: any[] = [];
   let complete = true;
   let itemShapeLogged = false;
   let itemsFailed = false;
@@ -1462,6 +1465,13 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
     const status = pickStr(c, ['status', 'couponStatus']) || null;
     const startAt = toIso(pickRaw(c, ['startAt', 'startDate', 'startDateTime', 'validStartAt']));
     const endAt = toIso(pickRaw(c, ['endAt', 'endDate', 'endDateTime', 'validEndAt']));
+    const couponRow = {
+      user_id: userId, coupon_id: couponId, promotion_name: name, coupon_type: type,
+      status, discount, max_discount: maxDiscount,
+      wow_exclusive: c?.wowExclusive === true, contract_id: pickStr(c, ['contractId', 'vendorContractId']) || null,
+      start_at: startAt, end_at: endAt, item_count: 0, fetched_at: new Date().toISOString(),
+    };
+    couponRows.push(couponRow);
 
     // 옵션 목록의 페이지 질의 형식은 계정·버전에 따라 다르다. 아무 질의 없이
     // 불렀더니 쿠폰 8개가 전부 빈 배열로 왔다 — 오류가 아니라 그냥 비어 있어서
@@ -1526,6 +1536,7 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
         break;
       }
     }
+    couponRow.item_count = got;
 
     if (itemsFailed || (!complete && outOfTime(deadline, sum))) break;
   }
@@ -1533,7 +1544,12 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
   // 쿠폰은 있는데 옵션이 하나도 안 붙으면 조용히 0건으로 끝난다. 그러면 화면에서
   // "쿠폰이 없다"와 "우리가 옵션 목록을 못 읽는다"가 똑같이 보인다. 구분해서 남긴다.
   if (rows.length === 0 && coupons.length > 0 && !itemsFailed) {
-    sum.errors.push(`쿠폰 설정: 쿠폰 ${coupons.length}건은 받았지만 각 쿠폰에 붙은 옵션 목록이 비어 있습니다`);
+    sum.errors.push(`쿠폰 설정: 쿠폰 ${coupons.length}건은 받았지만 옵션이 붙은 쿠폰이 없습니다 (계약 단위 쿠폰일 수 있습니다)`);
+  }
+
+  if (couponRows.length > 0) {
+    const cErr = await upsertChunked('coupang_coupons', couponRows, 'user_id,coupon_id');
+    if (cErr) sum.errors.push(cErr);
   }
 
   // 전부 받았을 때만 이전 것을 지운다. 일부만 받고 지우면 멀쩡하던 옵션의 쿠폰이 빠진다.
