@@ -26,7 +26,16 @@ export function toISODate(v: any): string | null {
     const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);
     return d.toISOString().slice(0, 10);
   }
-  const m = String(v ?? "").trim().match(/^(\d{4})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})/);
+  const str = String(v ?? "").trim();
+  // 광고센터 보고서의 날짜는 구분자 없는 20260906 형태(숫자 또는 문자열)로 온다.
+  // 이걸 못 읽으면 일자별 광고비가 통째로 '추정'(균등 분배)으로 떨어진다.
+  const compact = str.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) {
+    const mo = Number(compact[2]), dy = Number(compact[3]);
+    if (mo >= 1 && mo <= 12 && dy >= 1 && dy <= 31) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+    return null;
+  }
+  const m = str.match(/^(\d{4})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})/);
   if (!m) return null;
   const mo = Number(m[2]), dy = Number(m[3]);
   if (mo < 1 || mo > 12 || dy < 1 || dy > 31) return null;
