@@ -30,6 +30,8 @@ export interface SyncSummary {
   orders: number;
   sales: number;
   growth?: number;
+  growthCancelled?: number;
+  growthInventory?: number;
   settlements: number;
   returns: number;
   inquiries: number;
@@ -211,6 +213,8 @@ export interface InventoryRow {
   daysLeft: number | null;
   reorderQty: number;
   risk: StockRisk;
+  /** 쿠팡이 집계한 최근 30일 판매수. 없으면 null */
+  coupangSold30: number | null;
 }
 
 export interface InventoryResponse {
@@ -327,6 +331,8 @@ export const coupangApi = {
   deleteKey: () => request<{ ok: true }>('key-delete', { method: 'POST' }),
   sync: (full = false) => request<{ ok: true; summary: SyncSummary }>('sync', { method: 'POST', body: { full } }),
   profit: (days: number) => request<ProfitResponse>(`profit&days=${days}`),
+  /** 날짜를 직접 골라 보는 순이익. from·to는 YYYY-MM-DD */
+  profitRange: (from: string, to: string) => request<ProfitResponse>(`profit&from=${from}&to=${to}`),
   costs: () => request<{ rows: CostRow[] }>('costs'),
   adCosts: (days: number) => request<AdCostsResponse>(`ad-costs&days=${days}`),
   adCostSave: (body: { from: string; to: string; daily?: { date: string; cost: number }[]; total?: number; source?: 'report' | 'manual' }) =>

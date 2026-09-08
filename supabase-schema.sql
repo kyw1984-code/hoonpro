@@ -866,3 +866,23 @@ alter table coupang_costs add column if not exists fulfillment_cost int not null
 -- 띄울 수 있다. 모든 상품에 띄우면 판매자배송 상품에 0을 넣게 만들고,
 -- 아무 상품에도 안 띄우면 그로스 원가를 넣을 방법이 없다.
 alter table coupang_items add column if not exists business_type text not null default 'marketplace';
+
+-- ─────────────────────────────────────────────────────────────
+-- 33. 로켓그로스 창고 재고
+-- ─────────────────────────────────────────────────────────────
+-- 재고 예측은 쿠팡 물류센터에 실제로 있는 수량으로 해야 한다. 판매자 창고
+-- 재고(등록상품의 재고 수치)는 그로스에선 의미가 없다 — 팔리는 건 로켓창고
+-- 재고다. rg/inventory/summaries가 옵션별 판매가능수량과 쿠팡 자체 집계
+-- 30일 판매수를 준다.
+create table if not exists coupang_growth_inventory (
+  user_id uuid not null references users(id) on delete cascade,
+  vendor_item_id text not null,
+  product_name text,
+  external_sku text,
+  orderable_qty int not null default 0,   -- totalOrderableQuantity (판매가능 재고)
+  sales_30d int,                          -- SALES_COUNT_LAST_THIRTY_DAYS (쿠팡 집계)
+  synced_at timestamptz default now(),
+  primary key (user_id, vendor_item_id)
+);
+alter table coupang_growth_inventory enable row level security;
+revoke all on coupang_growth_inventory from anon, authenticated;

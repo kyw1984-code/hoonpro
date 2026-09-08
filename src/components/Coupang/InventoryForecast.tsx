@@ -1,11 +1,11 @@
 /**
- * [4] 재고 소진 예측
+ * [4] 그로스 재고 예측
  *
  * 품절은 매출만 잃는 게 아니라 검색 순위까지 떨어뜨리고, 되돌리는 데 몇 주가
- * 걸린다. 그래서 "며칠 남았는지"를 미리 보여주고 발주 수량까지 제안한다.
+ * 걸린다. 그래서 "며칠 남았는지"를 미리 보여주고 입고 수량까지 제안한다.
  *
- * 판매 속도는 주문일 기준이다. 매출인식일은 배송완료 이후라 열흘까지 늦어,
- * 그 숫자로 재고를 보면 이미 품절난 뒤에 알게 된다.
+ * 재고는 로켓창고의 판매가능수량이고 판매 속도는 그로스 주문(결제일) 기준이다.
+ * 판매자 창고 재고는 그로스에선 팔리는 재고가 아니라 여기서 보지 않는다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Boxes, Loader2, PackageX } from 'lucide-react';
@@ -103,7 +103,8 @@ export function InventoryForecast() {
           </div>
         </label>
         <p className="flex-1 text-[11.5px] leading-relaxed text-ink-3">
-          발주 권장 수량은 리드타임과 목표 기간을 합친 만큼을 채우는 수량입니다.
+          입고 권장 수량은 로켓창고 재고가 리드타임과 목표 기간을 합친 기간 동안 버티도록 채우는 수량입니다.
+          재고는 쿠팡 로켓창고의 판매가능수량이고, 판매 속도는 그로스 주문 기준입니다.
         </p>
         <label className="flex items-center gap-2 text-[12.5px] text-ink-2">
           <input type="checkbox" checked={onlyRisk} onChange={e => setOnlyRisk(e.target.checked)} className="h-4 w-4" />
@@ -123,7 +124,7 @@ export function InventoryForecast() {
           <Boxes className="mb-4 h-12 w-12 opacity-20" />
           <p className="text-sm font-semibold">{onlyRisk ? '재고가 부족한 상품이 없습니다' : '재고 데이터가 없습니다'}</p>
           <p className="mt-1.5 text-[12px]">
-            {onlyRisk ? '14일 이내 소진될 상품이 없습니다.' : '먼저 [지금 수집]으로 상품을 가져와주세요.'}
+            {onlyRisk ? '14일 이내 소진될 상품이 없습니다.' : '로켓창고 재고가 아직 없습니다. [지금 수집]을 누르면 쿠팡에서 가져옵니다. 로켓그로스를 쓰지 않는 계정이면 이 화면은 비어 있습니다.'}
           </p>
         </div>
       ) : (
@@ -133,11 +134,11 @@ export function InventoryForecast() {
               <thead>
                 <tr className="border-b border-line text-[11.5px] text-ink-3">
                   <th className="px-4 py-2.5 text-left font-medium">상품</th>
-                  <th className="px-3 py-2.5 text-right font-medium">재고</th>
+                  <th className="px-3 py-2.5 text-right font-medium">로켓창고 재고</th>
                   <th className="px-3 py-2.5 text-right font-medium">7일 판매</th>
                   <th className="px-3 py-2.5 text-right font-medium">일 평균</th>
                   <th className="px-3 py-2.5 text-right font-medium">남은 일수</th>
-                  <th className="px-3 py-2.5 text-right font-medium">발주 권장</th>
+                  <th className="px-3 py-2.5 text-right font-medium">입고 권장</th>
                   <th className="px-4 py-2.5 text-right font-medium">상태</th>
                 </tr>
               </thead>

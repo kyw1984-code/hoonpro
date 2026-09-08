@@ -338,11 +338,14 @@ const EP = {
     `/v2/providers/seller_api/apis/api/v1/marketplace/vendor-items/${vendorItemId}/prices/${price}`,
   vendorItemInventory: (vendorItemId: string) =>
     `/v2/providers/seller_api/apis/api/v1/marketplace/vendor-items/${vendorItemId}/inventories`,
-  exchangeRequests: (vendorId: string) => `/v2/providers/openapi/apis/api/v1/vendors/${vendorId}/exchangeRequests`,
+  // 교환요청은 v4만 있다. v1로 부르면 'No exactly matching API specification'으로 거절된다.
+  exchangeRequests: (vendorId: string) => `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/exchangeRequests`,
   ordersheets: (vendorId: string) => `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/ordersheets`,
   revenueHistory: '/v2/providers/openapi/apis/api/v1/revenue-history',
   // 로켓그로스는 완전히 다른 창구다. 마켓플레이스 매출내역에는 한 건도 안 온다.
   rgOrders: (vendorId: string) => `/v2/providers/rg_open_api/apis/api/v1/vendors/${vendorId}/rg/orders`,
+  // 로켓창고 재고 — 옵션별 판매가능수량과 쿠팡 자체 집계 30일 판매수
+  rgInventory: (vendorId: string) => `/v2/providers/rg_open_api/apis/api/v1/vendors/${vendorId}/rg/inventory/summaries`,
   settlementHistories: '/v2/providers/marketplace_openapi/apis/api/v1/settlement-histories',
   returnRequests: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/returnRequests`,
   onlineInquiries: (v: string, vendorId: string) => `/v2/providers/openapi/apis/api/${v}/vendors/${vendorId}/onlineInquiries`,
@@ -352,6 +355,8 @@ const EP = {
 
 // 발주서는 상태별로 조회해야 한다. 취소(CANCEL)는 매출이 아니므로 제외한다.
 const ORDER_STATUSES = ['ACCEPT', 'INSTRUCT', 'DEPARTURE', 'DELIVERING', 'FINAL_DELIVERY'];
+// 반품요청도 상태별로만 조회된다. RU 출고중지요청 · UC 반품접수 · CC 반품완료 · PR 쿠팡확인요청
+const RETURN_STATUSES = ['RU', 'UC', 'CC', 'PR'];
 
 // 한 번의 동기화가 무한정 길어지지 않도록 상한을 둔다.
 const LIMITS = {
@@ -377,6 +382,10 @@ export interface SyncSummary {
   sales: number;
   /** 로켓그로스 매출 — 창구가 달라 마켓플레이스 매출과 따로 센다 */
   growth: number;
+  /** 그로스 주문 중 취소라서 뺀 건수 */
+  growthCancelled: number;
+  /** 로켓창고 재고 행 수 */
+  growthInventory: number;
   settlements: number;
   returns: number;
   inquiries: number;
@@ -388,7 +397,7 @@ export interface SyncSummary {
 
 function emptySummary(): SyncSummary {
   return {
-    items: 0, orders: 0, sales: 0, growth: 0, settlements: 0, returns: 0, inquiries: 0,
+    items: 0, orders: 0, sales: 0, growth: 0, growthCancelled: 0, growthInventory: 0, settlements: 0, returns: 0, inquiries: 0,
     errors: [], authFailed: false, truncated: false,
   };
 }
@@ -552,6 +561,7 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
   const rows: any[] = [];
   let detailFailed = 0;
   let detailError = '';
+  let firstDetailShape = '';
   for (const sp of ordered.slice(0, LIMITS.itemDetailPerRun)) {
     // 상세는 건당 1호출이라 여기서 시간이 가장 많이 든다. 예산이 끝나면
     // 지금까지 받은 것만 저장하고 나머지는 다음 회차가 이어받는다.
@@ -573,6 +583,14 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
     }
     const detail = (r.data as any)?.data ?? r.data;
     const productId = pickStr(detail, ['productId', 'displayProductId']);
+    if (!firstDetailShape) {
+      // 값은 남기지 않는다. 키 이름만 있어도 어디서 어긋났는지 보인다.
+      const items = Array.isArray(detail?.items) ? detail.items : null;
+      firstDetailShape =
+        `키=${Object.keys(detail ?? {}).slice(0, 12).join(',')}` +
+        ` / items=${items ? `${items.length}건` : '없음'}` +
+        (items && items[0] ? ` / item키=${Object.keys(items[0]).slice(0, 12).join(',')}` : '');
+    }
     for (const it of Array.isArray(detail?.items) ? detail.items : []) {
       const vendorItemId = pickStr(it, ['vendorItemId', 'vendorItemID']);
       if (!vendorItemId) continue;
@@ -600,6 +618,13 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
   // 반품·가격 화면이 통째로 비는데 화면에는 아무 이유도 안 뜬다.
   if (detailFailed > 0 && rows.length === 0) {
     sum.errors.push(`상품 상세: ${detailError} (${detailFailed}건 실패)`);
+  } else if (rows.length === 0 && sellerProductIds.length > 0) {
+    // 목록도 받고 상세도 받았는데 옵션ID가 하나도 없다. 응답 모양이 예상과
+    // 다른 것이므로, 그 모양을 그대로 남겨 다음 수정의 단서로 삼는다.
+    const growthCount = sellerProductIds.filter(sp => sp.businessType === 'growth').length;
+    const shape = `목록 ${sellerProductIds.length}건(그로스 ${growthCount}) / 상세 ${firstDetailShape || '응답 없음'}`;
+    console.warn('coupang items: no vendor items parsed —', shape);
+    sum.errors.push(`상품 상세: 옵션ID를 하나도 찾지 못했습니다 [${shape}]`);
   }
   if (sellerProductIds.length === 0) {
     sum.errors.push('상품 목록: 쿠팡이 등록상품을 한 건도 주지 않았습니다. 윙에 판매중인 상품이 있는지 확인해주세요.');
@@ -917,6 +942,8 @@ async function syncRocketGrowth(
   const agg = new Map<string, any>();
   let failedThisRun = false;
   let lastCallAt = 0;
+  let cancelled = 0;
+  let firstOrderShape = '';
 
   const call = async (cFrom: string, cTo: string, token: string) => {
     // 분당 50회 한도를 지킨다. 몰아 치면 429가 나고, 그 회차 그로스 매출이 빈다.
@@ -951,10 +978,22 @@ async function syncRocketGrowth(
       }
 
       for (const order of listOf(r.data)) {
+        // 취소된 주문은 매출이 아니다. 윙 판매자센터의 매출은 취소를 뺀 숫자라,
+        // 여기서 안 빼면 우리 숫자가 항상 더 크게 나온다.
+        const orderStatus = pickStr(order, ['orderStatus', 'status', 'receiptStatus', 'cancelStatus']);
+        if (/CANCEL|취소|REFUND|환불/i.test(orderStatus)) {
+          cancelled += 1;
+          continue;
+        }
         const orderDate = kstDateOf(order?.paidAt ?? order?.paidDate ?? order?.orderedAt ?? order?.createdAt);
         const items = Array.isArray(order?.orderItems)
           ? order.orderItems
           : Array.isArray(order?.items) ? order.items : [order];
+        if (!firstOrderShape) {
+          firstOrderShape = `주문키=${Object.keys(order ?? {}).slice(0, 14).join(',')}` +
+            (items[0] ? ` / 항목키=${Object.keys(items[0]).slice(0, 14).join(',')}` : '');
+          console.info('coupang rg order shape —', firstOrderShape);
+        }
         for (const it of items) {
           const vendorItemId = pickStr(it, ['vendorItemId', 'vendorItemID']);
           const date = kstDateOf(it?.paidAt) || orderDate;
@@ -1021,6 +1060,67 @@ async function syncRocketGrowth(
   const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
   if (err) sum.errors.push(err);
   sum.growth = rows.length;
+  sum.growthCancelled = cancelled;
+}
+
+// ── 로켓창고 재고 동기화 ──────────────────────────────────────
+//
+// 그로스 재고 예측은 로켓창고에 실제로 있는 수량으로 해야 한다. 등록상품의
+// 재고 수치는 판매자 창고 기준이라 그로스에선 의미가 없다. 이 API는 옵션별
+// 판매가능수량(totalOrderableQuantity)과 쿠팡 자체 집계 30일 판매수를 준다.
+// 같은 rg_open_api 계열이라 분당 50회 한도를 함께 지킨다.
+async function syncGrowthInventory(userId: string, creds: CoupangCreds, sum: SyncSummary, deadline: number): Promise<void> {
+  if (!supabase) return;
+
+  const rows: any[] = [];
+  let token = '';
+  let lastCallAt = 0;
+  let complete = false;
+  for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
+    if (outOfTime(deadline, sum)) break;
+    const wait = LIMITS.rgGapMs - (Date.now() - lastCallAt);
+    if (wait > 0) await sleep(wait);
+    lastCallAt = Date.now();
+
+    const r = await coupangCall(creds, 'GET', EP.rgInventory(creds.vendorId), token ? `nextToken=${token}` : '');
+    if (!r.ok) {
+      if (r.authFailed) {
+        sum.authFailed = true;
+        return;
+      }
+      // 그로스를 안 쓰는 판매자는 권한이 없다. 고장이 아니라 해당 없음이다.
+      if (r.status === 403 || r.status === 404) return;
+      sum.errors.push(`그로스 재고: ${r.error}`);
+      return;
+    }
+    for (const inv of listOf(r.data)) {
+      const vendorItemId = pickStr(inv, ['vendorItemId', 'vendorItemID']);
+      if (!vendorItemId) continue;
+      const details = inv?.inventoryDetails ?? inv;
+      const salesMap = inv?.salesCountMap ?? {};
+      rows.push({
+        user_id: userId,
+        vendor_item_id: vendorItemId,
+        product_name: pickStr(inv, ['vendorItemName', 'productName', 'itemName']) || null,
+        external_sku: pickStr(inv, ['externalSkuId', 'externalSku']) || null,
+        orderable_qty: pickNum(details, ['totalOrderableQuantity', 'orderableQuantity'], 0),
+        sales_30d: salesMap?.SALES_COUNT_LAST_THIRTY_DAYS != null ? pickNum(salesMap, ['SALES_COUNT_LAST_THIRTY_DAYS'], 0) : null,
+        synced_at: new Date().toISOString(),
+      });
+    }
+    token = nextTokenOf(r.data);
+    if (!token) {
+      complete = true;
+      break;
+    }
+  }
+
+  // 목록을 끝까지 받았을 때만 통째로 바꾼다. 중간에 끊긴 목록으로 지우면
+  // 멀쩡한 재고 행이 사라져 '품절'로 보인다. 끊겼으면 받은 만큼만 덮어쓴다.
+  if (complete) await supabase.from('coupang_growth_inventory').delete().eq('user_id', userId);
+  const err = await upsertChunked('coupang_growth_inventory', rows, 'user_id,vendor_item_id');
+  if (err) sum.errors.push(err);
+  sum.growthInventory = rows.length;
 }
 
 
@@ -1120,12 +1220,19 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
   if (!supabase) return;
 
   const rows: any[] = [];
+  // 반품요청 조회는 주문번호가 없으면 status가 필수다. 빼면 "OrderId can't be null,
+  // if doesn't pass the parameter status"로 거절된다. 상태별로 한 번씩 돌고
+  // 접수번호로 합친다 — 같은 접수가 상태를 옮겨 가며 두 번 잡히면 안 된다.
+  const seenReceipt = new Set<string>();
+  let returnErrorLogged = false;
+  for (const status of RETURN_STATUSES) {
   for (const [cFrom, cTo] of dateChunks(from, to)) {
     let nextToken = '';
     for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
       if (outOfTime(deadline, sum)) break;
       const query =
-        `createdAtFrom=${cFrom}&createdAtTo=${cTo}&maxPerPage=50` + (nextToken ? `&nextToken=${nextToken}` : '');
+        `createdAtFrom=${cFrom}&createdAtTo=${cTo}&status=${status}&maxPerPage=50` +
+        (nextToken ? `&nextToken=${nextToken}` : '');
       const r = await coupangCallVersioned(
         creds, 'GET',
         v => EP.returnRequests(v, creds.vendorId),
@@ -1136,12 +1243,16 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
           sum.authFailed = true;
           return;
         }
-        sum.errors.push(`반품요청: ${r.error}`);
+        // 상태 하나가 거절돼도 나머지 상태는 계속 받는다. 같은 오류를 상태마다
+        // 네 번 쌓으면 화면이 그 문구로만 가득 찬다.
+        if (!returnErrorLogged) sum.errors.push(`반품요청(${status}): ${r.error}`);
+        returnErrorLogged = true;
         break;
       }
       for (const rr of listOf(r.data)) {
         const receiptId = pickStr(rr, ['receiptId', 'returnDeliveryId', 'cancelId']);
-        if (!receiptId) continue;
+        if (!receiptId || seenReceipt.has(receiptId)) continue;
+        seenReceipt.add(receiptId);
         const items = Array.isArray(rr?.returnItems) ? rr.returnItems : [rr];
         const first = items[0] ?? {};
         rows.push({
@@ -1163,15 +1274,18 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
       if (!nextToken) break;
     }
   }
+  }
 
-  // 교환 — 판매자 귀책이면 반품과 마찬가지로 왕복 배송비가 나간다
-  for (const [cFrom, cTo] of dateChunks(from, to)) {
+  // 교환 — 판매자 귀책이면 반품과 마찬가지로 왕복 배송비가 나간다.
+  // 이 API는 한 번에 7일까지, 날짜는 시각까지 붙인 형식만 받는다.
+  for (const [cFrom, cTo] of dateChunks(from, to, 7)) {
     if (outOfTime(deadline, sum)) break;
     let nextToken = '';
     for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
       if (outOfTime(deadline, sum)) break;
       const query =
-        `createdAtFrom=${cFrom}&createdAtTo=${cTo}&maxPerPage=50` + (nextToken ? `&nextToken=${nextToken}` : '');
+        `createdAtFrom=${cFrom}T00:00:00&createdAtTo=${cTo}T23:59:59&maxPerPage=50` +
+        (nextToken ? `&nextToken=${nextToken}` : '');
       const r = await coupangCall(creds, 'GET', EP.exchangeRequests(creds.vendorId), query);
       if (!r.ok) {
         if (r.authFailed) {
@@ -1335,6 +1449,9 @@ async function syncUser(
     today,
     sum, deadline,
   );
+  if (sum.authFailed) return sum;
+
+  await syncGrowthInventory(userId, creds, sum, deadline);
   if (sum.authFailed) return sum;
 
   await syncSettlements(userId, creds, sum, deadline);
@@ -2310,7 +2427,37 @@ async function handleCosts(userId: string, res: VercelResponse) {
     sold.set(id, (sold.get(id) ?? 0) + (Number(s.quantity) || 0));
   }
 
-  const rows = itemRes.rows.map((it: any) => {
+  // 등록상품 목록이 비어 있어도(상품 수집이 막혔거나 아직 안 돌았거나) 매출·주문에
+  // 이미 나온 옵션은 원가를 넣을 수 있어야 한다. 수강생이 상품 수집이 풀릴 때까지
+  // 기다릴 이유가 없다. 이름·채널은 매출 행에서, 판매가는 모른다.
+  const seenItem = new Set(itemRes.rows.map((it: any) => String(it.vendor_item_id)));
+  const fallbackRows: any[] = [];
+  {
+    const { rows: salesItems } = await selectAll<{ vendor_item_id: string; product_name: string | null; channel: string }>((f, t) =>
+      supabase!
+        .from('coupang_sales_daily')
+        .select('vendor_item_id, product_name, channel')
+        .eq('user_id', userId)
+        .gte('sale_date', addDays(kstToday(), -90))
+        .order('vendor_item_id').range(f, t));
+    const seenFallback = new Set<string>();
+    for (const sale of salesItems) {
+      const id = String(sale.vendor_item_id);
+      if (seenItem.has(id) || seenFallback.has(id)) continue;
+      seenFallback.add(id);
+      fallbackRows.push({
+        vendor_item_id: id,
+        product_name: sale.product_name ?? `옵션 ${id}`,
+        option_name: '',
+        sale_price: null,
+        stock: null,
+        status: '',
+        business_type: sale.channel === 'growth' ? 'growth' : 'marketplace',
+      });
+    }
+  }
+
+  const rows = [...itemRes.rows, ...fallbackRows].map((it: any) => {
     const c = costs.get(String(it.vendor_item_id));
     return {
       vendorItemId: String(it.vendor_item_id),
@@ -2842,6 +2989,8 @@ export interface InventoryRow {
   daysLeft: number | null; // 판매가 없으면 null
   reorderQty: number;      // 리드타임 + 목표 커버 기간을 채우는 데 필요한 수량
   risk: 'out' | 'urgent' | 'watch' | 'ok' | 'idle' | 'excess';
+  /** 쿠팡이 집계한 최근 30일 판매수 (로켓창고 재고 API). 없으면 null */
+  coupangSold30: number | null;
 }
 
 const RISK_ORDER: Record<InventoryRow['risk'], number> = {
@@ -2855,44 +3004,61 @@ export async function computeInventory(
 ): Promise<{ rows: InventoryRow[]; counts: Record<string, number> }> {
   if (!supabase) return { rows: [], counts: {} };
 
+  // 그로스 재고 예측이다. 재고는 로켓창고의 판매가능수량, 판매 속도는 그로스
+  // 주문(결제일 기준)이다. 등록상품의 재고 수치는 판매자 창고 기준이라 그로스에선
+  // 팔리는 재고가 아니다. 상품명은 등록상품이 있으면 거기서, 없으면 주문에서 가져온다
+  // — 상품 수집이 막혀 있어도 이 화면은 돌아가야 한다.
   const today = kstToday();
-  const [itemRes, orderRes] = await Promise.all([
-    selectAll((f, t) => supabase.from('coupang_items')
-      .select('vendor_item_id, product_name, option_name, stock, status').eq('user_id', userId)
+  const [invRes, salesRes, itemRes] = await Promise.all([
+    selectAll((f, t) => supabase
+      .from('coupang_growth_inventory')
+      .select('vendor_item_id, product_name, external_sku, orderable_qty, sales_30d')
+      .eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
     selectAll((f, t) => supabase
-      .from('coupang_orders_daily')
-      .select('vendor_item_id, order_date, quantity')
+      .from('coupang_sales_daily')
+      .select('vendor_item_id, sale_date, quantity, product_name')
       .eq('user_id', userId)
-      .gte('order_date', addDays(today, -27))
-      .order('order_date').range(f, t)),
+      .eq('channel', 'growth')
+      .gte('sale_date', addDays(today, -27))
+      .order('sale_date').range(f, t)),
+    selectAll((f, t) => supabase.from('coupang_items')
+      .select('vendor_item_id, product_name, option_name, status').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
   ]);
 
   const sold7 = new Map<string, number>();
   const sold28 = new Map<string, number>();
+  const nameFromSales = new Map<string, string>();
   const since7 = addDays(today, -6);
-  for (const o of orderRes.rows) {
+  for (const o of salesRes.rows) {
     const id = String(o.vendor_item_id);
     const qty = Number(o.quantity) || 0;
     sold28.set(id, (sold28.get(id) ?? 0) + qty);
-    if (String(o.order_date) >= since7) sold7.set(id, (sold7.get(id) ?? 0) + qty);
+    if (String(o.sale_date) >= since7) sold7.set(id, (sold7.get(id) ?? 0) + qty);
+    if (o.product_name && !nameFromSales.has(id)) nameFromSales.set(id, String(o.product_name));
   }
+  const itemById = new Map<string, any>();
+  for (const it of itemRes.rows) itemById.set(String(it.vendor_item_id), it);
 
   const rows: InventoryRow[] = [];
-  for (const it of itemRes.rows) {
-    const id = String(it.vendor_item_id);
-    const stock = Number(it.stock) || 0;
+  for (const inv of invRes.rows) {
+    const id = String(inv.vendor_item_id);
+    const it = itemById.get(id);
+    const stock = Number(inv.orderable_qty) || 0;
     const s28 = sold28.get(id) ?? 0;
     const s7 = sold7.get(id) ?? 0;
+    const coupang30 = inv.sales_30d === null || inv.sales_30d === undefined ? null : Number(inv.sales_30d) || 0;
 
-    // 28일 판매가 없으면 최근 7일로 본다. 신상품은 28일 평균이 실제보다 낮다.
-    const velocity = s28 > 0 ? s28 / 28 : s7 > 0 ? s7 / 7 : 0;
+    // 28일 판매가 없으면 최근 7일로, 그것도 없으면 쿠팡이 집계한 30일 판매수로 본다.
+    // 신상품은 28일 평균이 실제보다 낮다.
+    const velocity = s28 > 0 ? s28 / 28 : s7 > 0 ? s7 / 7 : coupang30 && coupang30 > 0 ? coupang30 / 30 : 0;
     const daysLeft = velocity > 0 ? stock / velocity : null;
 
     // 재고 0은 판매 속도와 무관하게 품절이다. 오래 품절된 상품일수록 최근 판매가
     // 없어 속도가 0인데, 그걸 '위험 없음'으로 읽으면 기능이 잡아야 할 것을 숨긴다.
     // 판매자가 스스로 판매를 멈춘 옵션만 따로 뺀다.
-    const stopped = /STOP|중지|SUSPEND|종료/i.test(String(it.status ?? ''));
+    const stopped = /STOP|중지|SUSPEND|종료/i.test(String(it?.status ?? ''));
     let risk: InventoryRow['risk'];
     if (stopped) risk = 'idle';
     else if (stock <= 0) risk = 'out';
@@ -2906,8 +3072,8 @@ export async function computeInventory(
 
     rows.push({
       vendorItemId: id,
-      productName: it.product_name ?? '',
-      optionName: it.option_name ?? '',
+      productName: it?.product_name ?? inv.product_name ?? nameFromSales.get(id) ?? (inv.external_sku ? `SKU ${inv.external_sku}` : ''),
+      optionName: it?.option_name ?? '',
       stock,
       sold7: s7,
       sold28: s28,
@@ -2915,6 +3081,7 @@ export async function computeInventory(
       daysLeft,
       reorderQty,
       risk,
+      coupangSold30: coupang30,
     });
   }
 
