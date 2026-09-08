@@ -2180,10 +2180,56 @@ async function relayPreflightOnce(): Promise<{ ok: boolean; reason?: string }> {
   }
 }
 
+/**
+ * 중계 서버가 멈춘 것을 운영자에게 알린다.
+ *
+ * 이 서버 하나가 죽으면 모든 판매자의 수집이 멈춘다. 그런데 크론은 로그에만
+ * 남기고 조용히 끝나서, 누가 화면을 열어 보기 전까지 아무도 모른다. 실제로
+ * 한 시간 반 동안 아무 데이터도 안 들어오는 걸 뒤늦게 알아챘다.
+ *
+ * 매시 메일이 오면 그것대로 못 쓰게 되므로, 멈춘 순간과 돌아온 순간에만 보낸다.
+ * 상태는 app_config에 남긴다 — 이 하나 때문에 표를 새로 만들 이유는 없다.
+ */
+async function notifyRelayState(down: boolean, reason: string): Promise<void> {
+  const to = (process.env.ADMIN_EMAIL || '').trim();
+  if (!supabase) return;
+
+  const { data } = await supabase.from('app_config').select('value').eq('key', 'relay_down_since').maybeSingle();
+  const downSince = (data?.value ?? '').trim();
+
+  // 상태가 그대로면 아무것도 하지 않는다
+  if (down === Boolean(downSince)) return;
+
+  const now = new Date().toISOString();
+  await supabase.from('app_config').upsert(
+    { key: 'relay_down_since', value: down ? now : '', updated_at: now },
+    { onConflict: 'key' },
+  );
+  if (!to) return;
+
+  if (down) {
+    await sendEmail(to, '[훈프로] 쿠팡 중계 서버가 응답하지 않습니다', wrapEmail(
+      '쿠팡 중계 서버 점검 필요',
+      `<p>고정 IP 중계 서버에 닿지 못해 <b>모든 판매자의 쿠팡 수집이 멈췄습니다.</b></p>` +
+        `<p style="color:#ffb454;">${escapeHtml(reason)}</p>` +
+        `<p>서버가 켜져 있어도 중계 프로그램이나 HTTPS가 죽어 있을 수 있습니다. ` +
+        `<code>/health</code> 주소를 열어 <code>{"ok":true}</code>가 나오는지 먼저 확인해주세요.</p>`,
+    ));
+  } else {
+    const minutes = downSince ? Math.round((Date.now() - Date.parse(downSince)) / 60000) : 0;
+    await sendEmail(to, '[훈프로] 쿠팡 중계 서버가 복구됐습니다', wrapEmail(
+      '쿠팡 중계 서버 복구',
+      `<p>중계 서버가 다시 응답합니다. 수집이 이어서 돕니다.</p>` +
+        (minutes > 0 ? `<p>멈춰 있던 시간: 약 ${minutes}분</p>` : ''),
+    ));
+  }
+}
+
 async function cronSync(res: VercelResponse) {
   if (!supabase) return res.status(200).json({ ok: false, reason: 'supabase 미설정' });
 
   const preflight = await relayPreflight();
+  await notifyRelayState(!preflight.ok, preflight.reason ?? '');
   if (!preflight.ok) {
     console.error('coupang cron aborted:', preflight.reason);
     return res.status(200).json({ ok: false, reason: preflight.reason });
