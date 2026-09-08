@@ -567,7 +567,7 @@ export function AnalyzerDashboard() {
       const data = await res.json();
       if (!res.ok || data.error) { setReportMsg({ text: data.error || "저장 실패", ok: false }); return; }
 
-      // 광고비를 날짜별로 남긴다. 이걸 해두면 [쿠팡 매출·정산 → 순이익] 화면이
+      // 광고비를 날짜별로 남긴다. 이걸 해두면 [훈프로 정산AI → 순이익] 화면이
       // 조회 기간에 겹치는 날만 합산해 광고비를 자동으로 채운다.
       let adMsg = " 광고비 기간을 넣으면 순이익 화면에도 자동 반영됩니다.";
       let adOk = true;

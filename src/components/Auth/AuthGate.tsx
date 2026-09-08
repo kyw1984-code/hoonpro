@@ -45,7 +45,7 @@ const TOOLS = [
   { icon: ListOrdered,        label: '순위 추적' },
   { icon: MessageSquareText,  label: '리뷰 분석' },
   { icon: BarChart3,          label: '광고 성과 분석' },
-  { icon: ShoppingBag,        label: '쿠팡 매출·정산' },
+  { icon: ShoppingBag,        label: '훈프로 정산AI' },
   { icon: MessageCircleQuestion, label: '훈프로 코칭AI' },
 ];
 

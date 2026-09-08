@@ -27,7 +27,7 @@ const TAB_LABEL: Record<FeatureTab, string> = {
   ranktracker: '순위 추적',
   review: '리뷰 분석',
   analyzer: '광고 성과 분석',
-  coupang: '쿠팡 매출·정산',
+  coupang: '훈프로 정산AI',
   qa: '훈프로 코칭AI',
   works: '내 작업',
 };

@@ -430,7 +430,7 @@ const TAB_LABELS: { id: string; label: string }[] = [
   { id: 'ranktracker', label: '순위 추적' },
   { id: 'review', label: '리뷰 분석' },
   { id: 'analyzer', label: '광고 성과 분석' },
-  { id: 'coupang', label: '쿠팡 매출·정산' },
+  { id: 'coupang', label: '훈프로 정산AI' },
   { id: 'qa', label: '훈프로 코칭AI' },
   { id: 'works', label: '내 작업' },
 ];
