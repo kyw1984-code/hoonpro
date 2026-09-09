@@ -78,7 +78,6 @@ interface Market {
 // ─── 공통 헬퍼 ────────────────────────────────────────────────────────────────
 const FAV_KEY = 'sourcingFavKeywords';
 const PURCHASE_POPUP_HIDE_KEY = 'purchase_popup_hide_date';
-const GUIDE_HIDE_KEY = 'sourcing_guide_hide'; // 'forever' 또는 'YYYY-MM-DD'(오늘 하루 닫기)
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -149,7 +148,7 @@ export function SourcingFinder() {
   // 관심 키워드 리포트 (크론이 축적한 리뷰 증가 속도)
   const [favReport, setFavReport] = useState<any[] | null>(null);
   const [favReportLoading, setFavReportLoading] = useState(false);
-  // 사용 방법 안내 팝업
+  // 사용 방법 안내 — 상단 버튼을 눌렀을 때만 연다
   const [showGuide, setShowGuide] = useState(false);
   // 주간 소싱 브리핑
   const [briefing, setBriefing] = useState<any | null>(null);
@@ -160,21 +159,9 @@ export function SourcingFinder() {
   // 관심 상품 순위 추적 (목록·관리는 '순위 추적' 탭, 여기선 원클릭 등록만)
   const [rankAdded, setRankAdded] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem(GUIDE_HIDE_KEY);
-      const today = new Date().toISOString().slice(0, 10);
-      if (v !== 'forever' && v !== today) setShowGuide(true);
-    } catch { /* localStorage 접근 실패 시 팝업 생략 */ }
-  }, []);
-
-  const closeGuide = (mode: 'today' | 'forever' | 'plain') => {
-    try {
-      if (mode === 'forever') localStorage.setItem(GUIDE_HIDE_KEY, 'forever');
-      else if (mode === 'today') localStorage.setItem(GUIDE_HIDE_KEY, new Date().toISOString().slice(0, 10));
-    } catch { /* 저장 실패해도 닫기는 동작 */ }
-    setShowGuide(false);
-  };
+  // 들어올 때 자동으로 띄우지 않는다. 상단 [사용 방법] 버튼으로 볼 사람만 본다.
+  // 매번 가리고 시작하면 안내가 아니라 치워야 할 것이 된다.
+  const closeGuide = () => setShowGuide(false);
 
   // 필터/정렬 (키워드)
   const [sortKey, setSortKey] = useState<'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('opportunityScore');
@@ -1530,7 +1517,7 @@ export function SourcingFinder() {
           {showGuide && (
             <>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                onClick={() => closeGuide('plain')}
+                onClick={() => closeGuide()}
                 className="fixed inset-0 z-[80] bg-ink/50 backdrop-blur-sm" />
               <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
                 className="fixed inset-0 m-auto z-[90] w-[92%] max-w-[540px] h-fit max-h-[88vh] bg-paper rounded-panel border border-line shadow-overlay overflow-y-auto flex flex-col">
@@ -1539,7 +1526,7 @@ export function SourcingFinder() {
                     <p className="text-[11px] font-semibold uppercase tracking-widest text-accent">How to use</p>
                     <h3 className="text-xl font-semibold text-ink mt-1.5">훈프로 소싱AI 사용 방법</h3>
                   </div>
-                  <button onClick={() => closeGuide('plain')} className="p-1.5 text-ink-3 hover:text-ink-2 hover:bg-paper-2 rounded-full transition-all">
+                  <button onClick={() => closeGuide()} className="p-1.5 text-ink-3 hover:text-ink-2 hover:bg-paper-2 rounded-full transition-all">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -1563,14 +1550,10 @@ export function SourcingFinder() {
                     이 안내는 상단의 [사용 방법] 버튼으로 언제든 다시 볼 수 있습니다. 소싱→입고→판매까지 1~2개월 — 항상 다음 달 팔릴 상품을 준비하세요.
                   </p>
                 </div>
-                <div className="flex items-center justify-between gap-3 border-t border-line px-7 py-4">
-                  <button onClick={() => closeGuide('forever')}
-                    className="text-[12px] font-medium text-ink-3 underline-offset-2 hover:text-ink-2 hover:underline">
-                    다시 열지 않기
-                  </button>
-                  <button onClick={() => closeGuide('today')}
+                <div className="flex items-center justify-end border-t border-line px-7 py-4">
+                  <button onClick={closeGuide}
                     className="rounded-control bg-ink px-4 py-2 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90">
-                    오늘 하루 닫기
+                    닫기
                   </button>
                 </div>
               </motion.div>

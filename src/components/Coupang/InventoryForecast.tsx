@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Boxes, Loader2, PackageX } from 'lucide-react';
-import { coupangApi, type InventoryResponse, type StockRisk } from '../../lib/coupang';
+import { coupangApi, type InventoryResponse, type InventoryRow, type StockRisk } from '../../lib/coupang';
 
 const RISK_META: Record<StockRisk, { label: string; className: string }> = {
   out: { label: '품절', className: 'border-critical/35 bg-critical-soft text-critical' },
@@ -20,6 +20,8 @@ const RISK_META: Record<StockRisk, { label: string; className: string }> = {
   idle: { label: '판매 없음', className: 'border-line bg-paper text-ink-3' },
 };
 
+type InvSortKey = 'stock' | 'sold7' | 'velocity' | 'daysLeft' | 'reorderQty';
+
 export function InventoryForecast() {
   const [leadTime, setLeadTime] = useState(14);
   const [cover, setCover] = useState(30);
@@ -28,6 +30,7 @@ export function InventoryForecast() {
   // 보기: 부족한 것만(기본) / 전체 / 카드 하나(품절·7일·14일·과잉). 카드를 누르면
   // 그 상태만 남고, 다시 누르면 기본으로 돌아간다.
   const [view, setView] = useState<'risky' | 'all' | StockRisk>('risky');
+  const [sort, setSort] = useState<{ key: InvSortKey; dir: 'asc' | 'desc' } | null>(null);
   const onlyRisk = view === 'risky';
 
   // 입력 한 글자마다 요청이 나가면 '14'를 '21'로 고치는 동안 세 번 조회되고,
@@ -66,6 +69,34 @@ export function InventoryForecast() {
 
   const risky = data.rows.filter(r => r.risk === 'out' || r.risk === 'urgent' || r.risk === 'watch');
   const shown = view === 'risky' ? risky : view === 'all' ? data.rows : data.rows.filter(r => r.risk === view);
+  // 서버가 준 순서(위험한 것 먼저)를 기본으로 두고, 사용자가 고른 열이 있으면 그걸로 다시 정렬한다.
+  // 남은 일수는 null(판매 속도 0)이 섞여 있어 숫자로만 비교하면 뒤죽박죽이 된다 — 항상 끝으로 보낸다.
+  const sorted = sort
+    ? [...shown].sort((a, b) => {
+        const pick = (r: InventoryRow) => (sort.key === 'daysLeft' ? r.daysLeft : Number(r[sort.key] ?? 0));
+        const av = pick(a);
+        const bv = pick(b);
+        if (av === null && bv === null) return 0;
+        if (av === null) return 1;
+        if (bv === null) return -1;
+        return sort.dir === 'asc' ? av - bv : bv - av;
+      })
+    : shown;
+  const toggleSort = (key: InvSortKey) =>
+    setSort(cur => (cur && cur.key === key ? { key, dir: cur.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: 'desc' }));
+  const SortTh = ({ k, label, className = 'px-3' }: { k: InvSortKey; label: string; className?: string }) => (
+    <th className={`${className} py-2.5 text-right font-medium`}>
+      <button
+        onClick={() => toggleSort(k)}
+        className={`inline-flex items-center gap-0.5 hover:text-ink ${sort?.key === k ? 'text-ink' : ''}`}
+        title="누르면 이 열로 정렬합니다. 다시 누르면 방향이 바뀝니다"
+      >
+        {label}
+        <span className="text-[10px]">{sort?.key === k ? (sort.dir === 'desc' ? '▼' : '▲') : '⇅'}</span>
+      </button>
+    </th>
+  );
+
   const pick = (risk: StockRisk) => setView(cur => (cur === risk ? 'risky' : risk));
 
   return (
@@ -138,16 +169,16 @@ export function InventoryForecast() {
               <thead>
                 <tr className="border-b border-line text-[11.5px] text-ink-3">
                   <th className="px-4 py-2.5 text-left font-medium">상품</th>
-                  <th className="px-3 py-2.5 text-right font-medium">로켓창고 재고</th>
-                  <th className="px-3 py-2.5 text-right font-medium">7일 판매</th>
-                  <th className="px-3 py-2.5 text-right font-medium">일 평균</th>
-                  <th className="px-3 py-2.5 text-right font-medium">남은 일수</th>
-                  <th className="px-3 py-2.5 text-right font-medium">입고 권장</th>
+                  <SortTh k="stock" label="로켓창고 재고" />
+                  <SortTh k="sold7" label="7일 판매" />
+                  <SortTh k="velocity" label="일 평균" />
+                  <SortTh k="daysLeft" label="남은 일수" />
+                  <SortTh k="reorderQty" label="입고 권장" />
                   <th className="px-4 py-2.5 text-right font-medium">상태</th>
                 </tr>
               </thead>
               <tbody>
-                {shown.map(r => {
+                {sorted.map(r => {
                   const meta = RISK_META[r.risk];
                   return (
                     <tr key={r.vendorItemId} className="border-b border-line/60 last:border-0">
