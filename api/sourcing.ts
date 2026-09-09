@@ -1043,14 +1043,84 @@ async function fetchSearchProducts(keyword: string, decoded: any): Promise<{
   return { products, remaining };
 }
 
-async function checkRankNow(keyword: string, productId: string, decoded: any): Promise<{
-  rankChecked: boolean; currentRank?: number | null; error?: string; remaining?: number | null;
+/**
+ * 검색 결과 2페이지 이후를 가져온다.
+ *
+ * 1페이지(60개)에 없다고 "순위 없음"이라고 답하면, 이제 막 시작해 80위쯤 있는
+ * 판매자에게는 아무 정보도 주지 못한다. 순위가 낮을수록 그 숫자가 더 필요하다.
+ *
+ * 다만 한 페이지가 Bright Data 호출 1건이라 실제 비용이 든다. 찾으면 즉시 멈추고,
+ * 페이지마다 일일 한도를 따로 센다 — 한 번 확인에 5배를 쓰면서 1회로 세면
+ * 한도가 비용을 막는 구실을 못 한다.
+ */
+async function fetchSearchPage(keyword: string, page: number, decoded: any): Promise<{
+  products: ParsedProduct[] | null;
+  /** 왜 멈췄는지. "한도에 걸려 그만둔 것"과 "결과가 거기서 끝난 것"은 전혀 다른 말이다 */
+  stop?: "limit" | "error";
+}> {
+  const cacheKey = `cp:v5:${keyword.replace(/\s+/g, "")}:p${page}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached && cached.ageMs < 3 * 3600 * 1000) return { products: cached.payload?.products || null };
+  if (!BRIGHTDATA_API_TOKEN) return { products: null, stop: "error" };
+
+  if (!decoded?.isAdmin && supabase) {
+    try {
+      const limit = (await loadLimits()).rank;
+      const { data, error } = await supabase.rpc("increment_feature_usage", {
+        p_user_id: decoded.userId, p_date: kstToday(), p_feature: "rank", p_limit: limit,
+      });
+      if (!error && data?.exceeded) return { products: null, stop: "limit" };
+    } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
+  }
+
+  const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60&page=${page}`;
+  const result = await fetchViaUnlocker(url, 1, 20000, { userId: decoded?.userId ?? null, feature: "rank-check-deep" });
+  if (!result.ok) return { products: null, stop: "error" };
+  const parsed = parseCoupangSearch(result.html!);
+  // 결과가 없으면 거기가 끝이다 — 이건 실패가 아니라 정상 종료다
+  if (parsed.products.length === 0) return { products: [] };
+  if (parsed.products.length >= 5) await cacheSet(cacheKey, { products: parsed.products, totalCount: parsed.totalCount });
+  return { products: parsed.products };
+}
+
+/** 한 번에 훑을 최대 페이지 수. 60 × 5 = 300위까지 본다 */
+const RANK_MAX_PAGES = 5;
+
+async function checkRankNow(keyword: string, productId: string, decoded: any, deep = true): Promise<{
+  rankChecked: boolean;
+  currentRank?: number | null;
+  error?: string;
+  remaining?: number | null;
+  /** 몇 위까지 훑었는지. 못 찾았을 때 "N위 밖"이라고 정확히 말하기 위한 값 */
+  searchedTo?: number;
+  /** 끝까지 못 보고 중간에 멈췄으면 그 이유. "300위 밖"과 "여기까지밖에 못 봤다"는 다른 말이다 */
+  stoppedBy?: "limit" | "error";
 }> {
   const r = await fetchSearchProducts(keyword, decoded);
   if (!r.products) return { rankChecked: false, error: r.error, remaining: r.remaining };
+
+  // 자연 순위는 광고를 뺀 목록에서의 자리다. 페이지를 이어 붙여도 같은 규칙으로 센다.
   const organic = r.products.filter(p => !p.isAd);
-  const idx = organic.findIndex(p => p.productId === productId);
-  return { rankChecked: true, currentRank: idx >= 0 ? idx + 1 : null, remaining: r.remaining };
+  let idx = organic.findIndex(p => p.productId === productId);
+  if (idx >= 0) {
+    return { rankChecked: true, currentRank: idx + 1, remaining: r.remaining, searchedTo: organic.length };
+  }
+  if (!deep) return { rankChecked: true, currentRank: null, remaining: r.remaining, searchedTo: organic.length };
+
+  // 1페이지에 없으면 뒤 페이지를 이어서 본다. 찾는 즉시 멈춘다.
+  const all = [...organic];
+  let stoppedBy: "limit" | "error" | undefined;
+  for (let page = 2; page <= RANK_MAX_PAGES; page++) {
+    const more = await fetchSearchPage(keyword, page, decoded);
+    if (more.stop) { stoppedBy = more.stop; break; }   // 한도에 걸렸거나 수집에 실패했다
+    if (!more.products || more.products.length === 0) break;   // 결과가 거기서 끝났다
+    all.push(...more.products.filter(p => !p.isAd));
+    idx = all.findIndex(p => p.productId === productId);
+    if (idx >= 0) {
+      return { rankChecked: true, currentRank: idx + 1, remaining: r.remaining, searchedTo: all.length };
+    }
+  }
+  return { rankChecked: true, currentRank: null, remaining: r.remaining, searchedTo: all.length, stoppedBy };
 }
 
 async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded: any) {
