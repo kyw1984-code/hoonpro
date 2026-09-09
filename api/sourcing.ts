@@ -1087,7 +1087,12 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
     if (!keyword || !productId) return res.status(400).json({ error: "keyword와 product가 필요합니다." });
     const now = await checkRankNow(keyword, productId, decoded);
     if (!now.rankChecked) return res.status(502).json({ error: now.error || "순위 확인 실패" });
-    return res.status(200).json(now);
+    // 판매자가 묻는 건 순위이기도 하고 "몇 페이지에 있나"이기도 하다.
+    // 쿠팡 검색 화면은 한 쪽에 36개다 — 우리가 긁는 60개가 아니라 구매자가 보는 화면이 기준이다.
+    const page = typeof now.currentRank === "number" && now.currentRank > 0
+      ? Math.ceil(now.currentRank / SEARCH_PAGE_SIZE)
+      : null;
+    return res.status(200).json({ ...now, page });
   }
 
   if (action === "remove") {

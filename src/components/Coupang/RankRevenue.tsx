@@ -9,10 +9,10 @@
  * 구간은 계산하지 않고 왜 못 하는지 그대로 말한다.
  */
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Info, ListOrdered, Loader2, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, Info, ListOrdered, Loader2 } from 'lucide-react';
 import { coupangApi, won, type RankRevenueItem } from '../../lib/coupang';
-import { getToken } from '../../lib/auth';
 import { RankRevenueChart } from './RankRevenueChart';
+import { MyProductRanks } from './MyProductRanks';
 
 const STATUS_TEXT: Record<RankRevenueItem['status'], string> = {
   ok: '',
@@ -45,130 +45,6 @@ function targetRanks(current: number, observedBest: number): number[] {
     .filter(n => n >= observedBest && n >= 1 && current - n >= 2 && !seen.has(n) && (seen.add(n), true))
     .sort((a, b) => b - a)
     .slice(0, 3);
-}
-
-/** 키워드 하나로 본 내 상품의 노출 순위와 그 상품의 매출 */
-interface KeywordHit {
-  productId: string;
-  productName: string;
-  rank: number | null;
-  page: number | null;
-  rankWithAds: number | null;
-  isAd: boolean;
-  price: number | null;
-  optionCount: number;
-  quantity: number;
-  salesAmount: number;
-}
-
-/**
- * 키워드로 지금 순위 찾아보기.
- *
- * 추적 목록에 등록해 두지 않은 키워드도 그 자리에서 확인할 수 있어야 한다.
- * "이 키워드로 검색하면 내 상품이 몇 위에 있고, 그 상품이 얼마나 팔렸나"가
- * 한 화면에 있어야 다음 할 일이 정해진다.
- *
- * 매출은 상품 단위로 합쳐 보여준다. 순위는 옵션이 아니라 상품에 매겨지므로,
- * 옵션별로 흩어 놓으면 "이 키워드가 내게 얼마를 벌어 주나"에 답할 수 없다.
- */
-function KeywordLookup({ days = 30 }: { days?: number }) {
-  const [keyword, setKeyword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<{ keyword: string; items: KeywordHit[]; scanned: number } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const kw = keyword.trim();
-    if (!kw || loading) return;
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      const res = await fetch(
-        `/api/sourcing?type=rank&action=keyword-lookup&keyword=${encodeURIComponent(kw)}&days=${days}`,
-        { headers: { Authorization: `Bearer ${getToken()}` } },
-      );
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || '순위를 확인하지 못했습니다.');
-      if (data.error) throw new Error(data.error);
-      setResult({ keyword: data.keyword, items: data.items ?? [], scanned: data.scanned ?? 0 });
-    } catch (err: any) {
-      setError(err?.message ?? '순위를 확인하지 못했습니다.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="rounded-panel border border-line bg-paper px-5 py-4">
-      <h3 className="text-sm font-semibold text-ink">키워드로 지금 순위 찾아보기</h3>
-      <p className="mt-1 text-[12px] leading-relaxed text-ink-2">
-        키워드를 넣으면 쿠팡에서 지금 검색해, <b className="text-ink">내가 파는 상품</b>이 몇 위·몇 페이지에 있는지와
-        그 상품의 최근 {days}일 매출을 함께 보여줍니다. 매출은 옵션이 아니라 상품 단위로 합칩니다.
-      </p>
-
-      <form onSubmit={run} className="mt-3 flex flex-wrap gap-2">
-        <input
-          value={keyword}
-          onChange={e => setKeyword(e.target.value)}
-          placeholder="예: 여성 집업"
-          className="min-w-0 flex-1 rounded-control border border-line bg-paper-2 px-3 py-2 text-[13px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
-        />
-        <button
-          type="submit"
-          disabled={loading || !keyword.trim()}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-control border border-accent bg-accent-soft px-4 py-2 text-[12.5px] font-semibold text-ink disabled:opacity-45"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4 text-accent" />}
-          {loading ? '찾는 중' : '순위 확인'}
-        </button>
-      </form>
-
-      {error && <p className="mt-2.5 text-[12.5px] text-critical">{error}</p>}
-
-      {result && result.items.length === 0 && (
-        <p className="mt-3 rounded-card border border-line bg-paper-2 px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-2">
-          "{result.keyword}" 검색 결과 {result.scanned}개를 훑었지만 내 상품이 없었습니다.
-          60위 밖이거나, 이 키워드로는 노출되지 않고 있습니다.
-        </p>
-      )}
-
-      {result && result.items.length > 0 && (
-        <div className="mt-3 flex flex-col gap-2">
-          {result.items.map(it => (
-            <div key={it.productId} className="rounded-card border border-line bg-paper-2 px-3.5 py-3">
-              <p className="truncate text-[12.5px] font-medium text-ink" title={it.productName}>{it.productName}</p>
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                <Cell label="노출순위" value={it.rank === null ? '60위 밖' : `${it.rank}위`} strong />
-                <Cell label="노출페이지" value={it.page === null ? '-' : `${it.page}페이지`} strong />
-                <Cell
-                  label={`최근 ${days}일 매출`}
-                  value={it.salesAmount > 0 ? won(it.salesAmount) : '판매 없음'}
-                  sub={it.quantity > 0 ? `${it.quantity.toLocaleString('ko-KR')}개 · 옵션 ${it.optionCount}개` : undefined}
-                />
-              </div>
-              {it.isAd && (
-                <p className="mt-1.5 text-[11.5px] text-ink-3">
-                  이 키워드에서 광고로도 노출되고 있습니다 (광고 포함 {it.rankWithAds}번째).
-                </p>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Cell({ label, value, sub, strong = false }: { label: string; value: string; sub?: string; strong?: boolean }) {
-  return (
-    <div className={`rounded-control px-2.5 py-2 ${strong ? 'bg-accent-soft' : 'border border-line'}`}>
-      <p className="text-[11px] text-ink-3">{label}</p>
-      <p className={`mt-0.5 text-[13.5px] font-semibold tabular-nums ${strong ? 'text-accent' : 'text-ink'}`}>{value}</p>
-      {sub && <p className="mt-0.5 text-[10.5px] leading-tight text-ink-3">{sub}</p>}
-    </div>
-  );
 }
 
 export function RankRevenue() {
@@ -206,7 +82,7 @@ export function RankRevenue() {
     const ownOnly = hint === 'no-own-product';
     return (
       <div className="flex flex-col gap-4">
-        <KeywordLookup />
+        <MyProductRanks />
         <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">
         <ListOrdered className="mb-4 h-12 w-12 opacity-20" />
         <p className="text-sm font-semibold">
@@ -236,7 +112,7 @@ export function RankRevenue() {
 
   return (
     <div className="flex flex-col gap-4">
-      <KeywordLookup />
+      <MyProductRanks />
       <div className="flex items-start gap-2 rounded-panel border border-line bg-paper px-5 py-4">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
         <p className="text-[12.5px] leading-relaxed text-ink-2">

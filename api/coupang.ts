@@ -2594,6 +2594,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'inquiry-reply': return await handleInquiryReply(userId, req, res);
       case 'rank-revenue': return await handleRankRevenue(userId, res);
       case 'my-rates': return await handleMyRates(userId, req, res);
+      case 'my-products': return await handleMyProducts(userId, req, res);
       case 'price-rules': return await handlePriceRules(userId, res);
       case 'price-rule-save': return await handlePriceRuleSave(userId, req, res);
       case 'price-apply': return await handlePriceApply(userId, req, res);
@@ -4569,6 +4570,85 @@ export function slope(xs: number[], ys: number[]): number | null {
   }
   if (den === 0) return null;
   return num / den;
+}
+
+// ── 내가 파는 상품 (상품 단위) ────────────────────────────────
+//
+// 순위는 옵션이 아니라 상품에 매겨진다. 그래서 순위를 보려는 화면은 옵션이 아니라
+// 상품 목록이어야 한다. 옵션 20개짜리 상품이 목록에 20줄로 늘어서면 "어느 상품의
+// 순위를 볼지" 고르는 일 자체가 어려워진다.
+//
+// 노출상품ID는 등록상품과 발주서 두 곳에서 모은다 — 상품 상세에 노출상품ID가 안
+// 오는 계정이 있어 한쪽만 보면 연결이 끊긴다.
+async function handleMyProducts(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (!supabase) return res.status(500).json({ error: 'Supabase가 설정되지 않았습니다.' });
+  const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 180);
+  const to = kstToday();
+  const from = addDays(to, -(days - 1));
+
+  const byProduct = new Map<string, { name: string; vendorItems: Set<string> }>();
+  const link = (pid: any, vid: any, name?: any) => {
+    const p = String(pid ?? '').trim();
+    const v = String(vid ?? '').trim();
+    if (!p || !v) return;
+    const cur = byProduct.get(p) ?? { name: '', vendorItems: new Set<string>() };
+    cur.vendorItems.add(v);
+    if (!cur.name && name) cur.name = String(name);
+    byProduct.set(p, cur);
+  };
+
+  const [itemRes, orderRes] = await Promise.all([
+    selectAll<any>((f, t) => supabase!.from('coupang_items')
+      .select('vendor_item_id, product_id, product_name').eq('user_id', userId)
+      .order('vendor_item_id').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_orders_daily')
+      .select('vendor_item_id, product_id, product_name').eq('user_id', userId)
+      .gte('order_date', from).order('order_date').range(f, t)),
+  ]);
+  for (const r of itemRes.rows) link(r.product_id, r.vendor_item_id, r.product_name);
+  for (const r of orderRes.rows) link(r.product_id, r.vendor_item_id, r.product_name);
+
+  if (byProduct.size === 0) {
+    return res.status(200).json({
+      from, to, products: [],
+      reason: '노출상품ID를 아직 찾지 못했습니다. 수집이 끝난 뒤 다시 확인해주세요.',
+    });
+  }
+
+  // 매출은 옵션 단위로 쌓이므로 상품 단위로 되접는다
+  const allVids = [...new Set([...byProduct.values()].flatMap(v => [...v.vendorItems]))];
+  const salesByVid = new Map<string, { qty: number; amount: number }>();
+  const { rows: sales } = await selectAll<any>((f, t) => supabase!.from('coupang_sales_daily')
+    .select('vendor_item_id, quantity, sales_amount').eq('user_id', userId)
+    .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t));
+  for (const r of sales) {
+    const v = String(r.vendor_item_id);
+    if (!allVids.includes(v)) continue;
+    const cur = salesByVid.get(v) ?? { qty: 0, amount: 0 };
+    cur.qty += Number(r.quantity) || 0;
+    cur.amount += Number(r.sales_amount) || 0;
+    salesByVid.set(v, cur);
+  }
+
+  const products = [...byProduct.entries()].map(([productId, v]) => {
+    let qty = 0;
+    let amount = 0;
+    for (const vid of v.vendorItems) {
+      const s = salesByVid.get(vid);
+      if (s) { qty += s.qty; amount += s.amount; }
+    }
+    return {
+      productId,
+      productName: v.name || `상품 ${productId}`,
+      optionCount: v.vendorItems.size,
+      quantity: qty,
+      salesAmount: amount,
+    };
+  });
+  // 많이 파는 상품이 위로. 순위를 확인할 이유가 가장 큰 상품이다.
+  products.sort((a, b) => b.salesAmount - a.salesAmount);
+
+  return res.status(200).json({ from, to, days, products });
 }
 
 // ── 판매자 실측 비율 ──────────────────────────────────────────

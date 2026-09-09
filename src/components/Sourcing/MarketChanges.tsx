@@ -61,7 +61,7 @@ export function MarketChanges({ keyword }: { keyword: string }) {
     if (!keyword) return;
     setData(null);
     setError(null);
-    fetch(`/api/sourcing?type=rank&action=changes&keyword=${encodeURIComponent(keyword)}`, {
+    fetch(`/api/sourcing?type=rankwatch&action=changes&keyword=${encodeURIComponent(keyword)}`, {
       headers: { Authorization: `Bearer ${getToken()}` },
     })
       .then(async r => {
@@ -72,7 +72,16 @@ export function MarketChanges({ keyword }: { keyword: string }) {
       .catch(e => setError(e?.message ?? '시장 변화를 불러오지 못했습니다.'));
   }, [keyword]);
 
-  if (error) return null;   // 부가 정보다. 실패했다고 분석 화면을 어지럽히지 않는다
+  // 조용히 사라지면 "이 기능이 없는 것"과 구별이 안 된다. 실제로 잘못된 주소로
+  // 부르고 있었는데 화면에서 아무 일도 안 일어나 한동안 몰랐다. 크게 떠들지 않되
+  // 한 줄은 남긴다.
+  if (error) {
+    return (
+      <p className="rounded-card border border-line bg-paper-2 px-4 py-2.5 text-[11.5px] text-ink-3">
+        시장 변화를 불러오지 못했습니다: {error}
+      </p>
+    );
+  }
   if (!data) {
     return (
       <div className="flex items-center gap-2 rounded-card border border-line bg-paper-2 p-4 text-ink-3">
