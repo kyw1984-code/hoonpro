@@ -89,11 +89,16 @@ export function LimitsAdmin({ showToast }: { showToast: (msg: string) => void })
   }
 
   // 입력값 기준으로 예상 원가를 즉시 다시 계산한다 (저장 전에도 영향이 보이게)
-  const projected = data.features.map(f => ({
-    ...f,
-    editedLimit: limits[f.key] ?? f.limit,
-    editedWorstKrw: Math.round((limits[f.key] ?? f.limit) * 30 * f.unitKrw),
-  }));
+  const projected = data.features.map(f => {
+    const editedLimit = limits[f.key] ?? f.limit;
+    return {
+      ...f,
+      editedLimit,
+      // 중지(0)는 원가가 0, 무제한(음수)은 상한이 없어 합계에 넣을 수 없다
+      editedWorstKrw: editedLimit > 0 ? Math.round(editedLimit * 30 * f.unitKrw) : 0,
+    };
+  });
+  const anyUnlimited = projected.some(f => f.editedLimit < 0);
   const worstTotal = projected.reduce((s, f) => s + f.editedWorstKrw, 0);
   // 모든 항목을 매일 한도까지 쓰는 사람은 사실상 없다. 판단 기준은 '평균'이고,
   // 실사용은 대체로 한도의 15~20% 수준이라 18%를 기준선으로 쓴다.
@@ -120,7 +125,8 @@ export function LimitsAdmin({ showToast }: { showToast: (msg: string) => void })
       </div>
 
       <p className="text-[12.5px] leading-relaxed text-ink-2">
-        0으로 두면 <b className="text-ink">무제한</b>입니다. 아래 &quot;최대 월 원가&quot;는 한 사람이 매일 한도를 끝까지
+        <b className="text-ink">0으로 두면 그 기능을 쓸 수 없습니다</b> (기능을 내릴 때 씁니다).
+        무제한으로 열려면 옆의 [무제한]을 켜세요. 아래 &quot;최대 월 원가&quot;는 한 사람이 매일 한도를 끝까지
         썼을 때의 금액이고, 실제 평균 사용량은 보통 한도의 15~20% 수준입니다.
         저장 후 최대 1분 뒤부터 서버에 반영됩니다.
       </p>
@@ -145,7 +151,10 @@ export function LimitsAdmin({ showToast }: { showToast: (msg: string) => void })
         <div className="rounded-card border border-line bg-paper p-4">
           <p className="text-[11.5px] text-ink-3">이론상 최대 (모든 항목 매일 한도까지)</p>
           <p className="mt-1 text-[22px] font-bold tabular-nums text-ink-2">{won(worstTotal)}</p>
-          <p className="mt-0.5 text-[11px] text-ink-3">요금의 {worstPct}% · 실제로는 거의 나오지 않는 값</p>
+          <p className="mt-0.5 text-[11px] text-ink-3">
+            요금의 {worstPct}% · 실제로는 거의 나오지 않는 값
+            {anyUnlimited && ' · 무제한 항목은 상한이 없어 이 합계에서 빠져 있습니다'}
+          </p>
         </div>
       </div>
 
@@ -173,11 +182,21 @@ export function LimitsAdmin({ showToast }: { showToast: (msg: string) => void })
                   <input
                     type="number"
                     min={0}
-                    value={f.editedLimit}
+                    disabled={f.editedLimit < 0}
+                    value={f.editedLimit < 0 ? '' : f.editedLimit}
+                    placeholder="무제한"
                     onChange={e => setLimits(l => ({ ...l, [f.key]: Math.max(0, Number(e.target.value) || 0) }))}
-                    className={`w-[86px] min-h-[40px] rounded-control border bg-paper-2 px-2.5 text-right text-[14px] tabular-nums text-ink ${changed ? 'border-accent' : 'border-line'}`}
+                    className={`w-[86px] min-h-[40px] rounded-control border bg-paper-2 px-2.5 text-right text-[14px] tabular-nums text-ink disabled:opacity-45 ${changed ? 'border-accent' : 'border-line'}`}
                   />
                   <span className="text-[12.5px] text-ink-2">회/일</span>
+                  <label className="flex cursor-pointer items-center gap-1 text-[12px] text-ink-2">
+                    <input
+                      type="checkbox"
+                      checked={f.editedLimit < 0}
+                      onChange={e => setLimits(l => ({ ...l, [f.key]: e.target.checked ? -1 : f.defaultLimit }))}
+                    />
+                    무제한
+                  </label>
                   <button
                     type="button"
                     onClick={() => setLimits(l => ({ ...l, [f.key]: f.defaultLimit }))}
@@ -201,7 +220,7 @@ export function LimitsAdmin({ showToast }: { showToast: (msg: string) => void })
                   <span className="ml-1 text-ink-3">{f.measured ? `(30일 실측 ${f.units30d.toLocaleString()}회)` : '(추정)'}</span>
                 </span>
                 <span className="text-[12.5px] font-semibold tabular-nums text-ink">
-                  {f.editedLimit === 0 ? '무제한' : `최대 월 ${won(f.editedWorstKrw)}`}
+                  {f.editedLimit < 0 ? '무제한' : f.editedLimit === 0 ? '사용 중지' : `최대 월 ${won(f.editedWorstKrw)}`}
                 </span>
               </div>
             </div>

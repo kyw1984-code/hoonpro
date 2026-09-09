@@ -1639,9 +1639,10 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
 }
 
 // 기능별 일일 한도 — 관리자 화면에서 조정한다 (app_config.feature_limits).
+// 0 = 사용 중지, 음수 = 무제한.
 // 기본값은 api/usage.ts와 같은 값을 쓴다. 번들이 분리되어 공유 모듈 대신 중복해 둔다.
 const DEFAULT_FEATURE_LIMITS: Record<string, number> = {
-  image: 40, qa: 100, sourcing: 60, reviews: 20, rank: 40, analyze: 40, general: 200,
+  image: 0, qa: 100, sourcing: 60, reviews: 20, rank: 100, analyze: 40, general: 200,
 };
 
 let limitCache: { at: number; value: Record<string, number> } | null = null;
@@ -1655,7 +1656,7 @@ async function loadLimits(): Promise<Record<string, number>> {
     const parsed = data?.value ? JSON.parse(data.value) : {};
     const merged = { ...DEFAULT_FEATURE_LIMITS };
     for (const [k, v] of Object.entries(parsed)) {
-      if (k in merged && Number.isFinite(Number(v))) merged[k] = Math.max(0, Math.round(Number(v)));
+      if (k in merged && Number.isFinite(Number(v))) merged[k] = Math.max(-1, Math.round(Number(v)));
     }
     limitCache = { at: Date.now(), value: merged };
     return merged;

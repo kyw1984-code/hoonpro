@@ -609,7 +609,7 @@ const PRICE_KRW = 39800;
 const LIMIT_META: {
   key: string; label: string; hint: string; fallbackKrw: number; calls: string[];
 }[] = [
-  { key: 'image', label: '이미지 생성', hint: '썸네일·상세페이지 이미지 1장', fallbackKrw: 7,
+  { key: 'image', label: '이미지 생성', hint: '썸네일·상세페이지 이미지 1장 (내린 기능 — 0이면 사용 중지)', fallbackKrw: 7,
     calls: ['thumbnail-image', 'detail-image'] },
   { key: 'qa', label: '훈프로 코칭AI', hint: '질문 1건', fallbackKrw: 5,
     calls: ['qa-ask'] },
@@ -617,8 +617,9 @@ const LIMIT_META: {
     calls: ['sourcing-products', 'sourcing-cron'] },
   { key: 'reviews', label: '리뷰 수집·요약', hint: '상품 1개', fallbackKrw: 12,
     calls: ['sourcing-reviews', 'sourcing-review-summary'] },
-  { key: 'rank', label: '순위 확인', hint: '조회 1회', fallbackKrw: 3,
-    calls: ['rank-check'] },
+  // 깊은 조회는 검색 페이지를 넘길 때마다 1회씩 센다. 한 번 확인에 최대 5회.
+  { key: 'rank', label: '순위 확인', hint: '검색 페이지 1장 (깊은 조회는 1번에 최대 5장)', fallbackKrw: 3,
+    calls: ['rank-check', 'rank-check-deep'] },
   { key: 'analyze', label: '경쟁상품 분석', hint: '분석 1회', fallbackKrw: 3,
     calls: ['competitor-analyze', 'competitor-estimate'] },
   { key: 'inquiry', label: '고객문의 답변 초안', hint: '문의 1건', fallbackKrw: 2,
@@ -627,8 +628,9 @@ const LIMIT_META: {
   { key: 'general', label: '기타 AI 작업', hint: '기획·문구·이미지 검수 등', fallbackKrw: 1, calls: [] },
 ];
 
+// 0 = 사용 중지, 음수 = 무제한
 const LIMIT_DEFAULTS: Record<string, number> = {
-  image: 40, qa: 100, sourcing: 60, reviews: 20, rank: 40, analyze: 40, inquiry: 60, general: 200,
+  image: 0, qa: 100, sourcing: 60, reviews: 20, rank: 100, analyze: 40, inquiry: 60, general: 200,
 };
 
 /** api_calls.feature → 한도 키 (매핑이 없으면 general) */
@@ -649,8 +651,9 @@ async function handleLimits(req: VercelRequest, res: VercelResponse) {
     for (const m of LIMIT_META) {
       const raw = (input as any)[m.key];
       const n = Number(raw);
-      // 0 = 무제한. 값이 없으면 기본값을 그대로 저장해 화면과 DB가 어긋나지 않게 한다.
-      saved[m.key] = Number.isFinite(n) ? Math.min(100000, Math.max(0, Math.round(n))) : LIMIT_DEFAULTS[m.key];
+      // 0 = 사용 중지, 음수 = 무제한(-1로 모음).
+      // 값이 없으면 기본값을 그대로 저장해 화면과 DB가 어긋나지 않게 한다.
+      saved[m.key] = Number.isFinite(n) ? Math.min(100000, Math.max(-1, Math.round(n))) : LIMIT_DEFAULTS[m.key];
     }
     const { error } = await supabase.from('app_config').upsert({
       key: 'feature_limits', value: JSON.stringify(saved), updated_at: new Date().toISOString(),
@@ -685,7 +688,7 @@ async function handleLimits(req: VercelRequest, res: VercelResponse) {
 
   const features = LIMIT_META.map((m) => {
     const limit = Number.isFinite(Number(stored[m.key]))
-      ? Math.max(0, Math.round(Number(stored[m.key])))
+      ? Math.max(-1, Math.round(Number(stored[m.key])))
       : LIMIT_DEFAULTS[m.key];
     const unit = units[m.key] || 0;
     const krw30d = (costUsd[m.key] || 0) * usdKrw;
@@ -703,7 +706,9 @@ async function handleLimits(req: VercelRequest, res: VercelResponse) {
       units30d: unit,
       cost30dKrw: Math.round(krw30d),
       // 한 사람이 한도를 매일 다 쓴다고 가정한 월 원가
-      worstCaseKrw: Math.round(limit * 30 * unitKrw),
+      // 사용 중지(0)는 원가가 0이고, 무제한(음수)은 상한 자체가 없다.
+      // 음수를 그대로 곱하면 원가가 마이너스로 나와 합계를 깎아 먹는다.
+      worstCaseKrw: limit > 0 ? Math.round(limit * 30 * unitKrw) : 0,
     };
   });
 

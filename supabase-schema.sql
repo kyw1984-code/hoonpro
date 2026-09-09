@@ -477,8 +477,17 @@ as $$
 declare
   v_count int;
 begin
-  -- 한도 0 이하는 무제한으로 취급 (코칭AI 등)
-  if p_limit <= 0 then
+  -- 한도 0 = 사용 중지. 운영에서 기능을 내릴 때 쓴다.
+  -- (예전에는 0을 무제한으로 취급했다. 기능을 끄려고 0을 넣으면 정반대로
+  --  무제한이 되는 함정이라, 0은 차단, 무제한은 음수로 뒤집었다.)
+  -- 사용량은 올리지 않는다 — 막은 호출을 세면 실측 단가의 분모가 부풀어
+  -- 관리자 화면의 원가 계산이 틀어진다.
+  if p_limit = 0 then
+    return json_build_object('exceeded', true, 'remaining', 0, 'disabled', true);
+  end if;
+
+  -- 음수 = 무제한 (코칭AI 등)
+  if p_limit < 0 then
     insert into feature_usage (user_id, date, feature, call_count)
     values (p_user_id, p_date, p_feature, 1)
     on conflict (user_id, date, feature)
@@ -508,9 +517,10 @@ begin
 end;
 $$;
 
--- 기능별 한도 기본값 (관리자 화면에서 조정. 0 = 무제한)
+-- 기능별 한도 기본값 (관리자 화면에서 조정. 0 = 사용 중지, 음수 = 무제한)
+-- image(썸네일·상세페이지 이미지)는 0 — 기능을 내렸다.
 insert into app_config (key, value) values
-  ('feature_limits', '{"image":40,"qa":100,"sourcing":60,"reviews":20,"rank":40,"analyze":40,"inquiry":60,"general":200}')
+  ('feature_limits', '{"image":0,"qa":100,"sourcing":60,"reviews":20,"rank":100,"analyze":40,"inquiry":60,"general":200}')
 on conflict (key) do nothing;
 
 -- ═════════════════════════════════════════════════════════════

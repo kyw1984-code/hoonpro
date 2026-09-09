@@ -25,6 +25,7 @@ interface FeatureLimit {
   limit: number;
   used: number;
   remaining: number; // -1 = 무제한
+  disabled?: boolean; // 한도 0 = 내린 기능
 }
 
 /** 초기화까지 남은 시간 — "6시간 20분 후" */
@@ -77,8 +78,10 @@ export function UsageLimits() {
 
   if (failed) return null;
 
+  // 내린 기능(한도 0)은 아예 빼고 보여준다. "0회 남음"으로 두면 오늘만 못 쓰는 것처럼
+  // 읽혀서, 내일 다시 와도 안 되는 이유를 설명할 길이 없다.
   const rows = (data?.features ?? [])
-    .filter(f => LABEL[f.feature])
+    .filter(f => LABEL[f.feature] && !(f.disabled || f.limit === 0))
     .sort((a, b) => ORDER.indexOf(a.feature) - ORDER.indexOf(b.feature));
 
   return (

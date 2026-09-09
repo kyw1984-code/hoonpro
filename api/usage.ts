@@ -8,15 +8,18 @@ const supabase = createClient(
 );
 
 // ─── 기능별 일일 한도 ─────────────────────────────────────────
-// 관리자 화면에서 조정한다 (app_config.feature_limits). 0 = 무제한.
+// 관리자 화면에서 조정한다 (app_config.feature_limits).
+//   0  = 사용 중지 (기능을 내릴 때)
+//   음수 = 무제한
 // 한도는 '최악의 사용자'가 적자를 만들지 않는 선이고, 평균 사용자는
 // 그 15~20%만 쓰므로 실제 평균 원가는 요금의 10~15% 수준이 된다.
 export const DEFAULT_FEATURE_LIMITS: Record<string, number> = {
-  image: 40,     // 썸네일·상세페이지 이미지 (low 품질 기준 장당 약 7원)
+  image: 0,      // 썸네일·상세페이지 이미지 — 내린 기능이라 0(사용 중지)
   qa: 100,       // 코칭AI — 사실상 무제한, 스크립트 남용만 차단
   sourcing: 60,  // 소싱 상품 수집
   reviews: 20,   // 리뷰 수집 + GPT 요약
-  rank: 40,      // 순위 확인
+  rank: 100,     // 순위 확인 — 한 번 확인에 검색 페이지를 최대 5장까지 넘기므로
+                 //             페이지 단위로 세면 40회로는 8번밖에 못 본다
   analyze: 40,   // 경쟁상품·이미지 분석
   inquiry: 60,   // 쿠팡 고객문의 답변 초안 (건당 약 2원)
   general: 200,  // 기획·문구 생성, 이미지 검수 등 내부 호출 (한 건 처리에 수십 번 쓰인다)
@@ -32,7 +35,8 @@ async function loadLimits(): Promise<Record<string, number>> {
     const parsed = data?.value ? JSON.parse(data.value) : {};
     const merged = { ...DEFAULT_FEATURE_LIMITS };
     for (const [k, v] of Object.entries(parsed)) {
-      if (k in merged && Number.isFinite(Number(v))) merged[k] = Math.max(0, Math.round(Number(v)));
+      // -1 이하는 전부 무제한(-1)으로 모은다. 0은 살려 둬야 '사용 중지'가 된다
+      if (k in merged && Number.isFinite(Number(v))) merged[k] = Math.max(-1, Math.round(Number(v)));
     }
     limitCache = { at: Date.now(), value: merged };
     return merged;
@@ -244,8 +248,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           feature,
           limit,
           used,
-          // 관리자와 한도 0(무제한)은 잔여를 -1로 표시한다
-          remaining: decoded.isAdmin || limit <= 0 ? -1 : Math.max(0, limit - used),
+          // 관리자와 무제한(음수)은 잔여를 -1로. 한도 0은 사용 중지라 잔여가 0이다
+          remaining: decoded.isAdmin || limit < 0 ? -1 : Math.max(0, limit - used),
+          disabled: !decoded.isAdmin && limit === 0,
         };
       }),
     });
@@ -296,6 +301,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   if (error) return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
+
+  // 한도 0은 '오늘 다 썼다'가 아니라 '내린 기능'이다. 내일 다시 오라고 하면 거짓말이 된다
+  if (limit === 0) {
+    return res.status(403).json({ error: '이 기능은 현재 제공하지 않습니다.', disabled: true });
+  }
 
   if (data?.exceeded) {
     return res.status(429).json({

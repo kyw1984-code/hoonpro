@@ -4404,7 +4404,8 @@ async function consumeQuota(userId: string, feature: string, fallback: number): 
   try {
     const { data } = await supabase.from('app_config').select('value').eq('key', 'feature_limits').maybeSingle();
     const parsed = data?.value ? JSON.parse(data.value) : {};
-    if (Number.isFinite(Number(parsed?.[feature]))) limit = Math.max(0, Math.round(Number(parsed[feature])));
+    // 0은 사용 중지, 음수는 무제한 — 둘 다 살려서 넘긴다
+    if (Number.isFinite(Number(parsed?.[feature]))) limit = Math.max(-1, Math.round(Number(parsed[feature])));
   } catch {
     /* 설정을 못 읽으면 기본값으로 간다 */
   }
