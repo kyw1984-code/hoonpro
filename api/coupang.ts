@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { isDisabled, parseLimits } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
@@ -4403,9 +4404,8 @@ async function consumeQuota(userId: string, feature: string, fallback: number): 
   let limit = fallback;
   try {
     const { data } = await supabase.from('app_config').select('value').eq('key', 'feature_limits').maybeSingle();
-    const parsed = data?.value ? JSON.parse(data.value) : {};
     // 0은 사용 중지, 음수는 무제한 — 둘 다 살려서 넘긴다
-    if (Number.isFinite(Number(parsed?.[feature]))) limit = Math.max(-1, Math.round(Number(parsed[feature])));
+    limit = parseLimits(data?.value)[feature] ?? fallback;
   } catch {
     /* 설정을 못 읽으면 기본값으로 간다 */
   }
@@ -4466,6 +4466,10 @@ async function handleInquiryDraft(userId: string, req: VercelRequest, res: Verce
 
   const quota = await consumeQuota(userId, 'inquiry', 60);
   if (!quota.ok) {
+    // 한도 0은 내린 기능이다. "내일 다시" 오라고 하면 거짓말이 된다
+    if (isDisabled(quota.limit)) {
+      return res.status(403).json({ error: '답변 초안은 현재 제공하지 않습니다.', disabled: true });
+    }
     return res.status(429).json({ error: `답변 초안은 하루 ${quota.limit}건까지입니다. 내일 다시 이용해주세요.` });
   }
 

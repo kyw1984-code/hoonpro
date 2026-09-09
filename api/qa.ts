@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { buildSellerContext } from '../lib/coupang-context.js';
@@ -372,12 +373,11 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
   // 관리자 원가 현황에서 볼 수 있게 한다 (한도 0 = 무제한).
   if (!decoded.isAdmin) {
     const today = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10); // KST 자정 기준
-    let qaLimit = 100;
+    let qaLimit = DEFAULT_FEATURE_LIMITS.qa;
     try {
       const { data: cfg } = await supabase
         .from('app_config').select('value').eq('key', 'feature_limits').maybeSingle();
-      const parsed = cfg?.value ? JSON.parse(cfg.value) : {};
-      if (Number.isFinite(Number(parsed.qa))) qaLimit = Math.max(0, Math.round(Number(parsed.qa)));
+      qaLimit = parseLimits(cfg?.value).qa;
     } catch { /* 설정 조회 실패 시 기본값 */ }
 
     const { data: usage } = await supabase.rpc('increment_feature_usage', {
@@ -386,6 +386,10 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
       p_feature: 'qa',
       p_limit: qaLimit,
     });
+    // 한도 0은 '오늘 다 썼다'가 아니라 '내린 기능'이다
+    if (isDisabled(qaLimit)) {
+      return res.status(403).json({ error: '코칭AI는 현재 제공하지 않습니다.', disabled: true });
+    }
     if (usage?.exceeded) {
       return res.status(429).json({ error: `코칭AI는 하루 ${qaLimit}회까지 이용할 수 있습니다. 내일 다시 이용해주세요.` });
     }

@@ -136,7 +136,12 @@ export function LimitsAdmin({ showToast }: { showToast: (msg: string) => void })
         <div className="rounded-card border border-line bg-paper p-4">
           <p className="text-[11.5px] text-ink-3">예상 평균 원가 (1인 / 월)</p>
           <p className="mt-1 text-[22px] font-bold tabular-nums text-ink">{won(avgTotal)}</p>
-          <p className="mt-0.5 text-[11px] text-ink-3">한도의 {Math.round(AVG_RATIO * 100)}%를 쓴다고 가정</p>
+          <p className="mt-0.5 text-[11px] text-ink-3">
+            한도의 {Math.round(AVG_RATIO * 100)}%를 쓴다고 가정
+            {/* 판단 기준으로 쓰는 숫자다. 무제한 항목이 빠진 걸 여기서 밝히지 않으면
+                기능을 열어 줄수록 마진이 좋아지는 것처럼 보인다 */}
+            {anyUnlimited && ' · 무제한 항목 제외'}
+          </p>
         </div>
         <div className="rounded-card border border-line bg-paper p-4">
           <p className="text-[11.5px] text-ink-3">요금({won(data.priceKrw)}) 대비 · 목표 20% 이하</p>

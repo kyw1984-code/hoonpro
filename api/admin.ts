@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { clampLimit, DEFAULT_FEATURE_LIMITS } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
@@ -628,10 +629,8 @@ const LIMIT_META: {
   { key: 'general', label: '기타 AI 작업', hint: '기획·문구·이미지 검수 등', fallbackKrw: 1, calls: [] },
 ];
 
-// 0 = 사용 중지, 음수 = 무제한
-const LIMIT_DEFAULTS: Record<string, number> = {
-  image: 0, qa: 100, sourcing: 60, reviews: 20, rank: 100, analyze: 40, inquiry: 60, general: 200,
-};
+// 0 = 사용 중지, 음수 = 무제한 (기본값은 src/lib/featureLimits.ts 한 곳에 있다)
+const LIMIT_DEFAULTS = DEFAULT_FEATURE_LIMITS;
 
 /** api_calls.feature → 한도 키 (매핑이 없으면 general) */
 function limitKeyOfCall(feature: string): string {
@@ -649,11 +648,9 @@ async function handleLimits(req: VercelRequest, res: VercelResponse) {
     }
     const saved: Record<string, number> = {};
     for (const m of LIMIT_META) {
-      const raw = (input as any)[m.key];
-      const n = Number(raw);
-      // 0 = 사용 중지, 음수 = 무제한(-1로 모음).
-      // 값이 없으면 기본값을 그대로 저장해 화면과 DB가 어긋나지 않게 한다.
-      saved[m.key] = Number.isFinite(n) ? Math.min(100000, Math.max(-1, Math.round(n))) : LIMIT_DEFAULTS[m.key];
+      // 빈 값은 숫자로 치지 않고 기본값으로 돌린다 — Number(null)은 0이라
+      // 값을 안 보낸 항목이 '사용 중지'로 저장돼 기능이 통째로 꺼진다.
+      saved[m.key] = clampLimit((input as any)[m.key], LIMIT_DEFAULTS[m.key]);
     }
     const { error } = await supabase.from('app_config').upsert({
       key: 'feature_limits', value: JSON.stringify(saved), updated_at: new Date().toISOString(),
@@ -687,9 +684,7 @@ async function handleLimits(req: VercelRequest, res: VercelResponse) {
   }
 
   const features = LIMIT_META.map((m) => {
-    const limit = Number.isFinite(Number(stored[m.key]))
-      ? Math.max(-1, Math.round(Number(stored[m.key])))
-      : LIMIT_DEFAULTS[m.key];
+    const limit = clampLimit(stored[m.key], LIMIT_DEFAULTS[m.key]);
     const unit = units[m.key] || 0;
     const krw30d = (costUsd[m.key] || 0) * usdKrw;
     // 표본이 너무 적으면 실측을 믿지 않고 초기 추정치를 쓴다

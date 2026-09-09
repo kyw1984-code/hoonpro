@@ -177,6 +177,8 @@ function ProductRow({ product, days }: { product: MyProduct; days: number }) {
     setLoading(true);
     setError(null);
     setResult(null);
+    // 확인 시각도 함께 지운다. 결과만 지우면 오류 옆에 옛 "3분 전"이 남는다
+    setCheckedAt(null);
     try {
       const res = await fetch(
         `/api/sourcing?type=rankwatch&action=check&keyword=${encodeURIComponent(kw)}&product=${encodeURIComponent(product.productId)}`,
