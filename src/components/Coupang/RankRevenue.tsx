@@ -86,7 +86,7 @@ function KeywordLookup({ days = 30 }: { days?: number }) {
     setResult(null);
     try {
       const res = await fetch(
-        `/api/sourcing?type=rank&action=keyword-lookup&keyword=${encodeURIComponent(kw)}&days=${days}`,
+        `/api/sourcing?type=rankwatch&action=keyword-lookup&keyword=${encodeURIComponent(kw)}&days=${days}`,
         { headers: { Authorization: `Bearer ${getToken()}` } },
       );
       const data = await res.json();
