@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { parseSet, medianUnitPrice } from "../src/lib/setProduct.js";
 import { buildSellerProfile, sellerFit, blendScore, type SellerProfile } from "../src/lib/sellerFit.js";
 import { detectOffCategory, scoreReasons } from "../src/lib/productRelevance.js";
 import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from "../src/lib/featureLimits.js";
@@ -469,9 +470,31 @@ async function handleTrend(req: VercelRequest, res: VercelResponse) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 주간 소싱 브리핑 — 다음 달 시즌 키워드 중 기회점수 상위 10개 (7일 캐시)
 // ═══════════════════════════════════════════════════════════════════════════════
-async function handleBriefing(_req: VercelRequest, res: VercelResponse) {
+/**
+ * 몇 달 뒤를 준비할 것인가.
+ *
+ * 예전에는 무조건 '다음 달'이었다. 그런데 중국 소싱이면 입고까지 28일이 걸리고
+ * 상세페이지·검수에 2주가 더 든다. 다음 달 키워드를 지금 보면 이미 늦는다.
+ * 연동 설정에 저장한 리드타임을 그대로 쓴다.
+ */
+async function briefingLeadMonths(userId: string | undefined): Promise<number> {
+  if (!supabase || !userId) return 1;
+  try {
+    const { data } = await supabase
+      .from("coupang_accounts").select("lead_time_days").eq("user_id", userId).maybeSingle();
+    const lead = Number(data?.lead_time_days);
+    if (!Number.isFinite(lead) || lead <= 0) return 1;
+    // 리드타임 + 준비 2주를 달 수로 올림. 국내 사입(3~7일)이면 1달, 중국(28일)이면 2달.
+    return Math.min(4, Math.max(1, Math.ceil((lead + 14) / 30)));
+  } catch {
+    return 1;
+  }
+}
+
+async function handleBriefing(_req: VercelRequest, res: VercelResponse, decoded?: any) {
   const now = new Date();
-  const targetMonth = (now.getMonth() + 1) % 12 + 1; // 다음 달 (판매 기준)
+  const lead = await briefingLeadMonths(decoded?.userId);
+  const targetMonth = ((now.getMonth() + lead) % 12) + 1;
   const cacheKey = `briefing:v1:${targetMonth}`;
   const cached = await cacheGet(cacheKey);
   if (cached && cached.ageMs < 7 * 24 * 3600 * 1000) {
@@ -514,7 +537,8 @@ async function handleBriefing(_req: VercelRequest, res: VercelResponse) {
     const t = trendByKw[p.keyword];
     return { ...p, peakMonths: t?.peakMonths || [], seasonality: t?.seasonality || 0 };
   });
-  const payload = { month: targetMonth, generatedAt: new Date().toISOString(), items };
+  // 몇 달 앞을 보고 있는지 밝힌다. 리드타임에 따라 달라지므로 화면이 설명해야 한다.
+  const payload = { month: targetMonth, leadMonths: lead, generatedAt: new Date().toISOString(), items };
   await cacheSet(cacheKey, payload);
   return res.status(200).json(payload);
 }
@@ -1610,7 +1634,10 @@ function scoreProducts(
     const demandScore = Math.min(100, Math.round(Math.log10(p.reviewCount + 1) * 25));
     // 진입 용이성: 로켓(직매입) 직접경쟁 여부
     const entryEase = p.deliveryType === "rocket" ? 15 : p.deliveryType === "jet" ? 55 : 80;
-    const price = p.productPrice;
+    // 2종 세트 41,200원과 단품 20,000원은 낱개로 보면 거의 같은 값이다.
+    // 세트를 모르고 비교하면 가격 위에 얹은 것이 전부 어긋난다.
+    const set = parseSet(p.productName, p.productPrice);
+    const price = set.unitPrice;
     const priceFit =
       price >= 15000 && price < 40000 ? 100
       : price >= 40000 && price < 90000 ? 80
@@ -1649,6 +1676,8 @@ function scoreProducts(
 
     return {
       ...p, isBrand, offCategory,
+      setCount: set.count,
+      unitPrice: set.unitPrice,
       calculated: {
         demandScore, entryEase, priceFit,
         opportunityScore: finalScore,
@@ -1677,7 +1706,16 @@ function scoreProducts(
   }
   const entryVerdict = (["Bad", "Fair", "Good", "Excellent"] as const)[verdictLevel];
 
+  // 세트가 섞인 시장에서는 표시가 평균이 실제 체감가와 다르다. 낱개 중앙값을 함께 준다.
+  const unitMedian = medianUnitPrice(
+    organic.map(o => ({ productName: o.productName, productPrice: o.productPrice })),
+  );
+
   const market = {
+    unitMedianPrice: unitMedian,
+    setRatio: organic.length > 0
+      ? Math.round((organic.filter(o => parseSet(o.productName, o.productPrice).count > 1).length / organic.length) * 100)
+      : 0,
     totalOnPage: total,
     rocketCount,
     jetCount,
@@ -1807,11 +1845,46 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
   // 분석했다는 것 자체가 관심의 표시다. ★를 따로 누르게 하지 않고 여기서 등록한다.
   await autoTrackKeyword(decoded?.userId, keyword);
 
+  // 이 키워드에 내 상품이 이미 있나, 몇 위인가. 새 상품을 찾는 것만큼이나
+  // "내 시장이 지금 어떤가"를 보러 오는 일이 많다.
+  const mine = await findMyProducts(decoded?.userId, withVelocity);
+
   return res.status(200).json({
     keyword, products: withVelocity, market, servedFrom,
+    ...(mine.length > 0 ? { myProducts: mine } : {}),
     ...(remaining !== null ? { remaining } : {}),
     ...(parseDebug ? { parseDebug } : {}),
   });
+}
+
+/**
+ * 검색 결과에 내 상품이 있나.
+ *
+ * 쿠팡 노출상품ID로 맞춘다. 이름으로 맞추면 비슷한 상품명에 잘못 걸린다.
+ * 등록상품과 발주서 두 곳에서 모으는 이유는 상품 상세에 노출상품ID가 안 오는
+ * 계정이 있어서다 — 한쪽만 보면 연결이 끊긴다.
+ */
+async function findMyProducts(
+  userId: string | undefined,
+  products: { productId: string; productName: string; rank: number; isAd: boolean }[],
+): Promise<{ productId: string; productName: string; rank: number; isAd: boolean }[]> {
+  if (!supabase || !userId || products.length === 0) return [];
+  try {
+    const ids = products.map(p => String(p.productId));
+    const [itemRes, orderRes] = await Promise.all([
+      supabase.from("coupang_items").select("product_id").eq("user_id", userId).in("product_id", ids),
+      supabase.from("coupang_orders_daily").select("product_id").eq("user_id", userId).in("product_id", ids),
+    ]);
+    const mineIds = new Set<string>();
+    for (const r of itemRes.data ?? []) if (r.product_id) mineIds.add(String(r.product_id));
+    for (const r of orderRes.data ?? []) if (r.product_id) mineIds.add(String(r.product_id));
+    if (mineIds.size === 0) return [];
+    return products
+      .filter(p => mineIds.has(String(p.productId)))
+      .map(p => ({ productId: p.productId, productName: p.productName, rank: p.rank, isAd: p.isAd }));
+  } catch {
+    return [];   // 못 찾아도 분석 결과는 그대로 보여준다
+  }
 }
 
 /** 판매자 프로필을 뽑는 기간. 너무 길면 지난 시즌 상품이 섞이고, 짧으면 표본이 모자란다 */
@@ -2422,7 +2495,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (type === "keywords") return handleKeywords(req, res);
   if (type === "trend") return handleTrend(req, res);
-  if (type === "briefing") return handleBriefing(req, res);
+  if (type === "briefing") return handleBriefing(req, res, decoded);
   if (type === "products") return handleProducts(req, res, decoded);
   if (type === "reviews") return handleReviews(req, res, decoded);
   if (type === "favorites") return handleFavorites(req, res, decoded);

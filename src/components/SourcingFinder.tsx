@@ -51,6 +51,10 @@ interface Product {
   estimated1688Price?: number;
   /** 검색에 섞여 든 다른 상품군 (음반·도서 등). 없으면 null */
   offCategory: { category: string; label: string; matched: string } | null;
+  /** 몇 개들이 세트인가. 단품이면 1 */
+  setCount?: number;
+  /** 낱개 가격 — 세트를 감안한 값 */
+  unitPrice?: number;
   calculated: {
     demandScore: number;
     entryEase: number;
@@ -66,7 +70,18 @@ interface Product {
   };
 }
 
+interface MyProductHit {
+  productId: string;
+  productName: string;
+  rank: number;
+  isAd: boolean;
+}
+
 interface Market {
+  /** 세트를 낱개로 환산한 중앙값 — 세트가 섞인 시장은 표시가 평균이 체감가와 다르다 */
+  unitMedianPrice?: number;
+  /** 세트 상품 비중 (%) */
+  setRatio?: number;
   totalOnPage: number;
   rocketCount: number;
   jetCount: number;
@@ -169,6 +184,7 @@ export function SourcingFinder() {
   const [prodError, setProdError] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [market, setMarket] = useState<Market | null>(null);
+  const [myProducts, setMyProducts] = useState<MyProductHit[]>([]);
   const [servedFrom, setServedFrom] = useState<string>('fresh');
   const [prodDebug, setProdDebug] = useState<string | null>(null);
   const [rocketFilter, setRocketFilter] = useState<'all' | 'general' | 'jet' | 'rocket'>('all');
@@ -381,6 +397,7 @@ export function SourcingFinder() {
         estimated1688Price: savedPrices[p.productId] || undefined,
       })));
       setMarket(data.market || null);
+      setMyProducts(Array.isArray(data.myProducts) ? data.myProducts : []);
       setServedFrom(data.servedFrom || 'fresh');
       setProdDebug(data.parseDebug || null);
       if (typeof data.remaining === 'number') {
@@ -514,7 +531,9 @@ export function SourcingFinder() {
               이번 주 추천 소싱 키워드 TOP {briefing.items.length}
             </p>
             <p className="mb-3 text-[12px] text-ink-2">
-              <b className="text-ink">{briefing.month}월 판매</b>를 준비할 키워드 중 검색량·경쟁·계절성 기준 상위입니다. 누르면 바로 쿠팡 분석이 실행됩니다.
+              <b className="text-ink">{briefing.month}월 판매</b>를 준비할 키워드 중 검색량·경쟁·계절성 기준 상위입니다.
+              {briefing.leadMonths > 1 && <> 대표님 리드타임({briefing.leadMonths}개월 앞)에 맞춰 잡았습니다.</>}
+              {' '}누르면 바로 쿠팡 분석이 실행됩니다.
             </p>
             <div className="flex gap-2 flex-wrap">
               {briefing.items.map((it: any) => (
@@ -937,6 +956,12 @@ export function SourcingFinder() {
                         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">평균 판매가</p>
                         <p className="text-xl font-semibold text-caution">{market.avgPrice.toLocaleString()}원</p>
                         <p className="mt-1 text-[12px] text-ink-3">{market.minPrice.toLocaleString()} ~ {market.maxPrice.toLocaleString()}원</p>
+                        {/* 세트가 섞인 시장은 표시가가 체감가와 다르다. 2종 세트 41,200원은 낱개 20,600원이다 */}
+                        {(market.setRatio ?? 0) >= 20 && (market.unitMedianPrice ?? 0) > 0 && (
+                          <p className="mt-1 text-[11.5px] text-accent">
+                            세트 {market.setRatio}% · 낱개 {market.unitMedianPrice!.toLocaleString()}원
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -947,6 +972,27 @@ export function SourcingFinder() {
                         <SourcingProfit avgPrice={market.avgPrice} product={selectedProduct} />
                       </div>
                       {/* 이 키워드를 전에도 본 적 있으면 그 사이 무엇이 달라졌는지 짚어 준다 */}
+                      {/* 새 상품을 찾는 것만큼이나 "내 시장이 지금 어떤가"를 보러 온다 */}
+                      {myProducts.length > 0 && (
+                        <div className="rounded-card border border-accent-line bg-accent-soft p-4">
+                          <p className="mb-2 text-[12px] font-semibold text-accent">
+                            이 키워드에 내 상품 {myProducts.length}개가 있습니다
+                          </p>
+                          <div className="flex flex-col gap-1.5">
+                            {myProducts.map(m => (
+                              <div key={m.productId} className="flex flex-wrap items-baseline gap-x-2 text-[12px]">
+                                <span className="min-w-0 flex-1 truncate text-ink" title={m.productName}>{m.productName}</span>
+                                <span className="shrink-0 font-semibold tabular-nums text-ink">
+                                  {m.rank}위{m.isAd && <span className="ml-1 font-normal text-caution">광고</span>}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
+                            위 목록의 경쟁 상품과 나란히 보시면 무엇이 다른지 알 수 있습니다.
+                          </p>
+                        </div>
+                      )}
                       <MarketChanges keyword={activeKeyword ?? ""} />
                     </div>
                   </div>
@@ -1088,6 +1134,11 @@ export function SourcingFinder() {
                               </span>
                             </div>
                             {/* 숫자만 있으면 왜 Great인지 알 수 없어 믿기 어렵다. 세 축을 한 줄씩 말한다 */}
+                            {(product.setCount ?? 1) > 1 && (
+                              <p className="mb-1.5 text-[11px] text-accent">
+                                {product.setCount}종 세트 · 낱개 {product.unitPrice?.toLocaleString()}원
+                              </p>
+                            )}
                             {product.calculated.reasons?.length > 0 && (
                               <ul className="mb-3 flex flex-col gap-0.5">
                                 {product.calculated.reasons.map(r => (
