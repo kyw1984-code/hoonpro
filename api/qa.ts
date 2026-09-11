@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { HOWTO } from '../src/lib/howto.js';
 import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
@@ -274,6 +275,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return await handleAsk(req, res, decoded);
       case 'feedback':
         return await handleFeedback(req, res, decoded);
+      case 'suggest':
+        return await handleSuggest(req, res, decoded);
+      case 'suggest-list':
+        if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+        return await handleSuggestList(req, res);
+      case 'suggest-update':
+        if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+        return await handleSuggestUpdate(req, res);
       case 'status': {
         const enabled = await getQaEnabled();
         return res.status(200).json({ enabled, canUse: isAdmin || enabled });
@@ -714,4 +723,234 @@ async function handleLogs(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: '로그를 불러오지 못했습니다.' });
   }
   return res.status(200).json({ logs: data || [] });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 건의·문의 창구
+//
+// 소통 창구가 아예 없었다. 전화나 카카오 상담은 받는 순간 응답 시간이
+// 기대치가 되고, 그게 곧 제품 만들 시간을 먹는다. 대신 글로 받는다.
+//
+// 들어온 글은 유형을 나눈다. "엑셀로 못 내려받나요"는 이미 되는 일이므로
+// 그 자리에서 답하고 끝낸다. 그게 운영자에게까지 오면 낭비다. 운영자는
+// 진짜 건의만 본다.
+//
+// 답을 지어내지 않는 것이 이 기능의 전부다. 없는 기능을 있다고 하면
+// 구독자는 그걸 찾아 헤매다 신뢰를 잃는다. 확실할 때만 답하고, 아니면
+// "전달했습니다"로 끝낸다.
+// ═══════════════════════════════════════════════════════════════
+
+/** 한 사람이 하루에 보낼 수 있는 건의 수 — 같은 사람이 수십 건을 쏟아내면 목록이 못 쓰게 된다 */
+const SUGGEST_DAILY_MAX = 10;
+const SUGGEST_MAX_LEN = 2000;
+
+/** 분류 결과 */
+interface Triage {
+  kind: 'bug' | 'improve' | 'howto' | 'praise' | 'other';
+  summary: string;
+  severity: 'high' | 'normal' | 'low';
+  /** 이미 되는 일이라 그 자리에서 답할 수 있으면 그 답. 아니면 null */
+  reply: string | null;
+}
+
+/**
+ * 화면별 사용 방법을 분류 근거로 쓴다.
+ *
+ * 구독자가 읽는 안내와 AI가 답하는 근거가 같아야 한다. 따로 쓰면 둘이
+ * 어긋나고, 어긋나면 화면에 적힌 것과 다른 답이 나간다.
+ */
+function howtoContext(): string {
+  return Object.entries(HOWTO)
+    .map(([id, g]) => {
+      const steps = g.steps.map(s => `- ${s.title}: ${s.desc}`).join('\n');
+      return `## ${g.title} (${id})\n${g.lead}\n${steps}${g.caution ? `\n주의: ${g.caution}` : ''}`;
+    })
+    .join('\n\n');
+}
+
+const TRIAGE_PROMPT = `당신은 쿠팡 셀러용 SaaS '훈프로'의 고객 의견을 분류합니다.
+
+[제품이 지금 할 수 있는 일]
+{{HOWTO}}
+
+[분류 규칙]
+kind는 다음 중 하나입니다.
+- howto: 이미 되는 일인데 쓰는 법을 몰라서 물은 것
+- bug: 되어야 하는데 안 된다고 말한 것
+- improve: 새 기능이나 개선 요청
+- praise: 칭찬이나 감사
+- other: 위 어디에도 안 맞는 것
+
+severity는 영향 범위로 정합니다.
+- high: 결제 실패, 데이터 손실, 로그인 불가, 숫자가 틀림처럼 돈이나 신뢰에 직접 닿는 것
+- normal: 기능이 불편하거나 일부가 안 되는 것
+- low: 사소한 표기, 취향, 칭찬
+
+summary는 같은 얘기끼리 묶기 위한 한 줄입니다. 12자 안팎의 명사구로 쓰세요.
+예: "재고 알림 과다", "엑셀 내보내기 요청", "순위 확인 느림"
+
+reply는 kind가 howto이고 위 [제품이 지금 할 수 있는 일]에 답이 분명히 있을 때만 씁니다.
+- 어느 화면의 무엇을 누르면 되는지 구체적으로 쓰세요.
+- 자료에 없으면 반드시 null로 두세요. 추측해서 답하지 마세요.
+- 없는 기능을 있다고 하면 사용자가 찾아 헤매다 신뢰를 잃습니다.
+- 2~3문장, 존댓말.
+
+JSON만 출력하세요:
+{"kind":"...","summary":"...","severity":"...","reply":"..." 또는 null}`;
+
+/** 분류에 실패해도 접수는 된다. 분류는 나중에 사람이 할 수 있지만 글을 잃으면 끝이다 */
+const TRIAGE_FALLBACK: Triage = { kind: 'other', summary: '', severity: 'normal', reply: null };
+
+async function triageSuggestion(body: string, area: string): Promise<Triage> {
+  const apiKey = getOpenAiKey();
+  if (!apiKey) return TRIAGE_FALLBACK;
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: TEXT_MODEL,
+        messages: [
+          { role: 'system', content: TRIAGE_PROMPT.replace('{{HOWTO}}', howtoContext()) },
+          { role: 'user', content: `[화면] ${area || '(모름)'}\n[내용]\n${body}` },
+        ],
+        temperature: 0.2,
+        response_format: { type: 'json_object' },
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const data: any = await res.json();
+    if (!res.ok) return TRIAGE_FALLBACK;
+
+    const parsed = JSON.parse(data?.choices?.[0]?.message?.content ?? '{}');
+    const kinds = ['bug', 'improve', 'howto', 'praise', 'other'];
+    const sevs = ['high', 'normal', 'low'];
+    const reply = typeof parsed.reply === 'string' ? parsed.reply.trim() : '';
+
+    return {
+      kind: kinds.includes(parsed.kind) ? parsed.kind : 'other',
+      summary: typeof parsed.summary === 'string' ? parsed.summary.slice(0, 60) : '',
+      severity: sevs.includes(parsed.severity) ? parsed.severity : 'normal',
+      // howto가 아닌데 답을 단 경우는 버린다. 버그나 요청에 "이렇게 하세요"라고
+      // 답하면 고쳐 달라는 사람에게 우회로를 안내하는 꼴이 된다.
+      reply: parsed.kind === 'howto' && reply.length > 0 ? reply.slice(0, 600) : null,
+    };
+  } catch {
+    return TRIAGE_FALLBACK;
+  }
+}
+
+async function handleSuggest(req: VercelRequest, res: VercelResponse, decoded: any) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const body = String(req.body?.body ?? '').trim();
+  const area = String(req.body?.area ?? '').trim().slice(0, 40);
+  if (body.length < 5) return res.status(400).json({ error: '조금만 더 자세히 적어주세요.' });
+  if (body.length > SUGGEST_MAX_LEN) {
+    return res.status(400).json({ error: `${SUGGEST_MAX_LEN}자 안으로 적어주세요.` });
+  }
+
+  // 같은 사람이 하루에 수십 건을 쏟아내면 목록이 못 쓰게 된다
+  const since = new Date(Date.now() - 24 * 3600_000).toISOString();
+  const { count } = await supabase
+    .from('feedback')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', decoded.userId)
+    .gte('created_at', since);
+  if ((count ?? 0) >= SUGGEST_DAILY_MAX) {
+    return res.status(429).json({ error: '오늘 보낼 수 있는 의견을 다 쓰셨습니다. 내일 다시 보내주세요.' });
+  }
+
+  const triage = await triageSuggestion(body, area);
+
+  const { error } = await supabase.from('feedback').insert({
+    user_id: decoded.userId,
+    area: area || null,
+    body,
+    kind: triage.kind,
+    summary: triage.summary || null,
+    severity: triage.severity,
+    auto_reply: triage.reply,
+    answered: triage.reply !== null,
+  });
+  if (error) return res.status(500).json({ error: '저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });
+
+  return res.status(200).json({
+    ok: true,
+    // 답을 지어내지 않는다. 확실할 때만 답하고 아니면 전달했다고만 말한다.
+    reply: triage.reply,
+    kind: triage.kind,
+  });
+}
+
+/** 관리자 — 같은 얘기끼리 묶어 무엇을 고칠지 보여준다 */
+async function handleSuggestList(req: VercelRequest, res: VercelResponse) {
+  const status = String(req.query.status ?? 'open');
+  let q = supabase
+    .from('feedback')
+    .select('id, user_id, area, body, kind, summary, severity, auto_reply, answered, status, note, created_at, users(email, name)')
+    .order('created_at', { ascending: false })
+    .limit(300);
+  if (status !== 'all') q = q.eq('status', status);
+
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: '불러오지 못했습니다.' });
+
+  const rows = (data ?? []).map((r: any) => ({
+    id: String(r.id),
+    area: r.area,
+    body: r.body,
+    kind: r.kind,
+    summary: r.summary,
+    severity: r.severity,
+    autoReply: r.auto_reply,
+    answered: r.answered,
+    status: r.status,
+    note: r.note,
+    createdAt: r.created_at,
+    userEmail: r.users?.email ?? null,
+    userName: r.users?.name ?? null,
+  }));
+
+  // 같은 요약끼리 묶는다. 한 사람이 한 말과 열 사람이 한 말은 무게가 다르다.
+  const groups = new Map<string, { summary: string; kind: string; severity: string; count: number; ids: string[] }>();
+  for (const r of rows) {
+    if (!r.summary || r.kind === 'howto' || r.kind === 'praise') continue;
+    const key = r.summary;
+    const g = groups.get(key) ?? { summary: key, kind: r.kind, severity: r.severity, count: 0, ids: [] };
+    g.count++;
+    g.ids.push(r.id);
+    // 한 건이라도 급하면 그 묶음이 급한 것이다
+    if (r.severity === 'high') g.severity = 'high';
+    groups.set(key, g);
+  }
+
+  return res.status(200).json({
+    items: rows,
+    // 여러 사람이 같은 말을 한 것부터
+    groups: [...groups.values()].sort((a, b) => b.count - a.count || (a.severity === 'high' ? -1 : 1)),
+    counts: {
+      open: rows.filter(r => r.status === 'open').length,
+      bug: rows.filter(r => r.kind === 'bug').length,
+      improve: rows.filter(r => r.kind === 'improve').length,
+      howto: rows.filter(r => r.kind === 'howto').length,
+    },
+  });
+}
+
+async function handleSuggestUpdate(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = String(req.body?.id ?? '');
+  if (!id) return res.status(400).json({ error: 'id가 필요합니다.' });
+
+  const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+  const status = String(req.body?.status ?? '');
+  if (['open', 'planned', 'done', 'wontfix'].includes(status)) patch.status = status;
+  if (typeof req.body?.note === 'string') patch.note = req.body.note.slice(0, 500);
+  // 여러 건을 한꺼번에 처리한다 — 같은 얘기를 열 명이 했으면 열 번 누를 이유가 없다
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [id];
+
+  const { error } = await supabase.from('feedback').update(patch).in('id', ids);
+  if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
+  return res.status(200).json({ ok: true, updated: ids.length });
 }

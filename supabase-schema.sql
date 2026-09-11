@@ -1124,3 +1124,44 @@ alter table coupang_accounts add column if not exists reorder_min_sales14 int no
 alter table sourcing_favorites add column if not exists auto boolean not null default false;
 alter table sourcing_favorites add column if not exists last_seen_at timestamptz default now();
 create index if not exists idx_sfav_user_seen on sourcing_favorites(user_id, last_seen_at desc);
+
+-- ─────────────────────────────────────────────────────────────
+-- 45. 건의·문의 창구
+-- ─────────────────────────────────────────────────────────────
+-- 소통 창구가 아예 없었다. 전화나 카카오 상담은 받는 순간 응답 시간이 기대치가
+-- 되고 그게 곧 제품 만들 시간을 먹는다. 대신 사이트 안에서 글로 받는다.
+--
+-- 들어온 글은 AI가 유형을 나누고, 이미 있는 기능이면 그 자리에서 답한다.
+-- "엑셀로 못 내려받나요" 같은 사용법 문의가 운영자에게까지 오면 그건 낭비다.
+-- 운영자는 진짜 건의만 본다.
+--
+-- 답변 내용은 저장하되 사람이 고칠 수 있게 둔다. AI가 틀린 답을 했을 때
+-- 그 기록이 남아 있어야 무엇이 잘못됐는지 안다.
+create table if not exists feedback (
+  id bigserial primary key,
+  user_id uuid references users(id) on delete set null,
+  -- 어느 화면에서 썼나. 같은 불편도 화면마다 원인이 다르다.
+  area text,
+  body text not null,
+
+  -- AI 분류
+  kind text check (kind in ('bug', 'improve', 'howto', 'praise', 'other')),
+  -- bug: 안 되는 것 / improve: 이렇게 됐으면 / howto: 쓰는 법을 모름
+  summary text,                          -- 한 줄 요약 (같은 얘기끼리 묶는 데 쓴다)
+  severity text check (severity in ('high', 'normal', 'low')),
+  auto_reply text,                       -- 그 자리에서 보여준 답
+  answered boolean not null default false,  -- AI가 답으로 끝낼 수 있었나
+
+  -- 운영
+  status text not null default 'open'
+    check (status in ('open', 'planned', 'done', 'wontfix')),
+  note text,                             -- 운영자 메모
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create index if not exists idx_fb_status on feedback(status, created_at desc);
+create index if not exists idx_fb_kind on feedback(kind, created_at desc);
+create index if not exists idx_fb_user on feedback(user_id, created_at desc);
+alter table feedback enable row level security;
+revoke all on feedback from anon, authenticated;
