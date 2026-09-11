@@ -8,9 +8,10 @@
  * 새 경쟁자를 늦게 아는 게 가장 비싸다. 가격을 내리고 순위가 오른 상품은
  * 그 자체로 "지금 이 시장에서 통하는 수"를 알려준다.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Loader2, Megaphone, Sparkles, TrendingDown } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { won } from '../../lib/coupang';
 
 interface PriceChange {
   productId: string;
@@ -51,14 +52,17 @@ interface Changes {
   gone: Array<{ productId: string; productName: string; rank: number | null }>;
 }
 
-const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 
 export function MarketChanges({ keyword }: { keyword: string }) {
   const [data, setData] = useState<Changes | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 키워드를 빠르게 바꾸면 늦게 온 응답이 마지막에 도착해, 지금 보고 있는
+  // 키워드와 다른 시장 변화가 표에 남는다. 순번이 뒤처진 응답은 버린다.
+  const seq = useRef(0);
   useEffect(() => {
     if (!keyword) return;
+    const mine = ++seq.current;
     setData(null);
     setError(null);
     fetch(`/api/sourcing?type=rankwatch&action=changes&keyword=${encodeURIComponent(keyword)}`, {
@@ -66,10 +70,11 @@ export function MarketChanges({ keyword }: { keyword: string }) {
     })
       .then(async r => {
         const d = await r.json();
+        if (mine !== seq.current) return;
         if (!r.ok) throw new Error(d?.error || '시장 변화를 불러오지 못했습니다.');
         setData(d);
       })
-      .catch(e => setError(e?.message ?? '시장 변화를 불러오지 못했습니다.'));
+      .catch(e => { if (mine === seq.current) setError(e?.message ?? '시장 변화를 불러오지 못했습니다.'); });
   }, [keyword]);
 
   // 조용히 사라지면 "이 기능이 없는 것"과 구별이 안 된다. 실제로 잘못된 주소로

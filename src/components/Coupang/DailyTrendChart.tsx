@@ -11,6 +11,7 @@
  */
 import { useMemo, useRef, useState } from 'react';
 import type { ProfitDay } from '../../lib/coupang';
+import { won } from '../../lib/coupang';
 
 // RankRevenueChart와 같은 팔레트 — 어두운 표면에서 대비·색각 검증을 통과한 조합
 const SALES_COLOR = '#c47a2c';
@@ -35,7 +36,6 @@ function movingAverage(values: number[], window: number): Array<number | null> {
 }
 
 const shortDate = (d: string) => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
-const money = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 
 export function DailyTrendChart({ days }: { days: ProfitDay[] }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -154,8 +154,8 @@ export function DailyTrendChart({ days }: { days: ProfitDay[] }) {
       {point && (
         <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4 gap-y-0.5 rounded-control border border-line bg-paper-2 px-3 py-2 text-[11.5px] tabular-nums">
           <b className="text-ink">{point.date}</b>
-          <span className="text-ink-2">매출 {money(point.salesAmount)}</span>
-          <span className={point.profit >= 0 ? 'text-positive' : 'text-critical'}>순이익 {money(point.profit)}</span>
+          <span className="text-ink-2">매출 {won(point.salesAmount)}</span>
+          <span className={point.profit >= 0 ? 'text-positive' : 'text-critical'}>순이익 {won(point.profit)}</span>
           <span className="text-ink-3">{point.quantity.toLocaleString('ko-KR')}개</span>
         </div>
       )}

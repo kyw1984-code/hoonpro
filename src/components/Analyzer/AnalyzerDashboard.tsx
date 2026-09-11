@@ -134,10 +134,14 @@ export function AnalyzerDashboard() {
     // 판정은 쿠팡 셀러 통상 기준선(손익분기 ROAS 300%)으로 폴백해 어긋난 판정을 막는다
     const marginProvided = breakEvenROAS > 0;
     const effectiveBE = marginProvided ? breakEvenROAS : 300;
-    const rowProfit = (row: any) =>
+    // 순이익 계산은 이 한 곳에서만 한다. 예전에는 여기 정의해 놓고 아무도
+    // 부르지 않은 채, 같은 식을 아래에 다섯 번 손으로 옮겨 적어 두었다.
+    // 마진 규칙을 바꾸려면 다섯 곳을 찾아야 하고, 하나를 놓치면 표의 합계와
+    // 행별 합이 어긋나는데 아무 오류도 나지 않는다.
+    const profitOf = (revenue: number, qty: number, adCost: number) =>
       revenueMode === "actual"
-        ? rowRevenue(row) * netMarginRate - (row.광고비 || 0)
-        : (row[colQty] || 0) * netUnitMargin - (row.광고비 || 0);
+        ? revenue * netMarginRate - adCost
+        : qty * netUnitMargin - adCost;
 
     // ── 지면별 집계 ──
     const placementMap = new Map<string, any>();
@@ -158,7 +162,7 @@ export function AnalyzerDashboard() {
       const 클릭률 = p.노출수 > 0 ? p.클릭수 / p.노출수 : 0;
       const 구매전환율 = p.클릭수 > 0 ? p.판매수량 / p.클릭수 : 0;
       const CPC = p.클릭수 > 0 ? p.광고비 / p.클릭수 : 0;
-      const 실질순이익 = revenueMode === "actual" ? 실제매출액 * netMarginRate - p.광고비 : p.판매수량 * netUnitMargin - p.광고비;
+      const 실질순이익 = profitOf(실제매출액, p.판매수량, p.광고비);
       return { ...p, 실제매출액, 실제ROAS, 클릭률, 구매전환율, CPC, 실질순이익 };
     });
 
@@ -169,7 +173,7 @@ export function AnalyzerDashboard() {
     );
     const totalRevenue = tot.매출;
     const totalRealRoas = tot.광고비 > 0 ? totalRevenue / tot.광고비 : 0;
-    const totalProfit = revenueMode === "actual" ? totalRevenue * netMarginRate - tot.광고비 : tot.판매수량 * netUnitMargin - tot.광고비;
+    const totalProfit = profitOf(totalRevenue, tot.판매수량, tot.광고비);
     const totalCtr = tot.노출수 > 0 ? tot.클릭수 / tot.노출수 : 0;
     const totalCvr = tot.클릭수 > 0 ? tot.판매수량 / tot.클릭수 : 0;
     const avgCPC = tot.클릭수 > 0 ? tot.광고비 / tot.클릭수 : 0;
@@ -196,7 +200,7 @@ export function AnalyzerDashboard() {
         const ctr = c.노출수 > 0 ? c.클릭수 / c.노출수 : 0;
         const cvr = c.클릭수 > 0 ? c.판매수량 / c.클릭수 : 0;
         const cpc = c.클릭수 > 0 ? c.광고비 / c.클릭수 : 0;
-        const 순이익 = revenueMode === "actual" ? c.매출 * netMarginRate - c.광고비 : c.판매수량 * netUnitMargin - c.광고비;
+        const 순이익 = profitOf(c.매출, c.판매수량, c.광고비);
         const 검색ROAS = c.검색광고비 > 0 ? (c.검색매출 / c.검색광고비) * 100 : 0;
         const 비검색ROAS = c.비검색광고비 > 0 ? (c.비검색매출 / c.비검색광고비) * 100 : 0;
         const 검색비중 = c.광고비 > 0 ? (c.검색광고비 / c.광고비) * 100 : 0;
@@ -262,7 +266,7 @@ export function AnalyzerDashboard() {
       });
       productSummary = Array.from(prodMap.values()).map((p) => ({
         ...p,
-        실질순이익: revenueMode === "actual" ? p.매출 * netMarginRate - p.광고비 : p.판매수량 * netUnitMargin - p.광고비,
+        실질순이익: profitOf(p.매출, p.판매수량, p.광고비),
       }));
     }
 

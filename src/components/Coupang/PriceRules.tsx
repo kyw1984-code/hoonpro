@@ -253,15 +253,21 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                     />
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-ink-3">{r.marketPrice ? won(r.marketPrice) : '-'}</td>
+                  {/* 실제 판매가를 매일 자동으로 바꾸는 스위치다. 16px 네모는
+                      손가락으로 잘못 누르기 쉽고 되돌릴 방법이 화면에 없다.
+                      네모 자체는 그대로 두고 누를 수 있는 자리를 44px로 넓힌다. */}
                   <td className="px-3 py-2 text-center">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(valueOf(r, 'autoApply'))}
-                      onChange={e => edit(r.vendorItemId, { autoApply: e.target.checked })}
-                      disabled={!r.costEntered}
-                      title={r.costEntered ? '매일 오전 9시 자동 반영' : '원가를 먼저 입력해야 합니다'}
-                      className="h-4 w-4 disabled:opacity-30"
-                    />
+                    <label className="mx-auto flex h-11 w-11 cursor-pointer items-center justify-center">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(valueOf(r, 'autoApply'))}
+                        onChange={e => edit(r.vendorItemId, { autoApply: e.target.checked })}
+                        disabled={!r.costEntered}
+                        title={r.costEntered ? '매일 오전 9시 자동 반영' : '원가를 먼저 입력해야 합니다'}
+                        aria-label="매일 오전 9시 자동 반영"
+                        className="h-4 w-4 disabled:opacity-30"
+                      />
+                    </label>
                   </td>
                   <td className="px-4 py-2 text-right">
                     {r.suggestedPrice !== null ? (
@@ -269,7 +275,7 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                         <button
                           onClick={() => apply(r)}
                           disabled={busy === r.vendorItemId}
-                          className="flex items-center gap-1 rounded-control border border-accent-line bg-accent-soft px-2.5 py-1 text-[11.5px] font-semibold text-ink transition-opacity hover:opacity-80 disabled:opacity-50"
+                          className="flex min-h-[36px] items-center gap-1 rounded-control border border-accent-line bg-accent-soft px-3 py-2 text-[11.5px] font-semibold text-ink transition-opacity hover:opacity-80 disabled:opacity-50"
                         >
                           {busy === r.vendorItemId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
                           {won(r.suggestedPrice)}로 변경

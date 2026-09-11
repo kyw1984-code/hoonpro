@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react';
 import { Loader2, Users } from 'lucide-react';
 import { getToken } from '../lib/auth';
+import { won } from '../lib/coupang';
 
 interface Competitor {
   productId: string;
@@ -40,7 +41,6 @@ const DELIVERY_LABEL: Record<string, string> = {
   general: '일반',
 };
 
-const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
 
 /** 중앙값 대비 몇 % 비싼지/싼지. 중앙값이 없으면 비교할 대상이 없다. */
 function gapText(mine: number, median: number | null): string | null {

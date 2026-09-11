@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from '../src/lib/featureLimits.js';
+import { calcCostUsd } from '../src/lib/pricing.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -41,27 +42,7 @@ function nextResetIso(): string {
   return new Date(midnightKst - 9 * 3600_000).toISOString();
 }
 
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gemini-2.5-flash': { input: 0.30, output: 2.50 },
-  'gemini-2.5-flash-image': { input: 0.30, output: 30.00 },
-  'gemini-2.0-flash': { input: 0.10, output: 0.40 },
-  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
-  'gpt-4.1': { input: 2.00, output: 8.00 },
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-4o': { input: 2.50, output: 10.00 },
-  'gpt-image-2': { input: 5.00, output: 30.00 },
-  'gpt-image-2-2026-04-21': { input: 5.00, output: 30.00 },
-  'gpt-image-1.5': { input: 5.00, output: 40.00 },
-  'gpt-image-1-mini': { input: 2.00, output: 8.00 },
-  'gpt-image-1': { input: 5.00, output: 40.00 },
-  'chatgpt-image-latest': { input: 5.00, output: 40.00 },
-};
 
-function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
-  const price = MODEL_PRICING[model];
-  if (!price) return 0;
-  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');

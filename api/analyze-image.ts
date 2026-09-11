@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+import { calcCostUsd } from '../src/lib/pricing.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -26,14 +27,6 @@ const GEMINI_IMAGE_MODELS = [
   'gemini-2.5-flash-image-preview',
 ];
 
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
-  'gpt-4.1': { input: 2.00, output: 8.00 },
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-4o': { input: 2.50, output: 10.00 },
-  'gemini-2.5-flash': { input: 0, output: 0 },
-  'gemini-2.5-pro': { input: 0, output: 0 },
-};
 
 const CONFIG_TTL_MS = 45_000;
 let cachedImageModel: string | null = null;
@@ -45,11 +38,6 @@ function parseDataUrl(input: string): { mime: string; data: string } {
   return { mime: mime || 'image/png', data };
 }
 
-function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
-  const price = MODEL_PRICING[model];
-  if (!price) return 0;
-  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
-}
 
 function isGeminiImageModel(model: string): boolean {
   return model.startsWith('gemini-');

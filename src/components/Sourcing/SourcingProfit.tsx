@@ -12,6 +12,7 @@
 import { useEffect, useState } from 'react';
 import { Calculator, Loader2 } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { ratioPct, won } from '../../lib/coupang';
 import { costCeiling, marginAt, type SellerRates } from '../../lib/sourcingProfit';
 
 interface RatesResponse {
@@ -31,8 +32,6 @@ interface RatesResponse {
   };
 }
 
-const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
-const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
 const MARGINS = [0.1, 0.15, 0.2, 0.3];
 
@@ -139,7 +138,7 @@ export function SourcingProfit({
       )}
       <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3">
         업계 평균이 아니라 <b className="text-ink-2">대표님의 최근 60일 실적</b>에서 뽑은 비율입니다
-        (수수료 {pct(rates.commission)} · 광고비 {pct(rates.ad)} · 반품 {pct(rates.returns)} · 쿠폰 {pct(rates.coupon)}).
+        (수수료 {ratioPct(rates.commission)} · 광고비 {ratioPct(rates.ad)} · 반품 {ratioPct(rates.returns)} · 쿠폰 {ratioPct(rates.coupon)}).
       </p>
 
       <div className="mt-3 flex flex-wrap items-end gap-2">
@@ -223,7 +222,7 @@ export function SourcingProfit({
         />
         {m && (
           <span className={`text-[12.5px] font-semibold ${m.profit > 0 ? 'text-positive' : 'text-critical'}`}>
-            개당 {won(m.profit)} · 이익률 {pct(m.rate)}
+            개당 {won(m.profit)} · 이익률 {ratioPct(m.rate)}
           </span>
         )}
       </div>

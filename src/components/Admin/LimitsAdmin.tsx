@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { SlidersHorizontal, RefreshCw, Loader2, Save, RotateCcw, AlertTriangle } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { won } from '../../lib/coupang';
 
 // 관리자 — 기능별 일일 한도
 // 한도 × 실측 단가 = "한 사람이 매일 한도를 다 썼을 때의 월 원가"를 요금과 비교해 보여준다.
@@ -34,7 +35,6 @@ interface LimitsData {
 // 평균 사용자는 한도의 약 18%만 쓴다 (원가 현황의 실측 평균과 맞춰 조정)
 const AVG_RATIO = 0.18;
 
-const won = (n: number) => `${Math.round(n || 0).toLocaleString()}원`;
 
 export function LimitsAdmin({ showToast }: { showToast: (msg: string) => void }) {
   const [data, setData] = useState<LimitsData | null>(null);

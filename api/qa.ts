@@ -4,6 +4,7 @@ import { DEFAULT_FEATURE_LIMITS, decideQuota, isDisabled, parseLimits } from '..
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { buildSellerContext } from '../lib/coupang-context.js';
+import { calcCostUsd } from '../src/lib/pricing.js';
 
 // "훈프로 코칭AI" RAG 챗봇 통합 API
 // Vercel Hobby 함수 개수 제한(12개) 때문에 action 파라미터로 통합
@@ -32,12 +33,6 @@ const MAX_INGEST_CHARS = 300_000;
 const CHUNK_SIZE = 900; // 한 청크 최대 글자 수
 const CHUNK_OVERLAP = 120;
 
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
-  'gpt-4.1': { input: 2.00, output: 8.00 },
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-4o': { input: 2.50, output: 10.00 },
-};
 
 // 민감 주제: LLM 호출 없이 직접 문의 유도 (환불/계정정지/세무)
 const SENSITIVE_PATTERNS: { pattern: RegExp; topic: string }[] = [
@@ -46,11 +41,6 @@ const SENSITIVE_PATTERNS: { pattern: RegExp; topic: string }[] = [
   { pattern: /세무|세금\s*신고|종합\s*소득세|부가세|부가가치세|사업자\s*세금|절세/, topic: '세무' },
 ];
 
-function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
-  const price = MODEL_PRICING[model];
-  if (!price) return 0;
-  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
-}
 
 // ── 수강생 공개 여부 (app_config.qa_enabled, 기본 OFF — 자료가 쌓일 때까지 관리자 전용) ──
 const QA_CONFIG_TTL_MS = 30_000;
