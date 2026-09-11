@@ -18,6 +18,7 @@ import { PriceRules } from './PriceRules';
 import { ReturnReasons } from './ReturnReasons';
 import { CouponEffect } from './CouponEffect';
 import { BriefSettings } from './BriefSettings';
+import { HowTo } from '../HowTo';
 
 type View = 'profit' | 'settlement' | 'inventory' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
 
@@ -150,22 +151,27 @@ export function CoupangDashboard() {
       />
 
       {VIEWS.length > 1 && (
-        <nav className="flex gap-1 overflow-x-auto border-b border-line" aria-label="쿠팡 분석 화면">
-          {VIEWS.map(v => (
-            <button
-              key={v.id}
-              onClick={() => setView(v.id)}
-              aria-current={view === v.id ? 'page' : undefined}
-              className={`relative -mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 text-[13px] transition-all ${
-                view === v.id
-                  ? 'border-accent font-semibold text-ink'
-                  : 'border-transparent font-medium text-ink-3 hover:text-ink'
-              }`}
-            >
-              {v.label}
-            </button>
-          ))}
-        </nav>
+        <div className="flex items-end gap-2 border-b border-line">
+          <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="쿠팡 분석 화면">
+            {VIEWS.map(v => (
+              <button
+                key={v.id}
+                onClick={() => setView(v.id)}
+                aria-current={view === v.id ? 'page' : undefined}
+                className={`relative -mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 text-[13px] transition-all ${
+                  view === v.id
+                    ? 'border-accent font-semibold text-ink'
+                    : 'border-transparent font-medium text-ink-3 hover:text-ink'
+                }`}
+              >
+                {v.label}
+              </button>
+            ))}
+          </nav>
+          {/* 화면마다 하는 일이 달라서 안내도 화면별로 따로 있다.
+              헤더의 [사용 방법]은 정산AI 전체를 설명한다. */}
+          <HowTo id={`coupang.${view}`} compact className="mb-1.5" />
+        </div>
       )}
 
       <div key={refreshKey} className="contents">
