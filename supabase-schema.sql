@@ -1108,3 +1108,19 @@ revoke all on coupang_reorder_rules from anon, authenticated;
 -- 자동 판단 기준: 최근 14일에 이만큼도 안 팔렸으면 발주 대상이 아니다.
 -- 0으로 두면 자동 판단을 끄고 전부 알린다.
 alter table coupang_accounts add column if not exists reorder_min_sales14 int not null default 3;
+
+-- ─────────────────────────────────────────────────────────────
+-- 44. 분석한 키워드는 자동으로 추적한다
+-- ─────────────────────────────────────────────────────────────
+-- ★(관심 키워드)를 눌러야만 매일 자동 수집이 돌았는데, 실제로는 아무도 누르지
+-- 않았다. 같은 키워드를 열흘에 네 번 다시 분석하면서도 저장은 안 하니 시장
+-- 변화·리뷰 증가 속도가 통째로 죽어 있었다.
+--
+-- 사람에게 한 동작을 더 시켜서 될 일이 아니다. 분석했다는 것 자체가 곧
+-- 관심의 표시이므로 그때 자동으로 등록한다.
+--
+-- auto로 들어온 것은 최근 N개만 남긴다. 무한정 쌓이면 크론이 도는 키워드가
+-- 늘어 수집 비용이 함께 늘고, 오래전에 한 번 본 키워드까지 매일 돌게 된다.
+alter table sourcing_favorites add column if not exists auto boolean not null default false;
+alter table sourcing_favorites add column if not exists last_seen_at timestamptz default now();
+create index if not exists idx_sfav_user_seen on sourcing_favorites(user_id, last_seen_at desc);

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { detectOffCategory, scoreReasons } from "../src/lib/productRelevance.js";
 import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from "../src/lib/featureLimits.js";
 import { createClient } from "@supabase/supabase-js";
 import { createHmac } from "crypto";
@@ -1619,10 +1620,24 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
       : opportunityScore >= 40 ? "Normal"
       : "Bad";
     const isBrand = !searchTargetsBrand && isBrandKeyword(p.productName);
-    return { ...p, isBrand, calculated: { demandScore, entryEase, priceFit, opportunityScore, grade } };
+    // 쿠팡 검색은 카테고리를 가리지 않는다. "검정치마"에 밴드 3집 CD가 섞여 들어오고,
+    // 그런 상품은 리뷰가 많아 수요 점수가 높고 로켓이 아니라 진입 점수도 높다.
+    // 즉 잘못된 방향으로 후한 점수를 받아 소싱 후보 맨 위에 올라온다.
+    const offCategory = detectOffCategory(p.productName, searchKeyword);
+    const reasons = scoreReasons({
+      reviewCount: p.reviewCount, deliveryType: p.deliveryType,
+      productPrice: price, demandScore, entryEase, priceFit,
+    });
+    return { ...p, isBrand, offCategory, calculated: { demandScore, entryEase, priceFit, opportunityScore, grade, reasons } };
   });
 
-  scored.sort((a, b) => b.calculated.opportunityScore - a.calculated.opportunityScore || a.rank - b.rank);
+  // 다른 상품군은 지우지 않고 아래로 내린다. 지우면 규칙이 틀렸을 때
+  // 판매자가 "왜 이게 없지"를 확인할 방법이 없다.
+  scored.sort((a, b) => {
+    const off = Number(Boolean(a.offCategory)) - Number(Boolean(b.offCategory));
+    if (off !== 0) return off;
+    return b.calculated.opportunityScore - a.calculated.opportunityScore || a.rank - b.rank;
+  });
 
   // 시장 판정: 로켓 비중 기본 + 경쟁강도(상품수/검색량)로 보정
   let verdictLevel = rocketRatio <= 25 ? 3 : rocketRatio <= 45 ? 2 : rocketRatio <= 65 ? 1 : 0;
@@ -1757,11 +1772,66 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
     return { ...p, reviewGrowthPerDay: v ? v.perDay : null, obsDays: v ? v.days : null };
   });
 
+  // 분석했다는 것 자체가 관심의 표시다. ★를 따로 누르게 하지 않고 여기서 등록한다.
+  await autoTrackKeyword(decoded?.userId, keyword);
+
   return res.status(200).json({
     keyword, products: withVelocity, market, servedFrom,
     ...(remaining !== null ? { remaining } : {}),
     ...(parseDebug ? { parseDebug } : {}),
   });
+}
+
+/** 최근 이만큼만 자동 추적한다. 더 쌓이면 크론이 도는 키워드가 늘어 수집 비용이 함께 는다 */
+const AUTO_TRACK_KEEP = 20;
+
+/**
+ * 분석한 키워드를 매일 자동 수집 대상에 넣는다.
+ *
+ * 예전에는 ★를 눌러야 등록됐는데 실제로는 아무도 누르지 않았다. 같은 키워드를
+ * 열흘에 네 번 다시 분석하면서도 저장은 안 하니 시장 변화와 리뷰 증가 속도가
+ * 통째로 죽어 있었다. 사람에게 동작을 하나 더 시켜서 될 일이 아니었다.
+ *
+ * 손으로 넣은 것(auto=false)은 건드리지 않는다. 자동으로 들어온 것만 오래된
+ * 순서로 정리한다.
+ */
+async function autoTrackKeyword(userId: string | undefined, keyword: string): Promise<void> {
+  if (!supabase || !userId || !keyword) return;
+  try {
+    const { data: existing } = await supabase
+      .from("sourcing_favorites")
+      .select("keyword, auto")
+      .eq("user_id", userId)
+      .eq("keyword", keyword)
+      .maybeSingle();
+
+    if (existing) {
+      // 이미 있으면 '마지막으로 본 시각'만 새로 한다. 손으로 넣은 것을 auto로 덮지 않는다.
+      await supabase
+        .from("sourcing_favorites")
+        .update({ last_seen_at: new Date().toISOString() })
+        .eq("user_id", userId).eq("keyword", keyword);
+      return;
+    }
+
+    await supabase.from("sourcing_favorites").insert({
+      user_id: userId, keyword, auto: true, last_seen_at: new Date().toISOString(),
+    });
+
+    // 자동으로 들어온 것이 너무 많아지면 오래된 것부터 뺀다
+    const { data: autos } = await supabase
+      .from("sourcing_favorites")
+      .select("keyword, last_seen_at")
+      .eq("user_id", userId).eq("auto", true)
+      .order("last_seen_at", { ascending: false });
+    const stale = (autos ?? []).slice(AUTO_TRACK_KEEP).map(r => String(r.keyword));
+    if (stale.length > 0) {
+      await supabase.from("sourcing_favorites")
+        .delete().eq("user_id", userId).eq("auto", true).in("keyword", stale);
+    }
+  } catch {
+    /* 추적 등록 실패가 분석 결과를 막지 않는다 */
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
