@@ -2591,6 +2591,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'settlement': return await handleSettlement(userId, res);
       case 'reports': return await handleReports(userId, res);
       case 'brief-settings': return await handleBriefSettings(userId, req, res);
+      case 'reorder-rule': return await handleReorderRule(userId, req, res);
       case 'inventory': return await handleInventory(userId, req, res);
       case 'returns': return await handleReturns(userId, req, res);
       case 'return-reasons': return await handleReturnReasons(userId, req, res);
@@ -3957,21 +3958,56 @@ export interface BriefData {
   newInquiries: number;
   newReturns: number;
   leadTimeDays: number;
+  /** 시즌 판단 기준 — 최근 14일 판매가 이만큼도 안 되면 발주 대상에서 뺐다 */
+  minSales14: number;
+  /** 그렇게 빠진 개수. 숨긴 걸 숨겼다고 말해야 판단 기준을 고칠 수 있다 */
+  seasonalSkipped: number;
 }
 
-/** 발주가 필요한 것만 — 남은 일수가 리드타임보다 짧으면 지금 넣어야 늦지 않는다 */
-export function needsReorder(rows: InventoryRow[], leadTimeDays: number): InventoryRow[] {
+/**
+ * 발주가 필요한 것만.
+ *
+ * 두 가지를 함께 본다.
+ *  · 급한가  — 남은 일수가 리드타임보다 짧으면 지금 넣어야 늦지 않는다
+ *  · 채울 값이 있는가 — 시즌이 끝난 상품은 품절이어도 채울 일이 아니다
+ *
+ * 여름 나시티가 9월에 품절인 건 사고가 아니라 계절이다. 남은 일수만 보면
+ * 한 달에 한두 개 팔리는 상품이 매일 목록에 올라오고, 매일 같은 목록이 오면
+ * 그 메일은 안 읽힌다. 안 읽히는 메일에는 진짜 급한 품절도 함께 묻힌다.
+ *
+ * 시즌 종료는 '최근에 아직 팔리는가'로 본다 — 계절이 바뀌면 판매가 먼저 끊긴다.
+ * 28일 평균이 아니라 14일을 보는 이유는, 28일에는 지난 시즌의 끝자락이 섞여
+ * 있어 이미 끝난 상품이 아직 팔리는 것처럼 보이기 때문이다.
+ *
+ * 다만 자동 판단은 '곧 시작될 시즌'을 알 수 없다. 겨울 상품은 9월에 안 팔리지만
+ * 10월 발주는 해야 한다. 그래서 손으로 고정한 규칙이 자동 판단보다 항상 우선한다.
+ */
+export function needsReorder(
+  rows: InventoryRow[],
+  leadTimeDays: number,
+  minSales14 = 0,
+): InventoryRow[] {
   return rows
     .filter(r => {
-      if (r.risk === 'out') return true;            // 이미 품절
-      if (r.daysLeft === null) return false;        // 안 팔리는 재고는 발주 대상이 아니다
-      return r.daysLeft <= leadTimeDays;            // 지금 주문해도 도착 전에 떨어진다
+      // 손으로 정한 규칙이 먼저다
+      if (r.reorderMode === 'exclude') return false;
+
+      const urgent = r.risk === 'out'                    // 이미 품절
+        || (r.daysLeft !== null && r.daysLeft <= leadTimeDays);  // 도착 전에 떨어진다
+      if (r.reorderMode === 'always') return urgent;
+
+      if (!urgent) return false;
+      if (r.daysLeft === null && r.risk !== 'out') return false;  // 안 팔리는 재고
+      // 최근에 팔리지 않으면 채울 값이 없다 (minSales14가 0이면 이 판단을 끈다)
+      return minSales14 <= 0 || r.sold14 >= minSales14;
     })
     .sort((a, b) => (a.daysLeft ?? -1) - (b.daysLeft ?? -1))
     .slice(0, 8);
 }
 
-async function collectBrief(userId: string, day: string, leadTimeDays: number): Promise<BriefData> {
+async function collectBrief(
+  userId: string, day: string, leadTimeDays: number, minSales14: number,
+): Promise<BriefData> {
   const prevDay = addDays(day, -7);   // 요일 효과가 크므로 어제가 아니라 지난주 같은 요일과 견준다
 
   const [ordersRes, prevOrdersRes, inventory, inquiryRes, returnRes] = await Promise.all([
@@ -4013,15 +4049,21 @@ async function collectBrief(userId: string, day: string, leadTimeDays: number): 
 
   const prevOrderAmount = prevOrdersRes.rows.reduce((n, o) => n + (Number(o.order_amount) || 0), 0);
 
+  const reorder = needsReorder(inventory.rows, leadTimeDays, minSales14);
+  // 시즌 판단으로 빠진 개수 — 기준을 끄고 세어 차이를 본다
+  const withoutSeason = needsReorder(inventory.rows, leadTimeDays, 0);
+
   return {
     orderAmount,
     quantity,
     prevOrderAmount,
     topSellers: [...byProduct.values()].sort((a, b) => b.amount - a.amount).slice(0, 3),
-    reorder: needsReorder(inventory.rows, leadTimeDays),
+    reorder,
     newInquiries: inquiryRes.count ?? 0,
     newReturns: returnRes.count ?? 0,
     leadTimeDays,
+    minSales14,
+    seasonalSkipped: Math.max(0, withoutSeason.length - reorder.length),
   };
 }
 
@@ -4084,7 +4126,11 @@ export function briefHtml(name: string, day: string, d: BriefData): string {
     html +=
       `<div style="margin:18px 0 0;padding:12px 14px;background:#2a1f1f;border:1px solid #4a2f2f;border-radius:10px;">` +
       `<div style="font-size:13px;font-weight:700;color:#ffb454;">지금 발주해야 할 것 ${d.reorder.length}개</div>` +
-      `<div style="font-size:11px;color:#7c88a3;margin:3px 0 6px;">리드타임 ${d.leadTimeDays}일 기준입니다. 지금 주문해도 도착 전에 떨어지는 것만 골랐습니다.</div>` +
+      `<div style="font-size:11px;color:#7c88a3;margin:3px 0 6px;">리드타임 ${d.leadTimeDays}일 기준입니다. 지금 주문해도 도착 전에 떨어지는 것만 골랐습니다.` +
+      (d.seasonalSkipped > 0
+        ? ` 최근 14일 판매가 ${d.minSales14}개 미만인 ${d.seasonalSkipped}개는 시즌이 지난 것으로 보고 뺐습니다.`
+        : '') +
+      `</div>` +
       rows +
       `</div>`;
   }
@@ -4111,6 +4157,7 @@ async function sendDailyBrief(
   name: string,
   day: string,
   leadTimeDays: number,
+  minSales14: number,
 ): Promise<boolean> {
   if (!supabase) return false;
 
@@ -4123,7 +4170,7 @@ async function sendDailyBrief(
     .maybeSingle();
   if (already) return false;
 
-  const d = await collectBrief(userId, day, leadTimeDays);
+  const d = await collectBrief(userId, day, leadTimeDays, minSales14);
   if (!briefWorthSending(d)) return false;
 
   await sendEmail(
@@ -4141,6 +4188,7 @@ async function sendDailyBrief(
       quantity: d.quantity,
       prevOrderAmount: d.prevOrderAmount,
       reorderCount: d.reorder.length,
+      seasonalSkipped: d.seasonalSkipped,
       newInquiries: d.newInquiries,
       newReturns: d.newReturns,
     },
@@ -4158,7 +4206,7 @@ async function cronMorningBrief(res: VercelResponse) {
 
   const { data: accounts } = await supabase
     .from('coupang_accounts')
-    .select('user_id, brief_enabled, lead_time_days, users(email, name)')
+    .select('user_id, brief_enabled, lead_time_days, reorder_min_sales14, users(email, name)')
     .eq('status', 'active');
 
   const result = { day, sent: 0, skipped: 0, failed: 0 };
@@ -4172,6 +4220,7 @@ async function cronMorningBrief(res: VercelResponse) {
       const sent = await sendDailyBrief(
         acc.user_id, email, acc.users?.name ?? '', day,
         Number(acc.lead_time_days) || 14,
+        Number.isFinite(Number(acc.reorder_min_sales14)) ? Number(acc.reorder_min_sales14) : 3,
       );
       if (sent) result.sent++; else result.skipped++;
     } catch {
@@ -4192,6 +4241,11 @@ async function handleBriefSettings(userId: string, req: VercelRequest, res: Verc
       // 0일이면 '이미 늦은 것'만 알리게 되고, 너무 길면 전부 발주 대상이 된다
       if (Number.isFinite(n)) patch.lead_time_days = Math.min(120, Math.max(1, Math.round(n)));
     }
+    if (req.body?.minSales14 !== undefined) {
+      const n = Number(req.body.minSales14);
+      // 0은 '자동 판단 끔'이라 살려 둔다
+      if (Number.isFinite(n)) patch.reorder_min_sales14 = Math.min(999, Math.max(0, Math.round(n)));
+    }
     if (Object.keys(patch).length === 0) return res.status(400).json({ error: '변경할 값이 없습니다.' });
     const { error } = await supabase!.from('coupang_accounts').update(patch).eq('user_id', userId);
     if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
@@ -4200,13 +4254,46 @@ async function handleBriefSettings(userId: string, req: VercelRequest, res: Verc
 
   const { data } = await supabase!
     .from('coupang_accounts')
-    .select('brief_enabled, lead_time_days')
+    .select('brief_enabled, lead_time_days, reorder_min_sales14')
     .eq('user_id', userId)
     .maybeSingle();
   return res.status(200).json({
     enabled: data?.brief_enabled ?? true,
     leadTimeDays: Number(data?.lead_time_days) || 14,
+    minSales14: Number.isFinite(Number(data?.reorder_min_sales14)) ? Number(data!.reorder_min_sales14) : 3,
   });
+}
+
+/**
+ * 발주 규칙 고정 — 자동 판단이 틀렸을 때 판매자가 직접 정한다.
+ *
+ * 자동 판단은 '곧 시작될 시즌'을 모른다. 겨울 상품은 9월에 안 팔리지만 10월
+ * 발주는 해야 하고, 반대로 단종한 상품은 잘 팔리는 중에도 채울 이유가 없다.
+ */
+async function handleReorderRule(userId: string, req: VercelRequest, res: VercelResponse) {
+  const vendorItemId = String(req.body?.vendorItemId ?? req.query.vendorItemId ?? '').trim();
+  if (!vendorItemId) return res.status(400).json({ error: '옵션을 지정해주세요.' });
+
+  const mode = String(req.body?.mode ?? '').trim();
+  // 'auto'는 규칙을 지운다는 뜻이다 — 다시 자동 판단에 맡긴다
+  if (mode === 'auto' || mode === '') {
+    await supabase!.from('coupang_reorder_rules').delete()
+      .eq('user_id', userId).eq('vendor_item_id', vendorItemId);
+    return res.status(200).json({ ok: true, vendorItemId, mode: 'auto' });
+  }
+  if (mode !== 'exclude' && mode !== 'always') {
+    return res.status(400).json({ error: '알 수 없는 값입니다.' });
+  }
+
+  const { error } = await supabase!.from('coupang_reorder_rules').upsert({
+    user_id: userId,
+    vendor_item_id: vendorItemId,
+    mode,
+    note: typeof req.body?.note === 'string' ? req.body.note.slice(0, 200) : null,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
+  return res.status(200).json({ ok: true, vendorItemId, mode });
 }
 
 function emailButtonLink(label: string, href = 'https://hoonproai.com'): string {
@@ -4287,6 +4374,10 @@ export interface InventoryRow {
   risk: 'out' | 'urgent' | 'watch' | 'ok' | 'idle' | 'excess';
   /** 쿠팡이 집계한 최근 30일 판매수 (로켓창고 재고 API). 없으면 null */
   coupangSold30: number | null;
+  /** 최근 14일 판매수 — 시즌이 끝났는지는 28일 평균보다 이쪽이 먼저 말해준다 */
+  sold14: number;
+  /** 판매자가 손으로 고정한 발주 규칙. 없으면 자동 판단 */
+  reorderMode: 'auto' | 'exclude' | 'always';
 }
 
 const RISK_ORDER: Record<InventoryRow['risk'], number> = {
@@ -4324,16 +4415,27 @@ export async function computeInventory(
   ]);
 
   const sold7 = new Map<string, number>();
+  const sold14 = new Map<string, number>();
   const sold28 = new Map<string, number>();
   const nameFromSales = new Map<string, string>();
   const since7 = addDays(today, -6);
+  const since14 = addDays(today, -13);
   for (const o of salesRes.rows) {
     const id = String(o.vendor_item_id);
     const qty = Number(o.quantity) || 0;
     sold28.set(id, (sold28.get(id) ?? 0) + qty);
+    if (String(o.sale_date) >= since14) sold14.set(id, (sold14.get(id) ?? 0) + qty);
     if (String(o.sale_date) >= since7) sold7.set(id, (sold7.get(id) ?? 0) + qty);
     if (o.product_name && !nameFromSales.has(id)) nameFromSales.set(id, String(o.product_name));
   }
+
+  // 판매자가 손으로 고정한 발주 규칙 (시즌 종료로 빼둔 것, 곧 시즌이 와서 넣어둔 것)
+  const ruleById = new Map<string, 'exclude' | 'always'>();
+  try {
+    const { data: rules } = await supabase
+      .from('coupang_reorder_rules').select('vendor_item_id, mode').eq('user_id', userId);
+    for (const r of rules ?? []) ruleById.set(String(r.vendor_item_id), r.mode as 'exclude' | 'always');
+  } catch { /* 규칙을 못 읽어도 예측 자체는 돌아야 한다 */ }
   const itemById = new Map<string, any>();
   for (const it of itemRes.rows) itemById.set(String(it.vendor_item_id), it);
 
@@ -4343,6 +4445,7 @@ export async function computeInventory(
     const it = itemById.get(id);
     const stock = Number(inv.orderable_qty) || 0;
     const s28 = sold28.get(id) ?? 0;
+    const s14 = sold14.get(id) ?? 0;
     const s7 = sold7.get(id) ?? 0;
     const coupang30 = inv.sales_30d === null || inv.sales_30d === undefined ? null : Number(inv.sales_30d) || 0;
 
@@ -4384,6 +4487,8 @@ export async function computeInventory(
       reorderQty,
       risk,
       coupangSold30: coupang30,
+      sold14: s14,
+      reorderMode: ruleById.get(id) ?? 'auto',
     });
   }
 

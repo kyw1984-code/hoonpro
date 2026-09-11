@@ -8,7 +8,7 @@
  * 판매자 창고 재고는 그로스에선 팔리는 재고가 아니라 여기서 보지 않는다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Boxes, Loader2, PackageX } from 'lucide-react';
+import { AlertTriangle, BellOff, BellRing, Boxes, Loader2, PackageX } from 'lucide-react';
 import { coupangApi, type InventoryResponse, type InventoryRow, type StockRisk } from '../../lib/coupang';
 
 const RISK_META: Record<StockRisk, { label: string; className: string }> = {
@@ -20,7 +20,7 @@ const RISK_META: Record<StockRisk, { label: string; className: string }> = {
   idle: { label: '판매 없음', className: 'border-line bg-paper text-ink-3' },
 };
 
-type InvSortKey = 'stock' | 'sold7' | 'velocity' | 'daysLeft' | 'reorderQty';
+type InvSortKey = 'stock' | 'sold7' | 'sold14' | 'velocity' | 'daysLeft' | 'reorderQty';
 
 export function InventoryForecast() {
   const [leadTime, setLeadTime] = useState(14);
@@ -165,12 +165,13 @@ export function InventoryForecast() {
       ) : (
         <div className="rounded-panel border border-line bg-paper">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[780px] text-[12.5px]">
+            <table className="w-full min-w-[880px] text-[12.5px]">
               <thead>
                 <tr className="border-b border-line text-[11.5px] text-ink-3">
                   <th className="px-4 py-2.5 text-left font-medium">상품</th>
                   <SortTh k="stock" label="로켓창고 재고" />
                   <SortTh k="sold7" label="7일 판매" />
+                  <SortTh k="sold14" label="14일 판매" />
                   <SortTh k="velocity" label="일 평균" />
                   <SortTh k="daysLeft" label="남은 일수" />
                   <SortTh k="reorderQty" label="입고 권장" />
@@ -188,6 +189,7 @@ export function InventoryForecast() {
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-2">{r.stock.toLocaleString('ko-KR')}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.sold7.toLocaleString('ko-KR')}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.sold14.toLocaleString('ko-KR')}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-ink-3">{r.velocity > 0 ? r.velocity.toFixed(1) : '-'}</td>
                       <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-ink">
                         {r.daysLeft === null ? '-' : `${Math.floor(r.daysLeft)}일`}
@@ -196,12 +198,15 @@ export function InventoryForecast() {
                         {r.reorderQty > 0 ? `${r.reorderQty.toLocaleString('ko-KR')}개` : '-'}
                       </td>
                       <td className="px-4 py-2.5 text-right">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-control border px-2 py-0.5 text-[11px] font-semibold ${meta.className}`}
-                        >
-                          {(r.risk === 'out' || r.risk === 'urgent') && <PackageX className="h-3 w-3" />}
-                          {meta.label}
-                        </span>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-control border px-2 py-0.5 text-[11px] font-semibold ${meta.className}`}
+                          >
+                            {(r.risk === 'out' || r.risk === 'urgent') && <PackageX className="h-3 w-3" />}
+                            {meta.label}
+                          </span>
+                          <ReorderModeButton row={r} onChanged={load} />
+                        </div>
                       </td>
                     </tr>
                   );
@@ -232,6 +237,55 @@ function Stat({
       <p className="text-[11.5px] text-ink-3">{label}</p>
       <p className={`mt-1 text-[19px] font-semibold tabular-nums ${tone === 'critical' ? 'text-critical' : 'text-ink'}`}>{value}</p>
       {sub && <p className="mt-0.5 text-[11px] leading-tight text-ink-3">{sub}</p>}
+    </button>
+  );
+}
+
+/**
+ * 발주 알림에서 이 옵션을 뺄지 정한다.
+ *
+ * 자동 판단은 '최근에 아직 팔리는가'만 본다. 그래서 곧 시즌이 시작될 상품을
+ * 알 수 없다 — 겨울 패딩은 9월에 안 팔리지만 10월 발주는 해야 한다. 반대로
+ * 단종한 상품은 잘 팔리는 중에도 채울 이유가 없다. 그 두 경우를 손으로 고정한다.
+ */
+function ReorderModeButton({ row, onChanged }: { row: InventoryRow; onChanged: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [mode, setMode] = useState(row.reorderMode);
+
+  // 서버에서 새로 받아온 값이 내 것과 다르면 그쪽을 따른다
+  useEffect(() => { setMode(row.reorderMode); }, [row.reorderMode]);
+
+  const cycle = async () => {
+    if (saving) return;
+    const next = mode === 'auto' ? 'exclude' : mode === 'exclude' ? 'always' : 'auto';
+    setSaving(true);
+    setMode(next);
+    try {
+      await coupangApi.reorderRule(row.vendorItemId, next);
+      onChanged();
+    } catch {
+      setMode(row.reorderMode);   // 실패하면 되돌린다
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const meta = {
+    auto: { icon: null, title: '자동 판단 — 최근에 팔리면 발주 알림에 넣습니다. 눌러서 제외로 바꿉니다.', cls: 'text-ink-3 hover:text-ink' },
+    exclude: { icon: <BellOff className="h-3.5 w-3.5" />, title: '발주 알림에서 제외 (시즌 종료·단종). 눌러서 항상 포함으로 바꿉니다.', cls: 'text-critical' },
+    always: { icon: <BellRing className="h-3.5 w-3.5" />, title: '판매가 없어도 항상 알림 (곧 시즌이 오는 상품). 눌러서 자동으로 되돌립니다.', cls: 'text-accent' },
+  }[mode];
+
+  return (
+    <button
+      type="button"
+      onClick={cycle}
+      disabled={saving}
+      title={meta.title}
+      aria-label={meta.title}
+      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-control border border-line transition-colors disabled:opacity-45 ${meta.cls}`}
+    >
+      {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : meta.icon ?? <span className="text-[10px]">자동</span>}
     </button>
   );
 }

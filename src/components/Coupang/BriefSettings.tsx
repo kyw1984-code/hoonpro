@@ -16,6 +16,7 @@ const auth = () => ({ Authorization: `Bearer ${getToken()}`, 'Content-Type': 'ap
 export function BriefSettings({ showToast }: { showToast?: (msg: string) => void }) {
   const [enabled, setEnabled] = useState(true);
   const [leadTime, setLeadTime] = useState('14');
+  const [minSales, setMinSales] = useState('3');
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,12 +28,13 @@ export function BriefSettings({ showToast }: { showToast?: (msg: string) => void
         if (!r.ok) throw new Error(d?.error || '설정을 불러오지 못했습니다.');
         setEnabled(d.enabled !== false);
         setLeadTime(String(d.leadTimeDays ?? 14));
+        setMinSales(String(d.minSales14 ?? 3));
       })
       .catch(e => setError(e?.message ?? '설정을 불러오지 못했습니다.'))
       .finally(() => setLoaded(true));
   }, []);
 
-  const save = async (patch: { enabled?: boolean; leadTimeDays?: number }) => {
+  const save = async (patch: { enabled?: boolean; leadTimeDays?: number; minSales14?: number }) => {
     setSaving(true);
     setError(null);
     try {
@@ -61,6 +63,13 @@ export function BriefSettings({ showToast }: { showToast?: (msg: string) => void
     const n = Math.min(120, Math.max(1, Number(leadTime) || 14));
     setLeadTime(String(n));
     void save({ leadTimeDays: n });
+  };
+
+  // 여기서는 0이 '자동 판단 끔'이라 뜻이 있는 값이다. 빈칸만 기본값으로 되돌린다.
+  const commitMinSales = () => {
+    const n = minSales.trim() === '' ? 3 : Math.min(999, Math.max(0, Number(minSales) || 0));
+    setMinSales(String(n));
+    void save({ minSales14: n });
   };
 
   return (
@@ -104,6 +113,25 @@ export function BriefSettings({ showToast }: { showToast?: (msg: string) => void
           <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-3">
             발주해서 입고되기까지 걸리는 날입니다. 남은 재고가 이 일수보다 적어지면 알려 드립니다.
             국내 사입이면 3~7일, 중국 소싱이면 25~40일이 보통입니다.
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-[12.5px] text-ink-2">시즌 지난 상품 빼기</span>
+            <span className="text-[12.5px] text-ink-3">최근 14일 판매</span>
+            <input
+              value={minSales}
+              onChange={e => setMinSales(e.target.value.replace(/[^0-9]/g, ''))}
+              onBlur={commitMinSales}
+              inputMode="numeric"
+              className="w-20 min-h-[40px] rounded-control border border-line bg-paper-2 px-2.5 text-right text-[13px] tabular-nums text-ink focus:border-accent focus:outline-none"
+            />
+            <span className="text-[12.5px] text-ink-2">개 미만이면 제외</span>
+          </div>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-3">
+            여름 나시티가 9월에 품절인 건 사고가 아니라 계절입니다. 최근에 팔리지 않는 상품은
+            품절이어도 발주 알림에서 뺍니다. <b className="text-ink-2">0을 넣으면 이 판단을 끄고</b> 전부 알립니다.
+            개별 상품은 [재고 예측]에서 직접 고정할 수 있습니다 — 곧 시즌이 오는 겨울 상품처럼
+            자동 판단이 알 수 없는 경우에 씁니다.
           </p>
         </>
       )}
