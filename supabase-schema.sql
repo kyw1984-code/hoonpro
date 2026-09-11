@@ -1053,3 +1053,29 @@ create index if not exists idx_sys_err_open on system_errors(resolved_at, last_s
 create index if not exists idx_sys_err_dedupe on system_errors(area, message) where resolved_at is null;
 alter table system_errors enable row level security;
 revoke all on system_errors from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 42. 아침 브리핑 — 매일 아침 한 통으로 어제를 정리한다
+-- ─────────────────────────────────────────────────────────────
+-- 기능이 많아도 판매자가 매일 앱을 열 이유는 따로 필요하다. 어제 순이익,
+-- 발주해야 할 재고, 새 문의를 아침에 한 번 보내면 그게 여는 이유가 된다.
+--
+-- 주간 리포트(coupang_reports)와 같은 방식으로 보낸 날을 남겨 중복 발송을
+-- 막는다. 크론이 재시도되거나 두 번 돌아도 같은 날 두 통이 가지 않는다.
+create table if not exists coupang_daily_briefs (
+  user_id uuid not null references users(id) on delete cascade,
+  brief_date date not null,
+  summary jsonb not null,
+  sent_at timestamptz default now(),
+  primary key (user_id, brief_date)
+);
+create index if not exists idx_cdb_user_date on coupang_daily_briefs(user_id, brief_date desc);
+alter table coupang_daily_briefs enable row level security;
+revoke all on coupang_daily_briefs from anon, authenticated;
+
+-- 수신 거부. 매일 오는 메일은 끌 수 있어야 한다.
+alter table coupang_accounts add column if not exists brief_enabled boolean not null default true;
+
+-- 발주 리드타임 — 재고 알림의 기준이다. 판매자마다 다르다(국내 3일, 중국 30일).
+-- 이 값이 틀리면 알림이 늘 이르거나 늘 늦어 아무도 안 본다.
+alter table coupang_accounts add column if not exists lead_time_days int not null default 14;

@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { isDisabled, parseLimits } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
@@ -2537,6 +2538,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const type = String(req.query.type || 'sync');
     if (type === 'daily') return cronDaily(res);
     if (type === 'weekly') return cronWeeklyReport(res);
+    if (type === 'brief') return cronMorningBrief(res);
     return cronSync(res);
   }
 
@@ -2588,8 +2590,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'ad-import-url': return await handleAdImportUrl(userId, req, res);
       case 'settlement': return await handleSettlement(userId, res);
       case 'reports': return await handleReports(userId, res);
+      case 'brief-settings': return await handleBriefSettings(userId, req, res);
       case 'inventory': return await handleInventory(userId, req, res);
       case 'returns': return await handleReturns(userId, req, res);
+      case 'return-reasons': return await handleReturnReasons(userId, req, res);
+      case 'coupon-effect': return await handleCouponEffect(userId, req, res);
       case 'inquiries': return await handleInquiries(userId, req, res);
       case 'inquiry-draft': return await handleInquiryDraft(userId, req, res);
       case 'inquiry-reply': return await handleInquiryReply(userId, req, res);
@@ -3930,6 +3935,280 @@ async function sendWeeklyReport(
   return true;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 아침 브리핑 — 매일 아침 한 통으로 어제를 정리한다
+//
+// 기능이 많아도 판매자가 매일 앱을 열 이유는 따로 필요하다. 아침에
+// "어제 순이익 47만원, 조거팬츠 재고 6일 남음, 새 문의 2건"이 오면
+// 그게 여는 이유가 되고, 여는 사람은 해지하지 않는다.
+//
+// 어제 실적은 매출인식일이 아니라 주문일 기준이다. 매출인식은 배송완료
+// 뒤라 최대 열흘 늦어서, 그 숫자로 '어제'를 말하면 대부분 0이 나온다.
+// 대신 주문 기준에는 정산 수수료가 없으므로 이 메일의 금액은 '주문액'이라고
+// 분명히 적는다 — 순이익인 척하면 나중에 정산 숫자와 어긋나 신뢰를 잃는다.
+// ═══════════════════════════════════════════════════════════════
+
+export interface BriefData {
+  orderAmount: number;
+  quantity: number;
+  prevOrderAmount: number;
+  topSellers: { name: string; qty: number; amount: number }[];
+  reorder: InventoryRow[];
+  newInquiries: number;
+  newReturns: number;
+  leadTimeDays: number;
+}
+
+/** 발주가 필요한 것만 — 남은 일수가 리드타임보다 짧으면 지금 넣어야 늦지 않는다 */
+export function needsReorder(rows: InventoryRow[], leadTimeDays: number): InventoryRow[] {
+  return rows
+    .filter(r => {
+      if (r.risk === 'out') return true;            // 이미 품절
+      if (r.daysLeft === null) return false;        // 안 팔리는 재고는 발주 대상이 아니다
+      return r.daysLeft <= leadTimeDays;            // 지금 주문해도 도착 전에 떨어진다
+    })
+    .sort((a, b) => (a.daysLeft ?? -1) - (b.daysLeft ?? -1))
+    .slice(0, 8);
+}
+
+async function collectBrief(userId: string, day: string, leadTimeDays: number): Promise<BriefData> {
+  const prevDay = addDays(day, -7);   // 요일 효과가 크므로 어제가 아니라 지난주 같은 요일과 견준다
+
+  const [ordersRes, prevOrdersRes, inventory, inquiryRes, returnRes] = await Promise.all([
+    selectAll<{ vendor_item_id: string; product_name: string | null; quantity: number; order_amount: number }>(
+      (f, t) => supabase!
+        .from('coupang_orders_daily')
+        .select('vendor_item_id, product_name, quantity, order_amount')
+        .eq('user_id', userId).eq('order_date', day).order('vendor_item_id').range(f, t)),
+    selectAll<{ quantity: number; order_amount: number }>((f, t) => supabase!
+      .from('coupang_orders_daily')
+      .select('quantity, order_amount')
+      .eq('user_id', userId).eq('order_date', prevDay).order('vendor_item_id').range(f, t)),
+    computeInventory(userId, leadTimeDays),
+    supabase!.from('coupang_inquiries')
+      .select('inquiry_id', { count: 'exact', head: true })
+      .eq('user_id', userId).eq('answered', false)
+      .gte('inquired_at', `${day}T00:00:00+09:00`).lte('inquired_at', `${day}T23:59:59+09:00`),
+    supabase!.from('coupang_returns')
+      .select('receipt_id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .gte('requested_at', `${day}T00:00:00+09:00`).lte('requested_at', `${day}T23:59:59+09:00`),
+  ]);
+
+  // 상품 단위로 합친다. 옵션 스무 개가 스무 줄로 늘어서면 메일에서 읽을 수 없다.
+  const byProduct = new Map<string, { name: string; qty: number; amount: number }>();
+  let orderAmount = 0;
+  let quantity = 0;
+  for (const o of ordersRes.rows) {
+    const qty = Number(o.quantity) || 0;
+    const amount = Number(o.order_amount) || 0;
+    orderAmount += amount;
+    quantity += qty;
+    const name = String(o.product_name ?? '이름 없는 상품');
+    const cur = byProduct.get(name) ?? { name, qty: 0, amount: 0 };
+    cur.qty += qty;
+    cur.amount += amount;
+    byProduct.set(name, cur);
+  }
+
+  const prevOrderAmount = prevOrdersRes.rows.reduce((n, o) => n + (Number(o.order_amount) || 0), 0);
+
+  return {
+    orderAmount,
+    quantity,
+    prevOrderAmount,
+    topSellers: [...byProduct.values()].sort((a, b) => b.amount - a.amount).slice(0, 3),
+    reorder: needsReorder(inventory.rows, leadTimeDays),
+    newInquiries: inquiryRes.count ?? 0,
+    newReturns: returnRes.count ?? 0,
+    leadTimeDays,
+  };
+}
+
+/** 보낼 만한 내용이 있는가 — 아무 일도 없던 날은 메일을 만들지 않는다 */
+export function briefWorthSending(d: BriefData): boolean {
+  return d.quantity > 0 || d.reorder.length > 0 || d.newInquiries > 0 || d.newReturns > 0;
+}
+
+export function briefHtml(name: string, day: string, d: BriefData): string {
+  const diff = d.orderAmount - d.prevOrderAmount;
+  const diffPct = d.prevOrderAmount > 0 ? Math.round((diff / d.prevOrderAmount) * 100) : null;
+  const arrow = diff > 0 ? '▲' : diff < 0 ? '▼' : '–';
+  const diffColor = diff > 0 ? '#5fd3a6' : diff < 0 ? '#ff8a8a' : '#a8b3c9';
+
+  const card = (label: string, value: string, sub = '') =>
+    `<td style="padding:10px 12px;background:#1b2540;border-radius:9px;vertical-align:top;">` +
+    `<div style="font-size:11px;color:#7c88a3;">${label}</div>` +
+    `<div style="font-size:17px;font-weight:700;color:#e8ecf5;margin-top:3px;">${value}</div>` +
+    (sub ? `<div style="font-size:11px;color:#7c88a3;margin-top:2px;">${sub}</div>` : '') +
+    `</td>`;
+
+  let html =
+    `<p style="margin:0 0 14px;">${escapeHtml(name)}님, ${day.slice(5).replace('-', '월 ')}일 상황입니다.</p>` +
+    `<table style="width:100%;border-collapse:separate;border-spacing:6px 0;"><tr>` +
+    card('어제 주문액', won(d.orderAmount), `${d.quantity.toLocaleString('ko-KR')}개`) +
+    card(
+      '지난주 같은 요일',
+      diffPct === null ? '비교 없음' : `<span style="color:${diffColor};">${arrow} ${Math.abs(diffPct)}%</span>`,
+      d.prevOrderAmount > 0 ? won(d.prevOrderAmount) : '',
+    ) +
+    `</tr></table>`;
+
+  if (d.topSellers.length > 0) {
+    html +=
+      `<p style="margin:18px 0 6px;font-size:12px;color:#7c88a3;">어제 많이 팔린 상품</p>` +
+      d.topSellers
+        .map(
+          s =>
+            `<div style="font-size:12.5px;padding:3px 0;">${escapeHtml(s.name.slice(0, 40))} ` +
+            `<span style="color:#7c88a3;">${s.qty}개 · ${won(s.amount)}</span></div>`,
+        )
+        .join('');
+  }
+
+  // 발주는 가장 급한 항목이라 실적보다 눈에 띄게 둔다. 품절은 매출만 잃는 게
+  // 아니라 검색 순위까지 잃고, 되돌리는 데 몇 주가 걸린다.
+  if (d.reorder.length > 0) {
+    const rows = d.reorder
+      .map(r => {
+        const left = r.risk === 'out'
+          ? `<span style="color:#ff8a8a;font-weight:700;">품절</span>`
+          : `<span style="color:${(r.daysLeft ?? 0) <= 3 ? '#ff8a8a' : '#ffb454'};">${r.daysLeft}일</span>`;
+        const label = `${r.productName}${r.optionName ? ` / ${r.optionName}` : ''}`;
+        return `<div style="font-size:12.5px;padding:4px 0;border-top:1px solid #23304f;">` +
+          `${escapeHtml(label.slice(0, 44))} · ${left}` +
+          (r.reorderQty > 0 ? ` <span style="color:#7c88a3;">→ ${r.reorderQty.toLocaleString('ko-KR')}개 발주</span>` : '') +
+          `</div>`;
+      })
+      .join('');
+    html +=
+      `<div style="margin:18px 0 0;padding:12px 14px;background:#2a1f1f;border:1px solid #4a2f2f;border-radius:10px;">` +
+      `<div style="font-size:13px;font-weight:700;color:#ffb454;">지금 발주해야 할 것 ${d.reorder.length}개</div>` +
+      `<div style="font-size:11px;color:#7c88a3;margin:3px 0 6px;">리드타임 ${d.leadTimeDays}일 기준입니다. 지금 주문해도 도착 전에 떨어지는 것만 골랐습니다.</div>` +
+      rows +
+      `</div>`;
+  }
+
+  const todo: string[] = [];
+  if (d.newInquiries > 0) todo.push(`답변 안 한 문의 ${d.newInquiries}건`);
+  if (d.newReturns > 0) todo.push(`새 반품 ${d.newReturns}건`);
+  if (todo.length > 0) {
+    html += `<p style="margin:16px 0 0;font-size:12.5px;color:#a8b3c9;">${todo.join(' · ')}</p>`;
+  }
+
+  html +=
+    `<p style="margin:14px 0 0;font-size:11px;color:#7c88a3;line-height:1.6;">` +
+    `금액은 <b style="color:#a8b3c9;">주문액</b>입니다. 수수료·광고비를 뺀 순이익은 정산이 끝나야 확정되므로 ` +
+    `[훈프로 정산AI]에서 확인하세요. 이 메일은 [연동 설정]에서 끌 수 있습니다.</p>` +
+    emailButtonLink('훈프로 열기');
+
+  return html;
+}
+
+async function sendDailyBrief(
+  userId: string,
+  email: string,
+  name: string,
+  day: string,
+  leadTimeDays: number,
+): Promise<boolean> {
+  if (!supabase) return false;
+
+  // 크론이 재시도되거나 두 번 돌아도 같은 날 두 통이 가지 않는다
+  const { data: already } = await supabase
+    .from('coupang_daily_briefs')
+    .select('user_id')
+    .eq('user_id', userId)
+    .eq('brief_date', day)
+    .maybeSingle();
+  if (already) return false;
+
+  const d = await collectBrief(userId, day, leadTimeDays);
+  if (!briefWorthSending(d)) return false;
+
+  await sendEmail(
+    email,
+    `[훈프로] ${day.slice(5).replace('-', '/')} 어제 주문 ${won(d.orderAmount)}` +
+      (d.reorder.length > 0 ? ` · 발주 ${d.reorder.length}건` : ''),
+    wrapEmail('오늘의 훈프로 브리핑', briefHtml(name, day, d)),
+  );
+
+  await supabase.from('coupang_daily_briefs').insert({
+    user_id: userId,
+    brief_date: day,
+    summary: {
+      orderAmount: d.orderAmount,
+      quantity: d.quantity,
+      prevOrderAmount: d.prevOrderAmount,
+      reorderCount: d.reorder.length,
+      newInquiries: d.newInquiries,
+      newReturns: d.newReturns,
+    },
+  });
+  return true;
+}
+
+async function cronMorningBrief(res: VercelResponse) {
+  if (!supabase) return res.status(200).json({ ok: false, reason: 'supabase 미설정' });
+  if (!process.env.RESEND_API_KEY) return res.status(200).json({ ok: false, reason: 'RESEND_API_KEY 미설정' });
+
+  const day = addDays(kstToday(), -1);   // 어제
+  const budgetMs = 240_000;
+  const startedAt = Date.now();
+
+  const { data: accounts } = await supabase
+    .from('coupang_accounts')
+    .select('user_id, brief_enabled, lead_time_days, users(email, name)')
+    .eq('status', 'active');
+
+  const result = { day, sent: 0, skipped: 0, failed: 0 };
+
+  for (const acc of (accounts ?? []) as any[]) {
+    if (Date.now() - startedAt > budgetMs) { result.skipped++; continue; }
+    if (acc.brief_enabled === false) { result.skipped++; continue; }
+    const email = acc.users?.email;
+    if (!email) { result.skipped++; continue; }
+    try {
+      const sent = await sendDailyBrief(
+        acc.user_id, email, acc.users?.name ?? '', day,
+        Number(acc.lead_time_days) || 14,
+      );
+      if (sent) result.sent++; else result.skipped++;
+    } catch {
+      result.failed++;
+    }
+  }
+
+  return res.status(200).json({ ok: true, ...result });
+}
+
+/** 브리핑 수신 설정 — 매일 오는 메일은 끌 수 있어야 한다 */
+async function handleBriefSettings(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'POST') {
+    const patch: Record<string, any> = {};
+    if (typeof req.body?.enabled === 'boolean') patch.brief_enabled = req.body.enabled;
+    if (req.body?.leadTimeDays !== undefined) {
+      const n = Number(req.body.leadTimeDays);
+      // 0일이면 '이미 늦은 것'만 알리게 되고, 너무 길면 전부 발주 대상이 된다
+      if (Number.isFinite(n)) patch.lead_time_days = Math.min(120, Math.max(1, Math.round(n)));
+    }
+    if (Object.keys(patch).length === 0) return res.status(400).json({ error: '변경할 값이 없습니다.' });
+    const { error } = await supabase!.from('coupang_accounts').update(patch).eq('user_id', userId);
+    if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
+    return res.status(200).json({ ok: true, ...patch });
+  }
+
+  const { data } = await supabase!
+    .from('coupang_accounts')
+    .select('brief_enabled, lead_time_days')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return res.status(200).json({
+    enabled: data?.brief_enabled ?? true,
+    leadTimeDays: Number(data?.lead_time_days) || 14,
+  });
+}
+
 function emailButtonLink(label: string, href = 'https://hoonproai.com'): string {
   return `<div style="margin:22px 0 4px;"><a href="${href}" style="display:inline-block;padding:11px 20px;border-radius:10px;background:linear-gradient(135deg,#7cf5ff,#8b7bff);color:#0a0f1f;font-weight:700;font-size:13.5px;text-decoration:none;">${label}</a></div>`;
 }
@@ -4300,6 +4579,229 @@ async function handleReturns(userId: string, req: VercelRequest, res: VercelResp
       cancelledCount,
     },
     missingReturnCost: rows.filter(r => !r.costEntered).length,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 쿠폰 효과 비교 — 어느 쿠폰 금액이 실제로 남았나
+//
+// 쿠폰 금액을 바꿔 가며 파는 건 그 자체로 실험이다. 그런데 결과가
+// 어디에도 안 남아서, 판매자는 "11,500원이 나았던 것 같다"는 느낌만
+// 갖고 다음 쿠폰을 정한다.
+//
+// 쿠폰마다 걸려 있던 기간이 곧 구간이다. 그 구간의 실적을 나란히 놓으면
+// 답이 나온다. 다만 구간 길이가 제각각(3일 vs 20일)이라 총액을 그냥
+// 비교하면 긴 구간이 무조건 이긴다. 하루 평균으로 환산해 비교한다.
+// ═══════════════════════════════════════════════════════════════
+
+/** 한 번에 계산할 구간 수. computeProfit이 구간마다 도니까 무한정 늘릴 수 없다 */
+const COUPON_SEGMENT_MAX = 6;
+
+interface CouponSegment {
+  couponId: string;
+  name: string;
+  discount: number;
+  type: string;
+  start: string;
+  end: string;
+  days: number;
+  quantity: number;
+  salesAmount: number;
+  profit: number;
+  couponDiscount: number;
+  /** 하루 평균 — 구간 길이가 달라서 이 값으로 비교해야 공정하다 */
+  perDayQuantity: number;
+  perDayProfit: number;
+  /** 개당 순이익 */
+  profitPerUnit: number;
+  marginRate: number;
+  /** 다른 쿠폰과 기간이 겹치는가 — 겹치면 이 구간의 실적은 그 쿠폰 것이기도 하다 */
+  overlapped: boolean;
+}
+
+async function handleCouponEffect(userId: string, req: VercelRequest, res: VercelResponse) {
+  const { from, to } = rangeFromQuery(req);
+
+  const { rows: coupons } = await selectAll<{
+    coupon_id: string; promotion_name: string | null; coupon_type: string | null;
+    discount: number | null; start_at: string | null; end_at: string | null;
+  }>((f, t) => supabase!
+    .from('coupang_coupons')
+    .select('coupon_id, promotion_name, coupon_type, discount, start_at, end_at')
+    .eq('user_id', userId)
+    .order('start_at', { ascending: false })
+    .range(f, t));
+
+  // 기간이 없는 쿠폰은 구간을 만들 수 없다. 조회 기간과 안 겹치는 것도 뺀다.
+  const clipped = coupons
+    .filter(c => c.start_at && c.end_at)
+    .map(c => {
+      const s = String(c.start_at).slice(0, 10);
+      const e = String(c.end_at).slice(0, 10);
+      return {
+        couponId: String(c.coupon_id),
+        name: c.promotion_name ?? '(이름 없는 쿠폰)',
+        type: c.coupon_type ?? '',
+        discount: Number(c.discount) || 0,
+        start: s < from ? from : s,
+        // 아직 안 끝난 쿠폰은 오늘까지만 본다. 미래 날짜를 넣으면 '하루 평균'의
+        // 분모가 부풀어 성과가 실제보다 나빠 보인다.
+        end: e > to ? to : e,
+        rawStart: s,
+        rawEnd: e,
+      };
+    })
+    .filter(c => c.start <= c.end)
+    .sort((a, b) => (a.start < b.start ? 1 : -1))
+    .slice(0, COUPON_SEGMENT_MAX);
+
+  if (clipped.length === 0) {
+    return res.status(200).json({
+      from, to, segments: [], best: null,
+      reason: '이 기간에 걸려 있던 쿠폰이 없습니다. 쿠폰을 바꿔 가며 팔면 여기서 금액별 성과를 비교해 드립니다.',
+    });
+  }
+
+  const segments: CouponSegment[] = [];
+  for (const c of clipped) {
+    const days = daysBetween(c.start, c.end) + 1;
+    const p = await computeProfit(userId, c.start, c.end, { totalsOnly: true });
+    const t = p.totals;
+    segments.push({
+      couponId: c.couponId,
+      name: c.name,
+      discount: c.discount,
+      type: c.type,
+      start: c.start,
+      end: c.end,
+      days,
+      quantity: t.quantity,
+      salesAmount: t.salesAmount,
+      profit: t.profit,
+      couponDiscount: t.couponDiscount,
+      perDayQuantity: days > 0 ? t.quantity / days : 0,
+      perDayProfit: days > 0 ? t.profit / days : 0,
+      profitPerUnit: t.quantity > 0 ? t.profit / t.quantity : 0,
+      marginRate: t.salesAmount > 0 ? (t.profit / t.salesAmount) * 100 : 0,
+      overlapped: false,
+    });
+  }
+
+  // 기간이 겹친 구간은 실적을 나눠 가진 것이라 단독 성과로 읽으면 안 된다
+  for (let i = 0; i < segments.length; i++) {
+    for (let j = i + 1; j < segments.length; j++) {
+      if (segments[i].start <= segments[j].end && segments[j].start <= segments[i].end) {
+        segments[i].overlapped = true;
+        segments[j].overlapped = true;
+      }
+    }
+  }
+
+  // 판단 기준은 하루 평균 순이익이다. 총 순이익으로 고르면 오래 걸어 둔 쿠폰이
+  // 무조건 이기고, 개당 순이익으로 고르면 쿠폰을 아예 안 준 구간이 이긴다
+  // (많이 파는 것보다 비싸게 파는 쪽을 늘 고르게 된다).
+  const comparable = segments.filter(s => s.quantity > 0 && !s.overlapped);
+  const best = comparable.length >= 2
+    ? [...comparable].sort((a, b) => b.perDayProfit - a.perDayProfit)[0]
+    : null;
+
+  return res.status(200).json({
+    from,
+    to,
+    segments,
+    best: best ? { couponId: best.couponId, name: best.name, discount: best.discount } : null,
+    truncated: coupons.filter(c => c.start_at && c.end_at).length > COUPON_SEGMENT_MAX,
+    note: comparable.length < 2
+      ? '비교하려면 기간이 겹치지 않는 쿠폰 구간이 둘 이상 필요합니다.'
+      : null,
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 반품 사유 분석 — 무엇을 고치면 반품이 줄어드나
+//
+// 반품 목록은 이미 있지만 한 건씩 흩어져 있어 무엇을 고칠지는 안 보인다.
+// 같은 상품에서 사이즈 얘기가 스무 번 나왔다면 그건 취향이 아니라 상세페이지에
+// 실측 치수가 없다는 뜻이다.
+//
+// 분류는 규칙 기반이라 원가가 들지 않는다(src/lib/returnReasons.ts).
+// ═══════════════════════════════════════════════════════════════
+
+async function handleReturnReasons(userId: string, req: VercelRequest, res: VercelResponse) {
+  const { from, to } = rangeFromQuery(req);
+
+  const [returnRes, salesRes] = await Promise.all([
+    selectAll<{
+      vendor_item_id: string | null; product_name: string | null;
+      quantity: number | null; reason: string | null; fault: string | null;
+    }>((f, t) => supabase!
+      .from('coupang_returns')
+      .select('vendor_item_id, product_name, quantity, reason, fault')
+      .eq('user_id', userId)
+      .gte('requested_at', `${from}T00:00:00+09:00`)
+      .lte('requested_at', `${to}T23:59:59+09:00`)
+      .order('requested_at').range(f, t)),
+    selectAll<{ vendor_item_id: string; quantity: number }>((f, t) => supabase!
+      .from('coupang_sales_daily')
+      .select('vendor_item_id, quantity')
+      .eq('user_id', userId)
+      .gte('sale_date', from).lte('sale_date', to)
+      .order('sale_date').range(f, t)),
+  ]);
+
+  const overall = summarizeReturnReasons(returnRes.rows);
+
+  // 상품별로 다시 센다. 전체 비율만 보면 "사이즈 30%"까지는 알아도
+  // 어느 상품의 상세페이지를 고쳐야 하는지는 모른다.
+  const soldByItem = new Map<string, number>();
+  for (const s of salesRes.rows) {
+    const k = String(s.vendor_item_id);
+    soldByItem.set(k, (soldByItem.get(k) ?? 0) + (Number(s.quantity) || 0));
+  }
+
+  const byProduct = new Map<string, { name: string; items: Set<string>; rows: typeof returnRes.rows }>();
+  for (const r of returnRes.rows) {
+    const name = String(r.product_name ?? '이름 없는 상품');
+    const cur = byProduct.get(name) ?? { name, items: new Set<string>(), rows: [] };
+    if (r.vendor_item_id) cur.items.add(String(r.vendor_item_id));
+    cur.rows.push(r);
+    byProduct.set(name, cur);
+  }
+
+  const products = [...byProduct.values()]
+    .map(p => {
+      const s = summarizeReturnReasons(p.rows);
+      const sold = [...p.items].reduce((n, id) => n + (soldByItem.get(id) ?? 0), 0);
+      // 손댈 수 있는 유형 중 가장 많은 것 — 변심이 1위여도 그건 할 일이 아니다
+      const top = s.categories.find(c => c.actionable) ?? null;
+      return {
+        productName: p.name,
+        returnCount: s.total,
+        returnQuantity: s.totalQuantity,
+        sold,
+        // 판매 표본이 적으면 비율이 튄다. 10개 팔아 1개 반품이 10%로 보이면
+        // 멀쩡한 상품이 문제 상품으로 올라온다.
+        returnRate: sold >= 10 ? s.totalQuantity / sold : null,
+        sellerFault: s.sellerFault,
+        topCategory: top ? { category: top.category, label: top.label, count: top.count, share: top.share, advice: top.advice } : null,
+        categories: s.categories,
+      };
+    })
+    .sort((a, b) => b.returnCount - a.returnCount)
+    .slice(0, 10);
+
+  const totalSold = [...soldByItem.values()].reduce((a, b) => a + b, 0);
+
+  return res.status(200).json({
+    from,
+    to,
+    total: overall.total,
+    totalQuantity: overall.totalQuantity,
+    sellerFault: overall.sellerFault,
+    totalSold,
+    returnRate: totalSold >= 10 ? overall.totalQuantity / totalSold : null,
+    categories: overall.categories,
+    products,
   });
 }
 
