@@ -21,6 +21,10 @@
     {
       "path": "/api/coupang?action=cron&type=weekly",
       "schedule": "0 23 * * 0"
+    },
+    {
+      "path": "/api/coupang?action=cron&type=brief",
+      "schedule": "0 22 * * *"
     }
   ],
   "functions": {

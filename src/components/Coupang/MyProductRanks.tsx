@@ -27,9 +27,57 @@ interface RankResult {
   rank: number | null;
   page: number | null;
   keyword: string;
+  /** 몇 위까지 훑었는지 — 못 찾았을 때 "N위 밖"이라고 정확히 말하기 위한 값 */
+  searchedTo?: number;
+  /** 끝까지 못 보고 멈췄으면 그 이유 */
+  stoppedBy?: 'limit' | 'error';
 }
 
 const auth = () => ({ Authorization: `Bearer ${getToken()}` });
+
+// 상품마다 넣은 키워드와 결과를 남긴다. 다른 탭에 다녀오면 컴포넌트가 새로 그려져
+// 입력이 전부 사라지는데, 상품 열 개에 키워드를 넣어 둔 사람에게는 그게 곧 처음부터
+// 다시 하라는 말이다. 순위는 시간이 지나면 변하므로 확인한 시각도 함께 남긴다.
+const SAVE_KEY = 'hoonpro_product_ranks';
+type Saved = Record<string, {
+  keyword: string;
+  /** 실제로 [순위 확인]을 돌린 결과인지. 적어만 둔 키워드를 "순위 없음"으로 읽으면 안 된다 */
+  checked?: boolean;
+  rank?: number | null;
+  page?: number | null;
+  searchedTo?: number;
+  stoppedBy?: 'limit' | 'error';
+  at?: string;
+}>;
+
+function loadSaved(): Saved {
+  try {
+    const v = JSON.parse(localStorage.getItem(SAVE_KEY) || '{}');
+    return v && typeof v === 'object' ? v : {};
+  } catch {
+    return {};
+  }
+}
+function saveOne(productId: string, value: Saved[string] | null) {
+  try {
+    const all = loadSaved();
+    if (value) all[productId] = value;
+    else delete all[productId];
+    localStorage.setItem(SAVE_KEY, JSON.stringify(all));
+  } catch {
+    /* 저장이 막힌 환경 — 화면 동작은 그대로 */
+  }
+}
+
+/** "3분 전"처럼. 순위는 변하므로 언제 확인한 값인지가 중요하다 */
+function ago(iso: string): string {
+  const m = Math.floor((Date.now() - Date.parse(iso)) / 60000);
+  if (!Number.isFinite(m)) return '';
+  if (m < 1) return '방금';
+  if (m < 60) return `${m}분 전`;
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}시간 전` : `${Math.floor(h / 24)}일 전`;
+}
 
 export function MyProductRanks({ days = 30 }: { days?: number }) {
   const [products, setProducts] = useState<MyProduct[] | null>(null);
@@ -89,10 +137,38 @@ export function MyProductRanks({ days = 30 }: { days?: number }) {
 }
 
 function ProductRow({ product, days }: { product: MyProduct; days: number }) {
-  const [keyword, setKeyword] = useState('');
+  // 지연 초기화 — 저장분은 마운트할 때 한 번만 읽는다. 이걸 본문에서 그냥 부르면
+  // 줄마다 매 렌더링마다 localStorage를 파싱하게 된다.
+  const [saved] = useState(() => loadSaved()[product.productId]);
+  const [keyword, setKeyword] = useState(saved?.keyword ?? '');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<RankResult | null>(null);
+  const [result, setResult] = useState<RankResult | null>(
+    saved?.checked
+      ? {
+          rank: saved.rank ?? null, page: saved.page ?? null, keyword: saved.keyword,
+          searchedTo: saved.searchedTo, stoppedBy: saved.stoppedBy,
+        }
+      : null,
+  );
+  const [checkedAt, setCheckedAt] = useState<string | null>(saved?.checked ? saved.at ?? null : null);
   const [error, setError] = useState<string | null>(null);
+
+  // 눌러 보지 않고 적어만 둔 키워드도 남긴다. 대표님이 겪은 건 "확인을 안 누르고
+  // 다른 탭에 갔다 오니 비어 있더라"이므로, 결과가 있을 때만 저장하면 절반만 고친 게 된다.
+  // 다만 키워드를 바꿔 적었다면 화면의 순위는 옛 키워드 것이니 함께 남기지 않는다.
+  const rememberKeyword = () => {
+    const kw = keyword.trim();
+    if (!kw) return saveOne(product.productId, null);
+    // 키워드를 바꿔 적었다면 화면의 순위는 옛 키워드 것이므로 함께 남기지 않는다
+    if (result && result.keyword === kw) {
+      saveOne(product.productId, {
+        keyword: kw, checked: true, rank: result.rank, page: result.page,
+        searchedTo: result.searchedTo, stoppedBy: result.stoppedBy, at: checkedAt ?? undefined,
+      });
+    } else {
+      saveOne(product.productId, { keyword: kw });
+    }
+  };
 
   const check = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,6 +177,8 @@ function ProductRow({ product, days }: { product: MyProduct; days: number }) {
     setLoading(true);
     setError(null);
     setResult(null);
+    // 확인 시각도 함께 지운다. 결과만 지우면 오류 옆에 옛 "3분 전"이 남는다
+    setCheckedAt(null);
     try {
       const res = await fetch(
         `/api/sourcing?type=rankwatch&action=check&keyword=${encodeURIComponent(kw)}&product=${encodeURIComponent(product.productId)}`,
@@ -108,7 +186,17 @@ function ProductRow({ product, days }: { product: MyProduct; days: number }) {
       );
       const d = await res.json();
       if (!res.ok) throw new Error(d?.error || '순위를 확인하지 못했습니다.');
-      setResult({ rank: d.currentRank ?? null, page: d.page ?? null, keyword: kw });
+      const next: RankResult = {
+        rank: d.currentRank ?? null, page: d.page ?? null, keyword: kw,
+        searchedTo: d.searchedTo, stoppedBy: d.stoppedBy,
+      };
+      const at = new Date().toISOString();
+      setResult(next);
+      setCheckedAt(at);
+      saveOne(product.productId, {
+        keyword: kw, checked: true, rank: next.rank, page: next.page,
+        searchedTo: next.searchedTo, stoppedBy: next.stoppedBy, at,
+      });
     } catch (err: any) {
       setError(err?.message ?? '순위를 확인하지 못했습니다.');
     } finally {
@@ -135,6 +223,7 @@ function ProductRow({ product, days }: { product: MyProduct; days: number }) {
         <input
           value={keyword}
           onChange={e => setKeyword(e.target.value)}
+          onBlur={rememberKeyword}
           placeholder="키워드"
           className="min-w-0 flex-1 rounded-control border border-line bg-paper-2 px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
         />
@@ -149,7 +238,14 @@ function ProductRow({ product, days }: { product: MyProduct; days: number }) {
 
         {result && (
           result.rank === null ? (
-            <span className="text-[12px] text-ink-3">"{result.keyword}" 60위 밖</span>
+            <span className="text-[12px] text-ink-3">
+              {/* 한도에 걸려 멈춘 걸 "순위 밖"이라고 하면 거짓말이 된다 */}
+              {result.stoppedBy
+                ? `"${result.keyword}" ${result.searchedTo ?? 0}위까지는 없었습니다 (${
+                    result.stoppedBy === 'limit' ? '오늘 순위 확인 한도에 걸려 여기까지' : '수집이 끊겨 여기까지'
+                  })`
+                : `"${result.keyword}" ${result.searchedTo ? `${result.searchedTo}위 밖` : '순위 없음'}`}
+            </span>
           ) : (
             <span className="inline-flex items-center gap-1.5">
               <span className="rounded-control bg-accent-soft px-2 py-0.5 text-[12.5px] font-semibold tabular-nums text-accent">
@@ -163,6 +259,7 @@ function ProductRow({ product, days }: { product: MyProduct; days: number }) {
             </span>
           )
         )}
+        {checkedAt && !loading && <span className="text-[11px] text-ink-3">{ago(checkedAt)}</span>}
         {error && <span className="text-[11.5px] text-critical">{error}</span>}
       </form>
     </div>

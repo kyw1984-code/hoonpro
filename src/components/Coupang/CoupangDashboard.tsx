@@ -15,6 +15,9 @@ import { ReturnAnalysis } from './ReturnAnalysis';
 import { InquiryAssistant } from './InquiryAssistant';
 import { RankRevenue } from './RankRevenue';
 import { PriceRules } from './PriceRules';
+import { ReturnReasons } from './ReturnReasons';
+import { CouponEffect } from './CouponEffect';
+import { BriefSettings } from './BriefSettings';
 
 type View = 'profit' | 'settlement' | 'inventory' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
 
@@ -166,10 +169,20 @@ export function CoupangDashboard() {
       )}
 
       <div key={refreshKey} className="contents">
-      {view === 'profit' && <ProfitDashboard onEditCosts={() => setView('costs')} />}
+      {view === 'profit' && (
+        <div className="flex flex-col gap-5">
+          <ProfitDashboard onEditCosts={() => setView('costs')} />
+          <CouponEffect days={90} />
+        </div>
+      )}
       {view === 'settlement' && <SettlementCalendar />}
       {view === 'inventory' && <InventoryForecast />}
-      {view === 'returns' && <ReturnAnalysis onEditCosts={() => setView('costs')} />}
+      {view === 'returns' && (
+        <div className="flex flex-col gap-5">
+          <ReturnReasons days={90} />
+          <ReturnAnalysis onEditCosts={() => setView('costs')} />
+        </div>
+      )}
       {view === 'inquiries' && <InquiryAssistant />}
       {view === 'rank' && <RankRevenue />}
       {view === 'price' && <PriceRules onEditCosts={() => setView('costs')} />}
@@ -178,6 +191,7 @@ export function CoupangDashboard() {
 
       {view === 'settings' && (
         <div className="flex flex-col gap-5">
+        <BriefSettings />
         <WeeklyReports />
         <div className="rounded-panel border border-line bg-paper p-6">
           <h3 className="mb-3 text-sm font-semibold text-ink">연동 정보</h3>

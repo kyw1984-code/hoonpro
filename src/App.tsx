@@ -155,6 +155,7 @@ export default function App() {
   const [billingLocked, setBillingLocked] = useState(false);
   // 402(구독 필요)에 막혔을 때 띄우는 안내 — 구독 관리로 바로 이동시킨다
   const [subPrompt, setSubPrompt] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
 
   const applyBillingStatus = (s: BillingStatus, u: AuthUser | null) => {
     const subOk = s.subscription && ['trial', 'active', 'past_due'].includes(s.subscription.status);
@@ -178,13 +179,18 @@ export default function App() {
     const subRequiredHandler = (e: Event) => {
       setSubPrompt((e as CustomEvent).detail?.message || '구독 후 이용할 수 있습니다.');
     };
+    const unavailableHandler = (e: Event) => {
+      setUnavailable((e as CustomEvent).detail?.message || '이 기능은 현재 제공하지 않습니다.');
+    };
     window.addEventListener('usage-updated', handler);
     window.addEventListener('billing-updated', billingHandler);
     window.addEventListener('subscription-required', subRequiredHandler);
+    window.addEventListener('feature-unavailable', unavailableHandler);
     return () => {
       window.removeEventListener('usage-updated', handler);
       window.removeEventListener('billing-updated', billingHandler);
       window.removeEventListener('subscription-required', subRequiredHandler);
+      window.removeEventListener('feature-unavailable', unavailableHandler);
     };
   }, []);
 
@@ -209,6 +215,33 @@ export default function App() {
     <ApiKeyCheck>
       <div className="min-h-screen bg-ground flex flex-col font-sans">
         {/* ─── 구독 필요 안내 ─── */}
+        {unavailable && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setUnavailable(null)}
+          >
+            <div
+              className="w-full max-w-[400px] rounded-panel border border-line bg-paper p-6 shadow-overlay"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-control bg-paper-2">
+                <Lock className="h-5 w-5 text-ink-3" />
+              </div>
+              <h2 className="text-[17px] font-semibold text-ink">이용할 수 없는 기능입니다</h2>
+              <p className="mt-2 text-[13.5px] leading-relaxed text-ink-2">{unavailable}</p>
+              <button
+                type="button"
+                onClick={() => setUnavailable(null)}
+                className="mt-5 min-h-[44px] w-full rounded-control border border-line px-4 text-[14px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        )}
+
         {subPrompt && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
@@ -271,7 +304,8 @@ export default function App() {
             </button>
 
             <div className="flex shrink-0 items-center gap-3">
-              {!user.isAdmin && remainingCalls !== null && (
+              {/* 무제한은 -1로 온다. 그대로 두면 "오늘 -1회"가 된다 */}
+              {!user.isAdmin && remainingCalls !== null && remainingCalls >= 0 && (
                 <span
                   className="hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-xs sm:inline-flex tabular"
                   style={{

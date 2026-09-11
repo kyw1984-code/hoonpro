@@ -69,6 +69,17 @@ export function notifySubscriptionRequired(message?: string): void {
   }));
 }
 
+/**
+ * 내린 기능을 눌렀을 때 앱 전체에 알린다.
+ * generateImage처럼 예외를 삼키고 undefined를 돌려주는 호출부가 있어서,
+ * 던지기만 하면 버튼이 돌다가 아무 말 없이 멈춘다. 이유는 보여 줘야 한다.
+ */
+export function notifyFeatureUnavailable(message?: string): void {
+  window.dispatchEvent(new CustomEvent('feature-unavailable', {
+    detail: { message: message || '이 기능은 현재 제공하지 않습니다.' },
+  }));
+}
+
 export async function trackUsage(feature: 'image' | 'analyze' | 'general' = 'general'): Promise<void> {
   const token = getToken();
   if (!token) throw new Error('로그인이 필요합니다.');
@@ -81,6 +92,7 @@ export async function trackUsage(feature: 'image' | 'analyze' | 'general' = 'gen
   const data = await res.json();
   if (!res.ok) {
     if (res.status === 402) notifySubscriptionRequired(data.error);
+    if (res.status === 403 && data.disabled) notifyFeatureUnavailable(data.error);
     throw new Error(data.error ?? 'API 호출 한도를 초과했습니다.');
   }
 

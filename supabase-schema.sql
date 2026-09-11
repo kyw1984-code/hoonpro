@@ -477,8 +477,17 @@ as $$
 declare
   v_count int;
 begin
-  -- 한도 0 이하는 무제한으로 취급 (코칭AI 등)
-  if p_limit <= 0 then
+  -- 한도 0 = 사용 중지. 운영에서 기능을 내릴 때 쓴다.
+  -- (예전에는 0을 무제한으로 취급했다. 기능을 끄려고 0을 넣으면 정반대로
+  --  무제한이 되는 함정이라, 0은 차단, 무제한은 음수로 뒤집었다.)
+  -- 사용량은 올리지 않는다 — 막은 호출을 세면 실측 단가의 분모가 부풀어
+  -- 관리자 화면의 원가 계산이 틀어진다.
+  if p_limit = 0 then
+    return json_build_object('exceeded', true, 'remaining', 0, 'disabled', true);
+  end if;
+
+  -- 음수 = 무제한 (코칭AI 등)
+  if p_limit < 0 then
     insert into feature_usage (user_id, date, feature, call_count)
     values (p_user_id, p_date, p_feature, 1)
     on conflict (user_id, date, feature)
@@ -508,9 +517,10 @@ begin
 end;
 $$;
 
--- 기능별 한도 기본값 (관리자 화면에서 조정. 0 = 무제한)
+-- 기능별 한도 기본값 (관리자 화면에서 조정. 0 = 사용 중지, 음수 = 무제한)
+-- image(썸네일·상세페이지 이미지)는 0 — 기능을 내렸다.
 insert into app_config (key, value) values
-  ('feature_limits', '{"image":40,"qa":100,"sourcing":60,"reviews":20,"rank":40,"analyze":40,"inquiry":60,"general":200}')
+  ('feature_limits', '{"image":0,"qa":100,"sourcing":60,"reviews":20,"rank":100,"analyze":40,"inquiry":60,"general":200}')
 on conflict (key) do nothing;
 
 -- ═════════════════════════════════════════════════════════════
@@ -1043,3 +1053,29 @@ create index if not exists idx_sys_err_open on system_errors(resolved_at, last_s
 create index if not exists idx_sys_err_dedupe on system_errors(area, message) where resolved_at is null;
 alter table system_errors enable row level security;
 revoke all on system_errors from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 42. 아침 브리핑 — 매일 아침 한 통으로 어제를 정리한다
+-- ─────────────────────────────────────────────────────────────
+-- 기능이 많아도 판매자가 매일 앱을 열 이유는 따로 필요하다. 어제 순이익,
+-- 발주해야 할 재고, 새 문의를 아침에 한 번 보내면 그게 여는 이유가 된다.
+--
+-- 주간 리포트(coupang_reports)와 같은 방식으로 보낸 날을 남겨 중복 발송을
+-- 막는다. 크론이 재시도되거나 두 번 돌아도 같은 날 두 통이 가지 않는다.
+create table if not exists coupang_daily_briefs (
+  user_id uuid not null references users(id) on delete cascade,
+  brief_date date not null,
+  summary jsonb not null,
+  sent_at timestamptz default now(),
+  primary key (user_id, brief_date)
+);
+create index if not exists idx_cdb_user_date on coupang_daily_briefs(user_id, brief_date desc);
+alter table coupang_daily_briefs enable row level security;
+revoke all on coupang_daily_briefs from anon, authenticated;
+
+-- 수신 거부. 매일 오는 메일은 끌 수 있어야 한다.
+alter table coupang_accounts add column if not exists brief_enabled boolean not null default true;
+
+-- 발주 리드타임 — 재고 알림의 기준이다. 판매자마다 다르다(국내 3일, 중국 30일).
+-- 이 값이 틀리면 알림이 늘 이르거나 늘 늦어 아무도 안 본다.
+alter table coupang_accounts add column if not exists lead_time_days int not null default 14;
