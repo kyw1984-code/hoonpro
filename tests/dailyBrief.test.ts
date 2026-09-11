@@ -18,7 +18,15 @@ const item = (o: Partial<any> = {}): any => ({
 const brief = (o: Partial<BriefData> = {}): BriefData => ({
   orderAmount: 0, quantity: 0, prevOrderAmount: 0, topSellers: [],
   reorder: [], newInquiries: 0, newReturns: 0, leadTimeDays: 14,
-  minSales14: 3, seasonalSkipped: 0, ...o,
+  minSales14: 3, seasonalSkipped: 0,
+  adGap: { lastAdDate: '2026-09-09', missingDays: 1, missingWithSales: 1, overstatedBy: 0, shouldWarn: false, never: false },
+  ...o,
+});
+
+/** 광고비가 비어 있는 상태 */
+const gap = (o: Partial<BriefData['adGap']> = {}): BriefData['adGap'] => ({
+  lastAdDate: '2026-09-07', missingDays: 3, missingWithSales: 3,
+  overstatedBy: 194000, shouldWarn: true, never: false, ...o,
 });
 
 test('발주: 리드타임 안에 떨어지는 것만 고른다', () => {
@@ -197,4 +205,36 @@ test('메일: 뺀 게 없으면 그 말을 하지 않는다', () => {
     quantity: 3, reorder: [item({ risk: 'out', daysLeft: null, sold14: 20 })], seasonalSkipped: 0,
   }));
   assert.ok(!html.includes('시즌이 지난 것으로'));
+});
+
+// ── 광고비 공백 알림 ───────────────────────────────────────────
+// 쿠팡이 광고비를 API로 주지 않아 이것만 판매자가 직접 가져와야 한다.
+// 그 한 번을 잊으면 그날부터 순이익이 광고비만큼 크게 나온다.
+
+test('광고비: 비어 있으면 얼마나 부풀려졌는지 금액으로 말한다', () => {
+  const html = briefHtml('김', '2026-09-10', brief({ quantity: 5, adGap: gap() }));
+  assert.ok(html.includes('광고비를 가져와 주세요'));
+  assert.ok(html.includes('2026-09-07 이후로 비어 있습니다'));
+  assert.ok(html.includes('194,000원쯤 크게'));
+  assert.ok(html.includes('advertising.coupang.com'), '어디로 가야 하는지 알려줘야 한다');
+});
+
+test('광고비: 정상이면 아무 말도 하지 않는다', () => {
+  const html = briefHtml('김', '2026-09-10', brief({ quantity: 5 }));
+  assert.ok(!html.includes('광고비를 가져와 주세요'));
+});
+
+// 금액을 모를 때 0원이라고 쓰면 "광고비가 0원이구나"로 읽힌다
+test('광고비: 금액을 모르면 금액 말을 빼고 사실만 알린다', () => {
+  const html = briefHtml('김', '2026-09-10', brief({
+    quantity: 5, adGap: gap({ never: true, lastAdDate: null, overstatedBy: 0 }),
+  }));
+  assert.ok(html.includes('아직 한 번도 가져오지 않았습니다'));
+  assert.ok(!html.includes('0원쯤 크게'));
+});
+
+// 광고비가 비면 이 메일의 다른 숫자까지 틀린 것이 된다. 팔린 게 없어도 알려야 한다.
+test('광고비: 조용한 날이어도 광고비가 비었으면 메일을 보낸다', () => {
+  assert.equal(briefWorthSending(brief()), false);
+  assert.equal(briefWorthSending(brief({ adGap: gap() })), true);
 });

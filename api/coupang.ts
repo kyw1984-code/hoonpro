@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { isDisabled, parseLimits } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
@@ -3962,6 +3963,8 @@ export interface BriefData {
   minSales14: number;
   /** 그렇게 빠진 개수. 숨긴 걸 숨겼다고 말해야 판단 기준을 고칠 수 있다 */
   seasonalSkipped: number;
+  /** 광고비가 며칠째 비어 있나 — 비어 있으면 순이익이 그만큼 크게 나온다 */
+  adGap: AdGap;
 }
 
 /**
@@ -4003,6 +4006,52 @@ export function needsReorder(
     })
     .sort((a, b) => (a.daysLeft ?? -1) - (b.daysLeft ?? -1))
     .slice(0, 8);
+}
+
+/** 광고비가 어디까지 들어와 있고, 빈 구간에 얼마를 팔았나 */
+async function collectAdGap(userId: string, day: string): Promise<AdGap> {
+  const empty = adCostGap({ lastAdDate: null, through: day, salesDatesInGap: [], dailyAverage: 0 });
+  if (!supabase) return empty;
+
+  const { data: last } = await supabase
+    .from('coupang_ad_costs')
+    .select('ad_date')
+    .eq('user_id', userId)
+    .order('ad_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const lastAdDate = last?.ad_date ? String(last.ad_date).slice(0, 10) : null;
+
+  // 최근 평균 일 광고비 — 부풀려진 금액을 어림하는 데 쓴다.
+  // 마지막 30일이 아니라 '들어와 있는 마지막 날부터 거슬러 30일'이다.
+  let dailyAverage = 0;
+  if (lastAdDate) {
+    const { rows: recent } = await selectAll<{ cost: number }>((f, t) => supabase!
+      .from('coupang_ad_costs').select('cost')
+      .eq('user_id', userId)
+      .gte('ad_date', addDays(lastAdDate, -29)).lte('ad_date', lastAdDate)
+      .order('ad_date').range(f, t));
+    if (recent.length > 0) {
+      dailyAverage = recent.reduce((n, r) => n + (Number(r.cost) || 0), 0) / recent.length;
+    }
+  }
+
+  // 빈 구간에 매출이 있던 날. 매출이 없던 날은 광고비도 없는 게 맞다.
+  const from = lastAdDate ? addDays(lastAdDate, 1) : addDays(day, -29);
+  if (from > day) return adCostGap({ lastAdDate, through: day, salesDatesInGap: [], dailyAverage });
+
+  const { rows: sales } = await selectAll<{ sale_date: string }>((f, t) => supabase!
+    .from('coupang_sales_daily').select('sale_date')
+    .eq('user_id', userId)
+    .gte('sale_date', from).lte('sale_date', day)
+    .order('sale_date').range(f, t));
+
+  return adCostGap({
+    lastAdDate,
+    through: day,
+    salesDatesInGap: sales.map(r => String(r.sale_date).slice(0, 10)),
+    dailyAverage,
+  });
 }
 
 async function collectBrief(
@@ -4049,6 +4098,10 @@ async function collectBrief(
 
   const prevOrderAmount = prevOrdersRes.rows.reduce((n, o) => n + (Number(o.order_amount) || 0), 0);
 
+  // 광고비는 쿠팡이 API로 주지 않아 판매자가 직접 가져온다. 그 한 번을 잊으면
+  // 그날부터 순이익이 광고비만큼 크게 나온다. 며칠째 비었는지 세어 둔다.
+  const adGap = await collectAdGap(userId, day);
+
   const reorder = needsReorder(inventory.rows, leadTimeDays, minSales14);
   // 시즌 판단으로 빠진 개수 — 기준을 끄고 세어 차이를 본다
   const withoutSeason = needsReorder(inventory.rows, leadTimeDays, 0);
@@ -4064,12 +4117,14 @@ async function collectBrief(
     leadTimeDays,
     minSales14,
     seasonalSkipped: Math.max(0, withoutSeason.length - reorder.length),
+    adGap,
   };
 }
 
 /** 보낼 만한 내용이 있는가 — 아무 일도 없던 날은 메일을 만들지 않는다 */
 export function briefWorthSending(d: BriefData): boolean {
-  return d.quantity > 0 || d.reorder.length > 0 || d.newInquiries > 0 || d.newReturns > 0;
+  return d.quantity > 0 || d.reorder.length > 0 || d.newInquiries > 0 || d.newReturns > 0
+    || d.adGap.shouldWarn;
 }
 
 export function briefHtml(name: string, day: string, d: BriefData): string {
@@ -4135,6 +4190,26 @@ export function briefHtml(name: string, day: string, d: BriefData): string {
       `</div>`;
   }
 
+  // 광고비가 비면 이 메일의 다른 숫자까지 틀린 것이 된다. 그래서 할 일보다 위에 둔다.
+  if (d.adGap.shouldWarn) {
+    const g = d.adGap;
+    const what = g.never
+      ? '광고비를 아직 한 번도 가져오지 않았습니다.'
+      : `광고비가 ${g.lastAdDate} 이후로 비어 있습니다 (판매가 있던 ${g.missingWithSales}일).`;
+    const cost = g.overstatedBy > 0
+      ? ` 그만큼 순이익이 <b style="color:#e8ecf5;">${won(g.overstatedBy)}쯤 크게</b> 나오고 있습니다.`
+      : '';
+    html +=
+      `<div style="margin:16px 0 0;padding:12px 14px;background:#1b2540;border:1px solid #2f3d5f;border-radius:10px;">` +
+      `<div style="font-size:13px;font-weight:700;color:#ffb454;">광고비를 가져와 주세요</div>` +
+      `<div style="font-size:12px;color:#a8b3c9;margin-top:4px;line-height:1.65;">${what}${cost}</div>` +
+      `<div style="font-size:11px;color:#7c88a3;margin-top:5px;line-height:1.6;">` +
+      `쿠팡이 광고비를 API로 주지 않아 이것만 직접 가져와야 합니다. ` +
+      `<a href="https://advertising.coupang.com" style="color:#22a3b8;">광고센터</a>에 들어가 즐겨찾기에 넣어 둔 ` +
+      `[훈프로 광고비]를 한 번 눌러주시면 지난 30일치가 한꺼번에 채워집니다.</div>` +
+      `</div>`;
+  }
+
   const todo: string[] = [];
   if (d.newInquiries > 0) todo.push(`답변 안 한 문의 ${d.newInquiries}건`);
   if (d.newReturns > 0) todo.push(`새 반품 ${d.newReturns}건`);
@@ -4176,7 +4251,8 @@ async function sendDailyBrief(
   await sendEmail(
     email,
     `[훈프로] ${day.slice(5).replace('-', '/')} 어제 주문 ${won(d.orderAmount)}` +
-      (d.reorder.length > 0 ? ` · 발주 ${d.reorder.length}건` : ''),
+      (d.reorder.length > 0 ? ` · 발주 ${d.reorder.length}건` : '') +
+      (d.adGap.shouldWarn ? ' · 광고비 확인' : ''),
     wrapEmail('오늘의 훈프로 브리핑', briefHtml(name, day, d)),
   );
 
@@ -4189,6 +4265,8 @@ async function sendDailyBrief(
       prevOrderAmount: d.prevOrderAmount,
       reorderCount: d.reorder.length,
       seasonalSkipped: d.seasonalSkipped,
+      adMissingDays: d.adGap.missingWithSales,
+      adOverstatedBy: d.adGap.overstatedBy,
       newInquiries: d.newInquiries,
       newReturns: d.newReturns,
     },
