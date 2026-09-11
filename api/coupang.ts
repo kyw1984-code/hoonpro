@@ -517,7 +517,17 @@ export function dateChunks(from: string, to: string, size = LIMITS.chunkDays): A
  * 않으므로, 순이익·재고·상관이 조용히 일부 데이터로만 계산되고 숫자가 어느
  * 시점부터 안 늘어나는 형태로 나타난다.
  *
- * 정렬 키를 주면 커서로 넘기고(중복·누락 없음), 없으면 range로 넘긴다.
+ * 넘기는 방식은 range(OFFSET)이다. 예전 주석에는 "정렬 키를 주면 커서로
+ * 넘긴다"고 적혀 있었는데 그런 코드는 없었다. 읽는 쪽이 그 말을 믿으면
+ * 안 되므로 바로잡아 둔다.
+ *
+ * OFFSET은 읽는 도중 앞쪽 줄이 지워지면 뒤 페이지가 밀려 몇 줄을 건너뛴다.
+ * 그 위험은 수집 쪽에서 없앴다 — 예전에는 구간을 통째로 지운 뒤 다시 넣어서
+ * 그 사이에 읽으면 아예 비어 보였는데, 지금은 먼저 덮어쓰고 남은 것만 치운다.
+ * 읽는 중에 줄이 사라지지 않으므로 페이지가 밀리지 않는다.
+ *
+ * 그래도 상한(maxPages × pageSize)에 닿으면 truncated로 알린다. 부르는 쪽이
+ * 그걸 무시하면 조용히 일부만 계산된다.
  */
 export async function selectAll<T = any>(
   build: (from: number, to: number) => any,
@@ -970,22 +980,30 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
     }
   }
 
-  const rows = [...agg.values()].map(r => ({ ...r, updated_at: new Date().toISOString() }));
+  // 이 회차의 도장. 새로 넣는 줄에 전부 같은 값을 찍고, 나중에 이 값보다
+  // 오래된 줄만 치운다. '지우고 다시 넣기'가 아니라 '덮어쓰고 남은 것 치우기'다.
+  const batchAt = new Date().toISOString();
+  const rows = [...agg.values()].map(r => ({ ...r, updated_at: batchAt }));
 
-  // 구간을 통째로 다시 계산했을 때만 기존 구간을 지우고 새로 넣는다.
-  // 중간에 한 번이라도 실패했으면 지금 모은 값은 불완전하다. 그걸로 덮으면
-  // 멀쩡하던 과거 데이터까지 날아가므로, 실패한 회차에는 지우지 않고 덧쓰기만 한다.
-  if (!failedThisRun) {
+  // 순서가 중요하다. 예전에는 구간을 통째로 지운 뒤 넣었는데, 그 사이에 화면을
+  // 열면 그 기간 매출이 0원으로 보였다. 수집은 20시간마다 돌고 몇 초 걸리므로
+  // 자주는 아니지만, 하필 그때 본 사람에게는 장부가 비어 있다. 먼저 덮어쓰면
+  // 어느 순간에도 줄이 사라지지 않는다.
+  const err = await upsertChunked('coupang_orders_daily', rows, 'user_id,order_date,vendor_item_id');
+  if (err) sum.errors.push(err);
+  sum.orders = rows.length;
+
+  // 쿠팡에서 사라진 줄만 치운다. 중간에 한 번이라도 실패했으면 지금 모은 값이
+  // 불완전하므로 치우지 않는다 — 멀쩡하던 과거 데이터가 날아간다.
+  if (!failedThisRun && !err) {
     await supabase
       .from('coupang_orders_daily')
       .delete()
       .eq('user_id', userId)
       .gte('order_date', from)
-      .lte('order_date', to);
+      .lte('order_date', to)
+      .lt('updated_at', batchAt);
   }
-  const err = await upsertChunked('coupang_orders_daily', rows, 'user_id,order_date,vendor_item_id');
-  if (err) sum.errors.push(err);
-  sum.orders = rows.length;
 
   // 윙 주문도 쿠팡의 주문별 쿠폰 조회로 확인한다. 발주서 할인 항목보다 이쪽이 명확하다.
   await syncOrderCoupons(userId, creds, orderMeta, 'marketplace', sum, deadline);
@@ -1070,14 +1088,21 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
   }
 
   // 정산예정액이 응답에 없으면 판매금액 − 수수료로 채운다.
+  const batchAt = new Date().toISOString();
   const rows = [...agg.values()].map(r => ({
     ...r,
     settlement_amount: r.settlement_amount || Math.max(0, r.sales_amount - r.commission),
-    updated_at: new Date().toISOString(),
+    updated_at: batchAt,
   }));
 
-  // 주문과 같은 이유로, 실패한 회차에는 기존 구간을 지우지 않는다
-  if (!failedThisRun) {
+  // 주문과 같은 이유로 먼저 덮어쓰고 나중에 치운다 — 지운 뒤 넣으면 그 사이에
+  // 화면을 연 사람에게 그 기간 매출이 0원으로 보인다.
+  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
+  if (err) sum.errors.push(err);
+  sum.sales = rows.length;
+
+  // 쿠팡에서 사라진 줄만 치운다. 실패한 회차에는 치우지 않는다.
+  if (!failedThisRun && !err) {
     await supabase
       .from('coupang_sales_daily')
       .delete()
@@ -1086,11 +1111,9 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
       // 쓸어버린다. 그로스는 조회 창구가 달라 이 회차에서 다시 채워지지 않는다.
       .eq('channel', 'marketplace')
       .gte('sale_date', from)
-      .lte('sale_date', to);
+      .lte('sale_date', to)
+      .lt('updated_at', batchAt);
   }
-  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
-  if (err) sum.errors.push(err);
-  sum.sales = rows.length;
 }
 
 // ── 로켓그로스 매출 동기화 ────────────────────────────────────
@@ -1305,6 +1328,7 @@ async function syncRocketGrowth(
   const rate = agg.size > 0
     ? await marketplaceCommissionRates(userId)
     : { byItem: new Map<string, number>(), overall: null as number | null };
+  const batchAt = new Date().toISOString();
   const rows = [...agg.values()].map(r => {
     const pct = rate.byItem.get(String(r.vendor_item_id)) ?? rate.overall;
     const commission = pct === null ? 0 : Math.round(r.sales_amount * pct);
@@ -1312,24 +1336,28 @@ async function syncRocketGrowth(
       ...r,
       commission,
       settlement_amount: Math.max(0, r.sales_amount - commission),
-      updated_at: new Date().toISOString(),
+      updated_at: batchAt,
     };
   });
 
-  // 실패한 회차에는 기존 구간을 지우지 않는다 — 불완전한 결과로 덮으면 매출이 준다
-  if (!failedThisRun) {
+  // 윙과 같은 이유로 먼저 덮어쓰고 나중에 치운다. 이 판매자는 매출의 여덟 할이
+  // 그로스라, 지운 뒤 넣는 사이에 화면을 열면 장부가 거의 비어 보인다.
+  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
+  if (err) sum.errors.push(err);
+  sum.growth = rows.length;
+
+  // 쿠팡에서 사라진 줄만 치운다. 실패한 회차에는 치우지 않는다 —
+  // 불완전한 결과로 덮으면 매출이 준다.
+  if (!failedThisRun && !err) {
     await supabase
       .from('coupang_sales_daily')
       .delete()
       .eq('user_id', userId)
       .eq('channel', 'growth')
       .gte('sale_date', from)
-      .lte('sale_date', to);
+      .lte('sale_date', to)
+      .lt('updated_at', batchAt);
   }
-
-  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
-  if (err) sum.errors.push(err);
-  sum.growth = rows.length;
   sum.growthCancelled = cancelled;
 
   await syncOrderCoupons(userId, creds, orderMeta, 'growth', sum, deadline);

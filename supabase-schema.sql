@@ -1165,3 +1165,40 @@ create index if not exists idx_fb_kind on feedback(kind, created_at desc);
 create index if not exists idx_fb_user on feedback(user_id, created_at desc);
 alter table feedback enable row level security;
 revoke all on feedback from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- §46 실패한 유료 호출의 한도 되돌리기
+-- ─────────────────────────────────────────────────────────────────────────────
+--
+-- 한도는 부르기 전에 차감한다. 먼저 세지 않으면 같은 순간 여러 번 눌러 상한을
+-- 넘길 수 있기 때문이다. 문제는 그다음이다. 쿠팡이 차단 페이지를 주거나 중계가
+-- 끊겨 아무 결과도 못 받았는데 한도는 이미 깎여 있었다.
+--
+-- 실제로 이렇게 된다. 검색이 막히면 세 번 시도하고 셋 다 실패한다. 사용자는
+-- 결과를 못 받고 다시 누른다. 예순 번 누르면 그날 몫이 전부 사라지고, 그동안
+-- 백여든 번의 유료 호출이 나갔고, 손에 쥔 것은 없다.
+create or replace function refund_feature_usage(
+  p_user_id uuid, p_date date, p_feature text
+)
+returns json
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_count int;
+begin
+  select call_count into v_count
+  from feature_usage
+  where user_id = p_user_id and date = p_date and feature = p_feature
+  for update;
+
+  if v_count is null or v_count <= 0 then
+    return json_build_object('refunded', false, 'count', coalesce(v_count, 0));
+  end if;
+
+  update feature_usage set call_count = v_count - 1
+  where user_id = p_user_id and date = p_date and feature = p_feature;
+
+  return json_build_object('refunded', true, 'count', v_count - 1);
+end;
+$$;
