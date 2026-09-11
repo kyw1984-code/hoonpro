@@ -9,11 +9,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   clampLimit,
+  decideQuota,
   DEFAULT_FEATURE_LIMITS,
   isDisabled,
   limitState,
   mergeLimits,
   parseLimits,
+  quotaResponse,
 } from '../src/lib/featureLimits.ts';
 
 test('limitState: 0은 사용 중지, 음수는 무제한, 양수는 횟수', () => {
@@ -91,4 +93,78 @@ test('기본값: 이미지 생성은 내린 기능이고 순위 확인은 페이
   assert.equal(DEFAULT_FEATURE_LIMITS.image, 0);
   // 깊은 조회가 한 번에 최대 5페이지를 쓴다. 40이면 하루 8번뿐이라 100으로 둔다.
   assert.ok(DEFAULT_FEATURE_LIMITS.rank >= 100);
+});
+
+// ── 한도 소진 판정 ───────────────────────────────────────────────────────────
+// supabase.rpc는 실패해도 예외를 던지지 않고 { data: null, error }를 돌려준다.
+// 부르는 쪽이 `if (!error && data.exceeded)`로 검사하고 있어서, 오류가 나면
+// 그냥 통과했다. 이 기능들은 호출마다 실제 돈이 나간다.
+
+const okRpc = (remaining: number) => ({ data: { exceeded: false, remaining }, error: null });
+const overRpc = { data: { exceeded: true, remaining: 0 }, error: null };
+const errRpc = { data: null, error: { message: 'function does not exist' } };
+
+test('한도 판정: 정상이면 남은 횟수를 돌려준다', () => {
+  const d = decideQuota(60, okRpc(41));
+  assert.equal(d.allow, true);
+  assert.equal(d.remaining, 41);
+});
+
+test('한도 판정: 다 쓰면 막는다', () => {
+  const d = decideQuota(60, overRpc);
+  assert.equal(d.allow, false);
+  assert.equal(d.kind, 'exceeded');
+});
+
+// 내린 기능은 "내일 다시 오라"가 아니라 "제공하지 않는다"여야 한다
+test('한도 판정: 0은 내린 기능이다', () => {
+  const d = decideQuota(0, okRpc(99));
+  assert.equal(d.allow, false);
+  assert.equal(d.kind, 'disabled');
+});
+
+// 이것이 이 파일의 이유다. 셀 수 없으면 내주지 않는다.
+test('한도 판정: 집계가 실패하면 막는다 — 통과시키면 한도가 통째로 풀린다', () => {
+  const d = decideQuota(60, errRpc);
+  assert.equal(d.allow, false);
+  assert.equal(d.kind, 'error');
+});
+
+test('한도 판정: rpc 결과가 비어도 막는다', () => {
+  assert.equal(decideQuota(60, { data: null, error: null }).allow, false);
+  assert.equal(decideQuota(60, null).allow, false);
+});
+
+// 셀 것이 없는데 셈이 안 된다고 막으면 그건 그냥 고장이다
+test('한도 판정: 무제한은 집계가 실패해도 내준다', () => {
+  assert.equal(decideQuota(-1, errRpc).allow, true);
+  assert.equal(decideQuota(-1, { data: null, error: null }).allow, true);
+});
+
+// 내린 기능은 집계 결과와 무관하게 결론이 같다
+test('한도 판정: 내린 기능은 집계가 실패해도 막는다', () => {
+  const d = decideQuota(0, errRpc);
+  assert.equal(d.allow, false);
+  assert.equal(d.kind, 'disabled');
+});
+
+// RPC가 스스로 '내린 기능'이라고 말하면 그 말을 따른다
+test('한도 판정: RPC가 disabled라고 하면 그대로 전한다', () => {
+  const d = decideQuota(5, { data: { exceeded: true, disabled: true }, error: null });
+  assert.equal(d.kind, 'disabled');
+});
+
+test('한도 응답: 갈래마다 다른 상태코드를 준다', () => {
+  const disabled = quotaResponse({ allow: false, kind: 'disabled', remaining: null }, '코칭AI', 0);
+  assert.equal(disabled.status, 403);
+  assert.equal(disabled.body.disabled, true);
+
+  const exceeded = quotaResponse({ allow: false, kind: 'exceeded', remaining: 0 }, '소싱 분석', 60);
+  assert.equal(exceeded.status, 429);
+  assert.ok(String(exceeded.body.error).includes('60'));
+
+  // 셈 실패는 사용자 잘못이 아니다. 429로 주면 "내가 다 썼나" 하고 오해한다.
+  const err = quotaResponse({ allow: false, kind: 'error', remaining: null }, '소싱 분석', 60);
+  assert.equal(err.status, 503);
+  assert.equal(err.body.retryable, true);
 });

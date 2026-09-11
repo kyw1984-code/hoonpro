@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
 import { tabDisabledMessage } from '../lib/feature-gate.js';
 import { GoogleGenAI } from '@google/genai';
+import { calcCostUsd } from '../src/lib/pricing.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -26,25 +27,7 @@ const ALLOWED_MODELS = [
   'gemini-2.5-flash-image-preview',
 ];
 
-// gpt-image 단가(USD per 1M tokens, 근사치) - 변동 시 수정
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gpt-image-2': { input: 5.0, output: 30.0 },
-  'gpt-image-2-2026-04-21': { input: 5.0, output: 30.0 },
-  'gpt-image-1.5': { input: 5.0, output: 40.0 },
-  'gpt-image-1-mini': { input: 2.0, output: 8.0 },
-  'gpt-image-1': { input: 5.0, output: 40.0 },
-  'chatgpt-image-latest': { input: 5.0, output: 40.0 },
-  'gemini-3.1-flash-image': { input: 0, output: 0 },
-  'gemini-3-pro-image': { input: 0, output: 0 },
-  'gemini-2.5-flash-image': { input: 0, output: 0 },
-  'gemini-2.5-flash-image-preview': { input: 0, output: 0 },
-};
 
-function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
-  const price = MODEL_PRICING[model];
-  if (!price) return 0;
-  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
-}
 
 // ── 관리자 전역 설정(app_config)을 짧게 캐시해서 매 이미지마다 DB 조회를 피한다 ──
 const CONFIG_TTL_MS = 45_000;

@@ -16,7 +16,7 @@ const item = (o: Partial<any> = {}): any => ({
 });
 
 const brief = (o: Partial<BriefData> = {}): BriefData => ({
-  orderAmount: 0, quantity: 0, prevOrderAmount: 0, topSellers: [],
+  orderAmount: 0, quantity: 0, prevOrderAmount: 0, byChannel: { wing: 0, growth: 0 }, topSellers: [],
   reorder: [], newInquiries: 0, newReturns: 0, leadTimeDays: 14,
   minSales14: 3, seasonalSkipped: 0,
   adGap: { lastAdDate: '2026-09-09', missingDays: 1, missingWithSales: 1, overstatedBy: 0, shouldWarn: false, never: false },
@@ -237,4 +237,43 @@ test('광고비: 금액을 모르면 금액 말을 빼고 사실만 알린다', 
 test('광고비: 조용한 날이어도 광고비가 비었으면 메일을 보낸다', () => {
   assert.equal(briefWorthSending(brief()), false);
   assert.equal(briefWorthSending(brief({ adGap: gap() })), true);
+});
+
+// ── 창구 구분 ────────────────────────────────────────────────────────────────
+// 윙과 로켓그로스는 서로 다른 상품이고 저장되는 테이블도 다르다. 발주서만 읽으면
+// 그로스가 통째로 빠진다. 그로스가 매출의 8할인 판매자에게는 메일 전체가 틀린 것이
+// 되므로, 합계에 들어갔는지와 어느 쪽이 얼마인지를 함께 고정해 둔다.
+
+test('창구: 양쪽을 다 쓰면 각각 얼마인지 밝힌다', () => {
+  const html = briefHtml('김', '2026-09-10', brief({
+    orderAmount: 1_570_800, quantity: 39,
+    byChannel: { wing: 1_375_600, growth: 195_200 },
+  }));
+  assert.ok(html.includes('로켓그로스'), '그로스 금액이 없다');
+  assert.ok(html.includes('195,200'), html.slice(0, 400));
+  assert.ok(html.includes('1,375,600'));
+});
+
+// 한쪽만 쓰는 판매자에게 "윙 0원"은 알려 줄 것이 없는 줄이다
+test('창구: 한쪽만 쓰면 구분 줄을 보이지 않는다', () => {
+  const onlyWing = briefHtml('김', '2026-09-10', brief({
+    orderAmount: 500_000, quantity: 10, byChannel: { wing: 500_000, growth: 0 },
+  }));
+  assert.ok(!onlyWing.includes('로켓그로스'));
+
+  const onlyGrowth = briefHtml('김', '2026-09-10', brief({
+    orderAmount: 500_000, quantity: 10, byChannel: { wing: 0, growth: 500_000 },
+  }));
+  assert.ok(!onlyGrowth.includes('로켓그로스'));
+});
+
+// 합계는 두 창구를 더한 값이어야 한다. 이게 어긋나면 카드의 큰 숫자와
+// 그 아래 구분 줄이 서로 다른 말을 한다.
+test('창구: 합계가 두 창구의 합과 맞는다', () => {
+  const d = brief({
+    orderAmount: 1_570_800, quantity: 39,
+    byChannel: { wing: 1_375_600, growth: 195_200 },
+  });
+  assert.equal(d.byChannel.wing + d.byChannel.growth, d.orderAmount);
+  assert.ok(briefHtml('김', '2026-09-10', d).includes('1,570,800'));
 });

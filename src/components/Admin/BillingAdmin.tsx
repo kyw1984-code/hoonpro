@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CreditCard, Ticket, Plus, RefreshCw, Power, Loader2, AlertTriangle } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { won } from '../../lib/coupang';
 
 // 관리자 — 구독 현황 / 쿠폰 관리 / 유료화 스위치
 
@@ -44,7 +45,6 @@ const SUB_STATUS: Record<string, { text: string; cls: string }> = {
 const MARK_PRIMARY = '#22a3b8';   // 월간 · 순매출 막대
 const MARK_SECONDARY = '#8b7bff'; // 연간
 
-const won = (n: number) => `${Math.round(n || 0).toLocaleString()}원`;
 const monthLabel = (m: string) => `${Number(m.slice(5, 7))}월`;
 
 // 해지 사유 라벨 — 값은 서버·구독 화면과 동일

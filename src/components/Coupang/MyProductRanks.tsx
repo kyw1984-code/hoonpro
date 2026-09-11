@@ -10,7 +10,7 @@
  * 늘어서면 어느 줄의 순위를 볼지 고르는 일 자체가 어려워진다. 매출도 같은 이유로
  * 상품 단위로 합친다.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, Package, Search } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { won } from '../../lib/coupang';
@@ -84,15 +84,21 @@ export function MyProductRanks({ days = 30 }: { days?: number }) {
   const [reason, setReason] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 30일에서 90일로 빠르게 바꾸면 요청이 두 번 나가고, 늦게 온 쪽이 마지막에
+  // 도착한다. 그러면 90일 버튼이 눌린 채로 표에는 30일 숫자가 남는다. 오류도
+  // 안 나고 되돌릴 방법도 없다. 순번이 뒤처진 응답은 버린다.
+  const seq = useRef(0);
   useEffect(() => {
+    const mine = ++seq.current;
     fetch(`/api/coupang?action=my-products&days=${days}`, { headers: auth() })
       .then(async r => {
         const d = await r.json();
+        if (mine !== seq.current) return;
         if (!r.ok) throw new Error(d?.error || '상품을 불러오지 못했습니다.');
         setProducts(d.products ?? []);
         setReason(d.reason ?? null);
       })
-      .catch(e => setError(e?.message ?? '상품을 불러오지 못했습니다.'));
+      .catch(e => { if (mine === seq.current) setError(e?.message ?? '상품을 불러오지 못했습니다.'); });
   }, [days]);
 
   if (error) {

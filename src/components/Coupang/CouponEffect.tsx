@@ -8,7 +8,7 @@
  * 구간 길이가 제각각이라(3일 vs 20일) 총액을 그냥 비교하면 오래 걸어 둔
  * 쿠폰이 무조건 이긴다. 판단은 하루 평균 순이익으로 한다.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, Ticket, Trophy } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { won } from '../../lib/coupang';
@@ -49,16 +49,22 @@ export function CouponEffect({ days = 90 }: { days?: number }) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 30일에서 90일로 빠르게 바꾸면 요청이 두 번 나가고, 늦게 온 쪽이 마지막에
+  // 도착한다. 그러면 90일 버튼이 눌린 채로 표에는 30일 숫자가 남는다. 오류도
+  // 안 나고 되돌릴 방법도 없다. 순번이 뒤처진 응답은 버린다.
+  const seq = useRef(0);
   useEffect(() => {
+    const mine = ++seq.current;
     setData(null);
     setError(null);
     fetch(`/api/coupang?action=coupon-effect&days=${days}`, { headers: auth() })
       .then(async r => {
         const d = await r.json();
+        if (mine !== seq.current) return;
         if (!r.ok) throw new Error(d?.error || '쿠폰 성과를 불러오지 못했습니다.');
         setData(d);
       })
-      .catch(e => setError(e?.message ?? '쿠폰 성과를 불러오지 못했습니다.'));
+      .catch(e => { if (mine === seq.current) setError(e?.message ?? '쿠폰 성과를 불러오지 못했습니다.'); });
   }, [days]);
 
   if (error) {

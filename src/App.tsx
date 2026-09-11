@@ -3,13 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import React, { useState, useEffect } from 'react';
-import { DetailPlanner } from './components/Detail/DetailPlanner';
 import { SourcingFinder } from './components/SourcingFinder';
-import { ThumbnailGenerator } from './components/Thumbnail/ThumbnailGenerator';
 import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { RankTracker } from './components/RankTracker';
 import { ReviewAnalyzer } from './components/ReviewAnalyzer';
-import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
 import { HowTo } from './components/HowTo';
 import { Feedback } from './components/Feedback';
@@ -22,18 +19,16 @@ import { AskHoonpro } from './components/QA/AskHoonpro';
 import { HomeDashboard } from './components/Home/HomeDashboard';
 import { WorksLibrary } from './components/Works/WorksLibrary';
 import { CoupangDashboard } from './components/Coupang/CoupangDashboard';
-import { Home, FolderOpen, LayoutTemplate, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag } from 'lucide-react';
+import { Home, FolderOpen, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag } from 'lucide-react';
 import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 import { fetchBillingStatus, type BillingStatus } from './lib/billing';
 
-type Tab = 'home' | 'works' | 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'coupang' | 'qa' | 'billing' | 'admin';
+type Tab = 'home' | 'works' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'coupang' | 'qa' | 'billing' | 'admin';
 
 type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
 
 const TABS: TabDef[] = [
   { id: 'home', label: '홈', icon: Home },
-  { id: 'thumbnail', label: '썸네일 제작', icon: ImageIcon },
-  { id: 'detail', label: '상세페이지 제작', icon: LayoutTemplate },
   { id: 'sourcing', label: '훈프로 소싱AI', icon: TrendingUp },
   { id: 'ranktracker', label: '순위 추적', icon: ListOrdered },
   { id: 'review', label: '리뷰 분석', icon: MessageSquareText },
@@ -214,8 +209,7 @@ export default function App() {
   }
 
   return (
-    <ApiKeyCheck>
-      <div className="min-h-screen bg-ground flex flex-col font-sans">
+    <div className="min-h-screen bg-ground flex flex-col font-sans">
         {/* ─── 구독 필요 안내 ─── */}
         {unavailable && (
           <div
@@ -393,8 +387,6 @@ export default function App() {
           ) : (
             <>
               {shownTab === 'home' && <HomeDashboard onNavigate={(t) => setActiveTab(t as Tab)} hiddenTabs={user.isAdmin ? [] : hiddenTabs} />}
-              {shownTab === 'thumbnail' && <ThumbnailGenerator />}
-              {shownTab === 'detail' && <DetailPlanner />}
               {shownTab === 'sourcing' && <SourcingFinder />}
               {shownTab === 'ranktracker' && <RankTracker />}
               {shownTab === 'review' && <ReviewAnalyzer />}
@@ -408,8 +400,7 @@ export default function App() {
           )}
         </main>
 
-        <Footer />
-      </div>
-    </ApiKeyCheck>
+      <Footer />
+    </div>
   );
 }

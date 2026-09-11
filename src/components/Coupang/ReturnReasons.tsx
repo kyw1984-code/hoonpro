@@ -8,9 +8,10 @@
  * 변심은 따로 뺀다. 판매자가 손댈 수 없는 걸 개선 목록에 섞으면
  * "반품률을 낮추라"는 실행 불가능한 결론만 남는다.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, PackageX, Wrench } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { ratioPct } from '../../lib/coupang';
 
 interface Category {
   category: string;
@@ -43,11 +44,12 @@ interface Data {
   totalSold: number;
   returnRate: number | null;
   categories: Category[];
+  /** 고객이 철회한 반품 — 집계에서 뺐다 */
+  cancelledCount?: number;
   products: Product[];
 }
 
 const auth = () => ({ Authorization: `Bearer ${getToken()}` });
-const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
 // 색은 '고칠 수 있는 것'과 아닌 것만 구분한다. 유형마다 색을 다 다르게 주면
 // 색이 정보가 아니라 장식이 된다.
@@ -59,16 +61,22 @@ export function ReturnReasons({ days = 90 }: { days?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
 
+  // 30일에서 90일로 빠르게 바꾸면 요청이 두 번 나가고, 늦게 온 쪽이 마지막에
+  // 도착한다. 그러면 90일 버튼이 눌린 채로 표에는 30일 숫자가 남는다. 오류도
+  // 안 나고 되돌릴 방법도 없다. 순번이 뒤처진 응답은 버린다.
+  const seq = useRef(0);
   useEffect(() => {
+    const mine = ++seq.current;
     setData(null);
     setError(null);
     fetch(`/api/coupang?action=return-reasons&days=${days}`, { headers: auth() })
       .then(async r => {
         const d = await r.json();
+        if (mine !== seq.current) return;
         if (!r.ok) throw new Error(d?.error || '반품 사유를 불러오지 못했습니다.');
         setData(d);
       })
-      .catch(e => setError(e?.message ?? '반품 사유를 불러오지 못했습니다.'));
+      .catch(e => { if (mine === seq.current) setError(e?.message ?? '반품 사유를 불러오지 못했습니다.'); });
   }, [days]);
 
   if (error) {
@@ -108,9 +116,15 @@ export function ReturnReasons({ days = 90 }: { days?: number }) {
       </h3>
       <p className="mt-1 text-[12px] leading-relaxed text-ink-2">
         최근 {days}일 반품 {data.total}건 ({data.totalQuantity.toLocaleString('ko-KR')}개)
-        {data.returnRate !== null && <> · 반품률 {pct(data.returnRate)}</>}
+        {data.returnRate !== null && <> · 반품률 {ratioPct(data.returnRate)}</>}
         {data.sellerFault > 0 && <> · 판매자 귀책 {data.sellerFault}건</>}
       </p>
+      {/* 조용히 빼면 기준이 틀렸을 때 알아챌 방법이 없다 */}
+      {(data.cancelledCount ?? 0) > 0 && (
+        <p className="mt-1 text-[11.5px] text-ink-3">
+          고객이 철회한 반품 {data.cancelledCount}건은 빼고 셌습니다.
+        </p>
+      )}
 
       {fixableCount > 0 && (
         <p className="mt-2 rounded-control bg-accent-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-ink">
@@ -130,7 +144,7 @@ export function ReturnReasons({ days = 90 }: { days?: number }) {
               <span className="text-[13px] font-medium text-ink">{c.label}</span>
               {!c.actionable && <span className="text-[10.5px] text-ink-3">판매자가 줄이기 어려움</span>}
               <span className="ml-auto shrink-0 text-[12.5px] font-semibold tabular-nums text-ink">
-                {c.count}건 <span className="font-normal text-ink-3">{pct(c.share)}</span>
+                {c.count}건 <span className="font-normal text-ink-3">{ratioPct(c.share)}</span>
               </span>
             </div>
             <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-paper">
@@ -168,13 +182,13 @@ export function ReturnReasons({ days = 90 }: { days?: number }) {
                   </span>
                   <span className="shrink-0 text-[11.5px] tabular-nums text-ink-3">
                     반품 {p.returnCount}건
-                    {p.returnRate !== null && ` · ${pct(p.returnRate)}`}
+                    {p.returnRate !== null && ` · ${ratioPct(p.returnRate)}`}
                   </span>
                 </div>
                 {p.topCategory ? (
                   <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-2">
                     <b className="text-ink">{p.topCategory.label}</b> {p.topCategory.count}건
-                    ({pct(p.topCategory.share)}) — {p.topCategory.advice}
+                    ({ratioPct(p.topCategory.share)}) — {p.topCategory.advice}
                   </p>
                 ) : (
                   <p className="mt-0.5 text-[11.5px] text-ink-3">

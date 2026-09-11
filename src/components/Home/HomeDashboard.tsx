@@ -5,8 +5,8 @@
  */
 import { useEffect, useState } from 'react';
 import {
-  TrendingUp, ListOrdered, Zap, ChevronRight, Image as ImageIcon,
-  LayoutTemplate, BarChart3, MessageSquareText, Loader2, Check, X,
+  TrendingUp, ListOrdered, Zap, ChevronRight, ShoppingBag,
+  BarChart3, MessageSquareText, Loader2, Check, X,
 } from 'lucide-react';
 import { getToken, getUser } from '../../lib/auth';
 import { UsageLimits } from './UsageLimits';
@@ -37,7 +37,6 @@ const ACTION_ACCENTS = [
 const ONBOARDING_STEPS = [
   { key: 'sourcing',  tab: 'sourcing',    title: '팔 상품 찾기',   desc: '소싱AI에서 키워드를 ★로 저장해보세요' },
   { key: 'rank',      tab: 'ranktracker', title: '관심 상품 등록', desc: '순위 추적에 등록하면 매일 순위가 갱신됩니다' },
-  { key: 'thumbnail', tab: 'thumbnail',   title: '썸네일 만들기',  desc: 'AI로 썸네일 이미지를 하나 생성해보세요' },
   { key: 'coupang',   tab: 'coupang',     title: '쿠팡 연동',      desc: '윙 API 키를 넣으면 매출·정산·순이익이 자동으로 들어옵니다' },
 ] as const;
 
@@ -109,8 +108,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
 
   const quickLinks = [
     { tab: 'sourcing', label: '훈프로 소싱AI', desc: '오늘 팔릴 상품 찾기', icon: TrendingUp },
-    { tab: 'thumbnail', label: '썸네일 제작', desc: 'AI 썸네일 만들기', icon: ImageIcon },
-    { tab: 'detail', label: '상세페이지 제작', desc: '기획안부터 이미지까지', icon: LayoutTemplate },
+    { tab: 'coupang', label: '훈프로 정산AI', desc: '매출·순이익·재고 한눈에', icon: ShoppingBag },
     { tab: 'analyzer', label: '광고 성과 분석', desc: '보고서 올리고 코칭 받기', icon: BarChart3 },
   ].filter(q => shown(q.tab));
 

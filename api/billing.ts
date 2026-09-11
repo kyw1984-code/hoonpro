@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { isOwnReferral, referralNote } from '../src/lib/referral.js';
 import { withVat } from '../src/lib/vat.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
@@ -48,6 +49,12 @@ function tossHeaders(): Record<string, string> {
 }
 
 // 빌링키 암호화 (AES-256-GCM) — 카드번호는 토스가 보관하고 서버에는 빌링키만 암호화 저장
+//
+// 주의: 이 값이 바뀌면 이미 저장된 결제키를 하나도 못 읽는다. 복구할 방법이
+// 없고 구독자가 카드를 다시 등록해야 한다. 실제 결제가 시작된 뒤로는 절대
+// 바꾸지 않는다. BILLING_ENC_KEY를 안 정해 두면 JWT_SECRET으로 떨어지는데,
+// 그 상태에서 JWT_SECRET을 돌리면 같은 사고가 난다. 결제를 열기 전에
+// BILLING_ENC_KEY를 따로 정해 두는 편이 안전하다.
 function encKey(): Buffer {
   const secret = process.env.BILLING_ENC_KEY || process.env.JWT_SECRET!;
   return crypto.createHash('sha256').update(secret).digest();
@@ -61,10 +68,23 @@ function encryptBillingKey(plain: string): string {
 }
 
 function decryptBillingKey(enc: string): string {
-  const [ivHex, tagHex, dataHex] = enc.split(':');
-  const decipher = crypto.createDecipheriv('aes-256-gcm', encKey(), Buffer.from(ivHex, 'hex'));
-  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
-  return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+  // 형식부터 본다. 예전 평문이 섞여 있으면 split 결과가 모자라 Buffer.from이
+  // 알아보기 어려운 TypeError를 던진다. 로그에 그 메시지만 남으면 원인을
+  // 찾는 데 한참 걸리므로, 무엇이 잘못됐는지 한국어로 밝힌다.
+  // 값 자체는 절대 로그에 남기지 않는다 — 이걸로 결제가 일어난다.
+  const parts = String(enc ?? '').split(':');
+  if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
+    throw new Error('저장된 결제키의 형식이 올바르지 않습니다. 카드를 다시 등록해야 합니다.');
+  }
+  const [ivHex, tagHex, dataHex] = parts;
+  try {
+    const decipher = crypto.createDecipheriv('aes-256-gcm', encKey(), Buffer.from(ivHex, 'hex'));
+    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    return Buffer.concat([decipher.update(Buffer.from(dataHex, 'hex')), decipher.final()]).toString('utf8');
+  } catch {
+    // 인증 태그가 안 맞는다 = 암호화 키가 바뀌었거나 값이 손상됐다
+    throw new Error('저장된 결제키를 읽지 못했습니다. 암호화 키가 바뀌었을 수 있습니다.');
+  }
 }
 
 // 결제일 계산은 한국 시간 기준
@@ -168,11 +188,19 @@ interface CouponRow {
   redeemed_count: number;
   expires_at: string | null;
   active: boolean;
+  /** 추천 코드는 'referral:{발행자 userId}'가 들어 있다. 본인 사용을 막는 데 쓴다 */
+  note?: string | null;
 }
 
 // 쿠폰 유효성 검사 — 통과 시 null, 실패 시 사용자에게 보여줄 사유 반환
 async function checkCoupon(coupon: CouponRow | null, userId: string, ci: string | null): Promise<string | null> {
   if (!coupon) return '존재하지 않는 쿠폰 코드입니다.';
+  // 자기 추천 코드는 자기가 못 쓴다. 추천 코드는 [구독 관리] 화면에 늘 떠 있고
+  // 바로 아래가 쿠폰 입력칸이라, 막지 않으면 복사해서 붙여넣는 것으로 끝난다.
+  // 연간 결제 기준 1인당 39,336원이고, 매출이 아니라 판촉비로 잡혀 안 보인다.
+  if (isOwnReferral(coupon.note, userId)) {
+    return '자기 추천 코드는 사용할 수 없습니다. 다른 분께 공유해주세요.';
+  }
   if (!coupon.active) return '사용이 중지된 쿠폰입니다.';
   if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) return '유효기간이 지난 쿠폰입니다.';
   if (coupon.max_redemptions !== null && coupon.redeemed_count >= coupon.max_redemptions) {
@@ -305,10 +333,15 @@ async function tossCharge(
   }
 }
 
-async function tossCancelPayment(paymentKey: string, reason: string, cancelAmount?: number): Promise<{ ok: boolean; message?: string }> {
+async function tossCancelPayment(
+  paymentKey: string, reason: string, cancelAmount?: number, idempotencyKey?: string,
+): Promise<{ ok: boolean; message?: string }> {
+  // 멱등키를 붙인다. 구독 상태 선점이 1차 방어고 이건 2차다. 토스는 남은
+  // 금액이 있는 한 부분 취소를 거듭 받아 주므로, 같은 취소가 두 번 닿으면
+  // 두 번 다 빠져나간다. 같은 키로 온 두 번째 요청은 토스가 걸러 준다.
   const res = await fetch(`${TOSS_API}/v1/payments/${encodeURIComponent(paymentKey)}/cancel`, {
     method: 'POST',
-    headers: tossHeaders(),
+    headers: idempotencyKey ? { ...tossHeaders(), 'Idempotency-Key': idempotencyKey } : tossHeaders(),
     body: JSON.stringify(cancelAmount ? { cancelReason: reason, cancelAmount } : { cancelReason: reason }),
   });
   const data: any = await res.json();
@@ -784,6 +817,33 @@ async function refund(user: any, res: VercelResponse) {
   const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', user.userId).maybeSingle();
   if (!sub || sub.status === 'canceled') return res.status(404).json({ error: '진행 중인 구독이 없습니다.' });
 
+  // 자리를 먼저 잡는다. 예전에는 토스에 환불을 부른 뒤에야 상태를 바꿔서,
+  // 같은 순간 두 번 누르면 둘 다 검사를 통과하고 둘 다 승인됐다. 토스는
+  // 남은 금액이 있는 한 부분 취소를 거듭 받아 주므로, 반달치 환불 요청
+  // 두 번이면 한 달치가 통째로 빠져나갔다. 게다가 결제 기록은 마지막에
+  // 덮어써져 한 번만 환불한 것으로 남아 장부에서도 보이지 않았다.
+  //
+  // status가 아직 그대로일 때만 바꾼다. 진 쪽은 0행이 바뀌어 여기서 멈춘다.
+  // 환불은 어차피 구독을 끝내므로 'canceled'로 먼저 옮겨 자리를 잡는다.
+  // 두 번째 요청은 위의 `sub.status === 'canceled'` 검사에 걸려 멈춘다.
+  // 토스 호출이 실패하면 원래 상태로 되돌린다 — 돈은 안 돌려주고 구독만
+  // 끊긴 채로 두면 안 된다.
+  const prevStatus = sub.status;
+  const claim = await supabase
+    .from('subscriptions')
+    .update({ status: 'canceled', updated_at: new Date().toISOString() })
+    .eq('id', sub.id)
+    .eq('status', prevStatus)
+    .select('id');
+  if (claim.error || (claim.data?.length ?? 0) === 0) {
+    return res.status(409).json({ error: '환불 처리가 이미 진행 중입니다. 잠시 후 [구독 관리]에서 확인해주세요.' });
+  }
+  const releaseClaim = async () => {
+    await supabase.from('subscriptions')
+      .update({ status: prevStatus, updated_at: new Date().toISOString() })
+      .eq('id', sub.id);
+  };
+
   const endNow = {
     status: 'canceled',
     canceled_at: new Date().toISOString(),
@@ -813,10 +873,15 @@ async function refund(user: any, res: VercelResponse) {
   const within7Days = Date.now() - approvedAt.getTime() <= 7 * 86400000;
 
   // 사용 이력 판정 — 과금되는 모든 기능을 포함해야 한다.
-  //  · api_calls  : 썸네일·상세페이지·이미지 분석·QA (모델 호출 로깅)
-  //  · api_usage  : 소싱AI·리뷰 분석·순위 추적 (increment_usage만 호출하고
-  //                 api_calls에는 남기지 않는다 — 여기를 빠뜨리면 원가가 큰
-  //                 소싱 기능만 일주일 쓰고 전액 환불받는 우회가 가능하다)
+  //  · api_calls     : 모델 호출 로깅 (원가가 남는 모든 호출)
+  //  · feature_usage : 소싱AI·리뷰 분석·순위 추적 등 한도를 세는 기능.
+  //                    모델을 안 부르는 것도 있어 api_calls에는 안 남는다.
+  //                    여기를 빠뜨리면 원가가 큰 소싱 기능만 일주일 쓰고
+  //                    전액 환불받는 우회가 가능하다.
+  //
+  // 예전에는 api_usage를 봤는데 그 테이블에 쓰는 코드가 하나도 없어 늘 비어
+  // 있었다. 두 갈래 중 한쪽이 조용히 죽어 있었던 셈이다.
+  //
   // 조회가 실패하면 "사용함"으로 간주해 전액 환불로 흘러가지 않게 한다.
   const usedFrom = approvedAt.toISOString();
   const usedFromDate = usedFrom.slice(0, 10);
@@ -825,7 +890,7 @@ async function refund(user: any, res: VercelResponse) {
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.userId)
       .gte('created_at', usedFrom),
-    supabase.from('api_usage')
+    supabase.from('feature_usage')
       .select('call_count')
       .eq('user_id', user.userId)
       .gte('date', usedFromDate)
@@ -869,9 +934,14 @@ async function refund(user: any, res: VercelResponse) {
     const cancel = await tossCancelPayment(
       payment.payment_key,
       reason,
-      refundAmount === payment.amount ? undefined : refundAmount
+      refundAmount === payment.amount ? undefined : refundAmount,
+      // 이 결제를 이 금액으로 취소하는 일은 한 번뿐이다
+      `refund:${payment.id}:${refundAmount}`,
     );
-    if (!cancel.ok) return res.status(502).json({ error: `환불 처리에 실패했습니다: ${cancel.message}` });
+    if (!cancel.ok) {
+      await releaseClaim();
+      return res.status(502).json({ error: `환불 처리에 실패했습니다: ${cancel.message}` });
+    }
     await supabase.from('payments').update({
       status: refundAmount === payment.amount ? 'refunded' : 'partial_refund',
       refunded_amount: refundAmount,
@@ -999,8 +1069,25 @@ async function chargeDue(req: VercelRequest, res: VercelResponse) {
       await supabase.from('subscriptions').update({ status: 'paused', next_billing_at: null }).eq('id', sub.id);
       continue;
     }
-    const result = await chargeSubscription(sub, p, u ?? { email: '', name: '' });
-    result.ok ? summary.charged++ : summary.failed++;
+    // 한 구독의 실패가 나머지를 멈추면 안 된다. 예전에는 복호화가 안 되는
+    // 결제키 하나가 예외를 던져 그 뒤 구독자가 아무도 청구되지 않았고,
+    // 오래된 행 정리와 일일 운영 보고 메일까지 함께 건너뛰었다. 다음 날도
+    // 같은 자리에서 멈춰 스스로 낫지 않는 종류의 고장이었다.
+    try {
+      const result = await chargeSubscription(sub, p, u ?? { email: '', name: '' });
+      result.ok ? summary.charged++ : summary.failed++;
+    } catch (e: any) {
+      summary.failed++;
+      // 결제키를 못 읽는 구독은 다시 시도해도 같다. 멈춰 두고 사람이 보게 한다.
+      // 카드를 다시 등록하면 새 키가 저장되어 풀린다.
+      await supabase.from('subscriptions')
+        .update({ status: 'paused', next_billing_at: null, updated_at: new Date().toISOString() })
+        .eq('id', sub.id);
+      await logSystemError('정기결제', '구독 청구 중 예외가 발생해 이 구독을 멈췄습니다', {
+        detail: e?.message ?? String(e),
+        userId: sub.user_id,
+      });
+    }
   }
 
   const cleaned = await cleanupOldRows();
@@ -1115,7 +1202,7 @@ async function emailPref(user: { userId: string }, req: VercelRequest, res: Verc
 // 쿠폰 시스템을 그대로 재활용: note='referral:{userId}'로 소유자를 식별하고,
 // 사용 횟수는 coupons.redeemed_count로 확인한다 (추천 보상은 관리자가 쿠폰으로 지급).
 async function getReferralCode(user: { userId: string }, res: VercelResponse) {
-  const note = `referral:${user.userId}`;
+  const note = referralNote(user.userId);
   let { data: existing } = await supabase.from('coupons').select('*').eq('note', note).maybeSingle();
   if (!existing) {
     for (let attempt = 0; attempt < 3 && !existing; attempt++) {

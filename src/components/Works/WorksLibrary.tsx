@@ -1,6 +1,8 @@
 /**
- * 내 작업 — 저장한 상세페이지 기획안·썸네일을 다시 보는 보관함.
- * 상세페이지 제작의 [보관함에 저장], 썸네일 제작의 [보관함에 저장]에서 쌓인다.
+ * 내 작업 — 예전에 저장한 상세페이지 기획안·썸네일을 다시 보는 보관함.
+ *
+ * 두 제작 기능은 내렸다. 하지만 만들어 둔 것까지 없앨 이유는 없어서 보는
+ * 것과 내려받는 것은 그대로 둔다. 새로 쌓이지는 않는다.
  */
 import { useEffect, useState } from 'react';
 import { FolderOpen, FileText, Image as ImageIcon, Loader2, RefreshCw, X, Copy, Download } from 'lucide-react';
@@ -72,7 +74,8 @@ export function WorksLibrary() {
           </button>
         </div>
         <p className="text-[12px] text-ink-2">
-          상세페이지 제작의 <b>[보관함에 저장]</b>, 썸네일 제작의 <b>[보관함에 저장]</b>으로 저장한 결과물이 여기 쌓입니다. (최대 50개)
+          예전에 저장해 두신 상세페이지 기획안과 썸네일입니다. 두 기능은 내렸지만
+          만들어 두신 것은 그대로 두었습니다. 내려받기는 계속 됩니다.
         </p>
         {error && <p className="mt-2 text-[12px] text-critical">{error}</p>}
       </div>
@@ -85,7 +88,7 @@ export function WorksLibrary() {
         <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">
           <FolderOpen className="mb-4 h-12 w-12 opacity-20" />
           <p className="text-sm font-semibold">저장된 작업이 없습니다</p>
-          <p className="mt-1.5 text-[12px]">기획안이나 썸네일을 만들고 [보관함에 저장]을 눌러보세요 — 새로고침해도 사라지지 않습니다</p>
+          <p className="mt-1.5 text-[12px]">상세페이지·썸네일 제작으로 저장해 두신 것이 있으면 여기 보입니다</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">

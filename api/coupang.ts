@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
-import { isDisabled, parseLimits } from '../src/lib/featureLimits.js';
+import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
@@ -621,35 +621,66 @@ export interface CouponDef {
 }
 
 /**
- * 쿠폰 설정으로 본 옵션의 개당 쿠폰 할인.
+ * 쿠폰 설정으로 본 옵션의 개당 쿠폰 할인 — 이 기간의 하루 평균.
  *
- * 판매자가 쿠폰 관리에 등록한 값 그대로다 — "이 상품은 1건당 11,500원 할인"이면
- * 11,500. 주문에서 역산한 값은 다운로드쿠폰이 섞이거나 쿠폰을 바꾼 날이 끼면
- * 들쭉날쭉해지는데, 설정값은 그럴 일이 없다.
+ * 판매자가 쿠폰 관리에 등록한 값을 쓴다. 주문에서 역산한 값은 다운로드쿠폰이
+ * 섞이거나 쿠폰을 바꾼 날이 끼면 들쭉날쭉해지는데, 설정값은 그럴 일이 없다.
  * - 정액(PRICE·FIXED·FIXED_WITH_QUANTITY)은 금액 그대로
  * - 정률(RATE·PERCENT)은 판매 단가 × 비율, 최대할인이 있으면 거기서 자른다
- * - 기간이 [from, to]와 하나도 안 겹치는 쿠폰과 종료·삭제 상태는 뺀다
+ * - 종료·삭제 상태는 뺀다
+ *
+ * 돌려주는 값은 [from, to] 하루하루의 평균이다. 부르는 쪽(couponForRow)이 이
+ * 값에 기간 전체 판매수량을 곱하므로, 8일 중 2일만 걸려 있던 5,000원짜리는
+ * 5,000이 아니라 1,250이어야 총 할인액이 맞는다. 8일 내내 5,000원이면 그대로
+ * 5,000이다. 같은 날 두 쿠폰이 겹쳐 있으면 실제로 겹쳐 적용되므로 그날은 더한다.
  */
 export function definitionUnit(defs: CouponDef[], unitPrice: number, from: string, to: string): number {
-  let total = 0;
-  for (const d of defs) {
-    if (d.status && /EXPIRE|DELETE|CANCEL|END|PAUSE|STOP|만료|삭제|중지/i.test(d.status)) continue;
-    const start = d.start_at ? String(d.start_at).slice(0, 10) : '';
-    const end = d.end_at ? String(d.end_at).slice(0, 10) : '';
-    if (start && start > to) continue;
-    if (end && end < from) continue;
-    const amount = Number(d.discount) || 0;
-    if (amount <= 0) continue;
-    if (/RATE|PERCENT|정률/i.test(d.coupon_type ?? '')) {
-      let v = (unitPrice * amount) / 100;
-      const cap = Number(d.max_discount) || 0;
-      if (cap > 0) v = Math.min(v, cap);
-      total += v;
-    } else {
-      total += amount;
+  if (!from || !to || from > to) return 0;
+
+  // 날짜별로 가중해 평균을 낸다.
+  //
+  // 예전에는 기간에 걸치기만 하면 전부 더했다. 10일간 10,000원짜리를 걸고
+  // 그다음 20일간 8,000원짜리를 건 옵션은 한 달 화면에서 18,000원으로 잡혔다.
+  // 판매가가 39,800원이면 실매출이 절반으로 꺾이고, 정의가 셋이면 할인액이
+  // 판매가를 넘어 실매출이 0원으로 보였다.
+  //
+  // 같은 날 두 쿠폰이 함께 걸려 있으면 실제로 겹쳐 적용되므로 그날은 더한다.
+  // 더하는 것은 '같은 날'까지고, 서로 다른 시기는 평균으로 묶는다. 이 값에
+  // 기간 전체 판매수량을 곱하므로, 날짜별 평균이 총 할인액에 가장 가깝다.
+  const perDay = (day: string): number => {
+    let sum = 0;
+    for (const d of defs) {
+      if (d.status && /EXPIRE|DELETE|CANCEL|END|PAUSE|STOP|만료|삭제|중지/i.test(d.status)) continue;
+      const start = d.start_at ? String(d.start_at).slice(0, 10) : '';
+      const end = d.end_at ? String(d.end_at).slice(0, 10) : '';
+      // 시작일이 없으면 예전부터, 종료일이 없으면 앞으로도 계속 걸려 있는 것으로 본다
+      if (start && start > day) continue;
+      if (end && end < day) continue;
+      const amount = Number(d.discount) || 0;
+      if (amount <= 0) continue;
+      if (/RATE|PERCENT|정률/i.test(d.coupon_type ?? '')) {
+        let v = (unitPrice * amount) / 100;
+        const cap = Number(d.max_discount) || 0;
+        if (cap > 0) v = Math.min(v, cap);
+        sum += v;
+      } else {
+        sum += amount;
+      }
     }
+    return sum;
+  };
+
+  let total = 0;
+  let days = 0;
+  for (let day = from; day <= to; day = addDays(day, 1)) {
+    total += perDay(day);
+    days += 1;
+    if (days > 400) break; // 기간은 최대 365일이다. 무한 루프 방지용 빗장
   }
-  return Math.max(0, Math.round(total));
+  if (days === 0) return 0;
+  // 할인액이 판매가를 넘을 수는 없다. 넘으면 정의를 잘못 읽은 것이다.
+  const avg = total / days;
+  return Math.max(0, Math.min(Math.round(avg), Math.max(0, Math.round(unitPrice))));
 }
 
 /**
@@ -2244,11 +2275,22 @@ function wrapEmail(title: string, bodyHtml: string): string {
   );
 }
 
-async function sendEmail(to: string, subject: string, html: string): Promise<void> {
+/**
+ * 메일 한 통. 보냈는지 아닌지를 정직하게 돌려준다.
+ *
+ * 예전에는 응답 상태를 보지 않았다. 레이즌드는 실패를 예외가 아니라 상태
+ * 코드로 알린다 — 도메인 미인증이면 422, 한도 초과면 429, 주소가 잘못되면
+ * 400이다. 그 모두가 보이지 않게 지나갔다.
+ *
+ * 그런데 부르는 쪽은 보냈다고 치고 발송 기록을 남겼다. 그 날짜는 영구히
+ * '보냄'이 되어 다시 시도되지 않는다. 키 만료 경고가 특히 나빴다 — 한 번
+ * 놓치면 여섯 달 뒤 수집이 말없이 멈추고 아무도 이유를 모른다.
+ */
+async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
   const key = process.env.RESEND_API_KEY;
-  if (!key || !to) return;
+  if (!key || !to) return false;
   try {
-    await fetch('https://api.resend.com/emails', {
+    const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2258,8 +2300,15 @@ async function sendEmail(to: string, subject: string, html: string): Promise<voi
         html,
       }),
     });
-  } catch {
-    /* 이메일 실패가 동기화를 막지 않도록 */
+    if (!r.ok) {
+      // 본문에 받는 사람 주소가 섞여 올 수 있어 상태 코드만 남긴다
+      console.error('[메일] 발송 실패', { status: r.status, subject });
+      return false;
+    }
+    return true;
+  } catch (e: any) {
+    console.error('[메일] 발송 예외', { subject, detail: e?.message });
+    return false;
   }
 }
 
@@ -2468,7 +2517,7 @@ async function cronDaily(res: VercelResponse) {
       const email = acc.users?.email;
       const name = acc.users?.name ?? '';
       if (email) {
-        await sendEmail(
+        const notified = await sendEmail(
           email,
           `[훈프로] 쿠팡 API 키가 ${left}일 후 만료됩니다`,
           wrapEmail(
@@ -2478,11 +2527,15 @@ async function cronDaily(res: VercelResponse) {
               `<p style="color:#ffb454;">이미 다른 주문수집 프로그램을 쓰신다면 키를 새로 발급하지 마시고, 갱신된 같은 키를 그대로 붙여넣어야 그쪽 연동이 끊기지 않습니다.</p>`,
           ),
         );
-        await supabase
-          .from('coupang_accounts')
-          .update({ expiry_notified_at: today })
-          .eq('user_id', acc.user_id);
-        result.notified++;
+        // 못 보냈으면 알림 날짜를 찍지 않는다. 찍으면 이 키는 다시 경고받지
+        // 못하고, 여섯 달 뒤 수집이 말없이 멈춘다.
+        if (notified) {
+          await supabase
+            .from('coupang_accounts')
+            .update({ expiry_notified_at: today })
+            .eq('user_id', acc.user_id);
+          result.notified++;
+        }
       }
     }
   }
@@ -2856,7 +2909,10 @@ interface ProfitRow {
    */
   returnAmount: number;
   unitCostTotal: number;
+  /** 반품 건수 — 배송비는 상자 하나에 한 번 나가므로 이 값으로 곱한다 */
   returnCount: number;
+  /** 반품된 개수 — 얼마어치가 돌아왔는지는 이 값으로 센다 */
+  returnQuantity: number;
   returnCost: number;
   profit: number;
   marginRate: number;
@@ -2876,8 +2932,13 @@ function rangeFromQuery(req: VercelRequest): { from: string; to: string } {
 /** 순이익 계산 — 화면(1번)과 주간 리포트(3번)가 같은 숫자를 쓰도록 한곳에 둔다 */
 /**
  * @param opts.totalsOnly 합계만 쓰는 호출(직전 기간 비교 등)에서 켠다.
- *   상품명·재고와 광고비는 합계에 들어가지 않으므로 조회를 건너뛴다.
+ *   상품명·재고와 옵션별 광고비 분해는 합계에 들어가지 않으므로 건너뛴다.
  *   켜지 않으면 기간 비교 하나 때문에 한 요청이 조회를 두 배로 하게 된다.
+ *
+ *   다만 날짜별 광고비 합계는 건너뛰지 않는다. 예전에는 이것까지 건너뛰어
+ *   adCostHint가 항상 null이 됐고, 직전 기간만 광고비가 안 빠진 채 이번 기간과
+ *   견주어졌다. 광고비를 매주 같은 액수로 쓰는 판매자에게는 실적이 같은 주에도
+ *   하락으로 나갔다. 하루 한 줄짜리 작은 표라 건너뛸 이유도 없었다.
  */
 export async function computeProfit(
   userId: string,
@@ -2905,7 +2966,7 @@ export async function computeProfit(
       .order('requested_at').range(f, t)),
     // 이 기간에 걸친 일자별 광고비. 쿠팡 Open API에 광고 엔드포인트가 없어
     // 보고서 파일로 받아 둔 값이다(coupang_ad_costs 참고).
-    lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_ad_costs')
+    selectAll((f, t) => supabase!.from('coupang_ad_costs')
       .select('ad_date, cost, source').eq('user_id', userId)
       .gte('ad_date', from).lte('ad_date', to).order('ad_date').range(f, t)),
     // 옵션별 광고비 — 상품별 순이익에서 광고비를 빼기 위한 것
@@ -3010,12 +3071,19 @@ export async function computeProfit(
     rowQty.set(id, rq);
   }
 
-  const returnAgg = new Map<string, number>();
+  // 건수와 수량을 나눠 센다. 반품 배송비는 상자 하나에 한 번 나가므로 건수로
+  // 곱해야 한다. 수량으로 곱하면 3개짜리 반품 한 건에 배송비를 세 번 물린다.
+  // 반품 탭(handleReturns)이 이미 건수로 계산하므로, 수량으로 두면 같은 기간
+  // 같은 상품이 두 화면에서 다른 손실로 보인다.
+  const returnAgg = new Map<string, { count: number; quantity: number }>();
   for (const r of returnRes.rows) {
     if (!isActiveReturn(r.status)) continue;
     const id = String(r.vendor_item_id ?? '');
     if (!id) continue;
-    returnAgg.set(id, (returnAgg.get(id) ?? 0) + (Number(r.quantity) || 1));
+    const cur = returnAgg.get(id) ?? { count: 0, quantity: 0 };
+    cur.count += 1;
+    cur.quantity += Number(r.quantity) || 1;
+    returnAgg.set(id, cur);
   }
 
   const agg = new Map<string, ProfitRow>();
@@ -3039,6 +3107,7 @@ export async function computeProfit(
         returnAmount: 0,
         unitCostTotal: 0,
         returnCount: 0,
+        returnQuantity: 0,
         returnCost: 0,
         profit: 0,
         marginRate: 0,
@@ -3054,7 +3123,7 @@ export async function computeProfit(
   }
 
   // 판매는 없었지만 반품만 발생한 옵션도 손실로 잡아야 한다
-  for (const [id, count] of returnAgg) {
+  for (const [id, ret] of returnAgg) {
     if (agg.has(id)) continue;
     const item = items.get(id);
     agg.set(id, {
@@ -3062,7 +3131,7 @@ export async function computeProfit(
       productName: item?.product_name ?? '(상품명 미확인)',
       optionName: item?.option_name ?? '',
       quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, couponDiscount: 0, couponSource: null, adCost: 0, channel: 'marketplace', returnAmount: 0,
-      unitCostTotal: 0, returnCount: count, returnCost: 0, profit: 0, marginRate: 0,
+      unitCostTotal: 0, returnCount: ret.count, returnQuantity: ret.quantity, returnCost: 0, profit: 0, marginRate: 0,
       costEntered: false, stock: item?.stock ?? null, salePrice: item?.sale_price ?? null,
     });
   }
@@ -3073,7 +3142,10 @@ export async function computeProfit(
     const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (Number(c.fulfillment_cost) || 0) : 0;
     row.costEntered = Boolean(c) && perUnit > 0;
     row.unitCostTotal = perUnit * row.quantity;
-    row.returnCount = returnAgg.get(row.vendorItemId) ?? 0;
+    const ret = returnAgg.get(row.vendorItemId) ?? { count: 0, quantity: 0 };
+    row.returnCount = ret.count;
+    row.returnQuantity = ret.quantity;
+    // 배송비는 건수로 곱한다. 3개짜리 반품 한 건에 배송비가 세 번 나가지 않는다.
     row.returnCost = row.returnCount * (c ? Number(c.return_shipping_cost) || 0 : 0);
     const rq = rowQty.get(row.vendorItemId) ?? { market: 0, growth: 0 };
     const wing = wingAgg.get(row.vendorItemId);
@@ -3113,7 +3185,7 @@ export async function computeProfit(
     const unitNet = row.quantity > 0
       ? (row.salesAmount - row.couponDiscount) / row.quantity
       : Math.max(0, (row.salePrice ?? 0) - Math.max(wingUnit, growthUnit));
-    row.returnAmount = Math.round(row.returnCount * unitNet);
+    row.returnAmount = Math.round(row.returnQuantity * unitNet);
     row.adCost = adItemAgg.get(row.vendorItemId) ?? 0;
     // 순이익 = 매출 − 수수료 − 원가·배송 − 반품 − 광고비. 정산예정액이 이미 수수료를
     // 뺀 값이라 거기서 나머지를 뺀다. 광고비는 옵션에 붙은 몫만 — 옵션 없이 캠페인
@@ -3133,6 +3205,7 @@ export async function computeProfit(
       t.settlementAmount += r.settlementAmount;
       t.unitCostTotal += r.unitCostTotal;
       t.returnCount += r.returnCount;
+      t.returnQuantity += r.returnQuantity;
       t.returnCost += r.returnCost;
       t.profit += r.profit;
       t.couponDiscount += r.couponDiscount;
@@ -3140,7 +3213,7 @@ export async function computeProfit(
       t.returnAmount += r.returnAmount;
       return t;
     },
-    { quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, unitCostTotal: 0, returnCount: 0, returnCost: 0, profit: 0, couponDiscount: 0, adCost: 0, returnAmount: 0 },
+    { quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, unitCostTotal: 0, returnCount: 0, returnQuantity: 0, returnCost: 0, profit: 0, couponDiscount: 0, adCost: 0, returnAmount: 0 },
   );
 
   // 카드의 쿠폰 합계도 행과 같은 기준(단가 × 판매수량)이어야 실매출이 매출과 같은 기준이 된다
@@ -3286,6 +3359,13 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
     computeProfit(userId, prevFrom, prevTo, { totalsOnly: true }),
   ]);
 
+  // 두 기간을 같은 잣대로 세운다. 이번 기간의 totals.profit에는 옵션에 붙은
+  // 광고비만 빠져 있고, 직전 기간은 옵션별을 안 뽑아 하나도 안 빠져 있다.
+  // 그대로 견주면 광고를 쓸수록 "지난 기간보다 나빠졌다"가 된다.
+  // 양쪽 모두 광고비를 끝까지 뺀 값으로 맞춘다.
+  const prevNetProfit =
+    prev.totals.profit - Math.max(0, (prev.adCostHint ?? 0) - (prev.totals.adCost ?? 0));
+
   return res.status(200).json({
     ...cur,
     previous: {
@@ -3294,7 +3374,9 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
       salesAmount: prev.totals.salesAmount,
       quantity: prev.totals.quantity,
       commission: prev.totals.commission,
-      profit: prev.totals.profit,
+      /** 광고비까지 뺀 값. 화면의 순이익 카드도 같은 기준으로 견준다 */
+      profit: prevNetProfit,
+      adCost: prev.adCostHint ?? 0,
       // 직전 기간에 판매가 아예 없으면 증감률이 무의미하다. 화면이 판단하도록 알린다
       hasData: prev.totals.quantity > 0,
     },
@@ -3895,7 +3977,7 @@ async function sendWeeklyReport(
       ? warn('이번 주 광고비가 등록되어 있지 않아 순이익에서 빠지지 않았습니다. 훈프로 [광고 성과 분석]에서 광고 보고서를 올리면 자동으로 반영됩니다.')
       : '');
 
-  await sendEmail(
+  const sentWeekly = await sendEmail(
     email,
     `[훈프로] ${start} ~ ${end} 주간 성과`,
     wrapEmail(
@@ -3927,6 +4009,9 @@ async function sendWeeklyReport(
     ),
   );
 
+  // 브리핑과 같은 이유로, 못 보낸 주는 기록하지 않는다
+  if (!sentWeekly) return false;
+
   await supabase.from('coupang_reports').insert({
     user_id: userId,
     period_start: start,
@@ -3954,6 +4039,12 @@ export interface BriefData {
   orderAmount: number;
   quantity: number;
   prevOrderAmount: number;
+  /**
+   * 창구별 주문액. 윙과 로켓그로스는 서로 다른 상품이라 합계만 보면 어느 쪽이
+   * 움직였는지 알 수 없다. 그로스가 8할인 판매자에게 윙 숫자만 보여 주면
+   * 그 메일은 틀린 것이 된다.
+   */
+  byChannel: { wing: number; growth: number };
   topSellers: { name: string; qty: number; amount: number }[];
   reorder: InventoryRow[];
   newInquiries: number;
@@ -4059,7 +4150,14 @@ async function collectBrief(
 ): Promise<BriefData> {
   const prevDay = addDays(day, -7);   // 요일 효과가 크므로 어제가 아니라 지난주 같은 요일과 견준다
 
-  const [ordersRes, prevOrdersRes, inventory, inquiryRes, returnRes] = await Promise.all([
+  // 윙과 그로스는 저장되는 곳이 다르다. 발주서(coupang_orders_daily)에는 윙만
+  // 들어오고, 그로스는 매출내역(coupang_sales_daily, channel='growth')에 쌓인다.
+  // 두 테이블의 vendor_item_id는 하나도 겹치지 않으므로 그대로 더하면 된다.
+  //
+  // 같은 테이블의 channel='marketplace'는 더하면 안 된다. 그쪽은 매출인식일
+  // 기준이라 주문일 기준인 발주서와 날짜 뜻이 달라 같은 판매가 두 번 잡힌다.
+  // 그로스 행의 sale_date는 결제일(paidAt)이라 주문일과 같은 뜻이다.
+  const [ordersRes, prevOrdersRes, growthRes, prevGrowthRes, inventory, inquiryRes, returnRes] = await Promise.all([
     selectAll<{ vendor_item_id: string; product_name: string | null; quantity: number; order_amount: number }>(
       (f, t) => supabase!
         .from('coupang_orders_daily')
@@ -4069,6 +4167,17 @@ async function collectBrief(
       .from('coupang_orders_daily')
       .select('quantity, order_amount')
       .eq('user_id', userId).eq('order_date', prevDay).order('vendor_item_id').range(f, t)),
+    selectAll<{ vendor_item_id: string; product_name: string | null; quantity: number; sales_amount: number }>(
+      (f, t) => supabase!
+        .from('coupang_sales_daily')
+        .select('vendor_item_id, product_name, quantity, sales_amount')
+        .eq('user_id', userId).eq('channel', 'growth').eq('sale_date', day)
+        .order('vendor_item_id').range(f, t)),
+    selectAll<{ sales_amount: number }>((f, t) => supabase!
+      .from('coupang_sales_daily')
+      .select('sales_amount')
+      .eq('user_id', userId).eq('channel', 'growth').eq('sale_date', prevDay)
+      .order('vendor_item_id').range(f, t)),
     computeInventory(userId, leadTimeDays),
     supabase!.from('coupang_inquiries')
       .select('inquiry_id', { count: 'exact', head: true })
@@ -4084,19 +4193,26 @@ async function collectBrief(
   const byProduct = new Map<string, { name: string; qty: number; amount: number }>();
   let orderAmount = 0;
   let quantity = 0;
-  for (const o of ordersRes.rows) {
-    const qty = Number(o.quantity) || 0;
-    const amount = Number(o.order_amount) || 0;
+  let wingAmount = 0;
+  let growthAmount = 0;
+  const addSale = (rawName: unknown, rawQty: unknown, rawAmount: unknown) => {
+    const qty = Number(rawQty) || 0;
+    const amount = Number(rawAmount) || 0;
     orderAmount += amount;
     quantity += qty;
-    const name = String(o.product_name ?? '이름 없는 상품');
+    const name = String(rawName ?? '이름 없는 상품');
     const cur = byProduct.get(name) ?? { name, qty: 0, amount: 0 };
     cur.qty += qty;
     cur.amount += amount;
     byProduct.set(name, cur);
-  }
+    return amount;
+  };
+  for (const o of ordersRes.rows) wingAmount += addSale(o.product_name, o.quantity, o.order_amount);
+  for (const g of growthRes.rows) growthAmount += addSale(g.product_name, g.quantity, g.sales_amount);
 
-  const prevOrderAmount = prevOrdersRes.rows.reduce((n, o) => n + (Number(o.order_amount) || 0), 0);
+  const prevOrderAmount =
+    prevOrdersRes.rows.reduce((n, o) => n + (Number(o.order_amount) || 0), 0) +
+    prevGrowthRes.rows.reduce((n, g) => n + (Number(g.sales_amount) || 0), 0);
 
   // 광고비는 쿠팡이 API로 주지 않아 판매자가 직접 가져온다. 그 한 번을 잊으면
   // 그날부터 순이익이 광고비만큼 크게 나온다. 며칠째 비었는지 세어 둔다.
@@ -4110,6 +4226,7 @@ async function collectBrief(
     orderAmount,
     quantity,
     prevOrderAmount,
+    byChannel: { wing: wingAmount, growth: growthAmount },
     topSellers: [...byProduct.values()].sort((a, b) => b.amount - a.amount).slice(0, 3),
     reorder,
     newInquiries: inquiryRes.count ?? 0,
@@ -4150,6 +4267,14 @@ export function briefHtml(name: string, day: string, d: BriefData): string {
       d.prevOrderAmount > 0 ? won(d.prevOrderAmount) : '',
     ) +
     `</tr></table>`;
+
+  // 창구를 나눠 적는다. 윙과 그로스는 다른 상품이라 합계만 보면 어느 쪽이
+  // 움직였는지 알 수 없다. 한쪽만 쓰는 판매자에게는 그 줄을 보이지 않는다.
+  if (d.byChannel.wing > 0 && d.byChannel.growth > 0) {
+    html +=
+      `<p style="margin:8px 0 0;font-size:11.5px;color:#7c88a3;">` +
+      `로켓그로스 ${won(d.byChannel.growth)} · 윙 ${won(d.byChannel.wing)}</p>`;
+  }
 
   if (d.topSellers.length > 0) {
     html +=
@@ -4248,13 +4373,16 @@ async function sendDailyBrief(
   const d = await collectBrief(userId, day, leadTimeDays, minSales14);
   if (!briefWorthSending(d)) return false;
 
-  await sendEmail(
+  const sent = await sendEmail(
     email,
     `[훈프로] ${day.slice(5).replace('-', '/')} 어제 주문 ${won(d.orderAmount)}` +
       (d.reorder.length > 0 ? ` · 발주 ${d.reorder.length}건` : '') +
       (d.adGap.shouldWarn ? ' · 광고비 확인' : ''),
     wrapEmail('오늘의 훈프로 브리핑', briefHtml(name, day, d)),
   );
+  // 못 보냈으면 기록을 남기지 않는다. 남기면 그 날짜는 영구히 '보냄'이 되어
+  // 다시 시도되지 않는다. 다음 회차에 한 번 더 시도할 기회를 남긴다.
+  if (!sent) return false;
 
   await supabase.from('coupang_daily_briefs').insert({
     user_id: userId,
@@ -4913,13 +5041,14 @@ async function handleCouponEffect(userId: string, req: VercelRequest, res: Verce
 async function handleReturnReasons(userId: string, req: VercelRequest, res: VercelResponse) {
   const { from, to } = rangeFromQuery(req);
 
-  const [returnRes, salesRes] = await Promise.all([
+  const [rawReturnRes, salesRes] = await Promise.all([
     selectAll<{
       vendor_item_id: string | null; product_name: string | null;
       quantity: number | null; reason: string | null; fault: string | null;
+      status: string | null;
     }>((f, t) => supabase!
       .from('coupang_returns')
-      .select('vendor_item_id, product_name, quantity, reason, fault')
+      .select('vendor_item_id, product_name, quantity, reason, fault, status')
       .eq('user_id', userId)
       .gte('requested_at', `${from}T00:00:00+09:00`)
       .lte('requested_at', `${to}T23:59:59+09:00`)
@@ -4931,6 +5060,13 @@ async function handleReturnReasons(userId: string, req: VercelRequest, res: Verc
       .gte('sale_date', from).lte('sale_date', to)
       .order('sale_date').range(f, t)),
   ]);
+
+  // 고객이 철회한 반품은 빼고 센다. 반품 탭과 순이익 계산은 이미 빼고 있어,
+  // 여기서만 세면 같은 기간 같은 상품이 두 화면에서 다른 건수로 보인다.
+  // 이 숫자를 보고 상세페이지를 고치므로, 부풀려진 사유가 엉뚱한 수정을 부른다.
+  const returnRows = rawReturnRes.rows.filter(r => isActiveReturn(r.status));
+  const cancelledCount = rawReturnRes.rows.length - returnRows.length;
+  const returnRes = { rows: returnRows };
 
   const overall = summarizeReturnReasons(returnRes.rows);
 
@@ -4984,6 +5120,8 @@ async function handleReturnReasons(userId: string, req: VercelRequest, res: Verc
     totalSold,
     returnRate: totalSold >= 10 ? overall.totalQuantity / totalSold : null,
     categories: overall.categories,
+    /** 고객이 철회한 반품 — 빼고 셌다는 것을 화면에서도 밝힌다 */
+    cancelledCount,
     products,
   });
 }
@@ -5084,8 +5222,10 @@ async function logCoupangCost(
 }
 
 /** 기능별 일일 한도 — 다른 API와 같은 app_config를 읽는다 */
-async function consumeQuota(userId: string, feature: string, fallback: number): Promise<{ ok: boolean; remaining: number; limit: number }> {
-  if (!supabase) return { ok: true, remaining: -1, limit: 0 };
+async function consumeQuota(
+  userId: string, feature: string, fallback: number,
+): Promise<{ ok: boolean; kind: QuotaDecision['kind']; remaining: number; limit: number }> {
+  if (!supabase) return { ok: true, kind: 'ok', remaining: -1, limit: 0 };
   let limit = fallback;
   try {
     const { data } = await supabase.from('app_config').select('value').eq('key', 'feature_limits').maybeSingle();
@@ -5094,14 +5234,20 @@ async function consumeQuota(userId: string, feature: string, fallback: number): 
   } catch {
     /* 설정을 못 읽으면 기본값으로 간다 */
   }
+  // 셈이 안 되면 내주지 않는다. 예전에는 rpc가 오류를 내면 ok를 돌려줘서,
+  // 함수 이름이 바뀌거나 DB가 잠깐 붐비기만 해도 한도가 통째로 풀렸다.
   try {
-    const { data, error } = await supabase.rpc('increment_feature_usage', {
+    const rpc = await supabase.rpc('increment_feature_usage', {
       p_user_id: userId, p_date: kstToday(), p_feature: feature, p_limit: limit,
     });
-    if (error) return { ok: true, remaining: -1, limit };
-    return { ok: !data?.exceeded, remaining: Number(data?.remaining ?? -1), limit };
-  } catch {
-    return { ok: true, remaining: -1, limit };
+    const d = decideQuota(limit, rpc);
+    if (d.kind === 'error') {
+      console.error('[한도] 집계 실패', { feature, userId, rpcError: String((rpc as any)?.error?.message ?? '') });
+    }
+    return { ok: d.allow, kind: d.kind, remaining: d.remaining ?? -1, limit };
+  } catch (e: any) {
+    console.error('[한도] 집계 예외', { feature, userId, detail: e?.message });
+    return { ok: false, kind: 'error', remaining: -1, limit };
   }
 }
 
@@ -5152,8 +5298,12 @@ async function handleInquiryDraft(userId: string, req: VercelRequest, res: Verce
   const quota = await consumeQuota(userId, 'inquiry', 60);
   if (!quota.ok) {
     // 한도 0은 내린 기능이다. "내일 다시" 오라고 하면 거짓말이 된다
-    if (isDisabled(quota.limit)) {
+    if (quota.kind === 'disabled') {
       return res.status(403).json({ error: '답변 초안은 현재 제공하지 않습니다.', disabled: true });
+    }
+    // 셈이 안 된 것은 사용자 잘못이 아니다. 그렇게 말해야 다시 눌러 본다.
+    if (quota.kind === 'error') {
+      return res.status(503).json({ error: '사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.', retryable: true });
     }
     return res.status(429).json({ error: `답변 초안은 하루 ${quota.limit}건까지입니다. 내일 다시 이용해주세요.` });
   }
@@ -5457,7 +5607,10 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
     return res.status(200).json({ items: [], minPairs: MIN_PAIRS_FOR_CORRELATION, hint: 'no-own-product' });
   }
 
-  const [rankRes, orderRes] = await Promise.all([
+  // 판매는 두 곳에 나뉘어 있다. 발주서에는 윙만, 로켓그로스는 매출내역에 쌓인다.
+  // 그로스만 파는 상품은 발주서에 한 줄도 없어, 발주서만 읽으면 "순위는 올랐는데
+  // 하나도 안 팔렸다"는 결론이 나온다. 두 곳을 모두 읽어 같은 모양으로 맞춘다.
+  const [rankRes, orderRes, growthRes] = await Promise.all([
     selectAll((f, t) => supabase!
       .from('sourcing_rank_obs')
       .select('keyword, product_id, rank, captured_at')
@@ -5473,7 +5626,28 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
           .gte('order_date', from)
           .order('order_date').range(f, t))
       : Promise.resolve({ rows: [] as any[], truncated: false }),
+    allVendorItems.length > 0
+      ? selectAll((f, t) => supabase!
+          .from('coupang_sales_daily')
+          .select('vendor_item_id, sale_date, quantity, sales_amount')
+          .eq('user_id', userId)
+          .eq('channel', 'growth')
+          .in('vendor_item_id', allVendorItems)
+          .gte('sale_date', from)
+          .order('sale_date').range(f, t))
+      : Promise.resolve({ rows: [] as any[], truncated: false }),
   ]);
+
+  // 발주서와 같은 열 이름으로 바꿔 한 줄기로 흘려보낸다
+  const salesRows = [
+    ...orderRes.rows,
+    ...growthRes.rows.map((g: any) => ({
+      vendor_item_id: g.vendor_item_id,
+      order_date: g.sale_date,
+      quantity: g.quantity,
+      order_amount: g.sales_amount,
+    })),
+  ];
 
   // 하루에 여러 번 수집될 수 있으므로 날짜별 평균 순위를 쓴다
   const rankByKey = new Map<string, Map<string, { sum: number; n: number }>>();
@@ -5499,12 +5673,12 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
   // 좋아져서 팔렸다"는 결론을 만들어 낸다. 판매 0으로 셀 수 있는 날은
   // 주문 수집이 닿은 구간 안쪽뿐이다.
   let orderCoverageStart: string | null = null;
-  for (const o of orderRes.rows) {
+  for (const o of salesRows) {
     const d = String(o.order_date);
     if (orderCoverageStart === null || d < orderCoverageStart) orderCoverageStart = d;
   }
 
-  for (const o of orderRes.rows) {
+  for (const o of salesRows) {
     const pid = productOfVendorItem.get(String(o.vendor_item_id));
     if (!pid) continue;
     const day = String(o.order_date);

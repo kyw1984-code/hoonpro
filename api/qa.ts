@@ -1,9 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { HOWTO } from '../src/lib/howto.js';
-import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from '../src/lib/featureLimits.js';
+import { DEFAULT_FEATURE_LIMITS, decideQuota, isDisabled, parseLimits } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { buildSellerContext } from '../lib/coupang-context.js';
+import { calcCostUsd } from '../src/lib/pricing.js';
 
 // "훈프로 코칭AI" RAG 챗봇 통합 API
 // Vercel Hobby 함수 개수 제한(12개) 때문에 action 파라미터로 통합
@@ -32,12 +33,6 @@ const MAX_INGEST_CHARS = 300_000;
 const CHUNK_SIZE = 900; // 한 청크 최대 글자 수
 const CHUNK_OVERLAP = 120;
 
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
-  'gpt-4.1': { input: 2.00, output: 8.00 },
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-4o': { input: 2.50, output: 10.00 },
-};
 
 // 민감 주제: LLM 호출 없이 직접 문의 유도 (환불/계정정지/세무)
 const SENSITIVE_PATTERNS: { pattern: RegExp; topic: string }[] = [
@@ -46,11 +41,6 @@ const SENSITIVE_PATTERNS: { pattern: RegExp; topic: string }[] = [
   { pattern: /세무|세금\s*신고|종합\s*소득세|부가세|부가가치세|사업자\s*세금|절세/, topic: '세무' },
 ];
 
-function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
-  const price = MODEL_PRICING[model];
-  if (!price) return 0;
-  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
-}
 
 // ── 수강생 공개 여부 (app_config.qa_enabled, 기본 OFF — 자료가 쌓일 때까지 관리자 전용) ──
 const QA_CONFIG_TTL_MS = 30_000;
@@ -389,17 +379,24 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
       qaLimit = parseLimits(cfg?.value).qa;
     } catch { /* 설정 조회 실패 시 기본값 */ }
 
-    const { data: usage } = await supabase.rpc('increment_feature_usage', {
+    // 예전에는 error를 아예 안 봤다. rpc가 실패하면 usage가 null이 되고
+    // `usage?.exceeded`는 false라 그냥 통과했다. 한도가 통째로 풀린 셈이다.
+    const rpc = await supabase.rpc('increment_feature_usage', {
       p_user_id: decoded.userId,
       p_date: today,
       p_feature: 'qa',
       p_limit: qaLimit,
     });
-    // 한도 0은 '오늘 다 썼다'가 아니라 '내린 기능'이다
-    if (isDisabled(qaLimit)) {
-      return res.status(403).json({ error: '코칭AI는 현재 제공하지 않습니다.', disabled: true });
-    }
-    if (usage?.exceeded) {
+    const d = decideQuota(qaLimit, rpc);
+    if (!d.allow) {
+      // 한도 0은 '오늘 다 썼다'가 아니라 '내린 기능'이다
+      if (d.kind === 'disabled') {
+        return res.status(403).json({ error: '코칭AI는 현재 제공하지 않습니다.', disabled: true });
+      }
+      if (d.kind === 'error') {
+        console.error('[한도] qa 집계 실패', { userId: decoded.userId, rpcError: String((rpc as any)?.error?.message ?? '') });
+        return res.status(503).json({ error: '사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.', retryable: true });
+      }
       return res.status(429).json({ error: `코칭AI는 하루 ${qaLimit}회까지 이용할 수 있습니다. 내일 다시 이용해주세요.` });
     }
   }
@@ -852,11 +849,18 @@ async function handleSuggest(req: VercelRequest, res: VercelResponse, decoded: a
 
   // 같은 사람이 하루에 수십 건을 쏟아내면 목록이 못 쓰게 된다
   const since = new Date(Date.now() - 24 * 3600_000).toISOString();
-  const { count } = await supabase
+  const { count, error: countError } = await supabase
     .from('feedback')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', decoded.userId)
     .gte('created_at', since);
+  // 셀 수 없으면 받지 않는다. 예전에는 error를 버려서, 조회가 실패하면
+  // count가 null이 되고 (null ?? 0) >= 10이 false라 그냥 통과했다. 한 건마다
+  // 분류용 AI 호출이 한 번씩 나가므로 상한이 풀리면 그대로 비용이 된다.
+  if (countError) {
+    console.error('[건의] 일일 건수 조회 실패', { userId: decoded.userId, detail: countError.message });
+    return res.status(503).json({ error: '잠시 후 다시 보내주세요.', retryable: true });
+  }
   if ((count ?? 0) >= SUGGEST_DAILY_MAX) {
     return res.status(429).json({ error: '오늘 보낼 수 있는 의견을 다 쓰셨습니다. 내일 다시 보내주세요.' });
   }

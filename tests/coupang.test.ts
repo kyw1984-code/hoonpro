@@ -271,9 +271,44 @@ test('definitionUnit: 기간 밖·종료 상태 쿠폰은 뺀다', () => {
   const base = { coupon_type: 'FIXED_WITH_QUANTITY', discount: 5000, max_discount: null, status: 'APPLIED' };
   assert.equal(definitionUnit([{ ...base, start_at: '2026-09-10T00:00:00+09:00', end_at: null }], 10000, '2026-09-01', '2026-09-08'), 0);
   assert.equal(definitionUnit([{ ...base, start_at: null, end_at: '2026-08-30T23:59:59+09:00' }], 10000, '2026-09-01', '2026-09-08'), 0);
-  assert.equal(definitionUnit([{ ...base, start_at: '2026-09-05', end_at: '2026-09-06' }], 10000, '2026-09-01', '2026-09-08'), 5000);
+  // 8일 중 2일만 걸려 있었다. 이 값에 기간 전체 판매수량이 곱해지므로
+  // 5,000을 그대로 두면 안 걸린 6일치까지 할인한 것이 된다. 5000 × 2/8 = 1250.
+  assert.equal(definitionUnit([{ ...base, start_at: '2026-09-05', end_at: '2026-09-06' }], 10000, '2026-09-01', '2026-09-08'), 1250);
+  // 기간 내내 걸려 있으면 등록한 값 그대로다
+  assert.equal(definitionUnit([{ ...base, start_at: '2026-09-01', end_at: '2026-09-08' }], 10000, '2026-09-01', '2026-09-08'), 5000);
   assert.equal(definitionUnit([{ ...base, status: 'EXPIRED', start_at: null, end_at: null }], 10000, '2026-09-01', '2026-09-08'), 0);
   assert.equal(definitionUnit([], 10000, '2026-09-01', '2026-09-08'), 0);
+});
+
+// 시기가 다른 두 쿠폰을 그냥 더하면 할인액이 판매가에 육박한다. 실제로 실매출이
+// 절반으로 꺾이고, 정의가 셋이면 0원으로 보였다. 시기가 다르면 평균으로 묶는다.
+test('definitionUnit: 시기가 다른 쿠폰은 더하지 않고 날짜로 가중한다', () => {
+  const a = { coupon_type: 'PRICE', discount: 10000, max_discount: null, status: 'APPLIED',
+              start_at: '2026-09-01', end_at: '2026-09-10' };
+  const b = { coupon_type: 'PRICE', discount: 8000, max_discount: null, status: 'APPLIED',
+              start_at: '2026-09-11', end_at: '2026-09-30' };
+  // 10일×10,000 + 20일×8,000 = 260,000, 30일로 나누면 8,667
+  assert.equal(definitionUnit([a, b], 39800, '2026-09-01', '2026-09-30'), 8667);
+  // 예전에는 18,000이 나왔다. 판매가의 45%다.
+  assert.ok(definitionUnit([a, b], 39800, '2026-09-01', '2026-09-30') < 18000);
+});
+
+// 같은 날 겹친 쿠폰은 실제로 겹쳐 적용된다. 그날은 더하는 것이 맞다.
+test('definitionUnit: 같은 날 겹친 쿠폰은 더한다', () => {
+  const a = { coupon_type: 'PRICE', discount: 3000, max_discount: null, status: 'APPLIED',
+              start_at: '2026-09-01', end_at: '2026-09-10' };
+  const b = { coupon_type: 'PRICE', discount: 2000, max_discount: null, status: 'APPLIED',
+              start_at: '2026-09-01', end_at: '2026-09-10' };
+  assert.equal(definitionUnit([a, b], 39800, '2026-09-01', '2026-09-10'), 5000);
+});
+
+// 할인액이 판매가를 넘으면 정의를 잘못 읽은 것이다. 넘으면 실매출이 0원으로 보인다.
+test('definitionUnit: 판매가를 넘지 않는다', () => {
+  const many = Array.from({ length: 5 }, () => ({
+    coupon_type: 'PRICE', discount: 20000, max_discount: null, status: 'APPLIED',
+    start_at: '2026-09-01', end_at: '2026-09-10',
+  }));
+  assert.equal(definitionUnit(many, 39800, '2026-09-01', '2026-09-10'), 39800);
 });
 
 test('isTransient: 망 오류·중계 5xx만 다시 시도한다', () => {

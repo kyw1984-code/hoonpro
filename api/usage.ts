@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from '../src/lib/featureLimits.js';
+import { calcCostUsd } from '../src/lib/pricing.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -41,27 +42,7 @@ function nextResetIso(): string {
   return new Date(midnightKst - 9 * 3600_000).toISOString();
 }
 
-const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  'gemini-2.5-flash': { input: 0.30, output: 2.50 },
-  'gemini-2.5-flash-image': { input: 0.30, output: 30.00 },
-  'gemini-2.0-flash': { input: 0.10, output: 0.40 },
-  'gpt-4.1-mini': { input: 0.40, output: 1.60 },
-  'gpt-4.1': { input: 2.00, output: 8.00 },
-  'gpt-4o-mini': { input: 0.15, output: 0.60 },
-  'gpt-4o': { input: 2.50, output: 10.00 },
-  'gpt-image-2': { input: 5.00, output: 30.00 },
-  'gpt-image-2-2026-04-21': { input: 5.00, output: 30.00 },
-  'gpt-image-1.5': { input: 5.00, output: 40.00 },
-  'gpt-image-1-mini': { input: 2.00, output: 8.00 },
-  'gpt-image-1': { input: 5.00, output: 40.00 },
-  'chatgpt-image-latest': { input: 5.00, output: 40.00 },
-};
 
-function calcCostUsd(model: string, inputTokens: number, outputTokens: number): number {
-  const price = MODEL_PRICING[model];
-  if (!price) return 0;
-  return (inputTokens * price.input + outputTokens * price.output) / 1_000_000;
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -148,16 +129,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 완료 여부는 별도 플래그가 아니라 실제 사용 데이터로 판정한다.
   // 그래서 기존 사용자에게는 처음부터 완료 상태로 보이고, 카드가 뜨지 않는다.
   if (action === 'onboarding') {
-    const since90 = new Date(Date.now() - 90 * 86400_000).toISOString();
-    const [favRes, watchRes, thumbRes, userRes, coupangRes] = await Promise.all([
+    const [favRes, watchRes, userRes, coupangRes] = await Promise.all([
       supabase.from('sourcing_favorites').select('keyword', { count: 'exact', head: true })
         .eq('user_id', decoded.userId),
       supabase.from('sourcing_rank_watch').select('product_id', { count: 'exact', head: true })
         .eq('user_id', decoded.userId),
-      supabase.from('api_calls').select('id', { count: 'exact', head: true })
-        .eq('user_id', decoded.userId).like('feature', '%thumbnail%').gte('created_at', since90),
       supabase.from('users').select('onboarding_dismissed_at').eq('id', decoded.userId).maybeSingle(),
-      // 쿠팡 연동은 가장 가치가 큰 단계라 온보딩에 넣는다. 키가 등록돼 있으면 완료다.
+      // 쿠팡 연동은 가장 가치가 큰 단계다. 키가 등록돼 있으면 완료다.
       supabase.from('coupang_accounts').select('user_id', { count: 'exact', head: true })
         .eq('user_id', decoded.userId),
     ]);
@@ -165,13 +143,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const steps = {
       sourcing: (favRes.count ?? 0) > 0,
       rank: (watchRes.count ?? 0) > 0,
-      thumbnail: (thumbRes.count ?? 0) > 0,
       coupang: (coupangRes.count ?? 0) > 0,
     };
-    // 완료 판정은 기존 3단계 그대로 둔다. 쿠팡을 필수로 넣으면 이미 온보딩을
-    // 끝낸 사용자 전원에게 카드가 다시 뜬다. 쿠팡은 아직 안 한 사람에게만
-    // 추가로 권하는 선택 단계로 남긴다.
-    const done = steps.sourcing && steps.rank && steps.thumbnail;
+    // 완료 판정에 썸네일이 들어 있었다. 그 기능을 내린 뒤로는 아무도 그
+    // 조건을 채울 수 없어 온보딩 카드가 영원히 남았다. 쿠팡 연동으로
+    // 바꾼다 — 실제로 할 수 있고, 하면 제품의 값이 가장 크게 달라진다.
+    const done = steps.sourcing && steps.rank && steps.coupang;
 
     return res.status(200).json({
       steps,

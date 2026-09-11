@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Wallet, RefreshCw, Loader2, Plus, Trash2, AlertTriangle } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { won } from '../../lib/coupang';
 
 // 관리자 — 원가 현황
 // 변동비(AI·크롤링·메일)는 api_calls 실측, 고정비는 관리자가 입력한다.
@@ -20,7 +21,6 @@ const FEATURE_LABEL: Record<string, string> = {
   'detail-image': '상세페이지 제작',
 };
 
-const won = (n: number) => `${Math.round(n || 0).toLocaleString()}원`;
 
 export function CostsAdmin({ showToast }: { showToast: (msg: string) => void }) {
   const [data, setData] = useState<any | null>(null);

@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { parseSet, medianUnitPrice } from "../src/lib/setProduct.js";
 import { buildSellerProfile, sellerFit, blendScore, type SellerProfile } from "../src/lib/sellerFit.js";
 import { detectOffCategory, scoreReasons } from "../src/lib/productRelevance.js";
-import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from "../src/lib/featureLimits.js";
+import { DEFAULT_FEATURE_LIMITS, decideQuota, isDisabled, parseLimits } from "../src/lib/featureLimits.js";
 import { createClient } from "@supabase/supabase-js";
 import { createHmac } from "crypto";
 import jwt from "jsonwebtoken";
@@ -1043,16 +1043,24 @@ async function fetchSearchProducts(keyword: string, decoded: any): Promise<{
       try {
         const today = kstToday();
         const limit = (await loadLimits()).rank;
-        const { data, error } = await supabase.rpc("increment_feature_usage", {
+        const rpc = await supabase.rpc("increment_feature_usage", {
           p_user_id: decoded.userId, p_date: today, p_feature: "rank", p_limit: limit,
         });
-        if (!error && data?.exceeded) {
-          return { products: null, error: isDisabled(limit)
+        const d = decideQuota(limit, rpc);
+        if (!d.allow) {
+          if (d.kind === "error") {
+            console.error("[한도] rank 집계 실패", { userId: decoded.userId, rpcError: String((rpc as any)?.error?.message ?? "") });
+            return { products: null, error: "사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요." };
+          }
+          return { products: null, error: d.kind === "disabled"
             ? "순위 확인은 현재 제공하지 않습니다."
             : `순위 확인은 하루 ${limit}회까지입니다. 내일 새벽 자동 수집 시 기록됩니다.` };
         }
-        if (!error && typeof data?.remaining === "number") remaining = data.remaining;
-      } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
+        remaining = d.remaining;
+      } catch (e: any) {
+        console.error("[한도] rank 집계 예외", { userId: decoded.userId, detail: e?.message });
+        return { products: null, error: "사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요." };
+      }
     }
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
     const result = await fetchViaUnlocker(url, 2, 20000, { userId: decoded?.userId ?? null, feature: "rank-check" });
@@ -1100,12 +1108,23 @@ async function fetchSearchPage(keyword: string, page: number, decoded: any): Pro
   if (!decoded?.isAdmin && supabase) {
     try {
       const limit = (await loadLimits()).rank;
-      const { data, error } = await supabase.rpc("increment_feature_usage", {
+      const rpc = await supabase.rpc("increment_feature_usage", {
         p_user_id: decoded.userId, p_date: kstToday(), p_feature: "rank", p_limit: limit,
       });
-      if (!error && data?.exceeded) return { products: null, stop: "limit", remaining: 0 };
-      if (!error && typeof data?.remaining === "number") remaining = data.remaining;
-    } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
+      const d = decideQuota(limit, rpc);
+      if (!d.allow) {
+        // 심층 확장은 페이지마다 한 번씩 센다. 셈이 안 되면 여기서 멈춘다 —
+        // 한 번 훑을 때 검색 페이지를 최대 다섯 장까지 넘기고 장마다 돈이 나간다.
+        if (d.kind === "error") {
+          console.error("[한도] rank(심층) 집계 실패", { userId: decoded.userId, rpcError: String((rpc as any)?.error?.message ?? "") });
+        }
+        return { products: null, stop: "limit", remaining: 0 };
+      }
+      remaining = d.remaining;
+    } catch (e: any) {
+      console.error("[한도] rank(심층) 집계 예외", { userId: decoded.userId, detail: e?.message });
+      return { products: null, stop: "limit", remaining: 0 };
+    }
   }
 
   const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60&page=${page}`;
@@ -1578,19 +1597,24 @@ async function loadReviewVelocity(productIds: string[]): Promise<Map<string, { p
   const map = new Map<string, { perDay: number; days: number }>();
   if (!supabase || productIds.length === 0) return map;
   try {
+    // 최신순으로 읽는다. 오름차순에 상한을 두면 돌아오는 3000줄이 가장
+    // 오래된 것들이라, 관측이 쌓일수록 '마지막'이 과거의 어느 날에 멈춘다.
+    // 상품 55개를 매일 한 줄씩 90일 보관하면 두 달째부터 리뷰증가속도가
+    // 그 자리에 얼어붙고, 리뷰가 계속 늘어도 화면은 모른다.
     const { data } = await supabase
       .from("sourcing_product_obs")
       .select("product_id, review_count, captured_at")
       .in("product_id", productIds)
-      .order("captured_at", { ascending: true })
+      .order("captured_at", { ascending: false })
       .limit(3000);
     if (!data) return map;
     const first = new Map<string, { count: number; at: number }>();
     const last = new Map<string, { count: number; at: number }>();
+    // 최신순이므로 처음 만나는 것이 '마지막', 마지막에 만나는 것이 '처음'이다
     for (const row of data) {
       const at = new Date(row.captured_at).getTime();
-      if (!first.has(row.product_id)) first.set(row.product_id, { count: row.review_count, at });
-      last.set(row.product_id, { count: row.review_count, at });
+      if (!last.has(row.product_id)) last.set(row.product_id, { count: row.review_count, at });
+      first.set(row.product_id, { count: row.review_count, at });
     }
     for (const [pid, f] of first) {
       const l = last.get(pid)!;
@@ -1791,18 +1815,24 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
       try {
         const today = kstToday();
         const limit = (await loadLimits()).sourcing;
-        const { data, error } = await supabase.rpc("increment_feature_usage", {
+        const rpc = await supabase.rpc("increment_feature_usage", {
           p_user_id: decoded.userId,
           p_date: today,
           p_feature: "sourcing",
           p_limit: limit,
         });
-        if (!error && data?.exceeded) {
-          if (isDisabled(limit)) return res.status(403).json({ error: "소싱 분석은 현재 제공하지 않습니다.", disabled: true });
-          return res.status(429).json({ error: `소싱 분석은 하루 ${limit}회까지입니다. 내일 다시 이용해주세요. (이미 분석했던 키워드는 캐시로 계속 조회됩니다)` });
+        const d = decideQuota(limit, rpc);
+        if (!d.allow) {
+          if (d.kind === "disabled") return res.status(403).json({ error: "소싱 분석은 현재 제공하지 않습니다.", disabled: true });
+          if (d.kind === "exceeded") return res.status(429).json({ error: `소싱 분석은 하루 ${limit}회까지입니다. 내일 다시 이용해주세요. (이미 분석했던 키워드는 캐시로 계속 조회됩니다)` });
+          console.error("[한도] sourcing 집계 실패", { userId: decoded.userId, rpcError: String((rpc as any)?.error?.message ?? "") });
+          return res.status(503).json({ error: "사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true });
         }
-        if (!error && typeof data?.remaining === "number") remaining = data.remaining;
-      } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
+        remaining = d.remaining;
+      } catch (e: any) {
+        console.error("[한도] sourcing 집계 예외", { userId: decoded.userId, detail: e?.message });
+        return res.status(503).json({ error: "사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true });
+      }
     }
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
     const result = await fetchViaUnlocker(url, 2, 20000, { userId: decoded?.userId ?? null, feature: "sourcing-products" });
@@ -2070,15 +2100,21 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     try {
       const today = kstToday();
       const limit = (await loadLimits()).reviews;
-      const { data, error } = await supabase.rpc("increment_feature_usage", {
+      const rpc = await supabase.rpc("increment_feature_usage", {
         p_user_id: decoded.userId, p_date: today, p_feature: "reviews", p_limit: limit,
       });
-      if (!error && data?.exceeded) {
-        if (isDisabled(limit)) return res.status(403).json({ error: "리뷰 분석은 현재 제공하지 않습니다.", disabled: true });
-        return res.status(429).json({ error: `리뷰 분석은 하루 ${limit}회까지입니다.` });
+      const d = decideQuota(limit, rpc);
+      if (!d.allow) {
+        if (d.kind === "disabled") return res.status(403).json({ error: "리뷰 분석은 현재 제공하지 않습니다.", disabled: true });
+        if (d.kind === "exceeded") return res.status(429).json({ error: `리뷰 분석은 하루 ${limit}회까지입니다.` });
+        console.error("[한도] reviews 집계 실패", { userId: decoded.userId, rpcError: String((rpc as any)?.error?.message ?? "") });
+        return res.status(503).json({ error: "사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true });
       }
-      if (!error && typeof data?.remaining === "number") remaining = data.remaining;
-    } catch { /* 한도 집계 실패는 기능을 막지 않음 */ }
+      remaining = d.remaining;
+    } catch (e: any) {
+      console.error("[한도] reviews 집계 예외", { userId: decoded.userId, detail: e?.message });
+      return res.status(503).json({ error: "사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.", retryable: true });
+    }
   }
 
   // ① 리뷰 전용 엔드포인트 (HTML 프래그먼트) → ② 상품 페이지 폴백

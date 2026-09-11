@@ -429,9 +429,23 @@ export function won(n: number | null | undefined): string {
   return `${Math.round(n).toLocaleString('ko-KR')}원`;
 }
 
+/**
+ * 이미 퍼센트인 값을 적는다. 12.5 → "12.5%"
+ *
+ * 비율(0.125)을 넘기면 조용히 100배 작게 나온다. 비율에는 ratioPct를 쓴다.
+ * 이름이 같은 함수가 화면마다 따로 있었고 계약이 서로 반대여서, 한 줄을
+ * 옮겨 붙이는 것만으로 숫자가 100배 어긋났다. 반품 화면 안에서 두 형제
+ * 컴포넌트가 실제로 그 상태였다.
+ */
 export function pct(n: number | null | undefined, digits = 1): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return '-';
   return `${n.toFixed(digits)}%`;
+}
+
+/** 비율을 퍼센트로 적는다. 0.125 → "12.5%" */
+export function ratioPct(n: number | null | undefined, digits = 1): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return '-';
+  return `${(n * 100).toFixed(digits)}%`;
 }
 
 export function sinceText(iso: string | null | undefined): string {
