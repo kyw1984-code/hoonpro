@@ -11,6 +11,7 @@ import { RankTracker } from './components/RankTracker';
 import { ReviewAnalyzer } from './components/ReviewAnalyzer';
 import { ApiKeyCheck } from './components/ApiKeyCheck';
 import { Footer } from './components/Layout/Footer';
+import { HowTo } from './components/HowTo';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdReportReceiver } from './components/AdCenter/AdReportReceiver';
 import { AD_COLLECT_QUERY } from './lib/adCollector';
@@ -318,6 +319,9 @@ export default function App() {
                   <span>오늘 {remainingCalls}회</span>
                 </span>
               )}
+              {/* 지금 보고 있는 화면의 사용 방법. 늘 같은 자리에 있어야 찾지 않는다 */}
+              <HowTo id={activeTab} compact className="sm:hidden" />
+              <HowTo id={activeTab} className="hidden sm:flex" />
               <span className="hidden whitespace-nowrap text-[13px] font-medium text-ink sm:inline">{user.name}</span>
               <button
                 onClick={handleLogout}
