@@ -11,13 +11,14 @@ import { needsReorder, briefWorthSending, briefHtml, type BriefData } from '../a
 
 const item = (o: Partial<any> = {}): any => ({
   vendorItemId: 'v1', productName: '기모 후드 집업', optionName: 'L / 블랙',
-  stock: 40, sold7: 7, sold28: 28, velocity: 1, daysLeft: 40, reorderQty: 0,
-  risk: 'ok', coupangSold30: null, ...o,
+  stock: 40, sold7: 7, sold28: 28, sold14: 14, velocity: 1, daysLeft: 40, reorderQty: 0,
+  risk: 'ok', coupangSold30: null, reorderMode: 'auto', ...o,
 });
 
 const brief = (o: Partial<BriefData> = {}): BriefData => ({
   orderAmount: 0, quantity: 0, prevOrderAmount: 0, topSellers: [],
-  reorder: [], newInquiries: 0, newReturns: 0, leadTimeDays: 14, ...o,
+  reorder: [], newInquiries: 0, newReturns: 0, leadTimeDays: 14,
+  minSales14: 3, seasonalSkipped: 0, ...o,
 });
 
 test('발주: 리드타임 안에 떨어지는 것만 고른다', () => {
@@ -132,4 +133,68 @@ test('메일: 상품명의 HTML을 이스케이프한다', () => {
 test('메일: 발주할 게 없으면 그 구획이 아예 없다', () => {
   const html = briefHtml('김', '2026-09-10', brief({ orderAmount: 50000, quantity: 2 }));
   assert.ok(!html.includes('지금 발주해야 할 것'));
+});
+
+// ── 시즌 지난 상품 빼기 ────────────────────────────────────────
+// 여름 나시티가 9월에 품절인 건 사고가 아니라 계절이다. 매일 같은 목록이
+// 올라오면 그 메일은 안 읽히고, 진짜 급한 품절도 함께 묻힌다.
+
+test('시즌: 최근 판매가 끊긴 상품은 품절이어도 빼낸다', () => {
+  const rows = [
+    item({ vendorItemId: '여름나시티', risk: 'out', stock: 0, daysLeft: null, sold14: 0, sold28: 3 }),
+    item({ vendorItemId: '가을집업', risk: 'out', stock: 0, daysLeft: null, sold14: 39, sold28: 39 }),
+  ];
+  assert.deepEqual(needsReorder(rows, 28, 3).map(r => r.vendorItemId), ['가을집업']);
+});
+
+// 28일에는 지난 시즌의 끝자락이 섞여 있어 이미 끝난 상품이 아직 팔리는 것처럼 보인다
+test('시즌: 28일이 아니라 14일로 판단한다', () => {
+  const 끝물 = item({ vendorItemId: '끝물', risk: 'out', stock: 0, daysLeft: null, sold14: 1, sold28: 20 });
+  assert.equal(needsReorder([끝물], 28, 3).length, 0);
+});
+
+test('시즌: 기준을 0으로 두면 자동 판단을 끈다', () => {
+  const rows = [item({ vendorItemId: 'a', risk: 'out', stock: 0, daysLeft: null, sold14: 0 })];
+  assert.equal(needsReorder(rows, 28, 0).length, 1);
+  assert.equal(needsReorder(rows, 28, 3).length, 0);
+});
+
+// 자동 판단은 '곧 시작될 시즌'을 알 수 없다. 겨울 상품은 9월에 안 팔리지만
+// 10월 발주는 해야 한다. 손으로 고정한 규칙이 항상 우선한다.
+test('시즌: always로 고정하면 판매가 없어도 알린다', () => {
+  const 겨울패딩 = item({
+    vendorItemId: '겨울패딩', risk: 'out', stock: 0, daysLeft: null,
+    sold14: 0, sold28: 0, reorderMode: 'always',
+  });
+  assert.deepEqual(needsReorder([겨울패딩], 28, 3).map(r => r.vendorItemId), ['겨울패딩']);
+});
+
+test('시즌: exclude로 고정하면 잘 팔려도 빼낸다', () => {
+  const 단종 = item({
+    vendorItemId: '단종', risk: 'out', stock: 0, daysLeft: null,
+    sold14: 50, sold28: 90, reorderMode: 'exclude',
+  });
+  assert.equal(needsReorder([단종], 28, 3).length, 0);
+});
+
+// always가 '급하지 않은 것까지 전부 알린다'는 뜻은 아니다. 재고가 넉넉하면
+// 매일 목록에 올릴 이유가 없다.
+test('시즌: always여도 급하지 않으면 알리지 않는다', () => {
+  const 여유 = item({ vendorItemId: '여유', risk: 'ok', stock: 500, daysLeft: 200, sold14: 0, reorderMode: 'always' });
+  assert.equal(needsReorder([여유], 28, 3).length, 0);
+});
+
+test('메일: 시즌으로 뺀 게 있으면 몇 개를 뺐는지 밝힌다', () => {
+  const html = briefHtml('김', '2026-09-10', brief({
+    quantity: 3, reorder: [item({ risk: 'out', daysLeft: null, sold14: 20 })],
+    minSales14: 3, seasonalSkipped: 6,
+  }));
+  assert.ok(html.includes('6개는 시즌이 지난 것으로 보고 뺐습니다'));
+});
+
+test('메일: 뺀 게 없으면 그 말을 하지 않는다', () => {
+  const html = briefHtml('김', '2026-09-10', brief({
+    quantity: 3, reorder: [item({ risk: 'out', daysLeft: null, sold14: 20 })], seasonalSkipped: 0,
+  }));
+  assert.ok(!html.includes('시즌이 지난 것으로'));
 });

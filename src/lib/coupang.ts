@@ -253,6 +253,10 @@ export interface InventoryRow {
   risk: StockRisk;
   /** 쿠팡이 집계한 최근 30일 판매수. 없으면 null */
   coupangSold30: number | null;
+  /** 최근 14일 판매수 — 시즌이 끝났는지는 28일 평균보다 이쪽이 먼저 말해준다 */
+  sold14: number;
+  /** 발주 규칙: 자동 판단 / 항상 제외 / 항상 포함 */
+  reorderMode: 'auto' | 'exclude' | 'always';
 }
 
 export interface InventoryResponse {
@@ -395,6 +399,11 @@ export const coupangApi = {
   reports: () => request<{ reports: WeeklyReport[] }>('reports'),
   inventory: (leadTime: number, cover: number) =>
     request<InventoryResponse>(`inventory&leadTime=${leadTime}&cover=${cover}`),
+  /** 발주 알림에서 이 옵션을 빼거나(exclude) 항상 넣거나(always) 자동으로 되돌린다(auto) */
+  reorderRule: (vendorItemId: string, mode: 'auto' | 'exclude' | 'always') =>
+    request<{ ok: true; vendorItemId: string; mode: string }>('reorder-rule', {
+      method: 'POST', body: { vendorItemId, mode },
+    }),
   returns: (days: number) => request<ReturnsResponse>(`returns&days=${days}`),
   inquiries: (all = false) => request<{ inquiries: Inquiry[] }>(`inquiries&all=${all}`),
   inquiryDraft: (inquiryId: string) =>

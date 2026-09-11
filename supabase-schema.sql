@@ -1079,3 +1079,32 @@ alter table coupang_accounts add column if not exists brief_enabled boolean not 
 -- 발주 리드타임 — 재고 알림의 기준이다. 판매자마다 다르다(국내 3일, 중국 30일).
 -- 이 값이 틀리면 알림이 늘 이르거나 늘 늦어 아무도 안 본다.
 alter table coupang_accounts add column if not exists lead_time_days int not null default 14;
+
+-- ─────────────────────────────────────────────────────────────
+-- 43. 발주 알림에서 시즌 지난 상품 빼기
+-- ─────────────────────────────────────────────────────────────
+-- 여름 나시티가 9월에 품절이면 그건 채울 일이 아니라 시즌이 끝난 것이다.
+-- 그런데 발주 알림은 '남은 일수'만 봐서, 한 달에 한두 개 팔리는 상품도
+-- 재고가 0이면 매일 올라온다. 매일 같은 목록이 오면 그 메일은 안 읽히고,
+-- 안 읽히는 메일에는 진짜 급한 품절도 함께 묻힌다.
+--
+-- 판단은 '최근에 아직 팔리는가'로 한다. 시즌이 끝나면 판매가 먼저 끊긴다.
+-- 다만 자동 판단은 '이제 곧 시즌이 시작될 상품'을 알 수 없다 — 겨울 상품은
+-- 9월에 안 팔리지만 10월 발주는 해야 한다. 그래서 손으로 고정하는 길을 둔다.
+create table if not exists coupang_reorder_rules (
+  user_id uuid not null references users(id) on delete cascade,
+  vendor_item_id text not null,
+  mode text not null check (mode in ('exclude', 'always')),
+  -- exclude: 판매가 있어도 발주 알림에서 뺀다 (단종·시즌 종료)
+  -- always:  판매가 없어도 발주 알림에 넣는다 (곧 시즌이 오는 상품)
+  note text,
+  updated_at timestamptz default now(),
+  primary key (user_id, vendor_item_id)
+);
+create index if not exists idx_crr_user on coupang_reorder_rules(user_id);
+alter table coupang_reorder_rules enable row level security;
+revoke all on coupang_reorder_rules from anon, authenticated;
+
+-- 자동 판단 기준: 최근 14일에 이만큼도 안 팔렸으면 발주 대상이 아니다.
+-- 0으로 두면 자동 판단을 끄고 전부 알린다.
+alter table coupang_accounts add column if not exists reorder_min_sales14 int not null default 3;
