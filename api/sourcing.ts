@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { buildSellerProfile, sellerFit, blendScore, type SellerProfile } from "../src/lib/sellerFit.js";
 import { detectOffCategory, scoreReasons } from "../src/lib/productRelevance.js";
 import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from "../src/lib/featureLimits.js";
 import { createClient } from "@supabase/supabase-js";
@@ -1582,7 +1583,10 @@ async function loadReviewVelocity(productIds: string[]): Promise<Map<string, { p
 }
 
 // ─── 점수 산출 (실데이터) ─────────────────────────────────────────────────────
-function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCount: number, searchKeyword = "") {
+function scoreProducts(
+  parsed: ParsedProduct[], keywordVolume: number, totalCount: number, searchKeyword = "",
+  sellerProfile: SellerProfile | null = null,
+) {
   const organic = parsed.filter(p => !p.isAd);
   // 검색 키워드 자체가 브랜드면 브랜드 표시를 하지 않는다 (의도적 브랜드 조사)
   const searchTargetsBrand = isBrandKeyword(searchKeyword);
@@ -1628,7 +1632,33 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
       reviewCount: p.reviewCount, deliveryType: p.deliveryType,
       productPrice: price, demandScore, entryEase, priceFit,
     });
-    return { ...p, isBrand, offCategory, calculated: { demandScore, entryEase, priceFit, opportunityScore, grade, reasons } };
+
+    // 지금까지의 점수는 누가 쓰든 같다 — 즉 경쟁자도 같은 답을 본다.
+    // 정산AI가 아는 이 판매자의 실적을 얹어 "내가 이미 잘 파는 것과 닮은 시장"을
+    // 위로 올린다. 다만 기회점수를 덮지는 않는다(0.7 대 0.3).
+    const fit = sellerProfile ? sellerFit(
+      { productPrice: price, deliveryType: p.deliveryType, productName: p.productName },
+      sellerProfile,
+    ) : null;
+    const finalScore = fit ? blendScore(opportunityScore, fit.score) : opportunityScore;
+    const finalGrade =
+      finalScore >= 68 && p.reviewCount >= 30 ? "Great"
+      : finalScore >= 55 ? "Good"
+      : finalScore >= 40 ? "Normal"
+      : "Bad";
+
+    return {
+      ...p, isBrand, offCategory,
+      calculated: {
+        demandScore, entryEase, priceFit,
+        opportunityScore: finalScore,
+        /** 적합도를 빼기 전의 시장 자체 점수 */
+        marketScore: opportunityScore,
+        grade: finalGrade,
+        reasons: fit ? [...reasons, `내 가게 기준 ${fit.score}점 — ${fit.reason}`] : reasons,
+        fitScore: fit ? fit.score : null,
+      },
+    };
   });
 
   // 다른 상품군은 지우지 않고 아래로 내린다. 지우면 규칙이 틀렸을 때
@@ -1765,7 +1795,9 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
     return res.status(200).json({ keyword, products: [], market: null, error: "검색 결과가 없습니다." });
   }
 
-  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount, keyword);
+  // 정산AI가 아는 이 판매자의 실적으로 "내 가게와 닮은 시장"을 가린다
+  const sellerProfile = await loadSellerProfile(decoded?.userId);
+  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount, keyword, sellerProfile);
   const velocity = await loadReviewVelocity(products.map(p => p.productId));
   const withVelocity = products.map(p => {
     const v = velocity.get(p.productId);
@@ -1780,6 +1812,48 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
     ...(remaining !== null ? { remaining } : {}),
     ...(parseDebug ? { parseDebug } : {}),
   });
+}
+
+/** 판매자 프로필을 뽑는 기간. 너무 길면 지난 시즌 상품이 섞이고, 짧으면 표본이 모자란다 */
+const SELLER_PROFILE_DAYS = 60;
+
+/**
+ * 정산AI 데이터로 이 판매자의 성격을 뽑는다 — 무엇을 얼마에, 어느 창구로, 세트로 파는가.
+ *
+ * 쿠팡을 연동하지 않았거나 판매가 적으면 null이다. 그때는 예전처럼 모두에게
+ * 같은 점수를 쓴다. 근거 없는 보정은 없느니만 못하다.
+ */
+async function loadSellerProfile(userId: string | undefined): Promise<SellerProfile | null> {
+  if (!supabase || !userId) return null;
+  try {
+    const from = kstAddDays(kstToday(), -SELLER_PROFILE_DAYS);
+    const [salesRes, itemRes] = await Promise.all([
+      supabase.from("coupang_sales_daily")
+        .select("vendor_item_id, quantity, sales_amount, channel")
+        .eq("user_id", userId).gte("sale_date", from).limit(5000),
+      supabase.from("coupang_items")
+        .select("product_name").eq("user_id", userId).limit(1000),
+    ]);
+
+    // 옵션별로 합쳐 개당 가격을 낸다. 행마다 보면 하루 한 개 팔린 것도 한 표가 된다.
+    const byItem = new Map<string, { qty: number; amt: number; channel: string | null }>();
+    for (const r of salesRes.data ?? []) {
+      const id = String(r.vendor_item_id);
+      const cur = byItem.get(id) ?? { qty: 0, amt: 0, channel: null };
+      cur.qty += Number(r.quantity) || 0;
+      cur.amt += Number(r.sales_amount) || 0;
+      cur.channel = cur.channel ?? (r.channel ? String(r.channel) : null);
+      byItem.set(id, cur);
+    }
+    const sold = [...byItem.values()]
+      .filter(v => v.qty > 0)
+      .map(v => ({ unitPrice: v.amt / v.qty, channel: v.channel }));
+
+    const names = [...new Set((itemRes.data ?? []).map(i => String(i.product_name ?? "")).filter(Boolean))];
+    return buildSellerProfile(sold, names, SELLER_PROFILE_DAYS);
+  } catch {
+    return null;   // 프로필을 못 뽑아도 분석 자체는 돌아야 한다
+  }
 }
 
 /** 최근 이만큼만 자동 추적한다. 더 쌓이면 크론이 도는 키워드가 늘어 수집 비용이 함께 는다 */

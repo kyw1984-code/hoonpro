@@ -56,9 +56,13 @@ interface Product {
     entryEase: number;
     priceFit: number;
     opportunityScore: number;
+    /** 적합도를 섞기 전, 시장 자체의 점수 */
+    marketScore?: number;
     grade: 'Great' | 'Good' | 'Normal' | 'Bad';
-    /** 왜 이 점수인지 세 줄 */
+    /** 왜 이 점수인지 세 줄 (+ 내 가게 기준 한 줄) */
     reasons: string[];
+    /** 내 가게와 닮은 정도 (0~100). 실적이 적으면 null */
+    fitScore?: number | null;
   };
 }
 
@@ -1071,8 +1075,11 @@ export function SourcingFinder() {
                             </div>
                             <div className="flex items-center gap-1.5 mb-3">
                               <span className={`${BADGE_BASE} ${gradeStyle(product.calculated.grade)}`}
-                                title="수요검증(리뷰)·진입용이성(배송유형)·가격적합도 종합 (0~100)">
+                                title={product.calculated.fitScore != null
+                                  ? `수요·진입난이도·가격에 대표님의 최근 60일 실적(가격대·판매 창구·세트 구성)까지 반영한 점수입니다. 시장 자체 점수는 ${product.calculated.marketScore}점입니다`
+                                  : '수요검증(리뷰)·진입용이성(배송유형)·가격적합도 종합 (0~100)'}>
                                 기회지수 {product.calculated.opportunityScore}
+                                {product.calculated.fitScore != null && <span className="ml-1 font-normal opacity-70">내 기준</span>}
                               </span>
                               <span className={`px-2 py-0.5 rounded-control text-[10px] font-semibold ring-1 ${
                                 product.deliveryType === 'rocket' ? 'bg-critical-soft text-critical ring-critical/20' : 'bg-positive-soft text-positive ring-positive/20'
