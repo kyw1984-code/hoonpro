@@ -43,6 +43,8 @@ interface Data {
   totalSold: number;
   returnRate: number | null;
   categories: Category[];
+  /** 고객이 철회한 반품 — 집계에서 뺐다 */
+  cancelledCount?: number;
   products: Product[];
 }
 
@@ -111,6 +113,12 @@ export function ReturnReasons({ days = 90 }: { days?: number }) {
         {data.returnRate !== null && <> · 반품률 {pct(data.returnRate)}</>}
         {data.sellerFault > 0 && <> · 판매자 귀책 {data.sellerFault}건</>}
       </p>
+      {/* 조용히 빼면 기준이 틀렸을 때 알아챌 방법이 없다 */}
+      {(data.cancelledCount ?? 0) > 0 && (
+        <p className="mt-1 text-[11.5px] text-ink-3">
+          고객이 철회한 반품 {data.cancelledCount}건은 빼고 셌습니다.
+        </p>
+      )}
 
       {fixableCount > 0 && (
         <p className="mt-2 rounded-control bg-accent-soft px-3.5 py-2.5 text-[13px] leading-relaxed text-ink">

@@ -621,35 +621,66 @@ export interface CouponDef {
 }
 
 /**
- * 쿠폰 설정으로 본 옵션의 개당 쿠폰 할인.
+ * 쿠폰 설정으로 본 옵션의 개당 쿠폰 할인 — 이 기간의 하루 평균.
  *
- * 판매자가 쿠폰 관리에 등록한 값 그대로다 — "이 상품은 1건당 11,500원 할인"이면
- * 11,500. 주문에서 역산한 값은 다운로드쿠폰이 섞이거나 쿠폰을 바꾼 날이 끼면
- * 들쭉날쭉해지는데, 설정값은 그럴 일이 없다.
+ * 판매자가 쿠폰 관리에 등록한 값을 쓴다. 주문에서 역산한 값은 다운로드쿠폰이
+ * 섞이거나 쿠폰을 바꾼 날이 끼면 들쭉날쭉해지는데, 설정값은 그럴 일이 없다.
  * - 정액(PRICE·FIXED·FIXED_WITH_QUANTITY)은 금액 그대로
  * - 정률(RATE·PERCENT)은 판매 단가 × 비율, 최대할인이 있으면 거기서 자른다
- * - 기간이 [from, to]와 하나도 안 겹치는 쿠폰과 종료·삭제 상태는 뺀다
+ * - 종료·삭제 상태는 뺀다
+ *
+ * 돌려주는 값은 [from, to] 하루하루의 평균이다. 부르는 쪽(couponForRow)이 이
+ * 값에 기간 전체 판매수량을 곱하므로, 8일 중 2일만 걸려 있던 5,000원짜리는
+ * 5,000이 아니라 1,250이어야 총 할인액이 맞는다. 8일 내내 5,000원이면 그대로
+ * 5,000이다. 같은 날 두 쿠폰이 겹쳐 있으면 실제로 겹쳐 적용되므로 그날은 더한다.
  */
 export function definitionUnit(defs: CouponDef[], unitPrice: number, from: string, to: string): number {
-  let total = 0;
-  for (const d of defs) {
-    if (d.status && /EXPIRE|DELETE|CANCEL|END|PAUSE|STOP|만료|삭제|중지/i.test(d.status)) continue;
-    const start = d.start_at ? String(d.start_at).slice(0, 10) : '';
-    const end = d.end_at ? String(d.end_at).slice(0, 10) : '';
-    if (start && start > to) continue;
-    if (end && end < from) continue;
-    const amount = Number(d.discount) || 0;
-    if (amount <= 0) continue;
-    if (/RATE|PERCENT|정률/i.test(d.coupon_type ?? '')) {
-      let v = (unitPrice * amount) / 100;
-      const cap = Number(d.max_discount) || 0;
-      if (cap > 0) v = Math.min(v, cap);
-      total += v;
-    } else {
-      total += amount;
+  if (!from || !to || from > to) return 0;
+
+  // 날짜별로 가중해 평균을 낸다.
+  //
+  // 예전에는 기간에 걸치기만 하면 전부 더했다. 10일간 10,000원짜리를 걸고
+  // 그다음 20일간 8,000원짜리를 건 옵션은 한 달 화면에서 18,000원으로 잡혔다.
+  // 판매가가 39,800원이면 실매출이 절반으로 꺾이고, 정의가 셋이면 할인액이
+  // 판매가를 넘어 실매출이 0원으로 보였다.
+  //
+  // 같은 날 두 쿠폰이 함께 걸려 있으면 실제로 겹쳐 적용되므로 그날은 더한다.
+  // 더하는 것은 '같은 날'까지고, 서로 다른 시기는 평균으로 묶는다. 이 값에
+  // 기간 전체 판매수량을 곱하므로, 날짜별 평균이 총 할인액에 가장 가깝다.
+  const perDay = (day: string): number => {
+    let sum = 0;
+    for (const d of defs) {
+      if (d.status && /EXPIRE|DELETE|CANCEL|END|PAUSE|STOP|만료|삭제|중지/i.test(d.status)) continue;
+      const start = d.start_at ? String(d.start_at).slice(0, 10) : '';
+      const end = d.end_at ? String(d.end_at).slice(0, 10) : '';
+      // 시작일이 없으면 예전부터, 종료일이 없으면 앞으로도 계속 걸려 있는 것으로 본다
+      if (start && start > day) continue;
+      if (end && end < day) continue;
+      const amount = Number(d.discount) || 0;
+      if (amount <= 0) continue;
+      if (/RATE|PERCENT|정률/i.test(d.coupon_type ?? '')) {
+        let v = (unitPrice * amount) / 100;
+        const cap = Number(d.max_discount) || 0;
+        if (cap > 0) v = Math.min(v, cap);
+        sum += v;
+      } else {
+        sum += amount;
+      }
     }
+    return sum;
+  };
+
+  let total = 0;
+  let days = 0;
+  for (let day = from; day <= to; day = addDays(day, 1)) {
+    total += perDay(day);
+    days += 1;
+    if (days > 400) break; // 기간은 최대 365일이다. 무한 루프 방지용 빗장
   }
-  return Math.max(0, Math.round(total));
+  if (days === 0) return 0;
+  // 할인액이 판매가를 넘을 수는 없다. 넘으면 정의를 잘못 읽은 것이다.
+  const avg = total / days;
+  return Math.max(0, Math.min(Math.round(avg), Math.max(0, Math.round(unitPrice))));
 }
 
 /**
@@ -2856,7 +2887,10 @@ interface ProfitRow {
    */
   returnAmount: number;
   unitCostTotal: number;
+  /** 반품 건수 — 배송비는 상자 하나에 한 번 나가므로 이 값으로 곱한다 */
   returnCount: number;
+  /** 반품된 개수 — 얼마어치가 돌아왔는지는 이 값으로 센다 */
+  returnQuantity: number;
   returnCost: number;
   profit: number;
   marginRate: number;
@@ -2876,8 +2910,13 @@ function rangeFromQuery(req: VercelRequest): { from: string; to: string } {
 /** 순이익 계산 — 화면(1번)과 주간 리포트(3번)가 같은 숫자를 쓰도록 한곳에 둔다 */
 /**
  * @param opts.totalsOnly 합계만 쓰는 호출(직전 기간 비교 등)에서 켠다.
- *   상품명·재고와 광고비는 합계에 들어가지 않으므로 조회를 건너뛴다.
+ *   상품명·재고와 옵션별 광고비 분해는 합계에 들어가지 않으므로 건너뛴다.
  *   켜지 않으면 기간 비교 하나 때문에 한 요청이 조회를 두 배로 하게 된다.
+ *
+ *   다만 날짜별 광고비 합계는 건너뛰지 않는다. 예전에는 이것까지 건너뛰어
+ *   adCostHint가 항상 null이 됐고, 직전 기간만 광고비가 안 빠진 채 이번 기간과
+ *   견주어졌다. 광고비를 매주 같은 액수로 쓰는 판매자에게는 실적이 같은 주에도
+ *   하락으로 나갔다. 하루 한 줄짜리 작은 표라 건너뛸 이유도 없었다.
  */
 export async function computeProfit(
   userId: string,
@@ -2905,7 +2944,7 @@ export async function computeProfit(
       .order('requested_at').range(f, t)),
     // 이 기간에 걸친 일자별 광고비. 쿠팡 Open API에 광고 엔드포인트가 없어
     // 보고서 파일로 받아 둔 값이다(coupang_ad_costs 참고).
-    lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_ad_costs')
+    selectAll((f, t) => supabase!.from('coupang_ad_costs')
       .select('ad_date, cost, source').eq('user_id', userId)
       .gte('ad_date', from).lte('ad_date', to).order('ad_date').range(f, t)),
     // 옵션별 광고비 — 상품별 순이익에서 광고비를 빼기 위한 것
@@ -3010,12 +3049,19 @@ export async function computeProfit(
     rowQty.set(id, rq);
   }
 
-  const returnAgg = new Map<string, number>();
+  // 건수와 수량을 나눠 센다. 반품 배송비는 상자 하나에 한 번 나가므로 건수로
+  // 곱해야 한다. 수량으로 곱하면 3개짜리 반품 한 건에 배송비를 세 번 물린다.
+  // 반품 탭(handleReturns)이 이미 건수로 계산하므로, 수량으로 두면 같은 기간
+  // 같은 상품이 두 화면에서 다른 손실로 보인다.
+  const returnAgg = new Map<string, { count: number; quantity: number }>();
   for (const r of returnRes.rows) {
     if (!isActiveReturn(r.status)) continue;
     const id = String(r.vendor_item_id ?? '');
     if (!id) continue;
-    returnAgg.set(id, (returnAgg.get(id) ?? 0) + (Number(r.quantity) || 1));
+    const cur = returnAgg.get(id) ?? { count: 0, quantity: 0 };
+    cur.count += 1;
+    cur.quantity += Number(r.quantity) || 1;
+    returnAgg.set(id, cur);
   }
 
   const agg = new Map<string, ProfitRow>();
@@ -3039,6 +3085,7 @@ export async function computeProfit(
         returnAmount: 0,
         unitCostTotal: 0,
         returnCount: 0,
+        returnQuantity: 0,
         returnCost: 0,
         profit: 0,
         marginRate: 0,
@@ -3054,7 +3101,7 @@ export async function computeProfit(
   }
 
   // 판매는 없었지만 반품만 발생한 옵션도 손실로 잡아야 한다
-  for (const [id, count] of returnAgg) {
+  for (const [id, ret] of returnAgg) {
     if (agg.has(id)) continue;
     const item = items.get(id);
     agg.set(id, {
@@ -3062,7 +3109,7 @@ export async function computeProfit(
       productName: item?.product_name ?? '(상품명 미확인)',
       optionName: item?.option_name ?? '',
       quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, couponDiscount: 0, couponSource: null, adCost: 0, channel: 'marketplace', returnAmount: 0,
-      unitCostTotal: 0, returnCount: count, returnCost: 0, profit: 0, marginRate: 0,
+      unitCostTotal: 0, returnCount: ret.count, returnQuantity: ret.quantity, returnCost: 0, profit: 0, marginRate: 0,
       costEntered: false, stock: item?.stock ?? null, salePrice: item?.sale_price ?? null,
     });
   }
@@ -3073,7 +3120,10 @@ export async function computeProfit(
     const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (Number(c.fulfillment_cost) || 0) : 0;
     row.costEntered = Boolean(c) && perUnit > 0;
     row.unitCostTotal = perUnit * row.quantity;
-    row.returnCount = returnAgg.get(row.vendorItemId) ?? 0;
+    const ret = returnAgg.get(row.vendorItemId) ?? { count: 0, quantity: 0 };
+    row.returnCount = ret.count;
+    row.returnQuantity = ret.quantity;
+    // 배송비는 건수로 곱한다. 3개짜리 반품 한 건에 배송비가 세 번 나가지 않는다.
     row.returnCost = row.returnCount * (c ? Number(c.return_shipping_cost) || 0 : 0);
     const rq = rowQty.get(row.vendorItemId) ?? { market: 0, growth: 0 };
     const wing = wingAgg.get(row.vendorItemId);
@@ -3113,7 +3163,7 @@ export async function computeProfit(
     const unitNet = row.quantity > 0
       ? (row.salesAmount - row.couponDiscount) / row.quantity
       : Math.max(0, (row.salePrice ?? 0) - Math.max(wingUnit, growthUnit));
-    row.returnAmount = Math.round(row.returnCount * unitNet);
+    row.returnAmount = Math.round(row.returnQuantity * unitNet);
     row.adCost = adItemAgg.get(row.vendorItemId) ?? 0;
     // 순이익 = 매출 − 수수료 − 원가·배송 − 반품 − 광고비. 정산예정액이 이미 수수료를
     // 뺀 값이라 거기서 나머지를 뺀다. 광고비는 옵션에 붙은 몫만 — 옵션 없이 캠페인
@@ -3133,6 +3183,7 @@ export async function computeProfit(
       t.settlementAmount += r.settlementAmount;
       t.unitCostTotal += r.unitCostTotal;
       t.returnCount += r.returnCount;
+      t.returnQuantity += r.returnQuantity;
       t.returnCost += r.returnCost;
       t.profit += r.profit;
       t.couponDiscount += r.couponDiscount;
@@ -3140,7 +3191,7 @@ export async function computeProfit(
       t.returnAmount += r.returnAmount;
       return t;
     },
-    { quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, unitCostTotal: 0, returnCount: 0, returnCost: 0, profit: 0, couponDiscount: 0, adCost: 0, returnAmount: 0 },
+    { quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, unitCostTotal: 0, returnCount: 0, returnQuantity: 0, returnCost: 0, profit: 0, couponDiscount: 0, adCost: 0, returnAmount: 0 },
   );
 
   // 카드의 쿠폰 합계도 행과 같은 기준(단가 × 판매수량)이어야 실매출이 매출과 같은 기준이 된다
@@ -3286,6 +3337,13 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
     computeProfit(userId, prevFrom, prevTo, { totalsOnly: true }),
   ]);
 
+  // 두 기간을 같은 잣대로 세운다. 이번 기간의 totals.profit에는 옵션에 붙은
+  // 광고비만 빠져 있고, 직전 기간은 옵션별을 안 뽑아 하나도 안 빠져 있다.
+  // 그대로 견주면 광고를 쓸수록 "지난 기간보다 나빠졌다"가 된다.
+  // 양쪽 모두 광고비를 끝까지 뺀 값으로 맞춘다.
+  const prevNetProfit =
+    prev.totals.profit - Math.max(0, (prev.adCostHint ?? 0) - (prev.totals.adCost ?? 0));
+
   return res.status(200).json({
     ...cur,
     previous: {
@@ -3294,7 +3352,9 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
       salesAmount: prev.totals.salesAmount,
       quantity: prev.totals.quantity,
       commission: prev.totals.commission,
-      profit: prev.totals.profit,
+      /** 광고비까지 뺀 값. 화면의 순이익 카드도 같은 기준으로 견준다 */
+      profit: prevNetProfit,
+      adCost: prev.adCostHint ?? 0,
       // 직전 기간에 판매가 아예 없으면 증감률이 무의미하다. 화면이 판단하도록 알린다
       hasData: prev.totals.quantity > 0,
     },
@@ -4953,13 +5013,14 @@ async function handleCouponEffect(userId: string, req: VercelRequest, res: Verce
 async function handleReturnReasons(userId: string, req: VercelRequest, res: VercelResponse) {
   const { from, to } = rangeFromQuery(req);
 
-  const [returnRes, salesRes] = await Promise.all([
+  const [rawReturnRes, salesRes] = await Promise.all([
     selectAll<{
       vendor_item_id: string | null; product_name: string | null;
       quantity: number | null; reason: string | null; fault: string | null;
+      status: string | null;
     }>((f, t) => supabase!
       .from('coupang_returns')
-      .select('vendor_item_id, product_name, quantity, reason, fault')
+      .select('vendor_item_id, product_name, quantity, reason, fault, status')
       .eq('user_id', userId)
       .gte('requested_at', `${from}T00:00:00+09:00`)
       .lte('requested_at', `${to}T23:59:59+09:00`)
@@ -4971,6 +5032,13 @@ async function handleReturnReasons(userId: string, req: VercelRequest, res: Verc
       .gte('sale_date', from).lte('sale_date', to)
       .order('sale_date').range(f, t)),
   ]);
+
+  // 고객이 철회한 반품은 빼고 센다. 반품 탭과 순이익 계산은 이미 빼고 있어,
+  // 여기서만 세면 같은 기간 같은 상품이 두 화면에서 다른 건수로 보인다.
+  // 이 숫자를 보고 상세페이지를 고치므로, 부풀려진 사유가 엉뚱한 수정을 부른다.
+  const returnRows = rawReturnRes.rows.filter(r => isActiveReturn(r.status));
+  const cancelledCount = rawReturnRes.rows.length - returnRows.length;
+  const returnRes = { rows: returnRows };
 
   const overall = summarizeReturnReasons(returnRes.rows);
 
@@ -5024,6 +5092,8 @@ async function handleReturnReasons(userId: string, req: VercelRequest, res: Verc
     totalSold,
     returnRate: totalSold >= 10 ? overall.totalQuantity / totalSold : null,
     categories: overall.categories,
+    /** 고객이 철회한 반품 — 빼고 셌다는 것을 화면에서도 밝힌다 */
+    cancelledCount,
     products,
   });
 }

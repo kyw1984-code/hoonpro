@@ -446,7 +446,9 @@ export function ProfitDashboard({ onEditCosts }: Props) {
               value={won(netProfit)}
               sub={pct(netMargin)}
               tone={netProfit >= 0 ? 'positive' : 'critical'}
-              delta={delta(data.totals.profit, prev?.profit ?? 0, Boolean(prev?.hasData))}
+              // 카드에 적힌 값은 광고비까지 뺀 순이익이다. 견주는 쪽도 같아야 한다.
+              // 서버의 previous.profit도 광고비를 뺀 값으로 맞춰 두었다.
+              delta={delta(netProfit, prev?.profit ?? 0, Boolean(prev?.hasData))}
             />
           </div>
 
