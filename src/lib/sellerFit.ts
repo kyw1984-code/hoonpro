@@ -13,6 +13,8 @@
  * 맞는가(적합도)는 다른 질문이다. 둘을 섞되 기회점수 쪽에 무게를 둔다.
  */
 
+import { parseSet } from './setProduct.js';
+
 export interface SellerProfile {
   /** 실제 팔리는 가격대 — 사분위로 잡는다. 평균은 비싼 한두 개에 끌려간다 */
   priceP25: number;
@@ -46,10 +48,22 @@ function percentile(sorted: number[], q: number): number {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
 }
 
-/** 상품명이 'N종 세트' 형태인가 */
+/**
+ * 상품명이 세트 구성인가.
+ *
+ * setProduct.ts의 parseSet과 같은 표현만 잡아야 한다. 예전에는 여기가 훨씬
+ * 헐거워서 두 가지가 새어 들어왔다.
+ *
+ *  · '묶음'이 아무 데서나 걸렸다. '묶음배송 가능'은 배송 안내지 세트가 아니다.
+ *    이 문구는 흔해서, 단품만 파는 가게의 세트 비중이 0.5 근처로 올라간다.
+ *    그 값은 0.6 위도 0.2 아래도 아니라 구성 신호가 통째로 죽는다. 조금 더
+ *    올라가면 뒤집혀서, 세트를 한 번도 안 판 사람에게 세트 시장을 권한다.
+ *  · '\d+\s*종'에 자릿수 제한이 없어 '12종합영양제'의 '12종'이 걸렸다.
+ *
+ * parseSet을 그대로 쓰면 규칙이 갈라질 일이 없다.
+ */
 export function looksLikeSet(productName: string | null | undefined): boolean {
-  const n = String(productName ?? '');
-  return /\d+\s*종|\b1\+1\b|\d+개\s*세트|\d+장\s*세트|묶음/.test(n);
+  return parseSet(productName, 0).count > 1;
 }
 
 export function buildSellerProfile(

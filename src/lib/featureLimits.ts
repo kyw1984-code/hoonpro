@@ -91,3 +91,96 @@ export function parseLimits(
     return { ...defaults };
   }
 }
+
+// ── 한도 소진 판정 ───────────────────────────────────────────────────────────
+
+/** increment_feature_usage가 돌려주는 모양 */
+export interface UsageRpcResult {
+  exceeded?: boolean;
+  disabled?: boolean;
+  remaining?: number;
+}
+
+/**
+ * 갈래마다 kind를 둔다. 허용 쪽에만 kind가 없으면 `if (!d.allow)`로 좁혀도
+ * 타입이 갈라지지 않아 부르는 쪽에서 d.kind를 못 읽는다.
+ */
+export type QuotaDecision =
+  /** 써도 된다 */
+  | { allow: true; kind: 'ok'; remaining: number | null }
+  /** 내린 기능이다 */
+  | { allow: false; kind: 'disabled'; remaining: null }
+  /** 오늘 몫을 다 썼다 */
+  | { allow: false; kind: 'exceeded'; remaining: 0 }
+  /** 셀 수가 없다 — 세지 못하면 내주지 않는다 */
+  | { allow: false; kind: 'error'; remaining: null };
+
+/**
+ * 한도 집계 결과를 보고 내줄지 정한다.
+ *
+ * 핵심은 오류일 때의 처신이다. supabase.rpc는 실패해도 예외를 던지지 않고
+ * { data: null, error }를 돌려준다. 그런데 부르는 쪽이 `if (!error && data.exceeded)`
+ * 로 검사하고 있어서, 오류가 나면 그냥 통과했다. try/catch는 잡을 것이 없으니
+ * 소용이 없었고, 로그도 남지 않았다.
+ *
+ * 이 기능들은 호출마다 실제 돈이 나간다. 함수 이름이 바뀌거나 DB가 잠깐
+ * 붐비기만 해도 모든 사용자의 한도가 통째로 풀린다. 그래서 셀 수 없으면
+ * 내주지 않는다. 잠깐 못 쓰는 쪽이, 한도 없이 돈이 나가는 쪽보다 낫다.
+ *
+ * 다만 무제한인 기능은 애초에 셀 것이 없으므로 오류여도 내준다. 셈이 필요
+ * 없는데 셈이 안 된다고 막으면 그건 그냥 고장이다.
+ */
+export function decideQuota(
+  limit: number,
+  rpc: { data: UsageRpcResult | null; error: unknown } | null,
+): QuotaDecision {
+  const state = limitState(limit);
+  // 내린 기능은 무엇을 세든 결론이 같다
+  if (state === 'disabled') return { allow: false, kind: 'disabled', remaining: null };
+
+  if (!rpc || rpc.error) {
+    // 셀 것이 없는 기능은 셈이 안 돼도 상관없다
+    if (state === 'unlimited') return { allow: true, kind: 'ok', remaining: null };
+    return { allow: false, kind: 'error', remaining: null };
+  }
+
+  const data = rpc.data;
+  // 오류는 아닌데 결과가 비었다 — RPC 모양이 바뀐 것이다. 이것도 셈 실패다.
+  if (!data || typeof data !== 'object') {
+    if (state === 'unlimited') return { allow: true, kind: 'ok', remaining: null };
+    return { allow: false, kind: 'error', remaining: null };
+  }
+
+  if (data.exceeded) {
+    // RPC가 '내린 기능'이라고 말하면 그 말을 따른다
+    if (data.disabled) return { allow: false, kind: 'disabled', remaining: null };
+    return { allow: false, kind: 'exceeded', remaining: 0 };
+  }
+
+  return { allow: true, kind: 'ok', remaining: typeof data.remaining === 'number' ? data.remaining : null };
+}
+
+/** 막혔을 때 사용자에게 보여줄 문구와 응답 코드 */
+export function quotaResponse(
+  decision: Extract<QuotaDecision, { allow: false }>,
+  featureLabel: string,
+  limit: number,
+): { status: number; body: Record<string, unknown> } {
+  if (decision.kind === 'disabled') {
+    return {
+      status: 403,
+      body: { error: `${featureLabel}은(는) 현재 제공하지 않습니다.`, disabled: true },
+    };
+  }
+  if (decision.kind === 'exceeded') {
+    return {
+      status: 429,
+      body: { error: `${featureLabel}은(는) 하루 ${limit}회까지입니다. 내일 다시 이용해주세요.` },
+    };
+  }
+  // 셈 실패 — 사용자 잘못이 아니므로 그렇게 말한다
+  return {
+    status: 503,
+    body: { error: '사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.', retryable: true },
+  };
+}

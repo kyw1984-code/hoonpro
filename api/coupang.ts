@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
-import { isDisabled, parseLimits } from '../src/lib/featureLimits.js';
+import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
@@ -2275,11 +2275,22 @@ function wrapEmail(title: string, bodyHtml: string): string {
   );
 }
 
-async function sendEmail(to: string, subject: string, html: string): Promise<void> {
+/**
+ * 메일 한 통. 보냈는지 아닌지를 정직하게 돌려준다.
+ *
+ * 예전에는 응답 상태를 보지 않았다. 레이즌드는 실패를 예외가 아니라 상태
+ * 코드로 알린다 — 도메인 미인증이면 422, 한도 초과면 429, 주소가 잘못되면
+ * 400이다. 그 모두가 보이지 않게 지나갔다.
+ *
+ * 그런데 부르는 쪽은 보냈다고 치고 발송 기록을 남겼다. 그 날짜는 영구히
+ * '보냄'이 되어 다시 시도되지 않는다. 키 만료 경고가 특히 나빴다 — 한 번
+ * 놓치면 여섯 달 뒤 수집이 말없이 멈추고 아무도 이유를 모른다.
+ */
+async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
   const key = process.env.RESEND_API_KEY;
-  if (!key || !to) return;
+  if (!key || !to) return false;
   try {
-    await fetch('https://api.resend.com/emails', {
+    const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2289,8 +2300,15 @@ async function sendEmail(to: string, subject: string, html: string): Promise<voi
         html,
       }),
     });
-  } catch {
-    /* 이메일 실패가 동기화를 막지 않도록 */
+    if (!r.ok) {
+      // 본문에 받는 사람 주소가 섞여 올 수 있어 상태 코드만 남긴다
+      console.error('[메일] 발송 실패', { status: r.status, subject });
+      return false;
+    }
+    return true;
+  } catch (e: any) {
+    console.error('[메일] 발송 예외', { subject, detail: e?.message });
+    return false;
   }
 }
 
@@ -2499,7 +2517,7 @@ async function cronDaily(res: VercelResponse) {
       const email = acc.users?.email;
       const name = acc.users?.name ?? '';
       if (email) {
-        await sendEmail(
+        const notified = await sendEmail(
           email,
           `[훈프로] 쿠팡 API 키가 ${left}일 후 만료됩니다`,
           wrapEmail(
@@ -2509,11 +2527,15 @@ async function cronDaily(res: VercelResponse) {
               `<p style="color:#ffb454;">이미 다른 주문수집 프로그램을 쓰신다면 키를 새로 발급하지 마시고, 갱신된 같은 키를 그대로 붙여넣어야 그쪽 연동이 끊기지 않습니다.</p>`,
           ),
         );
-        await supabase
-          .from('coupang_accounts')
-          .update({ expiry_notified_at: today })
-          .eq('user_id', acc.user_id);
-        result.notified++;
+        // 못 보냈으면 알림 날짜를 찍지 않는다. 찍으면 이 키는 다시 경고받지
+        // 못하고, 여섯 달 뒤 수집이 말없이 멈춘다.
+        if (notified) {
+          await supabase
+            .from('coupang_accounts')
+            .update({ expiry_notified_at: today })
+            .eq('user_id', acc.user_id);
+          result.notified++;
+        }
       }
     }
   }
@@ -3955,7 +3977,7 @@ async function sendWeeklyReport(
       ? warn('이번 주 광고비가 등록되어 있지 않아 순이익에서 빠지지 않았습니다. 훈프로 [광고 성과 분석]에서 광고 보고서를 올리면 자동으로 반영됩니다.')
       : '');
 
-  await sendEmail(
+  const sentWeekly = await sendEmail(
     email,
     `[훈프로] ${start} ~ ${end} 주간 성과`,
     wrapEmail(
@@ -3986,6 +4008,9 @@ async function sendWeeklyReport(
         emailButtonLink('훈프로에서 자세히 보기'),
     ),
   );
+
+  // 브리핑과 같은 이유로, 못 보낸 주는 기록하지 않는다
+  if (!sentWeekly) return false;
 
   await supabase.from('coupang_reports').insert({
     user_id: userId,
@@ -4348,13 +4373,16 @@ async function sendDailyBrief(
   const d = await collectBrief(userId, day, leadTimeDays, minSales14);
   if (!briefWorthSending(d)) return false;
 
-  await sendEmail(
+  const sent = await sendEmail(
     email,
     `[훈프로] ${day.slice(5).replace('-', '/')} 어제 주문 ${won(d.orderAmount)}` +
       (d.reorder.length > 0 ? ` · 발주 ${d.reorder.length}건` : '') +
       (d.adGap.shouldWarn ? ' · 광고비 확인' : ''),
     wrapEmail('오늘의 훈프로 브리핑', briefHtml(name, day, d)),
   );
+  // 못 보냈으면 기록을 남기지 않는다. 남기면 그 날짜는 영구히 '보냄'이 되어
+  // 다시 시도되지 않는다. 다음 회차에 한 번 더 시도할 기회를 남긴다.
+  if (!sent) return false;
 
   await supabase.from('coupang_daily_briefs').insert({
     user_id: userId,
@@ -5194,8 +5222,10 @@ async function logCoupangCost(
 }
 
 /** 기능별 일일 한도 — 다른 API와 같은 app_config를 읽는다 */
-async function consumeQuota(userId: string, feature: string, fallback: number): Promise<{ ok: boolean; remaining: number; limit: number }> {
-  if (!supabase) return { ok: true, remaining: -1, limit: 0 };
+async function consumeQuota(
+  userId: string, feature: string, fallback: number,
+): Promise<{ ok: boolean; kind: QuotaDecision['kind']; remaining: number; limit: number }> {
+  if (!supabase) return { ok: true, kind: 'ok', remaining: -1, limit: 0 };
   let limit = fallback;
   try {
     const { data } = await supabase.from('app_config').select('value').eq('key', 'feature_limits').maybeSingle();
@@ -5204,14 +5234,20 @@ async function consumeQuota(userId: string, feature: string, fallback: number): 
   } catch {
     /* 설정을 못 읽으면 기본값으로 간다 */
   }
+  // 셈이 안 되면 내주지 않는다. 예전에는 rpc가 오류를 내면 ok를 돌려줘서,
+  // 함수 이름이 바뀌거나 DB가 잠깐 붐비기만 해도 한도가 통째로 풀렸다.
   try {
-    const { data, error } = await supabase.rpc('increment_feature_usage', {
+    const rpc = await supabase.rpc('increment_feature_usage', {
       p_user_id: userId, p_date: kstToday(), p_feature: feature, p_limit: limit,
     });
-    if (error) return { ok: true, remaining: -1, limit };
-    return { ok: !data?.exceeded, remaining: Number(data?.remaining ?? -1), limit };
-  } catch {
-    return { ok: true, remaining: -1, limit };
+    const d = decideQuota(limit, rpc);
+    if (d.kind === 'error') {
+      console.error('[한도] 집계 실패', { feature, userId, rpcError: String((rpc as any)?.error?.message ?? '') });
+    }
+    return { ok: d.allow, kind: d.kind, remaining: d.remaining ?? -1, limit };
+  } catch (e: any) {
+    console.error('[한도] 집계 예외', { feature, userId, detail: e?.message });
+    return { ok: false, kind: 'error', remaining: -1, limit };
   }
 }
 
@@ -5262,8 +5298,12 @@ async function handleInquiryDraft(userId: string, req: VercelRequest, res: Verce
   const quota = await consumeQuota(userId, 'inquiry', 60);
   if (!quota.ok) {
     // 한도 0은 내린 기능이다. "내일 다시" 오라고 하면 거짓말이 된다
-    if (isDisabled(quota.limit)) {
+    if (quota.kind === 'disabled') {
       return res.status(403).json({ error: '답변 초안은 현재 제공하지 않습니다.', disabled: true });
+    }
+    // 셈이 안 된 것은 사용자 잘못이 아니다. 그렇게 말해야 다시 눌러 본다.
+    if (quota.kind === 'error') {
+      return res.status(503).json({ error: '사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.', retryable: true });
     }
     return res.status(429).json({ error: `답변 초안은 하루 ${quota.limit}건까지입니다. 내일 다시 이용해주세요.` });
   }

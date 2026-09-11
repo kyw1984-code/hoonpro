@@ -83,3 +83,20 @@ test('중앙값: 하나를 잘못 읽어도 흔들리지 않는다', () => {
 test('중앙값: 빈 목록은 0', () => {
   assert.equal(medianUnitPrice([]), 0);
 });
+
+// '1.5 + 1.5kg'의 가운데에서 '5 + 1'이 걸려 6개들이로 읽혔다. 45,000원짜리가
+// 낱개 7,500원이 되고, 그 값이 가격 적합도·시장 평균가·내 가게 기준 점수로
+// 그대로 흘러간다. 틀렸다는 걸 알아챌 방법이 없다.
+test('소수점이 낀 무게 표기를 세트로 읽지 않는다', () => {
+  assert.equal(parseSet('제주 흑돼지 오겹살 1.5 + 1.5kg', 45000).count, 1);
+  assert.equal(parseSet('제주 흑돼지 오겹살 1.5 + 1.5kg', 45000).unitPrice, 45000);
+  assert.equal(parseSet('냉동 삼겹살 2.5 + 2.5 kg', 45000).count, 1);
+  assert.equal(parseSet('USB 허브 3.0 + 2.0 멀티', 45000).count, 1);
+});
+
+// 진짜 덤 표기는 계속 잡아야 한다
+test('덤 표기는 그대로 잡는다', () => {
+  assert.equal(parseSet('긴팔 티셔츠 1+1', 30000).count, 2);
+  assert.equal(parseSet('양말 2+1 특가', 30000).count, 3);
+  assert.equal(parseSet('마스크 1 + 1 행사', 30000).count, 2);
+});

@@ -10,6 +10,7 @@ import {
   buildSellerProfile, sellerFit, blendScore, looksLikeSet, FIT_MIN_OPTIONS,
   type SellerProfile,
 } from '../src/lib/sellerFit.ts';
+import { parseSet } from '../src/lib/setProduct.ts';
 
 // 대표님 실제 값에 가깝게: 객단가 19,678~36,400, 그로스 22 / 윙 12, 세트 78%
 const sold = [
@@ -130,4 +131,28 @@ test('섞기: 적합도가 순위를 뒤집을 만큼은 기운다', () => {
 test('섞기: 0~100을 벗어나지 않는다', () => {
   assert.equal(blendScore(200, 200), 100);
   assert.equal(blendScore(-50, -50), 0);
+});
+
+// '묶음배송 가능'은 배송 안내지 세트가 아니다. 이 문구는 흔해서, 단품만 파는
+// 가게의 세트 비중이 0.5 근처로 올라간다. 그 값은 0.6 위도 0.2 아래도 아니라
+// 구성 신호가 통째로 죽고, 조금 더 올라가면 뒤집혀서 세트를 한 번도 안 판
+// 사람에게 세트 시장을 권하게 된다.
+test('세트 판별: 배송 안내 문구를 세트로 읽지 않는다', () => {
+  assert.equal(looksLikeSet('화장지 30롤 묶음배송 가능'), false);
+  assert.equal(looksLikeSet('여성 니트 묶음배송'), false);
+});
+
+// '12종합영양제'의 '12종'이 걸렸다. 자릿수 제한이 없었기 때문이다.
+test('세트 판별: 종합·모델명에 낀 숫자를 세트로 읽지 않는다', () => {
+  assert.equal(looksLikeSet('비타민 12종합영양제'), false);
+  assert.equal(looksLikeSet('모델 2024 티셔츠'), false);
+});
+
+// 판별 규칙이 parseSet과 갈라지면 점수와 가격이 서로 다른 말을 한다
+test('세트 판별: 낱개 환산과 같은 기준을 쓴다', () => {
+  const names = ['여성 맨투맨 2종 세트', '나시티 4종세트', '긴팔 티셔츠 1+1',
+                 '기본 반팔 티셔츠', '화장지 30롤 묶음배송 가능', '비타민 12종합영양제'];
+  for (const n of names) {
+    assert.equal(looksLikeSet(n), parseSet(n, 10000).count > 1, n);
+  }
 });
