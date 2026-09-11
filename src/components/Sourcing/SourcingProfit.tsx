@@ -36,14 +36,49 @@ const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 
 const MARGINS = [0.1, 0.15, 0.2, 0.3];
 
-export function SourcingProfit({ avgPrice }: { avgPrice: number }) {
+export function SourcingProfit({
+  avgPrice,
+  product,
+}: {
+  avgPrice: number;
+  /** 상품 카드에서 [마진 분석]을 누르면 그 상품으로 채워진다 */
+  product?: { productName: string; productPrice: number; estimated1688Price?: number } | null;
+}) {
   const [data, setData] = useState<RatesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [price, setPrice] = useState(String(avgPrice || ''));
   const [margin, setMargin] = useState(0.2);
   const [quote, setQuote] = useState('');
+  // 1688 위안 가격 → 원화 원가. 예전에는 이 계산이 별도 '마진 계산기'에 있었는데
+  // 수수료 12%·배송비 3,000원이 코드에 박혀 있어 이 화면과 다른 답을 냈다.
+  // 어느 쪽을 믿어야 할지 모르게 되므로 한 곳으로 합쳤다.
+  const [yuan, setYuan] = useState('');
+  const [multiplier, setMultiplier] = useState(() => {
+    const saved = Number(localStorage.getItem('sourcingMultiplier'));
+    return Number.isFinite(saved) && saved > 0 ? saved : 300;
+  });
 
   useEffect(() => { setPrice(String(avgPrice || '')); }, [avgPrice]);
+
+  // 상품 카드에서 고른 상품으로 갈아 끼운다
+  useEffect(() => {
+    if (!product) return;
+    setPrice(String(product.productPrice || ''));
+    setYuan(product.estimated1688Price ? String(product.estimated1688Price) : '');
+  }, [product]);
+
+  // 위안을 넣으면 견적 원가 칸을 대신 채운다. 두 칸에 각각 넣게 하면
+  // 어느 쪽이 쓰이는지 알 수 없다.
+  useEffect(() => {
+    const y = Number(yuan);
+    if (y > 0) setQuote(String(Math.round(y * multiplier)));
+  }, [yuan, multiplier]);
+
+  const saveMultiplier = (v: number) => {
+    const n = Math.min(1000, Math.max(1, Math.round(v) || 300));
+    setMultiplier(n);
+    try { localStorage.setItem('sourcingMultiplier', String(n)); } catch { /* 저장 실패는 계산을 막지 않는다 */ }
+  };
 
   useEffect(() => {
     fetch('/api/coupang?action=my-rates&days=60', { headers: { Authorization: `Bearer ${getToken()}` } })
@@ -97,6 +132,11 @@ export function SourcingProfit({ avgPrice }: { avgPrice: number }) {
       <h4 className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
         <Calculator className="h-4 w-4 text-accent" /> 소싱 손익 계산
       </h4>
+      {product && (
+        <p className="mt-1 truncate text-[12px] text-ink-2" title={product.productName}>
+          {product.productName}
+        </p>
+      )}
       <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3">
         업계 평균이 아니라 <b className="text-ink-2">대표님의 최근 60일 실적</b>에서 뽑은 비율입니다
         (수수료 {pct(rates.commission)} · 광고비 {pct(rates.ad)} · 반품 {pct(rates.returns)} · 쿠폰 {pct(rates.coupon)}).
@@ -148,8 +188,31 @@ export function SourcingProfit({ avgPrice }: { avgPrice: number }) {
         </p>
       </div>
 
-      {/* 견적을 받아 왔을 때 바로 확인 */}
+      {/* 1688 위안 가격을 넣으면 원가가 자동으로 채워진다 */}
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <span className="text-[11.5px] text-ink-3">1688 매입가</span>
+        <input
+          value={yuan}
+          onChange={e => setYuan(e.target.value.replace(/[^0-9.]/g, ''))}
+          inputMode="decimal"
+          placeholder="위안"
+          className="w-20 rounded-control border border-line bg-paper px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
+        />
+        <span className="text-[11.5px] text-ink-3">× 배수</span>
+        <input
+          value={multiplier}
+          onChange={e => saveMultiplier(Number(e.target.value.replace(/[^0-9]/g, '')))}
+          inputMode="numeric"
+          title="환율에 관세·통관까지 얹은 배수입니다. 1위안당 실제로 얼마가 드는지 넣으세요"
+          className="w-16 rounded-control border border-line bg-paper px-2.5 py-1.5 text-right text-[12.5px] tabular-nums text-ink focus:border-accent focus:outline-none"
+        />
+        {Number(yuan) > 0 && (
+          <span className="text-[12px] tabular-nums text-ink-2">= {won(Number(yuan) * multiplier)}</span>
+        )}
+      </div>
+
+      {/* 견적을 받아 왔을 때 바로 확인 */}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="text-[11.5px] text-ink-3">견적 원가를 넣어 확인</span>
         <input
           value={quote}

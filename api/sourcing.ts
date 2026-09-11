@@ -1,4 +1,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { parseSet, medianUnitPrice } from "../src/lib/setProduct.js";
+import { buildSellerProfile, sellerFit, blendScore, type SellerProfile } from "../src/lib/sellerFit.js";
+import { detectOffCategory, scoreReasons } from "../src/lib/productRelevance.js";
 import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from "../src/lib/featureLimits.js";
 import { createClient } from "@supabase/supabase-js";
 import { createHmac } from "crypto";
@@ -467,9 +470,31 @@ async function handleTrend(req: VercelRequest, res: VercelResponse) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // 주간 소싱 브리핑 — 다음 달 시즌 키워드 중 기회점수 상위 10개 (7일 캐시)
 // ═══════════════════════════════════════════════════════════════════════════════
-async function handleBriefing(_req: VercelRequest, res: VercelResponse) {
+/**
+ * 몇 달 뒤를 준비할 것인가.
+ *
+ * 예전에는 무조건 '다음 달'이었다. 그런데 중국 소싱이면 입고까지 28일이 걸리고
+ * 상세페이지·검수에 2주가 더 든다. 다음 달 키워드를 지금 보면 이미 늦는다.
+ * 연동 설정에 저장한 리드타임을 그대로 쓴다.
+ */
+async function briefingLeadMonths(userId: string | undefined): Promise<number> {
+  if (!supabase || !userId) return 1;
+  try {
+    const { data } = await supabase
+      .from("coupang_accounts").select("lead_time_days").eq("user_id", userId).maybeSingle();
+    const lead = Number(data?.lead_time_days);
+    if (!Number.isFinite(lead) || lead <= 0) return 1;
+    // 리드타임 + 준비 2주를 달 수로 올림. 국내 사입(3~7일)이면 1달, 중국(28일)이면 2달.
+    return Math.min(4, Math.max(1, Math.ceil((lead + 14) / 30)));
+  } catch {
+    return 1;
+  }
+}
+
+async function handleBriefing(_req: VercelRequest, res: VercelResponse, decoded?: any) {
   const now = new Date();
-  const targetMonth = (now.getMonth() + 1) % 12 + 1; // 다음 달 (판매 기준)
+  const lead = await briefingLeadMonths(decoded?.userId);
+  const targetMonth = ((now.getMonth() + lead) % 12) + 1;
   const cacheKey = `briefing:v1:${targetMonth}`;
   const cached = await cacheGet(cacheKey);
   if (cached && cached.ageMs < 7 * 24 * 3600 * 1000) {
@@ -512,7 +537,8 @@ async function handleBriefing(_req: VercelRequest, res: VercelResponse) {
     const t = trendByKw[p.keyword];
     return { ...p, peakMonths: t?.peakMonths || [], seasonality: t?.seasonality || 0 };
   });
-  const payload = { month: targetMonth, generatedAt: new Date().toISOString(), items };
+  // 몇 달 앞을 보고 있는지 밝힌다. 리드타임에 따라 달라지므로 화면이 설명해야 한다.
+  const payload = { month: targetMonth, leadMonths: lead, generatedAt: new Date().toISOString(), items };
   await cacheSet(cacheKey, payload);
   return res.status(200).json(payload);
 }
@@ -1581,7 +1607,10 @@ async function loadReviewVelocity(productIds: string[]): Promise<Map<string, { p
 }
 
 // ─── 점수 산출 (실데이터) ─────────────────────────────────────────────────────
-function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCount: number, searchKeyword = "") {
+function scoreProducts(
+  parsed: ParsedProduct[], keywordVolume: number, totalCount: number, searchKeyword = "",
+  sellerProfile: SellerProfile | null = null,
+) {
   const organic = parsed.filter(p => !p.isAd);
   // 검색 키워드 자체가 브랜드면 브랜드 표시를 하지 않는다 (의도적 브랜드 조사)
   const searchTargetsBrand = isBrandKeyword(searchKeyword);
@@ -1605,7 +1634,10 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
     const demandScore = Math.min(100, Math.round(Math.log10(p.reviewCount + 1) * 25));
     // 진입 용이성: 로켓(직매입) 직접경쟁 여부
     const entryEase = p.deliveryType === "rocket" ? 15 : p.deliveryType === "jet" ? 55 : 80;
-    const price = p.productPrice;
+    // 2종 세트 41,200원과 단품 20,000원은 낱개로 보면 거의 같은 값이다.
+    // 세트를 모르고 비교하면 가격 위에 얹은 것이 전부 어긋난다.
+    const set = parseSet(p.productName, p.productPrice);
+    const price = set.unitPrice;
     const priceFit =
       price >= 15000 && price < 40000 ? 100
       : price >= 40000 && price < 90000 ? 80
@@ -1619,10 +1651,52 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
       : opportunityScore >= 40 ? "Normal"
       : "Bad";
     const isBrand = !searchTargetsBrand && isBrandKeyword(p.productName);
-    return { ...p, isBrand, calculated: { demandScore, entryEase, priceFit, opportunityScore, grade } };
+    // 쿠팡 검색은 카테고리를 가리지 않는다. "검정치마"에 밴드 3집 CD가 섞여 들어오고,
+    // 그런 상품은 리뷰가 많아 수요 점수가 높고 로켓이 아니라 진입 점수도 높다.
+    // 즉 잘못된 방향으로 후한 점수를 받아 소싱 후보 맨 위에 올라온다.
+    const offCategory = detectOffCategory(p.productName, searchKeyword);
+    const reasons = scoreReasons({
+      reviewCount: p.reviewCount, deliveryType: p.deliveryType,
+      productPrice: price, demandScore, entryEase, priceFit,
+    });
+
+    // 지금까지의 점수는 누가 쓰든 같다 — 즉 경쟁자도 같은 답을 본다.
+    // 정산AI가 아는 이 판매자의 실적을 얹어 "내가 이미 잘 파는 것과 닮은 시장"을
+    // 위로 올린다. 다만 기회점수를 덮지는 않는다(0.7 대 0.3).
+    const fit = sellerProfile ? sellerFit(
+      { productPrice: price, deliveryType: p.deliveryType, productName: p.productName },
+      sellerProfile,
+    ) : null;
+    const finalScore = fit ? blendScore(opportunityScore, fit.score) : opportunityScore;
+    const finalGrade =
+      finalScore >= 68 && p.reviewCount >= 30 ? "Great"
+      : finalScore >= 55 ? "Good"
+      : finalScore >= 40 ? "Normal"
+      : "Bad";
+
+    return {
+      ...p, isBrand, offCategory,
+      setCount: set.count,
+      unitPrice: set.unitPrice,
+      calculated: {
+        demandScore, entryEase, priceFit,
+        opportunityScore: finalScore,
+        /** 적합도를 빼기 전의 시장 자체 점수 */
+        marketScore: opportunityScore,
+        grade: finalGrade,
+        reasons: fit ? [...reasons, `내 가게 기준 ${fit.score}점 — ${fit.reason}`] : reasons,
+        fitScore: fit ? fit.score : null,
+      },
+    };
   });
 
-  scored.sort((a, b) => b.calculated.opportunityScore - a.calculated.opportunityScore || a.rank - b.rank);
+  // 다른 상품군은 지우지 않고 아래로 내린다. 지우면 규칙이 틀렸을 때
+  // 판매자가 "왜 이게 없지"를 확인할 방법이 없다.
+  scored.sort((a, b) => {
+    const off = Number(Boolean(a.offCategory)) - Number(Boolean(b.offCategory));
+    if (off !== 0) return off;
+    return b.calculated.opportunityScore - a.calculated.opportunityScore || a.rank - b.rank;
+  });
 
   // 시장 판정: 로켓 비중 기본 + 경쟁강도(상품수/검색량)로 보정
   let verdictLevel = rocketRatio <= 25 ? 3 : rocketRatio <= 45 ? 2 : rocketRatio <= 65 ? 1 : 0;
@@ -1632,7 +1706,16 @@ function scoreProducts(parsed: ParsedProduct[], keywordVolume: number, totalCoun
   }
   const entryVerdict = (["Bad", "Fair", "Good", "Excellent"] as const)[verdictLevel];
 
+  // 세트가 섞인 시장에서는 표시가 평균이 실제 체감가와 다르다. 낱개 중앙값을 함께 준다.
+  const unitMedian = medianUnitPrice(
+    organic.map(o => ({ productName: o.productName, productPrice: o.productPrice })),
+  );
+
   const market = {
+    unitMedianPrice: unitMedian,
+    setRatio: organic.length > 0
+      ? Math.round((organic.filter(o => parseSet(o.productName, o.productPrice).count > 1).length / organic.length) * 100)
+      : 0,
     totalOnPage: total,
     rocketCount,
     jetCount,
@@ -1750,18 +1833,152 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
     return res.status(200).json({ keyword, products: [], market: null, error: "검색 결과가 없습니다." });
   }
 
-  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount, keyword);
+  // 정산AI가 아는 이 판매자의 실적으로 "내 가게와 닮은 시장"을 가린다
+  const sellerProfile = await loadSellerProfile(decoded?.userId);
+  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount, keyword, sellerProfile);
   const velocity = await loadReviewVelocity(products.map(p => p.productId));
   const withVelocity = products.map(p => {
     const v = velocity.get(p.productId);
     return { ...p, reviewGrowthPerDay: v ? v.perDay : null, obsDays: v ? v.days : null };
   });
 
+  // 분석했다는 것 자체가 관심의 표시다. ★를 따로 누르게 하지 않고 여기서 등록한다.
+  await autoTrackKeyword(decoded?.userId, keyword);
+
+  // 이 키워드에 내 상품이 이미 있나, 몇 위인가. 새 상품을 찾는 것만큼이나
+  // "내 시장이 지금 어떤가"를 보러 오는 일이 많다.
+  const mine = await findMyProducts(decoded?.userId, withVelocity);
+
   return res.status(200).json({
     keyword, products: withVelocity, market, servedFrom,
+    ...(mine.length > 0 ? { myProducts: mine } : {}),
     ...(remaining !== null ? { remaining } : {}),
     ...(parseDebug ? { parseDebug } : {}),
   });
+}
+
+/**
+ * 검색 결과에 내 상품이 있나.
+ *
+ * 쿠팡 노출상품ID로 맞춘다. 이름으로 맞추면 비슷한 상품명에 잘못 걸린다.
+ * 등록상품과 발주서 두 곳에서 모으는 이유는 상품 상세에 노출상품ID가 안 오는
+ * 계정이 있어서다 — 한쪽만 보면 연결이 끊긴다.
+ */
+async function findMyProducts(
+  userId: string | undefined,
+  products: { productId: string; productName: string; rank: number; isAd: boolean }[],
+): Promise<{ productId: string; productName: string; rank: number; isAd: boolean }[]> {
+  if (!supabase || !userId || products.length === 0) return [];
+  try {
+    const ids = products.map(p => String(p.productId));
+    const [itemRes, orderRes] = await Promise.all([
+      supabase.from("coupang_items").select("product_id").eq("user_id", userId).in("product_id", ids),
+      supabase.from("coupang_orders_daily").select("product_id").eq("user_id", userId).in("product_id", ids),
+    ]);
+    const mineIds = new Set<string>();
+    for (const r of itemRes.data ?? []) if (r.product_id) mineIds.add(String(r.product_id));
+    for (const r of orderRes.data ?? []) if (r.product_id) mineIds.add(String(r.product_id));
+    if (mineIds.size === 0) return [];
+    return products
+      .filter(p => mineIds.has(String(p.productId)))
+      .map(p => ({ productId: p.productId, productName: p.productName, rank: p.rank, isAd: p.isAd }));
+  } catch {
+    return [];   // 못 찾아도 분석 결과는 그대로 보여준다
+  }
+}
+
+/** 판매자 프로필을 뽑는 기간. 너무 길면 지난 시즌 상품이 섞이고, 짧으면 표본이 모자란다 */
+const SELLER_PROFILE_DAYS = 60;
+
+/**
+ * 정산AI 데이터로 이 판매자의 성격을 뽑는다 — 무엇을 얼마에, 어느 창구로, 세트로 파는가.
+ *
+ * 쿠팡을 연동하지 않았거나 판매가 적으면 null이다. 그때는 예전처럼 모두에게
+ * 같은 점수를 쓴다. 근거 없는 보정은 없느니만 못하다.
+ */
+async function loadSellerProfile(userId: string | undefined): Promise<SellerProfile | null> {
+  if (!supabase || !userId) return null;
+  try {
+    const from = kstAddDays(kstToday(), -SELLER_PROFILE_DAYS);
+    const [salesRes, itemRes] = await Promise.all([
+      supabase.from("coupang_sales_daily")
+        .select("vendor_item_id, quantity, sales_amount, channel")
+        .eq("user_id", userId).gte("sale_date", from).limit(5000),
+      supabase.from("coupang_items")
+        .select("product_name").eq("user_id", userId).limit(1000),
+    ]);
+
+    // 옵션별로 합쳐 개당 가격을 낸다. 행마다 보면 하루 한 개 팔린 것도 한 표가 된다.
+    const byItem = new Map<string, { qty: number; amt: number; channel: string | null }>();
+    for (const r of salesRes.data ?? []) {
+      const id = String(r.vendor_item_id);
+      const cur = byItem.get(id) ?? { qty: 0, amt: 0, channel: null };
+      cur.qty += Number(r.quantity) || 0;
+      cur.amt += Number(r.sales_amount) || 0;
+      cur.channel = cur.channel ?? (r.channel ? String(r.channel) : null);
+      byItem.set(id, cur);
+    }
+    const sold = [...byItem.values()]
+      .filter(v => v.qty > 0)
+      .map(v => ({ unitPrice: v.amt / v.qty, channel: v.channel }));
+
+    const names = [...new Set((itemRes.data ?? []).map(i => String(i.product_name ?? "")).filter(Boolean))];
+    return buildSellerProfile(sold, names, SELLER_PROFILE_DAYS);
+  } catch {
+    return null;   // 프로필을 못 뽑아도 분석 자체는 돌아야 한다
+  }
+}
+
+/** 최근 이만큼만 자동 추적한다. 더 쌓이면 크론이 도는 키워드가 늘어 수집 비용이 함께 는다 */
+const AUTO_TRACK_KEEP = 20;
+
+/**
+ * 분석한 키워드를 매일 자동 수집 대상에 넣는다.
+ *
+ * 예전에는 ★를 눌러야 등록됐는데 실제로는 아무도 누르지 않았다. 같은 키워드를
+ * 열흘에 네 번 다시 분석하면서도 저장은 안 하니 시장 변화와 리뷰 증가 속도가
+ * 통째로 죽어 있었다. 사람에게 동작을 하나 더 시켜서 될 일이 아니었다.
+ *
+ * 손으로 넣은 것(auto=false)은 건드리지 않는다. 자동으로 들어온 것만 오래된
+ * 순서로 정리한다.
+ */
+async function autoTrackKeyword(userId: string | undefined, keyword: string): Promise<void> {
+  if (!supabase || !userId || !keyword) return;
+  try {
+    const { data: existing } = await supabase
+      .from("sourcing_favorites")
+      .select("keyword, auto")
+      .eq("user_id", userId)
+      .eq("keyword", keyword)
+      .maybeSingle();
+
+    if (existing) {
+      // 이미 있으면 '마지막으로 본 시각'만 새로 한다. 손으로 넣은 것을 auto로 덮지 않는다.
+      await supabase
+        .from("sourcing_favorites")
+        .update({ last_seen_at: new Date().toISOString() })
+        .eq("user_id", userId).eq("keyword", keyword);
+      return;
+    }
+
+    await supabase.from("sourcing_favorites").insert({
+      user_id: userId, keyword, auto: true, last_seen_at: new Date().toISOString(),
+    });
+
+    // 자동으로 들어온 것이 너무 많아지면 오래된 것부터 뺀다
+    const { data: autos } = await supabase
+      .from("sourcing_favorites")
+      .select("keyword, last_seen_at")
+      .eq("user_id", userId).eq("auto", true)
+      .order("last_seen_at", { ascending: false });
+    const stale = (autos ?? []).slice(AUTO_TRACK_KEEP).map(r => String(r.keyword));
+    if (stale.length > 0) {
+      await supabase.from("sourcing_favorites")
+        .delete().eq("user_id", userId).eq("auto", true).in("keyword", stale);
+    }
+  } catch {
+    /* 추적 등록 실패가 분석 결과를 막지 않는다 */
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2278,7 +2495,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (type === "keywords") return handleKeywords(req, res);
   if (type === "trend") return handleTrend(req, res);
-  if (type === "briefing") return handleBriefing(req, res);
+  if (type === "briefing") return handleBriefing(req, res, decoded);
   if (type === "products") return handleProducts(req, res, decoded);
   if (type === "reviews") return handleReviews(req, res, decoded);
   if (type === "favorites") return handleFavorites(req, res, decoded);
