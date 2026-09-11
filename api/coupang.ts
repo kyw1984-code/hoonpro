@@ -3954,6 +3954,12 @@ export interface BriefData {
   orderAmount: number;
   quantity: number;
   prevOrderAmount: number;
+  /**
+   * 창구별 주문액. 윙과 로켓그로스는 서로 다른 상품이라 합계만 보면 어느 쪽이
+   * 움직였는지 알 수 없다. 그로스가 8할인 판매자에게 윙 숫자만 보여 주면
+   * 그 메일은 틀린 것이 된다.
+   */
+  byChannel: { wing: number; growth: number };
   topSellers: { name: string; qty: number; amount: number }[];
   reorder: InventoryRow[];
   newInquiries: number;
@@ -4059,7 +4065,14 @@ async function collectBrief(
 ): Promise<BriefData> {
   const prevDay = addDays(day, -7);   // 요일 효과가 크므로 어제가 아니라 지난주 같은 요일과 견준다
 
-  const [ordersRes, prevOrdersRes, inventory, inquiryRes, returnRes] = await Promise.all([
+  // 윙과 그로스는 저장되는 곳이 다르다. 발주서(coupang_orders_daily)에는 윙만
+  // 들어오고, 그로스는 매출내역(coupang_sales_daily, channel='growth')에 쌓인다.
+  // 두 테이블의 vendor_item_id는 하나도 겹치지 않으므로 그대로 더하면 된다.
+  //
+  // 같은 테이블의 channel='marketplace'는 더하면 안 된다. 그쪽은 매출인식일
+  // 기준이라 주문일 기준인 발주서와 날짜 뜻이 달라 같은 판매가 두 번 잡힌다.
+  // 그로스 행의 sale_date는 결제일(paidAt)이라 주문일과 같은 뜻이다.
+  const [ordersRes, prevOrdersRes, growthRes, prevGrowthRes, inventory, inquiryRes, returnRes] = await Promise.all([
     selectAll<{ vendor_item_id: string; product_name: string | null; quantity: number; order_amount: number }>(
       (f, t) => supabase!
         .from('coupang_orders_daily')
@@ -4069,6 +4082,17 @@ async function collectBrief(
       .from('coupang_orders_daily')
       .select('quantity, order_amount')
       .eq('user_id', userId).eq('order_date', prevDay).order('vendor_item_id').range(f, t)),
+    selectAll<{ vendor_item_id: string; product_name: string | null; quantity: number; sales_amount: number }>(
+      (f, t) => supabase!
+        .from('coupang_sales_daily')
+        .select('vendor_item_id, product_name, quantity, sales_amount')
+        .eq('user_id', userId).eq('channel', 'growth').eq('sale_date', day)
+        .order('vendor_item_id').range(f, t)),
+    selectAll<{ sales_amount: number }>((f, t) => supabase!
+      .from('coupang_sales_daily')
+      .select('sales_amount')
+      .eq('user_id', userId).eq('channel', 'growth').eq('sale_date', prevDay)
+      .order('vendor_item_id').range(f, t)),
     computeInventory(userId, leadTimeDays),
     supabase!.from('coupang_inquiries')
       .select('inquiry_id', { count: 'exact', head: true })
@@ -4084,19 +4108,26 @@ async function collectBrief(
   const byProduct = new Map<string, { name: string; qty: number; amount: number }>();
   let orderAmount = 0;
   let quantity = 0;
-  for (const o of ordersRes.rows) {
-    const qty = Number(o.quantity) || 0;
-    const amount = Number(o.order_amount) || 0;
+  let wingAmount = 0;
+  let growthAmount = 0;
+  const addSale = (rawName: unknown, rawQty: unknown, rawAmount: unknown) => {
+    const qty = Number(rawQty) || 0;
+    const amount = Number(rawAmount) || 0;
     orderAmount += amount;
     quantity += qty;
-    const name = String(o.product_name ?? '이름 없는 상품');
+    const name = String(rawName ?? '이름 없는 상품');
     const cur = byProduct.get(name) ?? { name, qty: 0, amount: 0 };
     cur.qty += qty;
     cur.amount += amount;
     byProduct.set(name, cur);
-  }
+    return amount;
+  };
+  for (const o of ordersRes.rows) wingAmount += addSale(o.product_name, o.quantity, o.order_amount);
+  for (const g of growthRes.rows) growthAmount += addSale(g.product_name, g.quantity, g.sales_amount);
 
-  const prevOrderAmount = prevOrdersRes.rows.reduce((n, o) => n + (Number(o.order_amount) || 0), 0);
+  const prevOrderAmount =
+    prevOrdersRes.rows.reduce((n, o) => n + (Number(o.order_amount) || 0), 0) +
+    prevGrowthRes.rows.reduce((n, g) => n + (Number(g.sales_amount) || 0), 0);
 
   // 광고비는 쿠팡이 API로 주지 않아 판매자가 직접 가져온다. 그 한 번을 잊으면
   // 그날부터 순이익이 광고비만큼 크게 나온다. 며칠째 비었는지 세어 둔다.
@@ -4110,6 +4141,7 @@ async function collectBrief(
     orderAmount,
     quantity,
     prevOrderAmount,
+    byChannel: { wing: wingAmount, growth: growthAmount },
     topSellers: [...byProduct.values()].sort((a, b) => b.amount - a.amount).slice(0, 3),
     reorder,
     newInquiries: inquiryRes.count ?? 0,
@@ -4150,6 +4182,14 @@ export function briefHtml(name: string, day: string, d: BriefData): string {
       d.prevOrderAmount > 0 ? won(d.prevOrderAmount) : '',
     ) +
     `</tr></table>`;
+
+  // 창구를 나눠 적는다. 윙과 그로스는 다른 상품이라 합계만 보면 어느 쪽이
+  // 움직였는지 알 수 없다. 한쪽만 쓰는 판매자에게는 그 줄을 보이지 않는다.
+  if (d.byChannel.wing > 0 && d.byChannel.growth > 0) {
+    html +=
+      `<p style="margin:8px 0 0;font-size:11.5px;color:#7c88a3;">` +
+      `로켓그로스 ${won(d.byChannel.growth)} · 윙 ${won(d.byChannel.wing)}</p>`;
+  }
 
   if (d.topSellers.length > 0) {
     html +=
@@ -5457,7 +5497,10 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
     return res.status(200).json({ items: [], minPairs: MIN_PAIRS_FOR_CORRELATION, hint: 'no-own-product' });
   }
 
-  const [rankRes, orderRes] = await Promise.all([
+  // 판매는 두 곳에 나뉘어 있다. 발주서에는 윙만, 로켓그로스는 매출내역에 쌓인다.
+  // 그로스만 파는 상품은 발주서에 한 줄도 없어, 발주서만 읽으면 "순위는 올랐는데
+  // 하나도 안 팔렸다"는 결론이 나온다. 두 곳을 모두 읽어 같은 모양으로 맞춘다.
+  const [rankRes, orderRes, growthRes] = await Promise.all([
     selectAll((f, t) => supabase!
       .from('sourcing_rank_obs')
       .select('keyword, product_id, rank, captured_at')
@@ -5473,7 +5516,28 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
           .gte('order_date', from)
           .order('order_date').range(f, t))
       : Promise.resolve({ rows: [] as any[], truncated: false }),
+    allVendorItems.length > 0
+      ? selectAll((f, t) => supabase!
+          .from('coupang_sales_daily')
+          .select('vendor_item_id, sale_date, quantity, sales_amount')
+          .eq('user_id', userId)
+          .eq('channel', 'growth')
+          .in('vendor_item_id', allVendorItems)
+          .gte('sale_date', from)
+          .order('sale_date').range(f, t))
+      : Promise.resolve({ rows: [] as any[], truncated: false }),
   ]);
+
+  // 발주서와 같은 열 이름으로 바꿔 한 줄기로 흘려보낸다
+  const salesRows = [
+    ...orderRes.rows,
+    ...growthRes.rows.map((g: any) => ({
+      vendor_item_id: g.vendor_item_id,
+      order_date: g.sale_date,
+      quantity: g.quantity,
+      order_amount: g.sales_amount,
+    })),
+  ];
 
   // 하루에 여러 번 수집될 수 있으므로 날짜별 평균 순위를 쓴다
   const rankByKey = new Map<string, Map<string, { sum: number; n: number }>>();
@@ -5499,12 +5563,12 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
   // 좋아져서 팔렸다"는 결론을 만들어 낸다. 판매 0으로 셀 수 있는 날은
   // 주문 수집이 닿은 구간 안쪽뿐이다.
   let orderCoverageStart: string | null = null;
-  for (const o of orderRes.rows) {
+  for (const o of salesRows) {
     const d = String(o.order_date);
     if (orderCoverageStart === null || d < orderCoverageStart) orderCoverageStart = d;
   }
 
-  for (const o of orderRes.rows) {
+  for (const o of salesRows) {
     const pid = productOfVendorItem.get(String(o.vendor_item_id));
     if (!pid) continue;
     const day = String(o.order_date);
