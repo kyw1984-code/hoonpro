@@ -11,10 +11,18 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpRight, Download, Loader2, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { coupangApi, pct, won, type ProfitResponse } from '../../lib/coupang';
 import { DailyTrendChart } from './DailyTrendChart';
 import { AdCenterConnect } from '../AdCenter/AdCenterConnect';
+
+/**
+ * 엑셀 라이브러리는 쓸 때만 받는다.
+ *
+ * 압축해도 141KB라 첫 화면에 같이 받으면 가장 큰 덩어리가 된다. 그런데 쓰는
+ * 곳은 내려받기·올리기·보고서 읽기뿐이고, 대부분의 방문은 한 번도 안 쓴다.
+ * 누를 때 받으면 몇백 밀리초 늦지만, 안 누르는 사람은 아예 안 받는다.
+ */
+const loadXLSX = () => import('xlsx');
 
 const PERIODS = [
   { days: 7, label: '최근 7일' },
@@ -261,7 +269,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
 
   // 화면의 표를 그대로 엑셀로 내린다. 정산·세무 자료로 넘길 때
   // 화면을 다시 옮겨 적지 않게 하려는 것이다.
-  const downloadExcel = () => {
+  const downloadExcel = async () => {
     // 원가를 안 넣은 상품은 0이 아니라 빈칸으로 내린다. 0으로 내리면
     // 받아 본 사람이 "원가가 0원인 상품"으로 읽는다.
     const blank = '';
@@ -307,6 +315,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
       '상품명', '옵션', '옵션ID', '판매수량', '매출', '쿠팡수수료',
       '원가', '반품건수', '반품비용', '순이익', '이익률(%)', '원가입력',
     ];
+    const XLSX = await loadXLSX();
     const ws = XLSX.utils.json_to_sheet(sheet, { header });
     ws['!cols'] = [{ wch: 38 }, { wch: 20 }, { wch: 14 }, ...Array(9).fill({ wch: 12 })];
     const wb = XLSX.utils.book_new();

@@ -7,8 +7,16 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Save, Search, Upload } from 'lucide-react';
-import * as XLSX from 'xlsx';
 import { coupangApi, won, type CostRow } from '../../lib/coupang';
+
+/**
+ * 엑셀 라이브러리는 쓸 때만 받는다.
+ *
+ * 압축해도 141KB라 첫 화면에 같이 받으면 가장 큰 덩어리가 된다. 그런데 쓰는
+ * 곳은 내려받기·올리기·보고서 읽기뿐이고, 대부분의 방문은 한 번도 안 쓴다.
+ * 누를 때 받으면 몇백 밀리초 늦지만, 안 누르는 사람은 아예 안 받는다.
+ */
+const loadXLSX = () => import('xlsx');
 
 // 엑셀 헤더 — 내려받는 양식과 올릴 때 인식하는 이름을 한곳에서 맞춘다
 const SHEET_COLUMNS = {
@@ -26,8 +34,9 @@ function parseSheet(file: File): Promise<Array<Partial<CostRow> & { vendorItemId
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('파일을 읽지 못했습니다.'));
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
+        const XLSX = await loadXLSX();
         const wb = XLSX.read(reader.result, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
@@ -144,7 +153,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
 
   // 옵션이 수백 개인 판매자는 하나씩 타이핑하지 않는다. 현재 상품 목록을
   // 양식으로 내려주고, 채워서 올리면 옵션ID로 맞춰 한 번에 저장한다.
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
     if (!rows) return;
     const data = rows.map(r => ({
       [SHEET_COLUMNS.vendorItemId]: r.vendorItemId,
@@ -156,6 +165,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
       [SHEET_COLUMNS.fulfillmentCost]: r.fulfillmentCost,
       [SHEET_COLUMNS.returnShippingCost]: r.returnShippingCost,
     }));
+    const XLSX = await loadXLSX();
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '원가');

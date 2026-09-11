@@ -79,7 +79,7 @@ export function AnalyzerDashboard() {
       // 파싱은 광고센터 북마클릿과 같은 곳(adReport)에서 한다. 제목 줄이 헤더 위에 있는
       // 보고서, EUC-KR, BOM 처리를 한 군데서만 고치면 양쪽에 같이 반영된다.
       const buffer = await file.arrayBuffer();
-      setRawData(parseAdReportBuffer(buffer, { filename: file.name, contentType: file.type }));
+      setRawData(await parseAdReportBuffer(buffer, { filename: file.name, contentType: file.type }));
     } catch (err: any) {
       setError(`파일 처리 중 오류 발생: ${err.message}`);
     }

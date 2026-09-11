@@ -4,9 +4,17 @@
  * [광고 성과 분석]의 파일 업로드와 광고센터 북마클릿이 같은 파일을 받는다.
  * 파싱을 한 곳에 두어야 한쪽에서 고친 인코딩 처리가 다른 쪽에서 빠지지 않는다.
  */
-import * as XLSX from 'xlsx';
 import Papa from 'papaparse';
 import { rowsFromMatrix } from './adcost';
+
+/**
+ * 엑셀 라이브러리는 쓸 때만 받는다.
+ *
+ * 압축해도 141KB라 첫 화면에 같이 받으면 가장 큰 덩어리가 된다. 그런데 쓰는
+ * 곳은 내려받기·올리기·보고서 읽기뿐이고, 대부분의 방문은 한 번도 안 쓴다.
+ * 누를 때 받으면 몇백 밀리초 늦지만, 안 누르는 사람은 아예 안 받는다.
+ */
+const loadXLSX = () => import('xlsx');
 
 /** 앞 두 바이트가 'PK'면 zip 계열(xlsx)이다 */
 function looksLikeZip(buf: ArrayBuffer): boolean {
@@ -15,14 +23,15 @@ function looksLikeZip(buf: ArrayBuffer): boolean {
 }
 
 /** 첫 시트를 헤더 탐지와 함께 객체 행으로. cellDates가 없으면 날짜가 45000 같은 시리얼 숫자로 들어온다 */
-function sheetRows(buf: ArrayBuffer): any[] {
+async function sheetRows(buf: ArrayBuffer): Promise<any[]> {
+  const XLSX = await loadXLSX();
   const wb = XLSX.read(buf, { type: 'array', cellDates: true });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null }) as any[][];
   return rowsFromMatrix(matrix);
 }
 
-export function parseAdReportBuffer(buf: ArrayBuffer, hint?: { filename?: string; contentType?: string }): any[] {
+export async function parseAdReportBuffer(buf: ArrayBuffer, hint?: { filename?: string; contentType?: string }): Promise<any[]> {
   const name = String(hint?.filename ?? '').toLowerCase();
   const isCsv = name.endsWith('.csv') || (!looksLikeZip(buf) && /csv|text\/plain/i.test(hint?.contentType ?? ''));
 

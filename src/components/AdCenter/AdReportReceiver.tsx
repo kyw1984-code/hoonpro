@@ -38,7 +38,7 @@ export function AdReportReceiver() {
 
   /** 파일(버퍼)에서 날짜별 광고비를 뽑아 저장한다 — 북마클릿이 준 것이든 끌어다 놓은 것이든 같다 */
   const saveBuffer = useCallback(async (buf: ArrayBuffer, from: string, to: string, hint?: { filename?: string; contentType?: string; dateGroup?: string }) => {
-    const rows = parseAdReportBuffer(buf, hint);
+    const rows = await parseAdReportBuffer(buf, hint);
     if (rows.length === 0) throw new Error('보고서가 비어 있습니다. 이 기간에 광고 집행이 없었을 수 있습니다.');
     const cols = Object.keys(rows[0] ?? {});
     const daily = extractDailyAdCost(rows);
