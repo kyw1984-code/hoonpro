@@ -359,7 +359,7 @@ const DEFAULTS = { imageModel: 'gpt-image-2', imageQuality: 'high', aiIntegrated
 // 탭 순서 설정에 허용되는 탭 id (App.tsx TABS와 일치해야 함)
 // App.tsx의 TABS, lib/feature-gate.ts의 FeatureTab과 같은 목록이어야 한다.
 // (coupang이 빠져 있어 쿠팡 탭은 순서를 바꿀 수 없었다 — 추가했다)
-const TAB_IDS = ['home', 'thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'coupang', 'qa', 'works'];
+const TAB_IDS = ['home', 'sourcing', 'ranktracker', 'review', 'analyzer', 'coupang', 'qa', 'works'];
 
 // 사업자 정보 항목 (프론트 src/lib/company.ts CompanyInfo와 일치)
 const COMPANY_KEYS = ['name', 'ceo', 'bizNumber', 'mailOrderNumber', 'address', 'email', 'phone', 'effectiveDate', 'dbRegion'];

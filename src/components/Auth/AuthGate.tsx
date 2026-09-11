@@ -38,14 +38,14 @@ const TYPE_PHRASES = [
   'AI가 매일 리포트합니다',
 ];
 
+// 화면에 실제로 있는 것만 적는다. 없는 기능을 보고 들어온 사람은 찾다가
+// 신뢰를 잃는다. 썸네일·상세페이지 제작은 내렸으므로 여기서도 뺐다.
 const TOOLS = [
   { icon: TrendingUp,         label: '훈프로 소싱AI' },
-  { icon: ImageIcon,          label: '썸네일 제작' },
-  { icon: LayoutTemplate,     label: '상세페이지 제작' },
+  { icon: ShoppingBag,        label: '훈프로 정산AI' },
   { icon: ListOrdered,        label: '순위 추적' },
   { icon: MessageSquareText,  label: '리뷰 분석' },
   { icon: BarChart3,          label: '광고 성과 분석' },
-  { icon: ShoppingBag,        label: '훈프로 정산AI' },
   { icon: MessageCircleQuestion, label: '훈프로 코칭AI' },
 ];
 
@@ -671,8 +671,8 @@ export function AuthGate({ onSuccess }: Props) {
           </h1>
 
           <p className="relative z-[3] mt-5 max-w-[560px] text-[17px] leading-[1.6] text-[#b9c2d8]">
-            키워드 발굴부터 썸네일·상세페이지 제작, 순위·리뷰·광고 분석까지 —
-            셀러의 반복 업무를 <b className="font-semibold text-white">8가지 AI 도구</b>가 한 화면에서 자동화합니다.
+            팔 상품 고르기부터 순위·리뷰·광고 분석, 매출과 순이익 정산까지 —
+            셀러의 반복 업무를 <b className="font-semibold text-white">6가지 AI 도구</b>가 한 화면에서 자동화합니다.
           </p>
 
           {/* 스탯 */}
