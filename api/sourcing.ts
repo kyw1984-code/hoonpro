@@ -8,6 +8,7 @@ import { createHmac } from "crypto";
 import jwt from "jsonwebtoken";
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
 import { tabDisabledMessage } from "../lib/feature-gate.js";
+import { checkAccess } from "../src/lib/accessGate.js";
 
 export const config = { maxDuration: 60 };
 
@@ -2493,27 +2494,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: "유효하지 않은 토큰입니다. 다시 로그인해주세요." });
   }
 
-  // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 사용 불가 (api/qa.ts와 동일 기준)
-  if (!decoded.isAdmin && supabase) {
-    const { data: enforcedCfg } = await supabase
-      .from("app_config")
-      .select("value")
-      .eq("key", "billing_enforced")
-      .maybeSingle();
-    if (enforcedCfg?.value === "true") {
-      const { data: sub } = await supabase
-        .from("subscriptions")
-        .select("status")
-        .eq("user_id", decoded.userId)
-        .maybeSingle();
-      if (!sub || !["trial", "active", "past_due"].includes(sub.status)) {
-        return res.status(402).json({
-          error: "구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.",
-          subscriptionRequired: true,
-        });
-      }
-    }
-  }
+  // 접근 게이트 — 아직 우리 회원인가, 유료화가 켜졌다면 구독이 있는가.
+  // 판정은 src/lib/accessGate.ts 한 곳에 있다. 예전에는 이 검사가 파일
+  // 여섯 곳에 복사돼 있었고, 회원 상태는 아예 보지 않아 탈퇴·거절된
+  // 사람이 토큰이 만료되는 7일까지 계속 쓸 수 있었다.
+  const denied = await checkAccess(supabase, decoded.userId, decoded.isAdmin === true);
+  if (denied) return res.status(denied.status).json(denied.body);
 
   // 이 엔드포인트 하나가 화면 셋을 담당한다. 관리자가 끈 화면은 서버에서도
   // 막는다 — 감추기만 하면 열려 있던 브라우저 탭이 계속 호출한다.

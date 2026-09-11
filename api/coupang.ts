@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 import { tabDisabledMessage } from '../lib/feature-gate.js';
 import * as XLSX from 'xlsx';
 import { extractDailyAdCost, extractItemAdCost, rowsFromMatrix } from '../src/lib/adcost.js';
+import { checkAccess } from '../src/lib/accessGate.js';
 
 export const config = { maxDuration: 300 };
 
@@ -2609,21 +2610,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const userId: string = decoded.userId;
 
-  // ── 유료화 게이트 (다른 API와 동일 기준) ──
-  if (!decoded.isAdmin) {
-    const { data: enforcedCfg } = await supabase
-      .from('app_config').select('value').eq('key', 'billing_enforced').maybeSingle();
-    if (enforcedCfg?.value === 'true') {
-      const { data: sub } = await supabase
-        .from('subscriptions').select('status').eq('user_id', userId).maybeSingle();
-      if (!sub || !['trial', 'active', 'past_due'].includes(sub.status)) {
-        return res.status(402).json({
-          error: '구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.',
-          subscriptionRequired: true,
-        });
-      }
-    }
-  }
+  // 접근 게이트 — 아직 우리 회원인가, 유료화가 켜졌다면 구독이 있는가.
+  // 판정은 src/lib/accessGate.ts 한 곳에 있다. 예전에는 이 검사가 파일
+  // 여섯 곳에 복사돼 있었고, 회원 상태는 아예 보지 않아 탈퇴·거절된
+  // 사람이 토큰이 만료되는 7일까지 계속 쓸 수 있었다.
+  const denied = await checkAccess(supabase, decoded.userId, decoded.isAdmin === true);
+  if (denied) return res.status(denied.status).json(denied.body);
 
   // 관리자가 끈 화면은 서버에서도 막는다
   const tabBlocked = await tabDisabledMessage(supabase, 'coupang', decoded.isAdmin === true);
@@ -2814,7 +2806,7 @@ async function handleKeySave(userId: string, req: VercelRequest, res: VercelResp
     },
     { onConflict: 'user_id' },
   );
-  if (error) return res.status(500).json({ error: `저장 실패: ${error.message}` });
+  if (error) { console.error('[쿠팡] 저장 실패', { detail: error.message }); return res.status(500).json({ error: '저장하지 못했습니다. 잠시 후 다시 시도해주세요.' }); }
 
   return res.status(200).json({ ok: true, message: '연동됐습니다. 첫 수집은 최대 몇 분 걸릴 수 있습니다.' });
 }
@@ -3510,7 +3502,7 @@ async function handleCostSave(userId: string, req: VercelRequest, res: VercelRes
     const { error } = await supabase!
       .from('coupang_costs').update(patch)
       .eq('user_id', userId).eq('vendor_item_id', vendor_item_id);
-    if (error) return res.status(500).json({ error: `저장 실패: ${error.message}` });
+    if (error) { console.error('[쿠팡] 저장 실패', { detail: error.message }); return res.status(500).json({ error: '저장하지 못했습니다. 잠시 후 다시 시도해주세요.' }); }
   }
 
   return res.status(200).json({ ok: true, saved: rows.length });
@@ -3742,7 +3734,7 @@ async function handleAdCostDelete(userId: string, req: VercelRequest, res: Verce
   const { error } = await supabase!
     .from('coupang_ad_costs').delete()
     .eq('user_id', userId).gte('ad_date', from).lte('ad_date', to);
-  if (error) return res.status(500).json({ error: `삭제 실패: ${error.message}` });
+  if (error) { console.error('[쿠팡] 삭제 실패', { detail: error.message }); return res.status(500).json({ error: '삭제하지 못했습니다. 잠시 후 다시 시도해주세요.' }); }
   return res.status(200).json({ ok: true });
 }
 
@@ -5263,7 +5255,7 @@ async function handleInquiries(userId: string, req: VercelRequest, res: VercelRe
   if (!includeAnswered) query = query.eq('answered', false);
 
   const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error('[쿠팡] 문의 조회 실패', { detail: error.message }); return res.status(500).json({ error: '문의를 불러오지 못했습니다.' }); }
 
   return res.status(200).json({
     inquiries: (data ?? []).map(q => ({

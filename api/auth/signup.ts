@@ -200,7 +200,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       cert = await fetchCertification(String(impUid));
     } catch (e: any) {
-      return res.status(400).json({ error: e?.message ?? '본인인증에 실패했습니다.' });
+      // 본인인증 중계사가 돌려주는 문구를 그대로 내보내지 않는다. 우리 설정
+      // 문제(키 오류·잔액 부족)까지 가입하려는 사람에게 보이게 된다.
+      console.error('[가입] 본인인증 실패', { detail: e?.message });
+      return res.status(400).json({ error: '본인인증에 실패했습니다. 다시 시도해주세요.' });
     }
 
     const certPwProblem = passwordProblem(password);
@@ -232,7 +235,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (error.code === '23505') {
         return res.status(409).json({ error: '이미 등록된 이메일입니다.' });
       }
-      return res.status(500).json({ error: `서버 오류: ${error.message} (code: ${error.code})` });
+      // 오류 원문에는 테이블·열 이름과 제약 조건 이름이 들어 있다. 인증 없이
+      // 부를 수 있는 창구라 그대로 내보내면 스키마를 그려 볼 수 있다.
+      // 사용자에게는 일반 문구, 상세는 서버 로그에만 남긴다.
+      console.error('[가입] DB 오류', { code: error.code, detail: error.message });
+      return res.status(500).json({ error: '가입 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' });
     }
     return res.status(201).json({ message: '가입이 완료됐습니다. 바로 로그인해주세요.', verified: true });
   }
@@ -272,7 +279,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: '이미 등록된 이메일입니다.' });
-      return res.status(500).json({ error: `서버 오류: ${error.message} (code: ${error.code})` });
+      // 오류 원문에는 테이블·열 이름과 제약 조건 이름이 들어 있다. 인증 없이
+      // 부를 수 있는 창구라 그대로 내보내면 스키마를 그려 볼 수 있다.
+      // 사용자에게는 일반 문구, 상세는 서버 로그에만 남긴다.
+      console.error('[가입] DB 오류', { code: error.code, detail: error.message });
+      return res.status(500).json({ error: '가입 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' });
     }
     await supabase.from('email_verifications').delete().eq('email', normalizedEmail);
     return res.status(201).json({ message: '가입이 완료됐습니다. 바로 로그인해주세요.' });
@@ -296,7 +307,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (error.code === '23505') {
       return res.status(409).json({ error: '이미 등록된 이메일입니다.' });
     }
-    return res.status(500).json({ error: `서버 오류: ${error.message} (code: ${error.code})` });
+    console.error('[가입] DB 오류', { code: error.code, detail: error.message });
+    return res.status(500).json({ error: '가입 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' });
   }
 
   return res.status(201).json({ message: '가입 신청이 완료됐습니다. 관리자 승인 후 이용 가능합니다.' });

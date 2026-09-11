@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from '../src/lib/featureLimits.js';
 import { calcCostUsd } from '../src/lib/pricing.js';
+import { checkAccess } from '../src/lib/accessGate.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -222,28 +223,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ remaining: 999 });
   }
 
-  // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 기능 사용 불가
-  // (JWT가 아닌 DB를 매번 확인해 해지·정지가 즉시 반영되게 한다)
-  const { data: enforcedCfg } = await supabase
-    .from('app_config')
-    .select('value')
-    .eq('key', 'billing_enforced')
-    .maybeSingle();
-
-  if (enforcedCfg?.value === 'true') {
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('status')
-      .eq('user_id', decoded.userId)
-      .maybeSingle();
-    // past_due(재시도 중)까지는 이용 허용, paused/canceled/미구독은 차단
-    if (!sub || !['trial', 'active', 'past_due'].includes(sub.status)) {
-      return res.status(402).json({
-        error: '구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.',
-        subscriptionRequired: true,
-      });
-    }
-  }
+  // 접근 게이트 — 아직 우리 회원인가, 유료화가 켜졌다면 구독이 있는가.
+  // 판정은 src/lib/accessGate.ts 한 곳에 있다. 예전에는 이 검사가 파일
+  // 여섯 곳에 복사돼 있었고, 회원 상태는 아예 보지 않아 탈퇴·거절된
+  // 사람이 토큰이 만료되는 7일까지 계속 쓸 수 있었다.
+  const denied = await checkAccess(supabase, decoded.userId, decoded.isAdmin === true);
+  if (denied) return res.status(denied.status).json(denied.body);
 
   const today = kstToday();
   const limits = await loadLimits();

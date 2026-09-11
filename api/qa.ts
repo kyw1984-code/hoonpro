@@ -5,6 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { buildSellerContext } from '../lib/coupang-context.js';
 import { calcCostUsd } from '../src/lib/pricing.js';
+import { checkAccess } from '../src/lib/accessGate.js';
 
 // "훈프로 코칭AI" RAG 챗봇 통합 API
 // Vercel Hobby 함수 개수 제한(12개) 때문에 action 파라미터로 통합
@@ -333,27 +334,12 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
   }
 
 
-  // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 사용 불가 (api/usage.ts와 동일 기준)
-  if (!decoded.isAdmin) {
-    const { data: enforcedCfg } = await supabase
-      .from('app_config')
-      .select('value')
-      .eq('key', 'billing_enforced')
-      .maybeSingle();
-    if (enforcedCfg?.value === 'true') {
-      const { data: sub } = await supabase
-        .from('subscriptions')
-        .select('status')
-        .eq('user_id', decoded.userId)
-        .maybeSingle();
-      if (!sub || !['trial', 'active', 'past_due'].includes(sub.status)) {
-        return res.status(402).json({
-          error: '구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.',
-          subscriptionRequired: true,
-        });
-      }
-    }
-  }
+  // 접근 게이트 — 아직 우리 회원인가, 유료화가 켜졌다면 구독이 있는가.
+  // 판정은 src/lib/accessGate.ts 한 곳에 있다. 예전에는 이 검사가 파일
+  // 여섯 곳에 복사돼 있었고, 회원 상태는 아예 보지 않아 탈퇴·거절된
+  // 사람이 토큰이 만료되는 7일까지 계속 쓸 수 있었다.
+  const denied = await checkAccess(supabase, decoded.userId, decoded.isAdmin === true);
+  if (denied) return res.status(denied.status).json(denied.body);
 
   // 민감 주제는 토큰/사용량 소모 없이 직접 문의 안내
   const sensitive = SENSITIVE_PATTERNS.find(s => s.pattern.test(question));
