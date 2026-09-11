@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Eye, EyeOff, Building2, Wallet, SlidersHorizontal, ShoppingBag } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Eye, EyeOff, Building2, Wallet, SlidersHorizontal, ShoppingBag, MessageSquare } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
@@ -9,6 +9,7 @@ import { CostsAdmin } from './CostsAdmin';
 import { CoupangAdmin } from './CoupangAdmin';
 import { QAManager } from './QAManager';
 import { ErrorLog } from './ErrorLog';
+import { Suggestions } from './Suggestions';
 import { CompanyInfoConfig } from './CompanyInfoConfig';
 
 interface UserRow {
@@ -38,7 +39,7 @@ const DAILY_USAGE_LIMIT = 40;
 export function AdminPanel() {
   // 다른 탭을 보고 있어도 오류가 났다는 걸 알아야 한다. 탭 라벨에 건수를 띄운다.
   const [openErrors, setOpenErrors] = useState(0);
-  const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'limits' | 'stats' | 'config' | 'taborder' | 'company' | 'qa' | 'coupang' | 'errors'>('users');
+  const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'limits' | 'stats' | 'config' | 'taborder' | 'company' | 'qa' | 'coupang' | 'errors' | 'suggestions'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
@@ -221,6 +222,15 @@ export function AdminPanel() {
         >
           <ShoppingBag className="w-4 h-4" /> 쿠팡 연동
         </button>
+        {/* 건의는 오류 바로 앞에 — 둘 다 "지금 뭘 고쳐야 하나"에 답하는 자리다 */}
+        <button
+          onClick={() => setTab('suggestions')}
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'suggestions' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" /> 건의
+        </button>
         {/* 오류는 맨 끝에 두되, 열린 오류가 있으면 라벨이 빨갛게 눈에 띈다 */}
         <button
           onClick={() => setTab('errors')}
@@ -232,7 +242,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'errors' ? <ErrorLog showToast={showToast} /> : tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
+      {tab === 'suggestions' ? <Suggestions showToast={showToast} /> : tab === 'errors' ? <ErrorLog showToast={showToast} /> : tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <ImageConfigTab showToast={showToast} />
       ) : tab === 'taborder' ? (
         <TabOrderConfig showToast={showToast} />
