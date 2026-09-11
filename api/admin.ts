@@ -112,12 +112,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+// 한도는 KST 자정에 초기화된다. api/usage.ts·api/qa.ts와 같은 기준을 써야
+// 관리자 화면이 실제 사용량과 맞는다.
+function kstToday(): string {
+  return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
 // ── 회원 목록 ─────────────────────────────────────────────
 
 async function handleUsers(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const today = new Date().toISOString().split('T')[0];
+  // 한도는 KST 자정에 초기화되고 feature_usage에 그 날짜로 쌓인다. 여기서
+  // UTC 날짜를 쓰면 한국시간 0시부터 9시까지는 어제 행을 읽어, 관리자가 보는
+  // 사용량이 실제와 하루 어긋난다.
+  const today = kstToday();
 
   const { data: users, error } = await supabase
     .from('users')
@@ -126,14 +135,17 @@ async function handleUsers(req: VercelRequest, res: VercelResponse) {
 
   if (error) return res.status(500).json({ error: '서버 오류' });
 
+  // api_usage가 아니라 feature_usage를 읽는다. api_usage에는 쓰는 코드가
+  // 하나도 없어 늘 비어 있었고, 회원마다 사용량이 항상 0으로 보였다.
+  // feature_usage는 기능별로 한 줄씩이라 회원 단위로 다시 합친다.
   const { data: usages } = await supabase
-    .from('api_usage')
+    .from('feature_usage')
     .select('user_id, call_count')
     .eq('date', today);
 
   const usageMap: Record<string, number> = {};
   for (const u of usages ?? []) {
-    usageMap[u.user_id] = u.call_count;
+    usageMap[u.user_id] = (usageMap[u.user_id] ?? 0) + (Number(u.call_count) || 0);
   }
 
   const result = (users ?? []).map((u: any) => ({
@@ -175,14 +187,22 @@ async function handleUserAction(req: VercelRequest, res: VercelResponse) {
 
   if (action === 'reset') {
     if (!userId) return res.status(400).json({ error: '잘못된 요청입니다.' });
-    const today = new Date().toISOString().split('T')[0];
-    const { error } = await supabase
-      .from('api_usage')
+    // 회원 목록과 같은 테이블·같은 날짜를 봐야 한다. 예전에는 비어 있는
+    // api_usage를 UTC 날짜로 갱신하고 "리셋됐습니다"라고 답했다. 실제로는
+    // 아무것도 바뀌지 않았고, 한도에 걸린 회원을 풀어 줄 방법이 없었다.
+    const today = kstToday();
+    const { data: reset, error } = await supabase
+      .from('feature_usage')
       .update({ call_count: 0 })
       .eq('user_id', userId)
-      .eq('date', today);
+      .eq('date', today)
+      .select('feature');
     if (error) return res.status(500).json({ error: '서버 오류' });
-    return res.status(200).json({ message: '사용 횟수가 리셋됐습니다.' });
+    const n = reset?.length ?? 0;
+    return res.status(200).json({
+      message: n > 0 ? `${n}개 기능의 사용 횟수를 리셋했습니다.` : '오늘 사용한 기록이 없습니다.',
+      reset: n,
+    });
   }
 
   return res.status(400).json({ error: '잘못된 요청입니다.' });
