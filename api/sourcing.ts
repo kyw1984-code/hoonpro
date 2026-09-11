@@ -8,6 +8,8 @@ import { createHmac } from "crypto";
 import jwt from "jsonwebtoken";
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
 import { tabDisabledMessage } from "../lib/feature-gate.js";
+import { checkAccess } from "../src/lib/accessGate.js";
+import { runIn, selectIn } from "../src/lib/chunkedIn.js";
 
 export const config = { maxDuration: 60 };
 
@@ -1076,6 +1078,8 @@ async function fetchSearchProducts(keyword: string, decoded: any): Promise<{
   }
 
   if (!products || products.length === 0) {
+    // 캐시로도 못 채웠으니 결과를 못 준 것이다. 세 것을 되돌린다.
+    await refundQuota(decoded?.userId, "rank");
     return { products: null, error: "검색 결과를 수집하지 못했습니다. 잠시 후 다시 시도해주세요.", remaining };
   }
   await recordRankObservations(keyword, products);
@@ -1129,7 +1133,11 @@ async function fetchSearchPage(keyword: string, page: number, decoded: any): Pro
 
   const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60&page=${page}`;
   const result = await fetchViaUnlocker(url, 1, 20000, { userId: decoded?.userId ?? null, feature: "rank-check-deep" });
-  if (!result.ok) return { products: null, stop: "error", remaining };
+  if (!result.ok) {
+    // 이 페이지를 세고 돈까지 썼는데 결과가 없다. 세 것을 되돌린다.
+    await refundQuota(decoded?.userId, "rank");
+    return { products: null, stop: "error", remaining };
+  }
   const parsed = parseCoupangSearch(result.html!);
   // 결과가 없으면 거기가 끝이다 — 이건 실패가 아니라 정상 종료다
   if (parsed.products.length === 0) return { products: [], remaining };
@@ -1777,6 +1785,32 @@ async function loadLimits(): Promise<Record<string, number>> {
 }
 
 // 한도는 KST 자정에 초기화된다
+/**
+ * 결과를 못 받은 호출의 한도를 되돌린다.
+ *
+ * 한도는 부르기 전에 차감한다. 먼저 세지 않으면 같은 순간 여러 번 눌러 상한을
+ * 넘길 수 있기 때문이다. 문제는 그다음이다. 쿠팡이 차단 페이지를 주거나 중계가
+ * 끊겨 아무 결과도 못 받았는데 한도는 이미 깎여 있었다.
+ *
+ * 검색이 막히면 세 번 시도하고 셋 다 실패한다. 사용자는 결과를 못 받고 다시
+ * 누른다. 예순 번 누르면 그날 몫이 전부 사라지고, 그동안 백여든 번의 유료
+ * 호출이 나갔고, 손에 쥔 것은 없다. 돈을 낸 기능을 돈을 낸 사람이 못 쓰게 된다.
+ *
+ * 캐시된 값으로 답한 경우는 되돌리지 않는다. 결과를 받았기 때문이다.
+ */
+async function refundQuota(userId: string | null | undefined, feature: string): Promise<void> {
+  if (!supabase || !userId) return;
+  try {
+    const { error } = await supabase.rpc("refund_feature_usage", {
+      p_user_id: userId, p_date: kstToday(), p_feature: feature,
+    });
+    if (error) console.error("[한도] 되돌리기 실패", { feature, userId, detail: error.message });
+  } catch (e: any) {
+    // 되돌리기 실패가 응답을 막지는 않는다. 사용자는 이미 실패를 보고 있다.
+    console.error("[한도] 되돌리기 예외", { feature, userId, detail: e?.message });
+  }
+}
+
 function kstToday(): string {
   return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 }
@@ -1849,12 +1883,15 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
         parsed = cached.payload;
         servedFrom = "stale";
       } else {
+        // 결과를 못 받았으니 한도를 되돌린다
+        await refundQuota(decoded?.userId, "sourcing");
         return res.status(502).json({ error: `쿠팡 페이지 파싱 실패. ${p.diagnostics}` });
       }
     } else if (cached) {
       parsed = cached.payload;
       servedFrom = "stale";
     } else {
+      await refundQuota(decoded?.userId, "sourcing");
       return res.status(502).json({ error: result.error });
     }
   }
@@ -2003,8 +2040,8 @@ async function autoTrackKeyword(userId: string | undefined, keyword: string): Pr
       .order("last_seen_at", { ascending: false });
     const stale = (autos ?? []).slice(AUTO_TRACK_KEEP).map(r => String(r.keyword));
     if (stale.length > 0) {
-      await supabase.from("sourcing_favorites")
-        .delete().eq("user_id", userId).eq("auto", true).in("keyword", stale);
+      await runIn(stale, chunk => supabase!.from("sourcing_favorites")
+        .delete().eq("user_id", userId).eq("auto", true).in("keyword", chunk));
     }
   } catch {
     /* 추적 등록 실패가 분석 결과를 막지 않는다 */
@@ -2141,6 +2178,8 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   }
 
   if (reviews.length === 0) {
+    // 최대 세 번의 유료 호출을 쓰고도 아무것도 못 받았다. 세 것을 되돌린다.
+    await refundQuota(decoded?.userId, "reviews");
     return res.status(502).json({ error: `리뷰를 수집하지 못했습니다. 잠시 후 다시 시도해주세요.`, diagnostics: diag });
   }
 
@@ -2153,7 +2192,14 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     summary,
     ...(reviews.length < 3 ? { diagnostics: diag } : {}),
   };
-  if (!summary?.error && reviews.length >= 3) await cacheSet(cacheKey, payload);
+  // 리뷰를 실제로 받았으면 캐시한다. 예전에는 GPT 요약이 실패했다는 이유로
+  // 통째로 버려서, 같은 상품을 누를 때마다 유료 호출이 다시 나갔다. 요약은
+  // 실패해도 리뷰 원문과 표본은 그대로 쓸모가 있고, 다시 부른다고 요약이
+  // 성공한다는 보장도 없다.
+  //
+  // 리뷰가 두 개 이하인 상품도 캐시한다. 그것이 그 상품의 사실이라, 캐시하지
+  // 않으면 영원히 다시 긁는다.
+  if (reviews.length > 0) await cacheSet(cacheKey, payload);
   return res.status(200).json({ ...payload, ...(remaining !== null ? { remaining } : {}) });
 }
 
@@ -2290,13 +2336,26 @@ async function collectRankStates() {
     .from("sourcing_rank_watch")
     .select("user_id, keyword, product_id, product_name");
   if (!watches || watches.length === 0) return [];
-  const { data: obs } = await supabase
-    .from("sourcing_rank_obs")
-    .select("keyword, product_id, rank, captured_at")
-    .in("product_id", [...new Set(watches.map(w => w.product_id))])
-    .gte("captured_at", new Date(Date.now() - 8 * 86400000).toISOString())
-    .order("captured_at", { ascending: false })
-    .limit(3000);
+  // 여기는 모든 사용자의 추적 상품을 한 번에 본다. 사용자가 늘면 .in()이
+  // 주소 상한을 넘어 요청이 통째로 거부되고, 그러면 순위 급락 알림과 주간
+  // 리포트가 아무에게도 안 나간다. 조용히 멈추는 종류의 고장이다.
+  //
+  // 상한도 조각마다 따로 건다. 예전에는 3000줄을 전체에 걸어서, 상품이 많은
+  // 앞쪽 사용자가 그 몫을 다 쓰면 뒤쪽 사용자는 관측이 하나도 안 잡혔다.
+  const obsRes = await selectIn<{ keyword: string; product_id: string; rank: number | null; captured_at: string }>(
+    [...new Set(watches.map(w => String(w.product_id)))],
+    chunk => supabase!
+      .from("sourcing_rank_obs")
+      .select("keyword, product_id, rank, captured_at")
+      .in("product_id", chunk)
+      .gte("captured_at", new Date(Date.now() - 8 * 86400000).toISOString())
+      .order("captured_at", { ascending: false })
+      .limit(3000),
+  );
+  const obs = obsRes.rows;
+  if (obsRes.failedChunks > 0) {
+    console.error("[순위 알림] 관측 조회 일부 실패", { failedChunks: obsRes.failedChunks });
+  }
   return watches.map(w => {
     const hist = (obs || []).filter(o => o.keyword === w.keyword && o.product_id === w.product_id);
     const latest = hist[0] || null;
@@ -2422,14 +2481,19 @@ async function handleCron(req: VercelRequest, res: VercelResponse) {
 
   // 형평성: 캐시가 없거나 가장 오래된 키워드부터 수집 — 관심 키워드 전체가 순환된다
   const keyOf = (kw: string) => `cp:v5:${kw.replace(/\s+/g, "")}`;
+  // 키워드가 수백 개면 .in()이 주소 상한을 넘어 요청이 통째로 거부된다.
+  // 그러면 ageMap이 비고, 아래 20시간 건너뛰기가 함께 죽어 스무 분 전에
+  // 수집한 키워드를 매번 다시 긁는다. 한 번 긁을 때마다 실제 돈이 나간다.
+  // 나눠서 부르고, 몇 조각이 실패했는지 남긴다.
   const ageMap = new Map<string, number>();
-  try {
-    const { data: cacheRows } = await supabase
-      .from("sourcing_cache")
-      .select("cache_key, created_at")
-      .in("cache_key", keywords.map(keyOf));
-    for (const r of cacheRows || []) ageMap.set(r.cache_key, new Date(r.created_at).getTime());
-  } catch { /* 정렬 실패 시 원래 순서 유지 */ }
+  const ageRes = await selectIn<{ cache_key: string; created_at: string }>(
+    keywords.map(keyOf),
+    chunk => supabase!.from("sourcing_cache").select("cache_key, created_at").in("cache_key", chunk),
+  );
+  for (const r of ageRes.rows) ageMap.set(r.cache_key, new Date(r.created_at).getTime());
+  if (ageRes.failedChunks > 0) {
+    console.error("[소싱 크론] 캐시 나이 조회 일부 실패", { failedChunks: ageRes.failedChunks });
+  }
   keywords.sort((a, b) => (ageMap.get(keyOf(a)) ?? 0) - (ageMap.get(keyOf(b)) ?? 0));
 
   // 시간 기반 상한: 60초 제한 안에서 최대한 수집 (구 6개 고정 → 보통 10개 이상 처리)
@@ -2493,27 +2557,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: "유효하지 않은 토큰입니다. 다시 로그인해주세요." });
   }
 
-  // 유료화 게이트 — billing_enforced가 켜지면 유효한 구독 없이는 사용 불가 (api/qa.ts와 동일 기준)
-  if (!decoded.isAdmin && supabase) {
-    const { data: enforcedCfg } = await supabase
-      .from("app_config")
-      .select("value")
-      .eq("key", "billing_enforced")
-      .maybeSingle();
-    if (enforcedCfg?.value === "true") {
-      const { data: sub } = await supabase
-        .from("subscriptions")
-        .select("status")
-        .eq("user_id", decoded.userId)
-        .maybeSingle();
-      if (!sub || !["trial", "active", "past_due"].includes(sub.status)) {
-        return res.status(402).json({
-          error: "구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.",
-          subscriptionRequired: true,
-        });
-      }
-    }
-  }
+  // 접근 게이트 — 아직 우리 회원인가, 유료화가 켜졌다면 구독이 있는가.
+  // 판정은 src/lib/accessGate.ts 한 곳에 있다. 예전에는 이 검사가 파일
+  // 여섯 곳에 복사돼 있었고, 회원 상태는 아예 보지 않아 탈퇴·거절된
+  // 사람이 토큰이 만료되는 7일까지 계속 쓸 수 있었다.
+  const denied = await checkAccess(supabase, decoded.userId, decoded.isAdmin === true);
+  if (denied) return res.status(denied.status).json(denied.body);
 
   // 이 엔드포인트 하나가 화면 셋을 담당한다. 관리자가 끈 화면은 서버에서도
   // 막는다 — 감추기만 하면 열려 있던 브라우저 탭이 계속 호출한다.

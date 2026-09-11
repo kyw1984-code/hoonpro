@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
+import { LOGIN_LOCK_MS, lockState, nextFailure } from '../../src/lib/loginGuard.js';
 
 // 인증 통합 엔드포인트 (Vercel 함수 개수 제한 대응 — action으로 분기)
 //   (기본)                 이메일 + 비밀번호 로그인
@@ -157,9 +158,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 }
 
 // ── 로그인 ──
+/**
+ * 이메일 + 비밀번호 로그인.
+ *
+ * 두 가지를 지킨다.
+ *
+ * 1) 계정이 있는지 알려 주지 않는다
+ *    예전에는 없는 이메일에 404 '등록되지 않은 이메일입니다', 틀린 비밀번호에
+ *    401을 줬다. 응답만 보고 어느 이메일이 가입돼 있는지 전부 훑을 수 있었고,
+ *    그러면 대입할 계정을 골라 낼 수 있다. 둘을 같은 401 한 문장으로 합친다.
+ *    승인 대기·거절·탈퇴는 비밀번호가 맞은 뒤에만 알려 준다 — 그 전에 알려
+ *    주면 그것 자체가 "이 이메일은 가입돼 있다"는 뜻이 된다.
+ *
+ * 2) 무한정 시도하지 못하게 한다
+ *    비밀번호 재설정에는 횟수 제한이 있는데 로그인에는 없었다. 비밀번호 규칙이
+ *    8자 이상 영문+숫자라, 상한이 없으면 서버가 늘어나는 만큼 시도도 늘어난다.
+ *    계정 단위로 잠근다. IP 단위가 더 좋지만 프록시 뒤라 믿을 수 없다.
+ */
+/** 계정이 있는지 알려 주지 않는 하나의 응답 */
+function loginRejected(res: VercelResponse) {
+  return res.status(401).json({ error: '이메일 또는 비밀번호가 올바르지 않습니다.' });
+}
+
 async function login(req: VercelRequest, res: VercelResponse) {
   const { email, password } = req.body ?? {};
   if (!email) return res.status(400).json({ error: '이메일을 입력해주세요.' });
+  if (!password) return res.status(400).json({ error: '비밀번호를 입력해주세요.' });
 
   const { data: user, error } = await supabase
     .from('users')
@@ -167,17 +191,18 @@ async function login(req: VercelRequest, res: VercelResponse) {
     .eq('email', String(email).trim().toLowerCase())
     .maybeSingle();
 
-  if (error || !user) {
-    return res.status(404).json({ error: '등록되지 않은 이메일입니다.' });
-  }
-  if (user.withdrawn_at) {
-    return res.status(403).json({ error: '탈퇴 처리된 계정입니다. 새로 가입해주세요.' });
-  }
-  if (user.status === 'pending') {
-    return res.status(403).json({ error: '승인 대기 중입니다. 관리자 승인 후 이용 가능합니다.' });
-  }
-  if (user.status === 'rejected') {
-    return res.status(403).json({ error: '접근이 거부됐습니다. 관리자에게 문의하세요.' });
+  // 없는 이메일도 틀린 비밀번호와 같은 답을 준다
+  if (error || !user) return loginRejected(res);
+
+  // 잠긴 계정 — 남은 시간을 알려 준다. 이건 비밀번호를 맞힌 사람에게만
+  // 의미가 있는 정보가 아니라서 먼저 알려도 된다. 오히려 안 알려 주면
+  // 비밀번호를 맞게 넣고도 왜 안 되는지 모른다.
+  const lock = lockState(user.locked_until);
+  if (lock.locked) {
+    return res.status(429).json({
+      error: `로그인 시도가 많아 잠시 잠겼습니다. ${lock.minutesLeft}분 후 다시 시도해주세요.`,
+      lockedMinutes: lock.minutesLeft,
+    });
   }
 
   // 비밀번호가 없는 계정(비밀번호 도입 이전 가입 / PASS 가입)은 재설정으로 먼저 설정해야 한다.
@@ -191,9 +216,36 @@ async function login(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  if (!password) return res.status(400).json({ error: '비밀번호를 입력해주세요.' });
   if (!verifyPassword(String(password), user.password_hash)) {
-    return res.status(401).json({ error: '이메일 또는 비밀번호가 올바르지 않습니다.' });
+    const next = nextFailure(user.failed_logins);
+    await supabase.from('users').update({
+      failed_logins: next.failedLogins,
+      locked_until: next.lockedUntil,
+    }).eq('id', user.id);
+    if (next.justLocked) {
+      const mins = LOGIN_LOCK_MS / 60000;
+      return res.status(429).json({
+        error: `로그인 시도가 많아 ${mins}분간 잠겼습니다.`,
+        lockedMinutes: mins,
+      });
+    }
+    return loginRejected(res);
+  }
+
+  // 비밀번호가 맞았다. 이제부터는 계정 상태를 알려 줘도 된다.
+  if (user.withdrawn_at) {
+    return res.status(403).json({ error: '탈퇴 처리된 계정입니다. 새로 가입해주세요.' });
+  }
+  if (user.status === 'pending') {
+    return res.status(403).json({ error: '승인 대기 중입니다. 관리자 승인 후 이용 가능합니다.' });
+  }
+  if (user.status === 'rejected') {
+    return res.status(403).json({ error: '접근이 거부됐습니다. 관리자에게 문의하세요.' });
+  }
+
+  // 성공했으니 실패 기록을 지운다
+  if (user.failed_logins || user.locked_until) {
+    await supabase.from('users').update({ failed_logins: 0, locked_until: null }).eq('id', user.id);
   }
 
   return res.status(200).json({

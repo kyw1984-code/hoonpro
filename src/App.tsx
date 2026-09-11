@@ -2,9 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { SourcingFinder } from './components/SourcingFinder';
-import { AdAnalyzer } from './components/Analyzer/AdAnalyzer';
 import { RankTracker } from './components/RankTracker';
 import { ReviewAnalyzer } from './components/ReviewAnalyzer';
 import { Footer } from './components/Layout/Footer';
@@ -13,15 +12,36 @@ import { Feedback } from './components/Feedback';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdReportReceiver } from './components/AdCenter/AdReportReceiver';
 import { AD_COLLECT_QUERY } from './lib/adCollector';
-import { AdminPanel } from './components/Admin/AdminPanel';
-import { SubscriptionPage } from './components/Billing/SubscriptionPage';
 import { AskHoonpro } from './components/QA/AskHoonpro';
 import { HomeDashboard } from './components/Home/HomeDashboard';
-import { WorksLibrary } from './components/Works/WorksLibrary';
 import { CoupangDashboard } from './components/Coupang/CoupangDashboard';
-import { Home, FolderOpen, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag } from 'lucide-react';
+import { Home, FolderOpen, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag, Loader2 } from 'lucide-react';
 import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 import { fetchBillingStatus, type BillingStatus } from './lib/billing';
+
+
+/**
+ * 늦게 불러오는 화면들.
+ *
+ * 자바스크립트가 한 덩어리라 첫 화면을 열 때 모든 탭의 코드를 다 받았다.
+ * 관리자 패널은 운영자만 열고, 구독 관리는 한 달에 한 번, 광고 분석은 보고서를
+ * 올릴 때만 연다. 내 작업은 내린 기능의 보관함이라 여는 사람이 거의 없다.
+ * 누른 사람만 받게 한다.
+ */
+const AdminPanel = lazy(() => import('./components/Admin/AdminPanel').then(m => ({ default: m.AdminPanel })));
+const SubscriptionPage = lazy(() => import('./components/Billing/SubscriptionPage').then(m => ({ default: m.SubscriptionPage })));
+const AdAnalyzer = lazy(() => import('./components/Analyzer/AdAnalyzer').then(m => ({ default: m.AdAnalyzer })));
+const WorksLibrary = lazy(() => import('./components/Works/WorksLibrary').then(m => ({ default: m.WorksLibrary })));
+
+/** 청크를 받는 동안 보여 줄 것 — 화면이 덜컥 비지 않게 자리를 잡아 둔다 */
+function TabLoading() {
+  return (
+    <div className="flex items-center justify-center gap-2 py-24 text-ink-3">
+      <Loader2 className="h-5 w-5 animate-spin" />
+      <span className="text-[13px]">불러오는 중...</span>
+    </div>
+  );
+}
 
 type Tab = 'home' | 'works' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'coupang' | 'qa' | 'billing' | 'admin';
 
@@ -382,10 +402,12 @@ export default function App() {
                   훈프로가 구독제로 전환됐습니다. 구독을 시작하면 모든 기능과 기존 데이터(관심 키워드·순위 추적 이력)를 그대로 이용할 수 있습니다.
                 </p>
               </div>
-              <SubscriptionPage />
+              <Suspense fallback={<TabLoading />}><SubscriptionPage /></Suspense>
             </div>
           ) : (
-            <>
+            // 늦게 불러오는 화면은 Suspense 안에 둔다. 청크를 받는 동안
+            // 화면이 덜컥 비지 않게 자리를 잡아 준다.
+            <Suspense fallback={<TabLoading />}>
               {shownTab === 'home' && <HomeDashboard onNavigate={(t) => setActiveTab(t as Tab)} hiddenTabs={user.isAdmin ? [] : hiddenTabs} />}
               {shownTab === 'sourcing' && <SourcingFinder />}
               {shownTab === 'ranktracker' && <RankTracker />}
@@ -396,7 +418,7 @@ export default function App() {
               {shownTab === 'qa' && qaVisible && <AskHoonpro />}
               {activeTab === 'billing' && <SubscriptionPage />}
               {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
-            </>
+            </Suspense>
           )}
         </main>
 

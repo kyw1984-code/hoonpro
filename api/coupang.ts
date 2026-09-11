@@ -9,6 +9,7 @@ import jwt from 'jsonwebtoken';
 import { tabDisabledMessage } from '../lib/feature-gate.js';
 import * as XLSX from 'xlsx';
 import { extractDailyAdCost, extractItemAdCost, rowsFromMatrix } from '../src/lib/adcost.js';
+import { checkAccess } from '../src/lib/accessGate.js';
 
 export const config = { maxDuration: 300 };
 
@@ -516,7 +517,17 @@ export function dateChunks(from: string, to: string, size = LIMITS.chunkDays): A
  * 않으므로, 순이익·재고·상관이 조용히 일부 데이터로만 계산되고 숫자가 어느
  * 시점부터 안 늘어나는 형태로 나타난다.
  *
- * 정렬 키를 주면 커서로 넘기고(중복·누락 없음), 없으면 range로 넘긴다.
+ * 넘기는 방식은 range(OFFSET)이다. 예전 주석에는 "정렬 키를 주면 커서로
+ * 넘긴다"고 적혀 있었는데 그런 코드는 없었다. 읽는 쪽이 그 말을 믿으면
+ * 안 되므로 바로잡아 둔다.
+ *
+ * OFFSET은 읽는 도중 앞쪽 줄이 지워지면 뒤 페이지가 밀려 몇 줄을 건너뛴다.
+ * 그 위험은 수집 쪽에서 없앴다 — 예전에는 구간을 통째로 지운 뒤 다시 넣어서
+ * 그 사이에 읽으면 아예 비어 보였는데, 지금은 먼저 덮어쓰고 남은 것만 치운다.
+ * 읽는 중에 줄이 사라지지 않으므로 페이지가 밀리지 않는다.
+ *
+ * 그래도 상한(maxPages × pageSize)에 닿으면 truncated로 알린다. 부르는 쪽이
+ * 그걸 무시하면 조용히 일부만 계산된다.
  */
 export async function selectAll<T = any>(
   build: (from: number, to: number) => any,
@@ -969,22 +980,30 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
     }
   }
 
-  const rows = [...agg.values()].map(r => ({ ...r, updated_at: new Date().toISOString() }));
+  // 이 회차의 도장. 새로 넣는 줄에 전부 같은 값을 찍고, 나중에 이 값보다
+  // 오래된 줄만 치운다. '지우고 다시 넣기'가 아니라 '덮어쓰고 남은 것 치우기'다.
+  const batchAt = new Date().toISOString();
+  const rows = [...agg.values()].map(r => ({ ...r, updated_at: batchAt }));
 
-  // 구간을 통째로 다시 계산했을 때만 기존 구간을 지우고 새로 넣는다.
-  // 중간에 한 번이라도 실패했으면 지금 모은 값은 불완전하다. 그걸로 덮으면
-  // 멀쩡하던 과거 데이터까지 날아가므로, 실패한 회차에는 지우지 않고 덧쓰기만 한다.
-  if (!failedThisRun) {
+  // 순서가 중요하다. 예전에는 구간을 통째로 지운 뒤 넣었는데, 그 사이에 화면을
+  // 열면 그 기간 매출이 0원으로 보였다. 수집은 20시간마다 돌고 몇 초 걸리므로
+  // 자주는 아니지만, 하필 그때 본 사람에게는 장부가 비어 있다. 먼저 덮어쓰면
+  // 어느 순간에도 줄이 사라지지 않는다.
+  const err = await upsertChunked('coupang_orders_daily', rows, 'user_id,order_date,vendor_item_id');
+  if (err) sum.errors.push(err);
+  sum.orders = rows.length;
+
+  // 쿠팡에서 사라진 줄만 치운다. 중간에 한 번이라도 실패했으면 지금 모은 값이
+  // 불완전하므로 치우지 않는다 — 멀쩡하던 과거 데이터가 날아간다.
+  if (!failedThisRun && !err) {
     await supabase
       .from('coupang_orders_daily')
       .delete()
       .eq('user_id', userId)
       .gte('order_date', from)
-      .lte('order_date', to);
+      .lte('order_date', to)
+      .lt('updated_at', batchAt);
   }
-  const err = await upsertChunked('coupang_orders_daily', rows, 'user_id,order_date,vendor_item_id');
-  if (err) sum.errors.push(err);
-  sum.orders = rows.length;
 
   // 윙 주문도 쿠팡의 주문별 쿠폰 조회로 확인한다. 발주서 할인 항목보다 이쪽이 명확하다.
   await syncOrderCoupons(userId, creds, orderMeta, 'marketplace', sum, deadline);
@@ -1069,14 +1088,21 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
   }
 
   // 정산예정액이 응답에 없으면 판매금액 − 수수료로 채운다.
+  const batchAt = new Date().toISOString();
   const rows = [...agg.values()].map(r => ({
     ...r,
     settlement_amount: r.settlement_amount || Math.max(0, r.sales_amount - r.commission),
-    updated_at: new Date().toISOString(),
+    updated_at: batchAt,
   }));
 
-  // 주문과 같은 이유로, 실패한 회차에는 기존 구간을 지우지 않는다
-  if (!failedThisRun) {
+  // 주문과 같은 이유로 먼저 덮어쓰고 나중에 치운다 — 지운 뒤 넣으면 그 사이에
+  // 화면을 연 사람에게 그 기간 매출이 0원으로 보인다.
+  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
+  if (err) sum.errors.push(err);
+  sum.sales = rows.length;
+
+  // 쿠팡에서 사라진 줄만 치운다. 실패한 회차에는 치우지 않는다.
+  if (!failedThisRun && !err) {
     await supabase
       .from('coupang_sales_daily')
       .delete()
@@ -1085,11 +1111,9 @@ async function syncSales(userId: string, creds: CoupangCreds, from: string, to: 
       // 쓸어버린다. 그로스는 조회 창구가 달라 이 회차에서 다시 채워지지 않는다.
       .eq('channel', 'marketplace')
       .gte('sale_date', from)
-      .lte('sale_date', to);
+      .lte('sale_date', to)
+      .lt('updated_at', batchAt);
   }
-  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
-  if (err) sum.errors.push(err);
-  sum.sales = rows.length;
 }
 
 // ── 로켓그로스 매출 동기화 ────────────────────────────────────
@@ -1304,6 +1328,7 @@ async function syncRocketGrowth(
   const rate = agg.size > 0
     ? await marketplaceCommissionRates(userId)
     : { byItem: new Map<string, number>(), overall: null as number | null };
+  const batchAt = new Date().toISOString();
   const rows = [...agg.values()].map(r => {
     const pct = rate.byItem.get(String(r.vendor_item_id)) ?? rate.overall;
     const commission = pct === null ? 0 : Math.round(r.sales_amount * pct);
@@ -1311,24 +1336,28 @@ async function syncRocketGrowth(
       ...r,
       commission,
       settlement_amount: Math.max(0, r.sales_amount - commission),
-      updated_at: new Date().toISOString(),
+      updated_at: batchAt,
     };
   });
 
-  // 실패한 회차에는 기존 구간을 지우지 않는다 — 불완전한 결과로 덮으면 매출이 준다
-  if (!failedThisRun) {
+  // 윙과 같은 이유로 먼저 덮어쓰고 나중에 치운다. 이 판매자는 매출의 여덟 할이
+  // 그로스라, 지운 뒤 넣는 사이에 화면을 열면 장부가 거의 비어 보인다.
+  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
+  if (err) sum.errors.push(err);
+  sum.growth = rows.length;
+
+  // 쿠팡에서 사라진 줄만 치운다. 실패한 회차에는 치우지 않는다 —
+  // 불완전한 결과로 덮으면 매출이 준다.
+  if (!failedThisRun && !err) {
     await supabase
       .from('coupang_sales_daily')
       .delete()
       .eq('user_id', userId)
       .eq('channel', 'growth')
       .gte('sale_date', from)
-      .lte('sale_date', to);
+      .lte('sale_date', to)
+      .lt('updated_at', batchAt);
   }
-
-  const err = await upsertChunked('coupang_sales_daily', rows, 'user_id,sale_date,vendor_item_id,channel');
-  if (err) sum.errors.push(err);
-  sum.growth = rows.length;
   sum.growthCancelled = cancelled;
 
   await syncOrderCoupons(userId, creds, orderMeta, 'growth', sum, deadline);
@@ -2609,21 +2638,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const userId: string = decoded.userId;
 
-  // ── 유료화 게이트 (다른 API와 동일 기준) ──
-  if (!decoded.isAdmin) {
-    const { data: enforcedCfg } = await supabase
-      .from('app_config').select('value').eq('key', 'billing_enforced').maybeSingle();
-    if (enforcedCfg?.value === 'true') {
-      const { data: sub } = await supabase
-        .from('subscriptions').select('status').eq('user_id', userId).maybeSingle();
-      if (!sub || !['trial', 'active', 'past_due'].includes(sub.status)) {
-        return res.status(402).json({
-          error: '구독 후 이용할 수 있습니다. [구독 관리] 탭에서 구독을 시작해주세요.',
-          subscriptionRequired: true,
-        });
-      }
-    }
-  }
+  // 접근 게이트 — 아직 우리 회원인가, 유료화가 켜졌다면 구독이 있는가.
+  // 판정은 src/lib/accessGate.ts 한 곳에 있다. 예전에는 이 검사가 파일
+  // 여섯 곳에 복사돼 있었고, 회원 상태는 아예 보지 않아 탈퇴·거절된
+  // 사람이 토큰이 만료되는 7일까지 계속 쓸 수 있었다.
+  const denied = await checkAccess(supabase, decoded.userId, decoded.isAdmin === true);
+  if (denied) return res.status(denied.status).json(denied.body);
 
   // 관리자가 끈 화면은 서버에서도 막는다
   const tabBlocked = await tabDisabledMessage(supabase, 'coupang', decoded.isAdmin === true);
@@ -2814,7 +2834,7 @@ async function handleKeySave(userId: string, req: VercelRequest, res: VercelResp
     },
     { onConflict: 'user_id' },
   );
-  if (error) return res.status(500).json({ error: `저장 실패: ${error.message}` });
+  if (error) { console.error('[쿠팡] 저장 실패', { detail: error.message }); return res.status(500).json({ error: '저장하지 못했습니다. 잠시 후 다시 시도해주세요.' }); }
 
   return res.status(200).json({ ok: true, message: '연동됐습니다. 첫 수집은 최대 몇 분 걸릴 수 있습니다.' });
 }
@@ -3510,7 +3530,7 @@ async function handleCostSave(userId: string, req: VercelRequest, res: VercelRes
     const { error } = await supabase!
       .from('coupang_costs').update(patch)
       .eq('user_id', userId).eq('vendor_item_id', vendor_item_id);
-    if (error) return res.status(500).json({ error: `저장 실패: ${error.message}` });
+    if (error) { console.error('[쿠팡] 저장 실패', { detail: error.message }); return res.status(500).json({ error: '저장하지 못했습니다. 잠시 후 다시 시도해주세요.' }); }
   }
 
   return res.status(200).json({ ok: true, saved: rows.length });
@@ -3742,7 +3762,7 @@ async function handleAdCostDelete(userId: string, req: VercelRequest, res: Verce
   const { error } = await supabase!
     .from('coupang_ad_costs').delete()
     .eq('user_id', userId).gte('ad_date', from).lte('ad_date', to);
-  if (error) return res.status(500).json({ error: `삭제 실패: ${error.message}` });
+  if (error) { console.error('[쿠팡] 삭제 실패', { detail: error.message }); return res.status(500).json({ error: '삭제하지 못했습니다. 잠시 후 다시 시도해주세요.' }); }
   return res.status(200).json({ ok: true });
 }
 
@@ -5263,7 +5283,7 @@ async function handleInquiries(userId: string, req: VercelRequest, res: VercelRe
   if (!includeAnswered) query = query.eq('answered', false);
 
   const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) { console.error('[쿠팡] 문의 조회 실패', { detail: error.message }); return res.status(500).json({ error: '문의를 불러오지 못했습니다.' }); }
 
   return res.status(200).json({
     inquiries: (data ?? []).map(q => ({
