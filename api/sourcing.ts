@@ -442,8 +442,8 @@ async function getTrendData(keywords: string[]): Promise<{ trends: any[]; error?
         // JSON 덩어리일 뿐이고, 고칠 수 있는 사람은 운영자뿐이다.
         console.error("[데이터랩] 호출 실패", { status: dlRes.status, detail: text.slice(0, 300) });
         lastError = dlRes.status === 401
-          ? "네이버 데이터랩 키가 거부되었습니다. 관리자에게 문의해주세요."
-          : "네이버 데이터랩을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
+          ? "트렌드 조회 권한이 거부되었습니다. 관리자에게 문의해주세요."
+          : "트렌드를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
         continue;
       }
       const data = await dlRes.json().catch(() => null);
