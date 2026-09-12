@@ -2216,15 +2216,16 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   const diagParts: string[] = [];
   const failLog: { label: string; status?: number; snippet?: string }[] = [];
   for (const a of attempts) {
-    // 같은 주소가 어떤 때는 919KB, 어떤 때는 0바이트로 온다. 관찰해 보면
-    // 한동안 쉬었다가 부른 첫 번째는 오고, 바로 이어 부르면 빈 응답이 온다.
-    // 연달아 두드릴수록 더 막히는 것이라, 재시도 간격을 크게 벌린다.
-    // 8초, 16초, 24초 — 다 기다려도 1분 안쪽이고 함수 제한(300초)에 여유가 있다.
+    // 재시도는 한 번만 한다.
+    //
+    // 간격을 8·16·24초로 벌려 네 번 불러 봤지만 네 번 다 빈 응답이었다.
+    // 연달아 두드려서 막히는 게 아니라는 뜻이다. 그러면 재시도를 늘릴수록
+    // 성공 확률은 그대로인데 유료 호출만 늘어난다. 한 번만 더 본다.
     const r = await fetchViaUnlocker(
-      a.url, 3, a.minSize,
+      a.url, 1, a.minSize,
       { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
       a.headers,
-      8000,
+      3000,
     );
     if (!r.ok) {
       diagParts.push(`${a.label} 실패: ${r.error}`);
@@ -2254,8 +2255,10 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     // 예전에는 실패를 아무 데도 남기지 않아, 나중에 원인을 볼 수가 없었다.
     // 주소와 길이만 남긴다 — 리뷰 본문은 남기지 않는다.
     console.error("[리뷰] 수집 실패", { productId, hasItemId: Boolean(ref.itemId), diag: diagParts.join(" | "), failLog });
+    // "잠시 후 다시 시도해주세요"는 쓰지 않는다. 지금은 다시 눌러도 되지
+    // 않는 상태이고, 그 안내대로 누를 때마다 유료 호출만 나간다.
     return res.status(502).json({
-      error: "리뷰를 수집하지 못했습니다. 리뷰가 아직 없는 상품이거나 쿠팡이 일시적으로 막은 경우입니다. 잠시 후 다시 시도해주세요.",
+      error: "리뷰를 수집하지 못했습니다. 쿠팡이 리뷰 조회 방식을 바꿔 수집 경로를 고치는 중입니다. 다시 눌러도 당분간은 같은 결과입니다.",
       diagnostics: diag,
     });
   }
