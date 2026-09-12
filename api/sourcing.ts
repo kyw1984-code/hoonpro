@@ -607,6 +607,9 @@ async function fetchViaUnlocker(
   // 쿠팡의 리뷰 조각 엔드포인트는 상품 페이지 안에서만 불리는 주소라,
   // Referer가 없으면 빈 조각을 돌려주는 때가 있다. 필요한 곳에서만 넣는다.
   extraHeaders?: Record<string, string>,
+  // 재시도 간격. 기본값은 일시적인 오류를 넘기려는 짧은 간격이고, 차단이
+  // 의심될 때는 부르는 쪽에서 훨씬 길게 준다. 연달아 두드리면 더 막힌다.
+  backoffMs = 1500,
   // 실패했을 때 응답 본문을 조금 남긴다. 예전에는 길이만 알려주고 내용은
   // 버려서, "len=177"만 보고는 쿠팡이 막은 것인지 Bright Data가 거절한 것인지
   // 구분할 수가 없었다. 화면에는 관리자에게만 보여주고 로그에는 늘 남긴다.
@@ -615,7 +618,7 @@ async function fetchViaUnlocker(
   let lastStatus: number | undefined;
   let lastSnippet: string | undefined;
   for (let attempt = 0; attempt <= retries; attempt++) {
-    if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * attempt));
+    if (attempt > 0) await new Promise(r => setTimeout(r, backoffMs * attempt));
     try {
       const res = await fetch("https://api.brightdata.com/request", {
         method: "POST",
@@ -646,7 +649,9 @@ async function fetchViaUnlocker(
       if (!html || html.length < minSize) {
         lastStatus = res.status;
         lastSnippet = (html || "").slice(0, 300);
-        lastError = `Bright Data 응답이 비정상적으로 작습니다 (len=${html?.length ?? 0}). 잠시 후 다시 시도해주세요.`;
+        lastError = html
+          ? `Bright Data 응답이 비정상적으로 작습니다 (len=${html.length}). 잠시 후 다시 시도해주세요.`
+          : "쿠팡이 빈 응답을 돌려줬습니다 (차단으로 보입니다). 잠시 후 다시 시도해주세요.";
         continue;
       }
       return { ok: true, html };
@@ -2211,12 +2216,15 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   const diagParts: string[] = [];
   const failLog: { label: string; status?: number; snippet?: string }[] = [];
   for (const a of attempts) {
-    // 같은 주소가 어떤 때는 919KB, 어떤 때는 0바이트로 온다. 시도가 하나뿐이니
-    // 재시도를 여기에 준다. 함수 제한(300초) 안에 넉넉히 들어간다.
+    // 같은 주소가 어떤 때는 919KB, 어떤 때는 0바이트로 온다. 관찰해 보면
+    // 한동안 쉬었다가 부른 첫 번째는 오고, 바로 이어 부르면 빈 응답이 온다.
+    // 연달아 두드릴수록 더 막히는 것이라, 재시도 간격을 크게 벌린다.
+    // 8초, 16초, 24초 — 다 기다려도 1분 안쪽이고 함수 제한(300초)에 여유가 있다.
     const r = await fetchViaUnlocker(
-      a.url, 2, a.minSize,
+      a.url, 3, a.minSize,
       { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
       a.headers,
+      8000,
     );
     if (!r.ok) {
       diagParts.push(`${a.label} 실패: ${r.error}`);
