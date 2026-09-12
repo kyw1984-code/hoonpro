@@ -481,7 +481,7 @@ export function SourcingFinder() {
 
   const exportKeywordsCSV = () => downloadCSV(
     `키워드발굴_${currentSeed || 'result'}.csv`,
-    ['키워드', '월간검색량', 'PC검색량', '모바일검색량', '월평균클릭', '광고경쟁도', '기회점수', '등급', '쿠팡링크'],
+    ['키워드', '월간검색량', 'PC검색량', '모바일검색량', '월평균클릭', '경쟁강도', '기회점수', '등급', '쿠팡링크'],
     displayKeywords.map(k => [k.keyword, k.monthlyVolume, k.monthlyPcVolume, k.monthlyMobileVolume, k.monthlyClicks, k.compIdx, k.opportunityScore, k.grade, coupangSearchUrl(k.keyword)]),
   );
 
@@ -739,7 +739,7 @@ export function SourcingFinder() {
                       <th className="px-3 py-2.5 text-left">키워드</th>
                       <th className="px-4 py-2.5 text-right">월간 검색량</th>
                       <th className="hidden px-4 py-2.5 text-right md:table-cell">월평균 클릭</th>
-                      <th className="px-4 py-2.5 text-center">광고경쟁</th>
+                      <th className="px-4 py-2.5 text-center">경쟁강도</th>
                       <th className="w-36 px-4 py-2.5 text-left">기회점수</th>
                       <th className="px-4 py-2.5 text-center">등급</th>
                       <th className="px-4 py-2.5 text-right">분석</th>
