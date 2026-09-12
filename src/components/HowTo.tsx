@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react';
 import { HelpCircle, X } from 'lucide-react';
 import { HOWTO } from '../lib/howto';
+import { ModalPortal } from './ModalPortal';
 
 export function HowTo({
   id,
@@ -61,6 +62,7 @@ export function HowTo({
       </button>
 
       {open && (
+        <ModalPortal>
         <div
           className="fixed inset-0 z-[90] flex items-center justify-center bg-ink/50 p-4 backdrop-blur-sm"
           role="dialog"
@@ -120,6 +122,7 @@ export function HowTo({
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </>
   );
