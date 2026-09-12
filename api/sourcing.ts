@@ -10,7 +10,7 @@ import jwt from "jsonwebtoken";
 import { tabDisabledMessage } from "../lib/feature-gate.js";
 import { checkAccess } from "../src/lib/accessGate.js";
 import { runIn, selectIn } from "../src/lib/chunkedIn.js";
-import { mobileProductUrl, parseProductRef, productPageUrl, reviewFragmentUrl } from "../src/lib/coupangUrl.js";
+import { parseProductRef, productPageUrl } from "../src/lib/coupangUrl.js";
 
 export const config = { maxDuration: 60 };
 
@@ -2094,6 +2094,29 @@ function parseReviews(html: string): { rating: number; text: string }[] {
   return out;
 }
 
+/**
+ * 리뷰를 한 건도 못 뽑았을 때, 그 HTML에 무엇이 들어 있었는지 훑는다.
+ *
+ * 쿠팡이 마크업을 바꾸면 파서는 조용히 0건을 돌려준다. 길이만 봐서는
+ * "리뷰가 없는 상품"과 "읽는 법이 바뀐 상품"이 똑같아 보인다. 어떤 표식이
+ * 몇 번 나오는지와 그 주변 글자를 남겨, 다음에 무엇을 읽어야 할지 정한다.
+ */
+function reviewHtmlProbe(html: string): string {
+  const marks = [
+    "sdp-review", "js_reviewArticle", "review-article", "ReviewArticle",
+    "reviewContent", "__PRELOADED_STATE__", "productReview", "ratingSummary",
+    "data-rating", '"content":"', "review",
+  ];
+  const counts = marks
+    .map(m => [m, html.split(m).length - 1] as const)
+    .filter(([, n]) => n > 0)
+    .map(([m, n]) => `${m}:${n}`)
+    .join(" ");
+  const i = html.search(/sdp-review|reviewContent|js_reviewArticle|productReview/i);
+  const sample = i >= 0 ? html.slice(Math.max(0, i - 100), i + 400).replace(/\s+/g, " ") : "(표식 없음)";
+  return `${counts || "표식 하나도 없음"} || ${sample}`;
+}
+
 async function summarizeReviews(productName: string, reviews: { rating: number; text: string }[], userId: string | null = null): Promise<any> {
   const apiKey = (process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY || "").trim();
   if (!apiKey) return { error: "OpenAI API 키가 설정되지 않았습니다." };
@@ -2174,44 +2197,24 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     }
   }
 
-  // 세 번까지 시도한다. 예전에는 같은 주소를 두 번 부르고(재시도) 상품 페이지를
-  // 한 번 불렀는데, 조각이 정말로 비어 있으면 첫 두 번이 똑같이 비어 돌아와
-  // 유료 호출 한 번을 버렸다. 이제는 세 번이 서로 다른 시도다.
-  //   ① 옵션 번호까지 넣은 리뷰 조각 — 사용자가 긴 주소를 넣었을 때 가장 정확하다
-  //   ② 옵션 번호를 뺀 리뷰 조각 — 옵션이 내려갔거나 조각이 상품 단위일 때
-  //   ③ 상품 페이지 통째로 — 조각 엔드포인트 자체가 막혔을 때
-  // 각 시도는 재시도가 없다. 함수 제한(60초) 안에 끝나야 하고, 세 시도가
-  // 이미 서로에 대한 재시도 구실을 한다.
-  const referer = productPageUrl(ref);
-  const reviewHeaders = {
-    Referer: referer,
-    "Accept-Language": "ko-KR,ko;q=0.9",
-    "X-Requested-With": "XMLHttpRequest",
-  };
-  const attempts: { label: string; url: string; minSize: number; headers?: Record<string, string> }[] =
-    ref.itemId || ref.vendorItemId
-      ? [
-          { label: "리뷰조각(옵션)", url: reviewFragmentUrl(ref, 30, true), minSize: 500, headers: reviewHeaders },
-          { label: "리뷰조각", url: reviewFragmentUrl(ref, 30, false), minSize: 500, headers: reviewHeaders },
-        ]
-      : [
-          { label: "리뷰조각", url: reviewFragmentUrl(ref, 30, false), minSize: 500, headers: reviewHeaders },
-          // 쿠팡이 한 번에 주는 리뷰 수를 제한하는 때가 있다. 상품 페이지가
-          // 스스로 부를 때 쓰는 값(5)으로 한 번 더 물어본다.
-          { label: "리뷰조각(5건)", url: reviewFragmentUrl(ref, 5, false), minSize: 500, headers: reviewHeaders },
-        ];
-  attempts.push({ label: "상품페이지", url: referer, minSize: 20000 });
-  // PC 상품 페이지까지 비어 돌아오면 모바일 쪽을 마지막으로 본다. 마크업이
-  // 가볍고 차단도 덜해서 같은 상품인데 한쪽만 열리는 경우가 있다. 앞에서
-  // 하나라도 리뷰를 받으면 여기까지 오지 않는다.
-  attempts.push({ label: "모바일상품페이지", url: mobileProductUrl(ref), minSize: 5000 });
+  // 상품 페이지 하나만 본다.
+  //
+  // 예전에는 리뷰 전용 조각 엔드포인트(/vp/product/reviews)를 먼저 불렀다.
+  // 그 주소는 이제 "The api will be deprecated" 177바이트를 돌려준다 —
+  // 쿠팡이 내렸다. 부를 때마다 유료 호출만 나가고 아무것도 못 받는다.
+  // 모바일 페이지(m.coupang.com)는 "Sorry! Access denied"로 막힌다.
+  // 둘 다 뺐다. 남는 것은 상품 페이지 하나뿐이라 여기에 재시도를 몰아준다.
+  const pageUrl = productPageUrl(ref);
+  const attempts = [{ label: "상품페이지", url: pageUrl, minSize: 20000, headers: undefined as Record<string, string> | undefined }];
 
   let reviews: { rating: number; text: string }[] = [];
   const diagParts: string[] = [];
   const failLog: { label: string; status?: number; snippet?: string }[] = [];
   for (const a of attempts) {
+    // 같은 주소가 어떤 때는 919KB, 어떤 때는 0바이트로 온다. 시도가 하나뿐이니
+    // 재시도를 여기에 준다. 함수 제한(300초) 안에 넉넉히 들어간다.
     const r = await fetchViaUnlocker(
-      a.url, 0, a.minSize,
+      a.url, 2, a.minSize,
       { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
       a.headers,
     );
@@ -2222,6 +2225,9 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     }
     const got = parseReviews(r.html!);
     diagParts.push(`${a.label}: htmlLen=${r.html!.length}, 파싱=${got.length}개`);
+    // 페이지는 제대로 받았는데 한 건도 못 뽑았다면 마크업이 바뀐 것이다.
+    // 무엇이 들어 있었는지 남겨야 다음에 무엇을 읽어야 할지 정할 수 있다.
+    if (got.length === 0) failLog.push({ label: `${a.label}(파싱0)`, status: 200, snippet: reviewHtmlProbe(r.html!) });
     if (got.length > reviews.length) reviews = got;
     if (reviews.length >= 3) break;
   }
@@ -2230,7 +2236,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   // 글자만 늘어날 뿐이고, 무엇이 막았는지는 운영자가 알아야 할 몫이다.
   if (decoded?.isAdmin && failLog.length) {
     diag += " || 응답: " + failLog
-      .map(f => `${f.label}[${f.status ?? "-"}] ${JSON.stringify(f.snippet ?? "").slice(0, 200)}`)
+      .map(f => `${f.label}[${f.status ?? "-"}] ${JSON.stringify(f.snippet ?? "").slice(0, 700)}`)
       .join(" ; ");
   }
 
