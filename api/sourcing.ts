@@ -11,6 +11,7 @@ import { tabDisabledMessage } from "../lib/feature-gate.js";
 import { checkAccess } from "../src/lib/accessGate.js";
 import { runIn, selectIn } from "../src/lib/chunkedIn.js";
 import { parseProductRef, productPageUrl } from "../src/lib/coupangUrl.js";
+import { describeJson, parseReviewJson } from "../src/lib/coupangReview.js";
 
 export const config = { maxDuration: 60 };
 
@@ -2074,54 +2075,6 @@ async function autoTrackKeyword(userId: string | undefined, keyword: string): Pr
 // 경쟁상품 리뷰 분석 — 리뷰 수집 + GPT 요약 (불만/니즈 → 소싱·상세페이지 공략 포인트)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function parseReviews(html: string): { rating: number; text: string }[] {
-  const out: { rating: number; text: string }[] = [];
-  // 리뷰 본문 블록 (sdp-review 구형/신형 클래스 모두 시도)
-  const blocks = html.split(/class="[^"]*(?:sdp-review__article__list\b|review-article|ReviewArticle_)[^"]*"/).slice(1);
-  for (const b of blocks.slice(0, 40)) {
-    const text = stripTags(
-      pick(/class="[^"]*(?:review__content|review-content|ReviewContent_|article__content)[^"]*"[^>]*>([\s\S]{10,2000}?)<\/(?:div|p|span)>/, b),
-    );
-    const rating = parseInt(pick(/data-rating="(\d)"/, b), 10)
-      || (parseFloat(pick(/width:\s*([\d.]+)%/, b)) || 0) / 20 || 0;
-    if (text && text.length >= 8) out.push({ rating: Math.round(rating * 10) / 10, text: text.slice(0, 600) });
-  }
-  // 폴백: JSON 내 리뷰 콘텐츠 ("content":"...","rating":N 형태)
-  if (out.length < 3) {
-    for (const m of html.matchAll(/"(?:content|reviewContent|comment)"\s*:\s*"((?:[^"\\]|\\.){15,1500})"/g)) {
-      if (out.length >= 40) break;
-      try {
-        const text = JSON.parse(`"${m[1]}"`).replace(/\s+/g, " ").trim();
-        if (text.length >= 10 && !/^https?:/.test(text)) out.push({ rating: 0, text: text.slice(0, 600) });
-      } catch { /* 개별 파싱 실패 무시 */ }
-    }
-  }
-  return out;
-}
-
-/**
- * 리뷰를 한 건도 못 뽑았을 때, 그 HTML에 무엇이 들어 있었는지 훑는다.
- *
- * 쿠팡이 마크업을 바꾸면 파서는 조용히 0건을 돌려준다. 길이만 봐서는
- * "리뷰가 없는 상품"과 "읽는 법이 바뀐 상품"이 똑같아 보인다. 어떤 표식이
- * 몇 번 나오는지와 그 주변 글자를 남겨, 다음에 무엇을 읽어야 할지 정한다.
- */
-function reviewHtmlProbe(html: string): string {
-  const marks = [
-    "sdp-review", "js_reviewArticle", "review-article", "ReviewArticle",
-    "reviewContent", "__PRELOADED_STATE__", "productReview", "ratingSummary",
-    "data-rating", '"content":"', "review",
-  ];
-  const counts = marks
-    .map(m => [m, html.split(m).length - 1] as const)
-    .filter(([, n]) => n > 0)
-    .map(([m, n]) => `${m}:${n}`)
-    .join(" ");
-  const i = html.search(/sdp-review|reviewContent|js_reviewArticle|productReview/i);
-  const sample = i >= 0 ? html.slice(Math.max(0, i - 100), i + 400).replace(/\s+/g, " ") : "(표식 없음)";
-  return `${counts || "표식 하나도 없음"} || ${sample}`;
-}
-
 async function summarizeReviews(productName: string, reviews: { rating: number; text: string }[], userId: string | null = null): Promise<any> {
   const apiKey = (process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY || "").trim();
   if (!apiKey) return { error: "OpenAI API 키가 설정되지 않았습니다." };
@@ -2202,25 +2155,36 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     }
   }
 
-  // 상품 페이지 하나만 본다.
+  // 쿠팡의 새 리뷰 창구를 부른다.
   //
-  // 예전에는 리뷰 전용 조각 엔드포인트(/vp/product/reviews)를 먼저 불렀다.
-  // 그 주소는 이제 "The api will be deprecated" 177바이트를 돌려준다 —
-  // 쿠팡이 내렸다. 부를 때마다 유료 호출만 나가고 아무것도 못 받는다.
-  // 모바일 페이지(m.coupang.com)는 "Sorry! Access denied"로 막힌다.
-  // 둘 다 뺐다. 남는 것은 상품 페이지 하나뿐이라 여기에 재시도를 몰아준다.
-  const pageUrl = productPageUrl(ref);
-  const attempts = [{ label: "상품페이지", url: pageUrl, minSize: 20000, headers: undefined as Record<string, string> | undefined }];
+  // 예전 주소(/vp/product/reviews)는 HTML 조각을 돌려줬는데 지금은
+  // "The api will be deprecated" 한 줄만 온다. 새 주소는 /next-api/review이고
+  // JSON이다. 상품 페이지 통째로(919KB)를 받아 긁던 폴백도 뺐다 — 리뷰가
+  // 그 안에 없어서 받아져도 0건이었고, 받아지지도 않았다.
+  //
+  // 질의 문자열은 브라우저가 실제로 보내는 것과 같은 모양으로 맞춘다.
+  // 빈 ratings·market도 그대로 붙인다. 다르게 보내면 거절될 여지를 남긴다.
+  const reviewApi = `https://www.coupang.com/next-api/review?productId=${productId}`
+    + `&page=1&size=10&sortBy=ORDER_SCORE_ASC&ratingSummary=true&ratings=&market=`;
+  const attempts = [{
+    label: "리뷰API",
+    url: reviewApi,
+    minSize: 100,
+    headers: {
+      // 상품 페이지 안에서만 불리는 주소다. 어디서 왔는지 밝혀야 한다.
+      Referer: productPageUrl(ref),
+      Accept: "application/json, text/plain, */*",
+      "Accept-Language": "ko-KR,ko;q=0.9",
+    } as Record<string, string>,
+  }];
 
   let reviews: { rating: number; text: string }[] = [];
   const diagParts: string[] = [];
   const failLog: { label: string; status?: number; snippet?: string }[] = [];
   for (const a of attempts) {
-    // 재시도는 한 번만 한다.
-    //
-    // 간격을 8·16·24초로 벌려 네 번 불러 봤지만 네 번 다 빈 응답이었다.
-    // 연달아 두드려서 막히는 게 아니라는 뜻이다. 그러면 재시도를 늘릴수록
-    // 성공 확률은 그대로인데 유료 호출만 늘어난다. 한 번만 더 본다.
+    // 재시도는 한 번만 한다. 상품 페이지를 긁던 시절에 네 번까지 늘려 봤지만
+    // 성공률이 그대로여서 유료 호출만 늘었다. 리뷰 API는 응답이 수십 KB로
+    // 가벼워 통째 페이지보다 훨씬 잘 오므로 한 번이면 충분하다.
     const r = await fetchViaUnlocker(
       a.url, 1, a.minSize,
       { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
@@ -2232,11 +2196,11 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
       failLog.push({ label: a.label, status: r.status, snippet: r.snippet });
       continue;
     }
-    const got = parseReviews(r.html!);
-    diagParts.push(`${a.label}: htmlLen=${r.html!.length}, 파싱=${got.length}개`);
-    // 페이지는 제대로 받았는데 한 건도 못 뽑았다면 마크업이 바뀐 것이다.
-    // 무엇이 들어 있었는지 남겨야 다음에 무엇을 읽어야 할지 정할 수 있다.
-    if (got.length === 0) failLog.push({ label: `${a.label}(파싱0)`, status: 200, snippet: reviewHtmlProbe(r.html!) });
+    const got = parseReviewJson(r.html!);
+    diagParts.push(`${a.label}: len=${r.html!.length}, 파싱=${got.length}개`);
+    // 응답은 제대로 받았는데 한 건도 못 뽑았다면 생김새가 바뀐 것이다.
+    // 키 이름과 타입만 남긴다 — 리뷰 본문은 로그에 남기지 않는다.
+    if (got.length === 0) failLog.push({ label: `${a.label}(파싱0)`, status: 200, snippet: describeJson(r.html!) });
     if (got.length > reviews.length) reviews = got;
     if (reviews.length >= 3) break;
   }
@@ -2255,10 +2219,8 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     // 예전에는 실패를 아무 데도 남기지 않아, 나중에 원인을 볼 수가 없었다.
     // 주소와 길이만 남긴다 — 리뷰 본문은 남기지 않는다.
     console.error("[리뷰] 수집 실패", { productId, hasItemId: Boolean(ref.itemId), diag: diagParts.join(" | "), failLog });
-    // "잠시 후 다시 시도해주세요"는 쓰지 않는다. 지금은 다시 눌러도 되지
-    // 않는 상태이고, 그 안내대로 누를 때마다 유료 호출만 나간다.
     return res.status(502).json({
-      error: "리뷰를 수집하지 못했습니다. 쿠팡이 리뷰 조회 방식을 바꿔 수집 경로를 고치는 중입니다. 다시 눌러도 당분간은 같은 결과입니다.",
+      error: "리뷰를 수집하지 못했습니다. 리뷰가 아직 없는 상품이거나 쿠팡이 일시적으로 막은 경우입니다. 잠시 후 다시 시도해주세요.",
       diagnostics: diag,
     });
   }
