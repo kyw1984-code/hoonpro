@@ -438,7 +438,12 @@ async function getTrendData(keywords: string[]): Promise<{ trends: any[]; error?
       });
       if (!dlRes.ok) {
         const text = await dlRes.text().catch(() => "");
-        lastError = `데이터랩 API 오류 (${dlRes.status}): ${text.slice(0, 200)}`;
+        // 원문은 로그에만 남긴다. 화면에 그대로 띄우면 구독자에게는 영문
+        // JSON 덩어리일 뿐이고, 고칠 수 있는 사람은 운영자뿐이다.
+        console.error("[데이터랩] 호출 실패", { status: dlRes.status, detail: text.slice(0, 300) });
+        lastError = dlRes.status === 401
+          ? "네이버 데이터랩 키가 거부되었습니다. 관리자에게 문의해주세요."
+          : "네이버 데이터랩을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
         continue;
       }
       const data = await dlRes.json().catch(() => null);
@@ -457,12 +462,15 @@ async function getTrendData(keywords: string[]): Promise<{ trends: any[]; error?
   return { trends: keywords.map(kw => results[kw]).filter(Boolean), error: lastError || undefined };
 }
 
-async function handleTrend(req: VercelRequest, res: VercelResponse) {
+async function handleTrend(req: VercelRequest, res: VercelResponse, isAdmin = false) {
   const raw = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
   if (!raw) return res.status(400).json({ error: "keyword가 필요합니다." });
   if (!NAVER_DATALAB_CLIENT_ID || !NAVER_DATALAB_CLIENT_SECRET) {
+    console.error("[데이터랩] 키 미설정 — NAVER_DATALAB_CLIENT_ID / NAVER_DATALAB_CLIENT_SECRET");
     return res.status(500).json({
-      error: "데이터랩 API 키가 설정되지 않았습니다. Vercel 환경변수에 NAVER_DATALAB_CLIENT_ID, NAVER_DATALAB_CLIENT_SECRET을 등록해주세요.",
+      error: isAdmin
+        ? "데이터랩 키가 설정되지 않았습니다. Vercel 환경변수 NAVER_DATALAB_CLIENT_ID, NAVER_DATALAB_CLIENT_SECRET을 등록해주세요."
+        : "트렌드 기능이 아직 준비되지 않았습니다. 관리자에게 문의해주세요.",
     });
   }
   const keywords = raw.split(",").map(k => k.trim()).filter(Boolean).slice(0, 5);
@@ -2631,7 +2639,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (type === "keywords") return handleKeywords(req, res);
-  if (type === "trend") return handleTrend(req, res);
+  if (type === "trend") return handleTrend(req, res, decoded?.isAdmin === true);
   if (type === "briefing") return handleBriefing(req, res, decoded);
   if (type === "products") return handleProducts(req, res, decoded);
   if (type === "reviews") return handleReviews(req, res, decoded);
