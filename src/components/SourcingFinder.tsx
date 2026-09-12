@@ -730,8 +730,10 @@ export function SourcingFinder() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
+                    {/* 머리글과 본문의 칸 수가 같아야 한다. 예전에 ★ 버튼 칸을
+                        지우면서 본문 td만 빠지고 머리글의 빈 th가 남아, 키워드가
+                        40px짜리 칸에 갇혀 한 글자씩 세로로 쪼개졌다. */}
                     <tr className="border-b border-line text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">
-                      <th className="w-10 px-3 py-2.5" />
                       <th className="px-3 py-2.5 text-left">키워드</th>
                       <th className="px-4 py-2.5 text-right">월간 검색량</th>
                       <th className="hidden px-4 py-2.5 text-right md:table-cell">월평균 클릭</th>
@@ -749,7 +751,7 @@ export function SourcingFinder() {
                           activeKeyword === k.keyword ? 'bg-accent-soft' : 'hover:bg-paper-2'
                         }`}
                       >
-                        <td className="px-3 py-2.5 text-[13px] font-medium text-ink">{k.keyword}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-[13px] font-medium text-ink">{k.keyword}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">
                           <span className="text-[13px] font-semibold text-ink">{k.monthlyVolume.toLocaleString()}</span>
                           <span className="mt-0.5 block text-[11px] text-ink-3">PC {k.monthlyPcVolume.toLocaleString()} · MO {k.monthlyMobileVolume.toLocaleString()}</span>

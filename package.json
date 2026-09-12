@@ -19,6 +19,7 @@
     "@vercel/node": "^3.0.0",
     "@vitejs/plugin-react": "^5.0.4",
     "jsonwebtoken": "^9.0.3",
+    "jszip": "^3.10.2",
     "lucide-react": "^0.546.0",
     "motion": "^13.2.0",
     "papaparse": "^5.5.3",

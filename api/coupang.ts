@@ -1604,10 +1604,17 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
     if (itemsFailed || (!complete && outOfTime(deadline, sum))) break;
   }
 
-  // 쿠폰은 있는데 옵션이 하나도 안 붙으면 조용히 0건으로 끝난다. 그러면 화면에서
-  // "쿠폰이 없다"와 "우리가 옵션 목록을 못 읽는다"가 똑같이 보인다. 구분해서 남긴다.
+  // 쿠폰은 있는데 옵션이 하나도 안 붙는 경우가 있다. 계약 단위로 건 쿠폰이
+  // 그렇고, 그건 고장이 아니라 정상이다.
+  //
+  // 예전에는 이걸 sum.errors에 넣었다. 그 목록이 화면에서 "일부 실패"로
+  // 표시되는 곳이라, 판매자에게는 수집이 잘못된 것처럼 보였다. 실제로는
+  // 아무 문제가 없는데 매번 빨간 문구를 보게 되니, 진짜 실패가 섞여 들어와도
+  // 구분이 안 된다.
+  //
+  // 진단 가치는 서버 로그로 남기고 화면에서는 뺀다.
   if (rows.length === 0 && coupons.length > 0 && !itemsFailed) {
-    sum.errors.push(`쿠폰 설정: 쿠폰 ${coupons.length}건은 받았지만 옵션이 붙은 쿠폰이 없습니다 (계약 단위 쿠폰일 수 있습니다)`);
+    console.info('[쿠팡] 쿠폰에 옵션이 붙지 않았다', { userId, coupons: coupons.length });
   }
 
   if (couponRows.length > 0) {

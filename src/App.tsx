@@ -15,7 +15,7 @@ import { AD_COLLECT_QUERY } from './lib/adCollector';
 import { AskHoonpro } from './components/QA/AskHoonpro';
 import { HomeDashboard } from './components/Home/HomeDashboard';
 import { CoupangDashboard } from './components/Coupang/CoupangDashboard';
-import { Home, FolderOpen, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag, Loader2 } from 'lucide-react';
+import { Home, FolderOpen, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag, Loader2, LayoutTemplate } from 'lucide-react';
 import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 import { fetchBillingStatus, type BillingStatus } from './lib/billing';
 
@@ -32,6 +32,10 @@ const AdminPanel = lazy(() => import('./components/Admin/AdminPanel').then(m => 
 const SubscriptionPage = lazy(() => import('./components/Billing/SubscriptionPage').then(m => ({ default: m.SubscriptionPage })));
 const AdAnalyzer = lazy(() => import('./components/Analyzer/AdAnalyzer').then(m => ({ default: m.AdAnalyzer })));
 const WorksLibrary = lazy(() => import('./components/Works/WorksLibrary').then(m => ({ default: m.WorksLibrary })));
+// 썸네일·상세페이지 제작. 둘이 합쳐 4,400줄이라 반드시 늦게 불러온다.
+// 평소에는 꺼져 있어 아무도 안 받고, 켠 날에만 누른 사람이 받는다.
+const ThumbnailGenerator = lazy(() => import('./components/Thumbnail/ThumbnailGenerator').then(m => ({ default: m.ThumbnailGenerator })));
+const DetailPlanner = lazy(() => import('./components/Detail/DetailPlanner').then(m => ({ default: m.DetailPlanner })));
 
 /** 청크를 받는 동안 보여 줄 것 — 화면이 덜컥 비지 않게 자리를 잡아 둔다 */
 function TabLoading() {
@@ -43,12 +47,14 @@ function TabLoading() {
   );
 }
 
-type Tab = 'home' | 'works' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'coupang' | 'qa' | 'billing' | 'admin';
+type Tab = 'home' | 'works' | 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'coupang' | 'qa' | 'billing' | 'admin';
 
 type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
 
 const TABS: TabDef[] = [
   { id: 'home', label: '홈', icon: Home },
+  { id: 'thumbnail', label: '썸네일 제작', icon: ImageIcon },
+  { id: 'detail', label: '상세페이지 제작', icon: LayoutTemplate },
   { id: 'sourcing', label: '훈프로 소싱AI', icon: TrendingUp },
   { id: 'ranktracker', label: '순위 추적', icon: ListOrdered },
   { id: 'review', label: '리뷰 분석', icon: MessageSquareText },
@@ -60,6 +66,17 @@ const TABS: TabDef[] = [
 
 const TAB_ORDER_KEY = 'hoonpro_tab_order';
 const HIDDEN_TABS_KEY = 'hoonpro_hidden_tabs';
+const IMAGE_ENABLED_KEY = 'hoonpro_image_enabled';
+
+/** 이미지 생성이 켜져 있었나 — 서버 답이 오기 전까지 쓸 마지막 값 */
+const loadCachedImageEnabled = (): boolean => {
+  try {
+    return localStorage.getItem(IMAGE_ENABLED_KEY) === '1';
+  } catch {
+    // 기본은 꺼짐. 잘못 켜서 잠깐 보이는 것보다, 잘못 꺼서 안 보이는 쪽이 낫다.
+    return false;
+  }
+};
 
 const loadCachedHiddenTabs = (): string[] => {
   try {
@@ -118,6 +135,18 @@ export default function App() {
   // 관리자가 숨긴 기능. 캐시로 먼저 그려야 새로고침할 때마다 숨긴 탭이
   // 잠깐 보였다 사라지는 깜빡임이 없다.
   const [hiddenTabs, setHiddenTabs] = useState<string[]>(loadCachedHiddenTabs);
+  /**
+   * 썸네일·상세페이지 제작을 지금 쓸 수 있나.
+   *
+   * 스위치는 [한도 설정]의 '이미지 생성' 하나다. 0이면 서버가 생성을 막고
+   * 여기서 두 탭도 감춘다. 0보다 크면 둘 다 열린다. 스위치를 둘로 두면
+   * 한쪽만 켰을 때 탭은 보이는데 누르면 "제공하지 않습니다"가 뜨거나,
+   * 반대로 쓸 수는 있는데 들어갈 길이 없다.
+   *
+   * 캐시로 먼저 그린다. 새로고침할 때마다 꺼진 탭이 잠깐 보였다 사라지면
+   * 그것대로 눈에 거슬린다.
+   */
+  const [imageEnabled, setImageEnabled] = useState<boolean>(loadCachedImageEnabled);
 
   useEffect(() => {
     (async () => {
@@ -133,13 +162,23 @@ export default function App() {
           setHiddenTabs(data.hiddenTabs.map(String));
           localStorage.setItem(HIDDEN_TABS_KEY, JSON.stringify(data.hiddenTabs));
         }
+        if (typeof data.imageEnabled === 'boolean') {
+          setImageEnabled(data.imageEnabled);
+          localStorage.setItem(IMAGE_ENABLED_KEY, data.imageEnabled ? '1' : '0');
+        }
       } catch { /* 실패 시 기본 순서·표시 유지 */ }
     })();
   }, []);
 
   // 관리자는 숨긴 기능도 볼 수 있어야 한다. 수강생에게 열기 전에 직접
   // 써 보고 판단해야 하므로, 감추는 대신 '숨김' 표시만 붙인다.
-  const isHidden = (id: string) => !user?.isAdmin && hiddenTabs.includes(id);
+  const isHidden = (id: string) => {
+    // 이미지 생성이 꺼져 있으면 만드는 탭 둘은 아무에게도 안 보인다.
+    // 관리자에게도 감춘다 — 켜고 끄는 곳이 [한도 설정] 한 군데라야
+    // "켰는데 왜 안 되지"가 생기지 않는다.
+    if ((id === 'thumbnail' || id === 'detail') && !imageEnabled) return true;
+    return !user?.isAdmin && hiddenTabs.includes(id);
+  };
 
   // 보고 있던 탭이 숨겨지면 빈 화면에 남는다. 홈으로 돌려보낸다.
   useEffect(() => {
@@ -409,6 +448,8 @@ export default function App() {
             // 화면이 덜컥 비지 않게 자리를 잡아 준다.
             <Suspense fallback={<TabLoading />}>
               {shownTab === 'home' && <HomeDashboard onNavigate={(t) => setActiveTab(t as Tab)} hiddenTabs={user.isAdmin ? [] : hiddenTabs} />}
+              {shownTab === 'thumbnail' && <ThumbnailGenerator />}
+              {shownTab === 'detail' && <DetailPlanner />}
               {shownTab === 'sourcing' && <SourcingFinder />}
               {shownTab === 'ranktracker' && <RankTracker />}
               {shownTab === 'review' && <ReviewAnalyzer />}
