@@ -816,6 +816,18 @@ export function SourcingFinder() {
                         const peaks: number[] = Array.isArray(t.peakMonths) ? t.peakMonths : [];
                         const flatDemand = peaks.length === 0 || peaks.length > 4 || (t.seasonality > 0 && t.seasonality < 1.4);
                         const firstPeak = peaks[0] || 0;
+                        // 데이터랩 값은 구간 내 상대지수(최고=100)라 바닥이 0이 아니다.
+                        // 0부터 그린 막대는 모두 비슷한 키가 되어 차이가 안 보인다.
+                        // 그래서 연평균 기준선을 함께 긋고, 가장 높은 달과 낮은 달만
+                        // 숫자를 붙인다. 열두 개 전부에 숫자를 달면 아무도 안 읽는다.
+                        const positives = avg.filter(v => v > 0);
+                        const mean = positives.length ? positives.reduce((a, b) => a + b, 0) / positives.length : 0;
+                        const hiIdx = avg.indexOf(Math.max(...avg));
+                        const loIdx = positives.length ? avg.indexOf(Math.min(...positives)) : -1;
+                        const pctOfMean = (v: number) => (mean > 0 ? Math.round((v / mean) * 100) : 0);
+                        const CHART_H = 96;   // 막대 영역 높이
+                        const BAR_MAX = 76;   // 숫자 라벨 자리를 위로 남긴다
+                        const barH = (v: number) => Math.max((v / maxAvg) * BAR_MAX, v > 0 ? 3 : 1);
                         const prepA = firstPeak ? ((firstPeak - 3 + 12) % 12) + 1 : 0;
                         const prepB = firstPeak ? ((firstPeak - 2 + 12) % 12) + 1 : 0;
                         return (
@@ -828,28 +840,56 @@ export function SourcingFinder() {
                               ) : (
                                 <div className="flex flex-col gap-3 md:flex-row md:items-end md:gap-6">
                                   <div className="flex-1">
-                                    <div className="mb-2 flex items-center gap-2 flex-wrap">
+                                    <div className="mb-1.5 flex items-center gap-2 flex-wrap">
                                       <p className="text-[11px] font-semibold text-ink-2">최근 3년 월별 검색 트렌드 — 네이버 데이터랩</p>
                                       {flatDemand ? (
                                         <span className={`${BADGE_BASE} border-line-strong bg-paper text-ink-2`}>연중 고른 수요</span>
                                       ) : (
                                         <span className={`${BADGE_BASE} border-accent/35 bg-accent-soft text-accent`}>매년 {peaks.join('·')}월 피크</span>
                                       )}
-                                      {t.seasonality >= 1.4 && (
-                                        <span className="text-[11px] text-ink-3">피크월 검색량이 바닥월의 {t.seasonality}배</span>
-                                      )}
                                     </div>
-                                    <div className="flex h-16 items-end gap-1">
+                                    <p className="mb-2.5 text-[11px] leading-relaxed text-ink-3">
+                                      가장 많은 달 <b className="text-ink-2">{hiIdx + 1}월</b> (연평균의 {pctOfMean(avg[hiIdx])}%)
+                                      {loIdx >= 0 && <> · 가장 적은 달 <b className="text-ink-2">{loIdx + 1}월</b> (연평균의 {pctOfMean(avg[loIdx])}%)</>}
+                                      {t.seasonality >= 1.4 && <> · 피크월이 바닥월의 <b className="text-ink-2">{t.seasonality}배</b></>}
+                                    </p>
+                                    <div className="relative flex items-end gap-[3px]" style={{ height: `${CHART_H}px` }}>
+                                      {/* 연평균 기준선 — 이 선을 넘는 달이 성수기다 */}
+                                      {mean > 0 && (
+                                        <div
+                                          className="pointer-events-none absolute inset-x-0 z-0 border-t border-line-strong"
+                                          style={{ bottom: `${barH(mean)}px` }}
+                                        />
+                                      )}
                                       {avg.map((v, i) => (
-                                        <div key={i} className="flex flex-1 flex-col items-center gap-1" title={`${i + 1}월 평균 ${v}`}>
+                                        <div
+                                          key={i}
+                                          className="relative z-10 flex h-full flex-1 flex-col justify-end"
+                                          title={`${i + 1}월 · 상대지수 ${v} · 연평균의 ${pctOfMean(v)}%`}
+                                        >
+                                          {(i === hiIdx || i === loIdx) && (
+                                            <span className="mb-1 text-center text-[9px] leading-none tabular text-ink-2">{Math.round(v)}</span>
+                                          )}
                                           <div
-                                            className={`w-full rounded-t-[3px] ${!flatDemand && peaks.includes(i + 1) ? 'bg-accent' : 'bg-accent/30'}`}
-                                            style={{ height: `${Math.max(v / maxAvg * 52, v > 0 ? 3 : 1)}px` }}
+                                            className={`w-full rounded-t-[4px] ${!flatDemand && peaks.includes(i + 1) ? 'bg-accent' : 'bg-accent/30'}`}
+                                            style={{ height: `${barH(v)}px` }}
                                           />
-                                          <span className={`text-[9px] leading-none ${!flatDemand && peaks.includes(i + 1) ? 'font-semibold text-accent' : 'text-ink-3'}`}>{i + 1}</span>
                                         </div>
                                       ))}
                                     </div>
+                                    <div className="mt-1 flex gap-[3px]">
+                                      {avg.map((_, i) => (
+                                        <span
+                                          key={i}
+                                          className={`flex-1 text-center text-[9px] leading-none ${!flatDemand && peaks.includes(i + 1) ? 'font-semibold text-accent' : 'text-ink-3'}`}
+                                        >
+                                          {i + 1}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <p className="mt-2 text-[10px] leading-relaxed text-ink-3">
+                                      막대는 3년치 월평균 상대지수입니다. 100 = 검색이 가장 많았던 달. 가로선은 연평균입니다.
+                                    </p>
                                   </div>
                                   {!flatDemand && firstPeak > 0 && (
                                     <p className="shrink-0 rounded-control border border-accent-line bg-accent-soft px-3 py-2 text-[12px] font-medium text-accent">
