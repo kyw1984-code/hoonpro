@@ -11,7 +11,7 @@ import { tabDisabledMessage } from "../lib/feature-gate.js";
 import { checkAccess } from "../src/lib/accessGate.js";
 import { runIn, selectIn } from "../src/lib/chunkedIn.js";
 import { parseProductRef, productPageUrl } from "../src/lib/coupangUrl.js";
-import { describeJson, parseReviewJson } from "../src/lib/coupangReview.js";
+import { REVIEW_MAX_PAGES, REVIEW_PAGE_SIZE, describeJson, parseReviewJson, reviewApiUrl } from "../src/lib/coupangReview.js";
 
 export const config = { maxDuration: 60 };
 
@@ -2126,7 +2126,9 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   if (!productId) return res.status(400).json({ error: "상품 URL 또는 상품번호가 필요합니다." });
   if (!BRIGHTDATA_API_TOKEN) return res.status(500).json({ error: "Bright Data API 토큰이 설정되지 않았습니다." });
 
-  const cacheKey = `rv:v1:${productId}`;
+  // v2 — 한 쪽(10건)만 받다가 세 쪽(30건)으로 늘렸다. 옛 항목은 9건짜리라
+  // 그대로 쓰면 늘린 보람이 없다. 키를 바꿔 새로 받게 한다.
+  const cacheKey = `rv:v2:${productId}`;
   const cached = await cacheGet(cacheKey);
   if (cached && cached.ageMs < 7 * 24 * 3600 * 1000) {
     return res.status(200).json({ ...cached.payload, cached: true });
@@ -2155,55 +2157,63 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     }
   }
 
-  // 쿠팡의 새 리뷰 창구를 부른다.
+  // 쿠팡의 새 리뷰 창구를 쪽 단위로 부른다.
   //
   // 예전 주소(/vp/product/reviews)는 HTML 조각을 돌려줬는데 지금은
   // "The api will be deprecated" 한 줄만 온다. 새 주소는 /next-api/review이고
   // JSON이다. 상품 페이지 통째로(919KB)를 받아 긁던 폴백도 뺐다 — 리뷰가
   // 그 안에 없어서 받아져도 0건이었고, 받아지지도 않았다.
   //
-  // 질의 문자열은 브라우저가 실제로 보내는 것과 같은 모양으로 맞춘다.
-  // 빈 ratings·market도 그대로 붙인다. 다르게 보내면 거절될 여지를 남긴다.
-  const reviewApi = `https://www.coupang.com/next-api/review?productId=${productId}`
-    + `&page=1&size=10&sortBy=ORDER_SCORE_ASC&ratingSummary=true&ratings=&market=`;
-  const attempts = [{
-    label: "리뷰API",
-    url: reviewApi,
-    minSize: 100,
-    headers: {
-      // 상품 페이지 안에서만 불리는 주소다. 어디서 왔는지 밝혀야 한다.
-      Referer: productPageUrl(ref),
-      Accept: "application/json, text/plain, */*",
-      "Accept-Language": "ko-KR,ko;q=0.9",
-    } as Record<string, string>,
-  }];
+  // 한 쪽에 10건이라 세 쪽까지 본다. 리뷰가 수백 건인 상품을 9건으로 읽으면
+  // 불만 빈도가 우연에 좌우된다. 쪽마다 유료 호출이 한 번 나가지만 결과는
+  // 7일간 전체 공용으로 캐시되므로, 같은 상품을 여러 사람이 봐도 한 번이다.
+  const headers = {
+    // 상품 페이지 안에서만 불리는 주소다. 어디서 왔는지 밝혀야 한다.
+    Referer: productPageUrl(ref),
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "ko-KR,ko;q=0.9",
+  };
 
-  let reviews: { rating: number; text: string }[] = [];
+  const reviews: { rating: number; text: string }[] = [];
+  const seenText = new Set<string>();
   const diagParts: string[] = [];
   const failLog: { label: string; status?: number; snippet?: string }[] = [];
-  for (const a of attempts) {
-    // 재시도는 한 번만 한다. 상품 페이지를 긁던 시절에 네 번까지 늘려 봤지만
-    // 성공률이 그대로여서 유료 호출만 늘었다. 리뷰 API는 응답이 수십 KB로
-    // 가벼워 통째 페이지보다 훨씬 잘 오므로 한 번이면 충분하다.
+
+  for (let page = 1; page <= REVIEW_MAX_PAGES; page++) {
+    // 첫 쪽만 재시도한다. 첫 쪽이 오면 나머지도 대개 오고, 안 오면 재시도해도
+    // 안 온다 — 상품 페이지를 긁던 시절에 네 번까지 늘려 보고 확인했다.
     const r = await fetchViaUnlocker(
-      a.url, 1, a.minSize,
+      reviewApiUrl(productId, page),
+      page === 1 ? 1 : 0,
+      100,
       { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
-      a.headers,
+      headers,
       3000,
     );
     if (!r.ok) {
-      diagParts.push(`${a.label} 실패: ${r.error}`);
-      failLog.push({ label: a.label, status: r.status, snippet: r.snippet });
-      continue;
+      diagParts.push(`${page}쪽 실패: ${r.error}`);
+      failLog.push({ label: `${page}쪽`, status: r.status, snippet: r.snippet });
+      // 한 쪽이 막히면 뒤 쪽도 막힌다. 여기서 멈춰야 헛돈이 안 나간다.
+      break;
     }
     const got = parseReviewJson(r.html!);
-    diagParts.push(`${a.label}: len=${r.html!.length}, 파싱=${got.length}개`);
-    // 응답은 제대로 받았는데 한 건도 못 뽑았다면 생김새가 바뀐 것이다.
-    // 키 이름과 타입만 남긴다 — 리뷰 본문은 로그에 남기지 않는다.
-    if (got.length === 0) failLog.push({ label: `${a.label}(파싱0)`, status: 200, snippet: describeJson(r.html!) });
-    if (got.length > reviews.length) reviews = got;
-    if (reviews.length >= 3) break;
+    diagParts.push(`${page}쪽: len=${r.html!.length}, 파싱=${got.length}개`);
+    if (got.length === 0) {
+      // 응답은 제대로 받았는데 한 건도 못 뽑았다면 생김새가 바뀐 것이다.
+      // 키 이름과 타입만 남긴다 — 리뷰 본문은 로그에 남기지 않는다.
+      if (page === 1) failLog.push({ label: "1쪽(파싱0)", status: 200, snippet: describeJson(r.html!) });
+      break;
+    }
+    // 쪽이 겹치는 경우가 있다. 같은 글을 두 번 세면 불만 빈도가 부풀려진다.
+    for (const rv of got) {
+      if (seenText.has(rv.text)) continue;
+      seenText.add(rv.text);
+      reviews.push(rv);
+    }
+    // 한 쪽을 다 못 채웠으면 마지막 쪽이다. 더 불러 봐야 빈 응답만 온다.
+    if (got.length < REVIEW_PAGE_SIZE) break;
   }
+
   let diag = diagParts.join(" | ");
   // 응답 본문 조각은 운영자에게만 보여준다. 구독자에게는 읽을 수 없는
   // 글자만 늘어날 뿐이고, 무엇이 막았는지는 운영자가 알아야 할 몫이다.

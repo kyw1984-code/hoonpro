@@ -104,3 +104,20 @@ export function describeJson(raw: string, maxDepth = 4): string {
   };
   return shape(root, 0);
 }
+
+/** 한 쪽에 담기는 리뷰 수. 브라우저가 실제로 쓰는 값이다. */
+export const REVIEW_PAGE_SIZE = 10;
+
+/** 최대 몇 쪽까지 볼 것인가. 쪽마다 유료 호출이 한 번씩 나간다. */
+export const REVIEW_MAX_PAGES = 3;
+
+/**
+ * 리뷰 API 주소.
+ *
+ * 질의 문자열을 브라우저가 실제로 보내는 것과 같은 모양으로 맞춘다. 빈
+ * ratings·market도 그대로 붙인다. 다르게 보내면 거절될 여지를 남긴다.
+ */
+export function reviewApiUrl(productId: string, page = 1, size = REVIEW_PAGE_SIZE): string {
+  return `https://www.coupang.com/next-api/review?productId=${productId}`
+    + `&page=${page}&size=${size}&sortBy=ORDER_SCORE_ASC&ratingSummary=true&ratings=&market=`;
+}

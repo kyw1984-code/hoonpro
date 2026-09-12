@@ -62,3 +62,12 @@ test('describeJson은 키 이름과 타입만 남긴다', () => {
 test('describeJson은 JSON이 아니면 앞부분을 보여준다', () => {
   assert.ok(describeJson('<html>Sorry! Access denied</html>').startsWith('JSON 아님:'));
 });
+
+test('리뷰 API 주소는 쪽과 건수를 반영한다', async () => {
+  const { reviewApiUrl, REVIEW_PAGE_SIZE } = await import('../src/lib/coupangReview.ts');
+  const u = reviewApiUrl('9174862914', 2);
+  assert.ok(u.includes('productId=9174862914'));
+  assert.ok(u.includes(`page=2`) && u.includes(`size=${REVIEW_PAGE_SIZE}`));
+  // 브라우저가 보내는 모양 그대로 — 빈 값도 붙인다
+  assert.ok(u.includes('sortBy=ORDER_SCORE_ASC') && u.includes('ratings=&market='));
+});
