@@ -836,12 +836,12 @@ export function SourcingFinder() {
                               {t.error ? (
                                 <p className="text-[12px] text-critical">{t.error}</p>
                               ) : t.insufficient || avg.length === 0 ? (
-                                <p className="text-[12px] text-ink-3">검색량이 적어 데이터랩 트렌드 데이터가 없는 키워드입니다.</p>
+                                <p className="text-[12px] text-ink-3">검색량이 적어 트렌드 데이터가 없는 키워드입니다.</p>
                               ) : (
                                 <div className="flex flex-col gap-3 md:flex-row md:items-end md:gap-6">
                                   <div className="flex-1">
                                     <div className="mb-1.5 flex items-center gap-2 flex-wrap">
-                                      <p className="text-[11px] font-semibold text-ink-2">최근 3년 월별 검색 트렌드 — 네이버 데이터랩</p>
+                                      <p className="text-[11px] font-semibold text-ink-2">최근 3년 월별 검색 트렌드</p>
                                       {flatDemand ? (
                                         <span className={`${BADGE_BASE} border-line-strong bg-paper text-ink-2`}>연중 고른 수요</span>
                                       ) : (
