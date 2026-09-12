@@ -84,3 +84,16 @@ export function reviewFragmentUrl(ref: ProductRef, size = 30, withItem = true): 
   if (withItem && ref.vendorItemId) q.push(`vendorItemId=${ref.vendorItemId}`);
   return `https://www.coupang.com/vp/product/reviews?${q.join('&')}`;
 }
+
+/**
+ * 모바일 상품 페이지 주소.
+ *
+ * PC 상품 페이지가 비어 돌아올 때 마지막으로 붙잡는 곳이다. 모바일 페이지는
+ * 마크업이 가볍고 봇 차단도 덜해서, 같은 상품인데 한쪽만 열리는 경우가 있다.
+ */
+export function mobileProductUrl(ref: ProductRef): string {
+  const q: string[] = [];
+  if (ref.itemId) q.push(`itemId=${ref.itemId}`);
+  if (ref.vendorItemId) q.push(`vendorItemId=${ref.vendorItemId}`);
+  return `https://m.coupang.com/vm/products/${ref.productId}${q.length ? `?${q.join('&')}` : ''}`;
+}

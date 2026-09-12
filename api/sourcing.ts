@@ -10,7 +10,7 @@ import jwt from "jsonwebtoken";
 import { tabDisabledMessage } from "../lib/feature-gate.js";
 import { checkAccess } from "../src/lib/accessGate.js";
 import { runIn, selectIn } from "../src/lib/chunkedIn.js";
-import { parseProductRef, productPageUrl, reviewFragmentUrl } from "../src/lib/coupangUrl.js";
+import { mobileProductUrl, parseProductRef, productPageUrl, reviewFragmentUrl } from "../src/lib/coupangUrl.js";
 
 export const config = { maxDuration: 60 };
 
@@ -607,8 +607,13 @@ async function fetchViaUnlocker(
   // 쿠팡의 리뷰 조각 엔드포인트는 상품 페이지 안에서만 불리는 주소라,
   // Referer가 없으면 빈 조각을 돌려주는 때가 있다. 필요한 곳에서만 넣는다.
   extraHeaders?: Record<string, string>,
-): Promise<{ ok: boolean; html?: string; error?: string }> {
+  // 실패했을 때 응답 본문을 조금 남긴다. 예전에는 길이만 알려주고 내용은
+  // 버려서, "len=177"만 보고는 쿠팡이 막은 것인지 Bright Data가 거절한 것인지
+  // 구분할 수가 없었다. 화면에는 관리자에게만 보여주고 로그에는 늘 남긴다.
+): Promise<{ ok: boolean; html?: string; error?: string; status?: number; snippet?: string }> {
   let lastError = "Bright Data 호출 실패";
+  let lastStatus: number | undefined;
+  let lastSnippet: string | undefined;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 1500 * attempt));
     try {
@@ -630,13 +635,17 @@ async function fetchViaUnlocker(
 
       if (!res.ok) {
         const body = await res.text().catch(() => "");
+        lastStatus = res.status;
+        lastSnippet = body.slice(0, 300);
         lastError = `Bright Data Unlocker 오류 (HTTP ${res.status}) ${body.slice(0, 300)}`;
         if (res.status >= 500 || res.status === 429) continue; // 일시 오류는 재시도
-        return { ok: false, error: lastError };
+        return { ok: false, error: lastError, status: lastStatus, snippet: lastSnippet };
       }
       const html = await res.text();
       // 빈/불완전 응답은 일시 오류로 간주하고 재시도 (정상 페이지는 수백 KB 이상)
       if (!html || html.length < minSize) {
+        lastStatus = res.status;
+        lastSnippet = (html || "").slice(0, 300);
         lastError = `Bright Data 응답이 비정상적으로 작습니다 (len=${html?.length ?? 0}). 잠시 후 다시 시도해주세요.`;
         continue;
       }
@@ -645,7 +654,7 @@ async function fetchViaUnlocker(
       lastError = e?.message || "Bright Data 호출 실패";
     }
   }
-  return { ok: false, error: lastError };
+  return { ok: false, error: lastError, status: lastStatus, snippet: lastSnippet };
 }
 
 function pick(re: RegExp, s: string): string {
@@ -2192,10 +2201,15 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
           { label: "리뷰조각(5건)", url: reviewFragmentUrl(ref, 5, false), minSize: 500, headers: reviewHeaders },
         ];
   attempts.push({ label: "상품페이지", url: referer, minSize: 20000 });
+  // PC 상품 페이지까지 비어 돌아오면 모바일 쪽을 마지막으로 본다. 마크업이
+  // 가볍고 차단도 덜해서 같은 상품인데 한쪽만 열리는 경우가 있다. 앞에서
+  // 하나라도 리뷰를 받으면 여기까지 오지 않는다.
+  attempts.push({ label: "모바일상품페이지", url: mobileProductUrl(ref), minSize: 5000 });
 
   let reviews: { rating: number; text: string }[] = [];
   const diagParts: string[] = [];
-  for (const a of attempts.slice(0, 3)) {
+  const failLog: { label: string; status?: number; snippet?: string }[] = [];
+  for (const a of attempts) {
     const r = await fetchViaUnlocker(
       a.url, 0, a.minSize,
       { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
@@ -2203,6 +2217,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     );
     if (!r.ok) {
       diagParts.push(`${a.label} 실패: ${r.error}`);
+      failLog.push({ label: a.label, status: r.status, snippet: r.snippet });
       continue;
     }
     const got = parseReviews(r.html!);
@@ -2210,14 +2225,21 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     if (got.length > reviews.length) reviews = got;
     if (reviews.length >= 3) break;
   }
-  const diag = diagParts.join(" | ");
+  let diag = diagParts.join(" | ");
+  // 응답 본문 조각은 운영자에게만 보여준다. 구독자에게는 읽을 수 없는
+  // 글자만 늘어날 뿐이고, 무엇이 막았는지는 운영자가 알아야 할 몫이다.
+  if (decoded?.isAdmin && failLog.length) {
+    diag += " || 응답: " + failLog
+      .map(f => `${f.label}[${f.status ?? "-"}] ${JSON.stringify(f.snippet ?? "").slice(0, 200)}`)
+      .join(" ; ");
+  }
 
   if (reviews.length === 0) {
     // 유료 호출을 다 쓰고도 아무것도 못 받았다. 센 것을 되돌린다.
     await refundQuota(decoded?.userId, "reviews");
     // 예전에는 실패를 아무 데도 남기지 않아, 나중에 원인을 볼 수가 없었다.
     // 주소와 길이만 남긴다 — 리뷰 본문은 남기지 않는다.
-    console.error("[리뷰] 수집 실패", { productId, hasItemId: Boolean(ref.itemId), diag });
+    console.error("[리뷰] 수집 실패", { productId, hasItemId: Boolean(ref.itemId), diag: diagParts.join(" | "), failLog });
     return res.status(502).json({
       error: "리뷰를 수집하지 못했습니다. 리뷰가 아직 없는 상품이거나 쿠팡이 일시적으로 막은 경우입니다. 잠시 후 다시 시도해주세요.",
       diagnostics: diag,
