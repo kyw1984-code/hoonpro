@@ -2179,11 +2179,18 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     "Accept-Language": "ko-KR,ko;q=0.9",
     "X-Requested-With": "XMLHttpRequest",
   };
-  const attempts: { label: string; url: string; minSize: number; headers?: Record<string, string> }[] = [];
-  if (ref.itemId || ref.vendorItemId) {
-    attempts.push({ label: "리뷰조각(옵션)", url: reviewFragmentUrl(ref, 30, true), minSize: 500, headers: reviewHeaders });
-  }
-  attempts.push({ label: "리뷰조각", url: reviewFragmentUrl(ref, 30, false), minSize: 500, headers: reviewHeaders });
+  const attempts: { label: string; url: string; minSize: number; headers?: Record<string, string> }[] =
+    ref.itemId || ref.vendorItemId
+      ? [
+          { label: "리뷰조각(옵션)", url: reviewFragmentUrl(ref, 30, true), minSize: 500, headers: reviewHeaders },
+          { label: "리뷰조각", url: reviewFragmentUrl(ref, 30, false), minSize: 500, headers: reviewHeaders },
+        ]
+      : [
+          { label: "리뷰조각", url: reviewFragmentUrl(ref, 30, false), minSize: 500, headers: reviewHeaders },
+          // 쿠팡이 한 번에 주는 리뷰 수를 제한하는 때가 있다. 상품 페이지가
+          // 스스로 부를 때 쓰는 값(5)으로 한 번 더 물어본다.
+          { label: "리뷰조각(5건)", url: reviewFragmentUrl(ref, 5, false), minSize: 500, headers: reviewHeaders },
+        ];
   attempts.push({ label: "상품페이지", url: referer, minSize: 20000 });
 
   let reviews: { rating: number; text: string }[] = [];

@@ -12,6 +12,7 @@ import { useEffect, useState } from 'react';
 import { Check, Loader2, MessageSquarePlus, X } from 'lucide-react';
 import { getToken } from '../lib/auth';
 import { HOWTO } from '../lib/howto';
+import { ModalPortal } from './ModalPortal';
 
 type Phase =
   | { kind: 'form' }
@@ -71,6 +72,7 @@ export function Feedback({ area }: { area: string }) {
       </button>
 
       {open && (
+        <ModalPortal>
         <div
           className="fixed inset-0 z-[90] flex items-center justify-center bg-ink/50 p-4 backdrop-blur-sm"
           role="dialog"
@@ -177,6 +179,7 @@ export function Feedback({ area }: { area: string }) {
             </div>
           </div>
         </div>
+        </ModalPortal>
       )}
     </>
   );
