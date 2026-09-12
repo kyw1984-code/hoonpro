@@ -358,7 +358,9 @@ export function SourcingFinder() {
     setReviewLoading(true);
     try {
       const res = await fetch(
-        `/api/sourcing?type=reviews&product=${encodeURIComponent(p.productId)}&name=${encodeURIComponent(p.productName.slice(0, 100))}`,
+        // 상품번호만 보내면 서버가 대표 옵션의 리뷰를 찾는다. 검색에서 받은
+        // 주소에는 옵션 번호가 들어 있어, 있으면 그대로 넘긴다.
+        `/api/sourcing?type=reviews&product=${encodeURIComponent(p.productUrl || p.productId)}&name=${encodeURIComponent(p.productName.slice(0, 100))}`,
         { headers: authHeaders() },
       );
       const data = await safeJson(res);

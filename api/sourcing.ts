@@ -10,6 +10,7 @@ import jwt from "jsonwebtoken";
 import { tabDisabledMessage } from "../lib/feature-gate.js";
 import { checkAccess } from "../src/lib/accessGate.js";
 import { runIn, selectIn } from "../src/lib/chunkedIn.js";
+import { parseProductRef, productPageUrl, reviewFragmentUrl } from "../src/lib/coupangUrl.js";
 
 export const config = { maxDuration: 60 };
 
@@ -603,6 +604,9 @@ async function fetchViaUnlocker(
   retries = 2,
   minSize = 20000,
   cost: { userId: string | null; feature: string } = { userId: null, feature: "sourcing-unlocker" },
+  // 쿠팡의 리뷰 조각 엔드포인트는 상품 페이지 안에서만 불리는 주소라,
+  // Referer가 없으면 빈 조각을 돌려주는 때가 있다. 필요한 곳에서만 넣는다.
+  extraHeaders?: Record<string, string>,
 ): Promise<{ ok: boolean; html?: string; error?: string }> {
   let lastError = "Bright Data 호출 실패";
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -614,7 +618,12 @@ async function fetchViaUnlocker(
           Authorization: `Bearer ${BRIGHTDATA_API_TOKEN}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ zone: BRIGHTDATA_UNLOCKER_ZONE, url: targetUrl, format: "raw" }),
+        body: JSON.stringify({
+          zone: BRIGHTDATA_UNLOCKER_ZONE,
+          url: targetUrl,
+          format: "raw",
+          ...(extraHeaders && Object.keys(extraHeaders).length ? { headers: extraHeaders } : {}),
+        }),
       });
       // 응답을 받은 시점에 과금된다 — 재시도도 각각 1건으로 기록한다
       await logCost(cost.userId, cost.feature, "brightdata-unlocker");
@@ -1196,8 +1205,7 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
 
   if (action === "add") {
     const keyword = typeof req.query.keyword === "string" ? req.query.keyword.trim() : "";
-    const urlOrId = typeof req.query.product === "string" ? req.query.product.trim() : "";
-    const productId = /^\d+$/.test(urlOrId) ? urlOrId : (urlOrId.match(/\/vp\/products\/(\d+)/)?.[1] || "");
+    const productId = parseProductRef(req.query.product).productId;
     if (!keyword || !productId) {
       return res.status(400).json({ error: "키워드와 상품 URL(또는 상품번호)이 필요합니다. URL 예: https://www.coupang.com/vp/products/123456" });
     }
@@ -2119,8 +2127,11 @@ ${sample}`;
 }
 
 async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: any) {
-  const raw = typeof req.query.product === "string" ? req.query.product.trim() : "";
-  const productId = /^\d+$/.test(raw) ? raw : (raw.match(/\/vp\/products\/(\d+)/)?.[1] || "");
+  // 검색 결과에서 복사한 긴 주소에는 옵션 번호(itemId·vendorItemId)가 함께 들어 있다.
+  // 예전에는 상품번호만 뽑고 버렸는데, 리뷰 조각 엔드포인트가 옵션 단위라
+  // 옵션 번호가 없으면 빈 조각이 오는 경우가 있다. 준 정보를 그대로 쓴다.
+  const ref = parseProductRef(req.query.product);
+  const productId = ref.productId;
   const productName = typeof req.query.name === "string" ? req.query.name.trim().slice(0, 200) : "상품";
   if (!productId) return res.status(400).json({ error: "상품 URL 또는 상품번호가 필요합니다." });
   if (!BRIGHTDATA_API_TOKEN) return res.status(500).json({ error: "Bright Data API 토큰이 설정되지 않았습니다." });
@@ -2154,33 +2165,56 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     }
   }
 
-  // ① 리뷰 전용 엔드포인트 (HTML 프래그먼트) → ② 상품 페이지 폴백
-  // 함수 제한(60초) 안에 끝나도록 시도 횟수를 최소화한다: ①은 재시도 1회, ②는 재시도 없음
+  // 세 번까지 시도한다. 예전에는 같은 주소를 두 번 부르고(재시도) 상품 페이지를
+  // 한 번 불렀는데, 조각이 정말로 비어 있으면 첫 두 번이 똑같이 비어 돌아와
+  // 유료 호출 한 번을 버렸다. 이제는 세 번이 서로 다른 시도다.
+  //   ① 옵션 번호까지 넣은 리뷰 조각 — 사용자가 긴 주소를 넣었을 때 가장 정확하다
+  //   ② 옵션 번호를 뺀 리뷰 조각 — 옵션이 내려갔거나 조각이 상품 단위일 때
+  //   ③ 상품 페이지 통째로 — 조각 엔드포인트 자체가 막혔을 때
+  // 각 시도는 재시도가 없다. 함수 제한(60초) 안에 끝나야 하고, 세 시도가
+  // 이미 서로에 대한 재시도 구실을 한다.
+  const referer = productPageUrl(ref);
+  const reviewHeaders = {
+    Referer: referer,
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "X-Requested-With": "XMLHttpRequest",
+  };
+  const attempts: { label: string; url: string; minSize: number; headers?: Record<string, string> }[] = [];
+  if (ref.itemId || ref.vendorItemId) {
+    attempts.push({ label: "리뷰조각(옵션)", url: reviewFragmentUrl(ref, 30, true), minSize: 500, headers: reviewHeaders });
+  }
+  attempts.push({ label: "리뷰조각", url: reviewFragmentUrl(ref, 30, false), minSize: 500, headers: reviewHeaders });
+  attempts.push({ label: "상품페이지", url: referer, minSize: 20000 });
+
   let reviews: { rating: number; text: string }[] = [];
-  let diag = "";
-  const reviewUrl = `https://www.coupang.com/vp/product/reviews?productId=${productId}&page=1&size=30&sortBy=ORDER_SCORE_ASC&ratingSummary=true`;
-  const r1 = await fetchViaUnlocker(reviewUrl, 1, 500, { userId: decoded?.userId ?? null, feature: "sourcing-reviews" });
-  if (r1.ok) {
-    reviews = parseReviews(r1.html!);
-    if (reviews.length < 3) diag = `리뷰엔드포인트: htmlLen=${r1.html!.length}, 파싱=${reviews.length}개`;
-  } else {
-    diag = `리뷰엔드포인트 실패: ${r1.error}`;
-  }
-  if (reviews.length < 3) {
-    const r2 = await fetchViaUnlocker(`https://www.coupang.com/vp/products/${productId}`, 0, 20000, { userId: decoded?.userId ?? null, feature: "sourcing-reviews" });
-    if (r2.ok) {
-      const more = parseReviews(r2.html!);
-      if (more.length > reviews.length) reviews = more;
-      diag += ` | 상품페이지: htmlLen=${r2.html!.length}, 파싱=${more.length}개`;
-    } else {
-      diag += ` | 상품페이지 실패: ${r2.error}`;
+  const diagParts: string[] = [];
+  for (const a of attempts.slice(0, 3)) {
+    const r = await fetchViaUnlocker(
+      a.url, 0, a.minSize,
+      { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
+      a.headers,
+    );
+    if (!r.ok) {
+      diagParts.push(`${a.label} 실패: ${r.error}`);
+      continue;
     }
+    const got = parseReviews(r.html!);
+    diagParts.push(`${a.label}: htmlLen=${r.html!.length}, 파싱=${got.length}개`);
+    if (got.length > reviews.length) reviews = got;
+    if (reviews.length >= 3) break;
   }
+  const diag = diagParts.join(" | ");
 
   if (reviews.length === 0) {
-    // 최대 세 번의 유료 호출을 쓰고도 아무것도 못 받았다. 세 것을 되돌린다.
+    // 유료 호출을 다 쓰고도 아무것도 못 받았다. 센 것을 되돌린다.
     await refundQuota(decoded?.userId, "reviews");
-    return res.status(502).json({ error: `리뷰를 수집하지 못했습니다. 잠시 후 다시 시도해주세요.`, diagnostics: diag });
+    // 예전에는 실패를 아무 데도 남기지 않아, 나중에 원인을 볼 수가 없었다.
+    // 주소와 길이만 남긴다 — 리뷰 본문은 남기지 않는다.
+    console.error("[리뷰] 수집 실패", { productId, hasItemId: Boolean(ref.itemId), diag });
+    return res.status(502).json({
+      error: "리뷰를 수집하지 못했습니다. 리뷰가 아직 없는 상품이거나 쿠팡이 일시적으로 막은 경우입니다. 잠시 후 다시 시도해주세요.",
+      diagnostics: diag,
+    });
   }
 
   const summary = await summarizeReviews(productName, reviews, decoded?.userId ?? null);
