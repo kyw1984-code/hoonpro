@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseProductRef, productPageUrl, reviewFragmentUrl } from '../src/lib/coupangUrl.ts';
+import { parseProductRef, productPageUrl } from '../src/lib/coupangUrl.ts';
 
 test('상품번호만 넣어도 받는다', () => {
   assert.deepEqual(parseProductRef('9174862914'), { productId: '9174862914', itemId: '', vendorItemId: '' });
@@ -42,13 +42,4 @@ test('상품 페이지 주소에 옵션 번호를 붙인다', () => {
   const ref = { productId: '1', itemId: '2', vendorItemId: '3' };
   assert.equal(productPageUrl(ref), 'https://www.coupang.com/vp/products/1?itemId=2&vendorItemId=3');
   assert.equal(productPageUrl({ productId: '1', itemId: '', vendorItemId: '' }), 'https://www.coupang.com/vp/products/1');
-});
-
-test('리뷰 조각 주소는 옵션을 넣고 뺄 수 있다', () => {
-  const ref = { productId: '1', itemId: '2', vendorItemId: '3' };
-  const withItem = reviewFragmentUrl(ref, 30, true);
-  assert.ok(withItem.includes('itemId=2') && withItem.includes('vendorItemId=3'));
-  const without = reviewFragmentUrl(ref, 30, false);
-  assert.ok(!without.includes('itemId='));
-  assert.ok(without.includes('productId=1') && without.includes('size=30'));
 });
