@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { clampLimit, DEFAULT_FEATURE_LIMITS } from '../src/lib/featureLimits.js';
+import { clampLimit, DEFAULT_FEATURE_LIMITS, parseLimits } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
@@ -359,7 +359,7 @@ const DEFAULTS = { imageModel: 'gpt-image-2', imageQuality: 'high', aiIntegrated
 // 탭 순서 설정에 허용되는 탭 id (App.tsx TABS와 일치해야 함)
 // App.tsx의 TABS, lib/feature-gate.ts의 FeatureTab과 같은 목록이어야 한다.
 // (coupang이 빠져 있어 쿠팡 탭은 순서를 바꿀 수 없었다 — 추가했다)
-const TAB_IDS = ['home', 'sourcing', 'ranktracker', 'review', 'analyzer', 'coupang', 'qa', 'works'];
+const TAB_IDS = ['home', 'thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'coupang', 'qa', 'works'];
 
 // 사업자 정보 항목 (프론트 src/lib/company.ts CompanyInfo와 일치)
 const COMPANY_KEYS = ['name', 'ceo', 'bizNumber', 'mailOrderNumber', 'address', 'email', 'phone', 'effectiveDate', 'dbRegion'];
@@ -388,11 +388,13 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
     const { data, error } = await supabase
       .from('app_config')
       .select('key, value')
-      .in('key', ['image_model', 'image_quality', 'ai_integrated_text_enabled', 'tab_order', 'hidden_tabs', 'company_info']);
+      .in('key', ['image_model', 'image_quality', 'ai_integrated_text_enabled', 'tab_order', 'hidden_tabs', 'company_info', 'feature_limits']);
 
     if (error) {
       if (isMissingTable(error)) {
-        return res.status(200).json(isAdmin ? { ...DEFAULTS, tabOrder: null, hiddenTabs: [], company: {}, migrated: false } : { tabOrder: null, hiddenTabs: [], company: {} });
+        return res.status(200).json(isAdmin
+          ? { ...DEFAULTS, tabOrder: null, hiddenTabs: [], company: {}, imageEnabled: false, migrated: false }
+          : { tabOrder: null, hiddenTabs: [], company: {}, imageEnabled: false });
       }
       return res.status(500).json({ error: '서버 오류' });
     }
@@ -414,7 +416,19 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
     // 사업자 정보는 법적으로 공개 표기 의무가 있는 값이라 비관리자(푸터·약관 페이지)에도 공개
     const company = parseCompany(map.company_info);
 
-    if (!isAdmin) return res.status(200).json({ tabOrder, hiddenTabs, company });
+    /**
+     * 썸네일·상세페이지 제작을 지금 쓸 수 있는가.
+     *
+     * 스위치를 하나로 둔다. [한도 설정]의 '이미지 생성' 값이 0이면 서버가
+     * 생성을 막고 화면에서도 두 탭이 사라진다. 0보다 크면 둘 다 열린다.
+     *
+     * 탭 숨김과 한도를 따로 두면 스위치가 둘이 된다. 한쪽만 켜면 탭은
+     * 보이는데 누르면 "제공하지 않습니다"가 뜨거나, 반대로 쓸 수는 있는데
+     * 들어갈 길이 없다. 실제로 그 상태였다.
+     */
+    const imageEnabled = parseLimits(map.feature_limits).image !== 0;
+
+    if (!isAdmin) return res.status(200).json({ tabOrder, hiddenTabs, company, imageEnabled });
 
     return res.status(200).json({
       company,
@@ -423,6 +437,7 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
       aiIntegratedTextEnabled: map.ai_integrated_text_enabled === 'true',
       tabOrder,
       hiddenTabs,
+      imageEnabled,
       migrated: true,
     });
   }

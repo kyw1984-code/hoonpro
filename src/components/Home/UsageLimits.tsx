@@ -7,9 +7,8 @@ import { getToken } from '../../lib/auth';
  * 한도는 관리자 화면(app_config.feature_limits)에서 조정하고, 매일 0시(KST)에 초기화된다.
  */
 
-// 내린 기능(image)은 목록에서 뺐다. 쓸 수 없는 기능의 잔여 횟수를 보여 주면
-// "오늘은 되나" 하고 찾아 들어가게 된다.
 const LABEL: Record<string, { name: string; hint: string }> = {
+  image:    { name: '이미지 생성',      hint: '썸네일·상세페이지 이미지 1장당 1회' },
   qa:       { name: '훈프로 코칭AI',    hint: '질문 1건당 1회' },
   sourcing: { name: '소싱AI 상품 수집', hint: '키워드 수집 1회당 1회' },
   reviews:  { name: '리뷰 수집·요약',   hint: '상품 1개당 1회' },
@@ -19,7 +18,9 @@ const LABEL: Record<string, { name: string; hint: string }> = {
   general:  { name: '기타 AI 작업',     hint: '기획안·문구 생성, 이미지 검수 등' },
 };
 
-const ORDER = ['qa', 'sourcing', 'reviews', 'rank', 'analyze', 'inquiry', 'general'];
+// image가 앞이다. 켜 둔 날에는 그 잔여 횟수가 가장 궁금하다.
+// 꺼져 있으면 서버가 목록에서 빼고 내려주므로 여기 있어도 안 보인다.
+const ORDER = ['image', 'qa', 'sourcing', 'reviews', 'rank', 'analyze', 'inquiry', 'general'];
 
 interface FeatureLimit {
   feature: string;
