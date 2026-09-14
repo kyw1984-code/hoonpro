@@ -30,16 +30,19 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
   useEffect(() => {
     linkRef.current?.setAttribute('href', bookmarklet);
   }, [bookmarklet]);
-  const [lastDate, setLastDate] = useState<string | null | undefined>(undefined);
+  // 마지막 날짜만 보여주면 "90일로 받았는데 진짜 90일이 들어왔나"를 알 수가 없다.
+  // 첫 날짜와 실제로 값이 있는 날수를 함께 본다. 기간에 구멍이 있으면 날수가
+  // 기간보다 적게 나오므로 그것도 여기서 드러난다.
+  const [span, setSpan] = useState<{ first: string; last: string; days: number } | null | undefined>(undefined);
 
   useEffect(() => {
     coupangApi
       .adCosts(400)
       .then(r => {
         const dates = r.days.map(d => d.date).sort();
-        setLastDate(dates.length ? dates[dates.length - 1] : null);
+        setSpan(dates.length ? { first: dates[0], last: dates[dates.length - 1], days: dates.length } : null);
       })
-      .catch(() => setLastDate(null));
+      .catch(() => setSpan(null));
   }, []);
 
   const copy = async () => {
@@ -52,11 +55,11 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
     }
   };
 
-  const last = lastDate === undefined
+  const last = span === undefined
     ? '확인 중...'
-    : lastDate === null
+    : span === null
       ? '아직 없음'
-      : `${lastDate}까지 (${sinceText(`${lastDate}T00:00:00+09:00`)})`;
+      : `${span.first} ~ ${span.last} · ${span.days}일 (마지막 ${sinceText(`${span.last}T00:00:00+09:00`)})`;
 
   return (
     <div className="rounded-panel border border-line bg-paper px-5 py-4">
@@ -70,7 +73,7 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
             아래 버튼을 브라우저 <b className="text-ink">즐겨찾기 바에 한 번 끌어다 놓으세요</b>. 이후 광고센터에 들어가서 그 즐겨찾기를
             누르면 최근 {days}일 광고비가 자동으로 들어옵니다. 로그인 정보는 어디에도 저장되지 않습니다.
           </p>
-          <p className="mt-1 text-[11.5px] text-ink-3">광고비 마지막 반영: {last}</p>
+          <p className="mt-1 text-[11.5px] text-ink-3">광고비 들어온 기간: {last}</p>
         </div>
       </div>
 
