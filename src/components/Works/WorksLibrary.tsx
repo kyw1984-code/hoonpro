@@ -6,7 +6,7 @@
  * 리뷰 분석은 여기에 새로 쌓인다 — 예전에는 화면을 닫으면 사라졌다.
  */
 import { useEffect, useState } from 'react';
-import { FolderOpen, FileText, Image as ImageIcon, Loader2, RefreshCw, X, Copy, Download, MessageSquareText, TrendingUp, ExternalLink } from 'lucide-react';
+import { FolderOpen, FileText, Image as ImageIcon, Loader2, RefreshCw, X, Copy, Download, MessageSquareText, TrendingUp, ExternalLink, BarChart3, ArrowRight } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { ReviewSummaryView } from '../ReviewAnalyzer';
 
@@ -16,7 +16,23 @@ const KIND_META: Record<string, { label: string; badge: string; Icon: typeof Fil
   'detail-plan': { label: '상세페이지 기획안', badge: 'Detail Plan', Icon: FileText },
   review: { label: '리뷰 분석', badge: '리뷰 분석AI', Icon: MessageSquareText },
   sourcing: { label: '소싱 검색', badge: '소싱AI', Icon: TrendingUp },
+  'ad-report': { label: '광고 분석', badge: '광고분석AI', Icon: BarChart3 },
 };
+
+/**
+ * 섹션 탭.
+ *
+ * 저장한 것이 한 줄로 섞여 나오면 열 개만 넘어도 찾기 어렵다. 어느 기능에서
+ * 나온 결과인지로 나눈다. 담긴 것이 없는 섹션은 탭을 띄우지 않는다 — 눌러도
+ * 빈 화면인 탭은 없느니만 못하다.
+ */
+const SECTIONS: { key: string; label: string; kinds: string[] }[] = [
+  { key: 'all', label: '전체', kinds: [] },
+  { key: 'sourcing', label: '소싱AI', kinds: ['sourcing'] },
+  { key: 'review', label: '리뷰 분석AI', kinds: ['review'] },
+  { key: 'ad-report', label: '광고분석AI', kinds: ['ad-report'] },
+  { key: 'legacy', label: '기획안·썸네일', kinds: ['detail-plan', 'thumbnail'] },
+];
 const metaOf = (kind: string) => KIND_META[kind] ?? KIND_META['detail-plan'];
 
 const authHeaders = (): Record<string, string> => {
@@ -101,8 +117,9 @@ function SourcingSavedView({ payload }: { payload: any }) {
   );
 }
 
-export function WorksLibrary() {
+export function WorksLibrary({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const [works, setWorks] = useState<any[] | null>(null);
+  const [section, setSection] = useState<string>('all');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewer, setViewer] = useState<any | null>(null);
@@ -112,10 +129,33 @@ export function WorksLibrary() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/works?action=list', { headers: authHeaders() });
-      const data = await res.json();
-      if (!res.ok || data.error) { setWorks([]); setError(data.error || '조회 실패'); }
-      else setWorks(data.works || []);
+      // 광고 분석 저장본은 ad_reports에 따로 있다. 비교 기능이 그 테이블에
+      // 묶여 있어 옮기지 않고, 여기서는 읽어서 함께 보여주기만 한다.
+      const [wRes, rRes] = await Promise.all([
+        fetch('/api/works?action=list', { headers: authHeaders() }),
+        fetch('/api/usage?action=report-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ action: 'report-list' }),
+        }).catch(() => null),
+      ]);
+      const data = await wRes.json();
+      if (!wRes.ok || data.error) { setWorks([]); setError(data.error || '조회 실패'); return; }
+
+      const reports = rRes && rRes.ok ? ((await rRes.json()).reports ?? []) : [];
+      const asWork = reports.map((r: any) => ({
+        id: `ad-${r.id}`,
+        reportId: r.id,
+        kind: 'ad-report',
+        title: r.summary?.label
+          || (r.summary?.from && r.summary?.to ? `${r.summary.from} ~ ${r.summary.to}` : '광고 분석'),
+        payload: r.summary ?? {},
+        rowCount: r.row_count ?? 0,
+        created_at: r.created_at,
+      }));
+
+      setWorks([...(data.works || []), ...asWork]
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()));
     } catch (e: any) {
       setWorks([]);
       setError(e.message);
@@ -126,15 +166,31 @@ export function WorksLibrary() {
 
   useEffect(() => { load(); }, []);
 
-  const remove = async (id: number) => {
+  const remove = async (item: any) => {
     if (!confirm('이 항목을 보관함에서 삭제할까요?')) return;
-    await fetch('/api/works?action=delete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ id }),
-    }).catch(() => {});
+    // 광고 분석은 ad_reports에 있으므로 지우는 창구도 다르다
+    if (item.kind === 'ad-report') {
+      await fetch('/api/usage?action=report-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ action: 'report-delete', id: item.reportId }),
+      }).catch(() => {});
+    } else {
+      await fetch('/api/works?action=delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ id: item.id }),
+      }).catch(() => {});
+    }
     setViewer(null);
     load();
+  };
+
+  /** 광고 분석은 여기서 그리지 않고 광고분석AI로 보낸다 — 비교·재계산이 거기 있다 */
+  const openInAnalyzer = (item: any) => {
+    try { sessionStorage.setItem('hoonpro_open_ad_report', String(item.reportId)); } catch { /* 무시 */ }
+    setViewer(null);
+    onNavigate?.('analyzer');
   };
 
   const copyPlanText = async (text: string) => {
@@ -144,6 +200,9 @@ export function WorksLibrary() {
       setTimeout(() => setCopied(false), 2000);
     } catch { /* 무시 */ }
   };
+
+  const kinds = SECTIONS.find(x => x.key === section)?.kinds ?? [];
+  const shown = (works ?? []).filter((w: any) => section === 'all' || kinds.includes(w.kind));
 
   const fmtDate = (s: string) => {
     const d = new Date(s);
@@ -165,21 +224,46 @@ export function WorksLibrary() {
           저장해 두신 결과가 모입니다. 각 화면에서 [내 작업에 저장]을 누르면 여기 쌓입니다.
         </p>
         {error && <p className="mt-2 text-[12px] text-critical">{error}</p>}
+
+        {works && works.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-1.5">
+            {SECTIONS.filter(sec => sec.key === 'all' || works.some((w: any) => sec.kinds.includes(w.kind))).map(sec => {
+              const n = sec.key === 'all' ? works.length : works.filter((w: any) => sec.kinds.includes(w.kind)).length;
+              return (
+                <button
+                  key={sec.key}
+                  onClick={() => setSection(sec.key)}
+                  className={`rounded-control border px-3 py-1.5 text-[12.5px] font-semibold transition-colors ${
+                    section === sec.key
+                      ? 'border-accent-line bg-accent-soft text-accent'
+                      : 'border-line text-ink-2 hover:border-line-strong hover:text-ink'
+                  }`}
+                >
+                  {sec.label} <span className="tabular-nums opacity-70">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {works === null || (loading && works.length === 0) ? (
         <div className="flex items-center justify-center gap-2 rounded-panel border border-line bg-paper py-14 text-ink-3">
           <Loader2 className="h-5 w-5 animate-spin" /><span className="text-[13px]">불러오는 중...</span>
         </div>
-      ) : works.length === 0 ? (
+      ) : shown.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">
           <FolderOpen className="mb-4 h-12 w-12 opacity-20" />
-          <p className="text-sm font-semibold">저장된 작업이 없습니다</p>
-          <p className="mt-1.5 text-[12px]">리뷰 분석AI에서 분석한 뒤 [내 작업에 저장]을 누르면 여기 모입니다</p>
+          <p className="text-sm font-semibold">
+            {works.length === 0 ? '저장된 작업이 없습니다' : '이 섹션에는 저장된 것이 없습니다'}
+          </p>
+          <p className="mt-1.5 text-[12px]">
+            소싱AI·리뷰 분석AI에서 [내 작업에 저장], 광고분석AI에서 [현재 분석 저장]을 누르면 여기 모입니다
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-          {works.map((w: any) => (
+          {shown.map((w: any) => (
             <div key={w.id} className="group overflow-hidden rounded-card border border-line bg-paper">
               {w.kind === 'thumbnail' && w.payload?.url ? (
                 <button onClick={() => setViewer(w)} className="block aspect-square w-full overflow-hidden bg-paper-2">
@@ -194,6 +278,11 @@ export function WorksLibrary() {
                   )}
                   {w.kind === 'sourcing' && (
                     <span className="text-center text-[10.5px] leading-snug text-ink-3">상품 {(w.payload?.products?.length ?? 0)}개</span>
+                  )}
+                  {w.kind === 'ad-report' && (
+                    <span className="text-center text-[10.5px] leading-snug text-ink-3">
+                      ROAS {Number(w.payload?.roasPct ?? 0).toFixed(0)}% · 광고비 {Number(w.payload?.totalCost ?? 0).toLocaleString()}원
+                    </span>
                   )}
                 </button>
               )}
@@ -240,7 +329,7 @@ export function WorksLibrary() {
                     <Copy className="h-3.5 w-3.5" />{copied ? '복사됨 ✓' : '전체 복사'}
                   </button>
                 )}
-                <button onClick={() => remove(viewer.id)}
+                <button onClick={() => remove(viewer)}
                   className="rounded-control border border-line px-2.5 py-1.5 text-[12px] font-semibold text-critical hover:border-critical/40">
                   삭제
                 </button>
@@ -250,7 +339,42 @@ export function WorksLibrary() {
               </div>
             </div>
             <div className="overflow-y-auto p-6">
-              {viewer.kind === 'review' ? (
+              {viewer.kind === 'ad-report' ? (
+                <div className="flex flex-col gap-4">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {[
+                      { k: 'ROAS', v: `${Number(viewer.payload?.roasPct ?? 0).toFixed(0)}%` },
+                      { k: '광고비', v: `${Number(viewer.payload?.totalCost ?? 0).toLocaleString()}원` },
+                      { k: '매출', v: `${Number(viewer.payload?.totalRevenue ?? 0).toLocaleString()}원` },
+                      {
+                        k: '실질 순이익',
+                        v: viewer.payload?.totalProfit === null || viewer.payload?.totalProfit === undefined
+                          ? '—' : `${Number(viewer.payload.totalProfit).toLocaleString()}원`,
+                      },
+                    ].map(c => (
+                      <div key={c.k} className="rounded-card border border-line bg-paper-2 p-3">
+                        <p className="text-[10.5px] font-semibold uppercase tracking-wider text-ink-3">{c.k}</p>
+                        <p className="mt-0.5 text-[16px] font-semibold tabular-nums text-ink">{c.v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {viewer.rowCount > 0 ? (
+                    <button
+                      onClick={() => openInAnalyzer(viewer)}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-control bg-accent px-4 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90"
+                    >
+                      광고분석AI에서 열기 <ArrowRight className="h-4 w-4" />
+                    </button>
+                  ) : (
+                    <p className="text-[12.5px] text-ink-3">
+                      요약만 저장된 옛 기록이라 본문을 열 수 없습니다. 비교 기준으로는 그대로 쓰입니다.
+                    </p>
+                  )}
+                  <p className="text-[11px] text-ink-3">
+                    키워드별 판정과 제외 후보는 광고분석AI에서 봅니다 — 지난 보고서와의 비교도 그쪽에 있습니다.
+                  </p>
+                </div>
+              ) : viewer.kind === 'review' ? (
                 <ReviewSummaryView data={viewer.payload} />
               ) : viewer.kind === 'sourcing' ? (
                 <SourcingSavedView payload={viewer.payload} />

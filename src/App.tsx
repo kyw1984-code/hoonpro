@@ -455,7 +455,7 @@ export default function App() {
               {shownTab === 'review' && <ReviewAnalyzer />}
               {shownTab === 'analyzer' && <AdAnalyzer />}
               {shownTab === 'coupang' && <CoupangDashboard />}
-              {shownTab === 'works' && <WorksLibrary />}
+              {shownTab === 'works' && <WorksLibrary onNavigate={(t) => setActiveTab(t as Tab)} />}
               {shownTab === 'qa' && qaVisible && <AskHoonpro />}
               {activeTab === 'billing' && <SubscriptionPage />}
               {activeTab === 'admin' && user.isAdmin && <AdminPanel />}
