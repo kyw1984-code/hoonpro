@@ -40,12 +40,18 @@ export interface BillingStatus {
   plan: Plan | null;   // 현재 구독 중인 플랜
   subscription: SubscriptionInfo | null;
   payments: PaymentRow[];
+  /** 친구 추천으로 쌓인 미사용 보상 — 다음 결제에 한 건씩 적용된다 */
+  referralRewards?: { pending: number };
+  /** 기능별 하루 사용 한도 (0 = 내린 기능, 음수 = 무제한) */
+  featureLimits?: Record<string, number>;
 }
 
 export interface CouponPreview {
   valid: boolean;
-  type: 'free_period' | 'percent' | 'amount';
+  type: 'free_period' | 'percent' | 'amount' | 'amount_monthly';
   value: number;
+  /** 무료 이용 일수 (0이면 바로 결제) */
+  trialDays?: number;
   firstAmount: number;
   discount: number;
   description: string;

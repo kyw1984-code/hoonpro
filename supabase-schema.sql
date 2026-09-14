@@ -229,10 +229,13 @@ alter table payments enable row level security;
 create table if not exists coupons (
   id uuid default gen_random_uuid() primary key,
   code text unique not null,
-  -- free_period: value=무료 일수 / percent: value=% / amount: value=원
-  type text not null check (type in ('free_period', 'percent', 'amount')),
+  -- free_period: value=무료 일수(옛 방식) / percent: value=% / amount: value=원
+  -- amount_monthly: value=월 기준 원 (연간 결제에는 ×12) — 플랜이 달라도 같은 혜택이 되게
+  type text not null check (type in ('free_period', 'percent', 'amount', 'amount_monthly')),
   value int not null,
   duration_cycles int default 1, -- 할인형만: 적용 회차 수 (null = 계속)
+  -- 무료 이용 일수. 유형이 아니라 칸으로 둬야 "30일 무료 + 이후 매달 할인"이 된다
+  trial_days int not null default 0,
   max_redemptions int,           -- null = 무제한
   redeemed_count int default 0,
   expires_at timestamptz,
@@ -258,6 +261,31 @@ create unique index if not exists idx_redemption_ci
   on coupon_redemptions(coupon_id, ci) where ci is not null;
 
 alter table coupon_redemptions enable row level security;
+
+-- 친구 추천 양방향 보상 — 친구가 결제를 마치면 추천인의 다음 결제도 깎아준다.
+-- 구독 행의 coupon_id는 한 칸뿐이라 여기에 얹으면 친구가 쓴 쿠폰이 지워진다.
+-- 별도 줄로 쌓아 두고 결제할 때 오래된 것부터 하나씩 쓴다.
+--
+-- 보상은 비율이 아니라 금액이다. 비율로 두면 연간 구독자(357,600원)를 추천한
+-- 사람에게 35,760원이 나가고, 월간 추천인(3,980원)과 같은 '10%'라는 말로
+-- 열 배가 갈린다. 적립 시점의 월간 정가 10%로 고정한다.
+create table if not exists referral_rewards (
+  id uuid default gen_random_uuid() primary key,
+  referrer_id uuid not null references users(id) on delete cascade,
+  referred_user_id uuid not null references users(id) on delete cascade,
+  amount int not null default 0,   -- 다음 결제에서 깎을 공급가액(원)
+  percent int,                     -- (옛 방식) 비율 보상
+  granted_at timestamptz default now(),
+  consumed_at timestamptz,
+  consumed_order_id text,
+  -- 친구 한 명당 한 번. 재구독으로 보상이 반복 지급되는 것을 막는다
+  unique (referred_user_id)
+);
+
+create index if not exists idx_referral_rewards_pending
+  on referral_rewards(referrer_id, granted_at) where consumed_at is null;
+
+alter table referral_rewards enable row level security;
 
 -- users 확장 — 본인인증(PASS) 결과
 alter table users add column if not exists ci text;

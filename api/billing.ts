@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { isOwnReferral, referralNote } from '../src/lib/referral.js';
+import { isOwnReferral, referralNote, referrerIdFromNote } from '../src/lib/referral.js';
+import { applyDiscounts, trialDaysOf, referralRewardAmount } from '../src/lib/coupon.js';
+import { parseLimits } from '../src/lib/featureLimits.js';
 import { withVat } from '../src/lib/vat.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
@@ -31,6 +33,9 @@ const MAX_FAIL = 3;
 const CANCEL_REASONS = ['price', 'not-using', 'missing-feature', 'quality', 'temporary', 'other'];
 
 // 청구 주기 — 월간 1개월 / 연간 12개월, 일할 환불 기준일도 주기에 따름
+/** 친구 추천 보상 — 추천인이 다음 결제에서 받는 할인율 (친구가 받는 것과 같다) */
+const REFERRAL_REWARD_PERCENT = 10;
+
 function planMonths(plan: { interval?: string }): number {
   return plan?.interval === 'year' ? 12 : 1;
 }
@@ -181,6 +186,8 @@ interface CouponRow {
   type: 'free_period' | 'percent' | 'amount';
   value: number;
   duration_cycles: number | null;
+  /** 무료 이용 일수 (0 = 없음). 할인과 함께 줄 수 있다 */
+  trial_days?: number | null;
   max_redemptions: number | null;
   redeemed_count: number;
   expires_at: string | null;
@@ -215,21 +222,85 @@ async function checkCoupon(coupon: CouponRow | null, userId: string, ci: string 
   return null;
 }
 
-function couponPrice(coupon: CouponRow | null, price: number): { amount: number; discount: number } {
-  if (!coupon) return { amount: price, discount: 0 };
-  // 토스 최소 결제 금액(100원) 밑으로 내려가지 않게 할인 상한을 둔다
-  // (0원 시작은 할인 쿠폰이 아니라 무료 기간 쿠폰으로 발급)
-  const maxDiscount = Math.max(0, price - 100);
-  if (coupon.type === 'percent') {
-    const discount = Math.min(maxDiscount, Math.floor((price * coupon.value) / 100));
-    return { amount: price - discount, discount };
-  }
-  if (coupon.type === 'amount') {
-    const discount = Math.min(maxDiscount, coupon.value);
-    return { amount: price - discount, discount };
-  }
-  return { amount: price, discount: 0 }; // free_period는 결제 없이 무료 기간 부여
+/** 월간 플랜 정가 (공급가). 추천 보상액의 기준이다 */
+async function monthlyListPrice(): Promise<number> {
+  const { data } = await supabase
+    .from('plans').select('price').eq('interval', 'month').eq('active', true)
+    .order('price', { ascending: true }).limit(1);
+  return data && data.length > 0 ? Number(data[0].price) : 0;
 }
+
+/** 이 사람에게 쌓여 있는 추천 보상 중 가장 오래된 것 하나 */
+async function pendingReferralReward(userId: string): Promise<{ id: string; amount: number } | null> {
+  const { data } = await supabase
+    .from('referral_rewards')
+    .select('id, amount')
+    .eq('referrer_id', userId)
+    .is('consumed_at', null)
+    .order('granted_at', { ascending: true })
+    .limit(1);
+  return data && data.length > 0 ? { id: data[0].id, amount: Number(data[0].amount) || 0 } : null;
+}
+
+/**
+ * 친구가 추천 코드로 결제를 마쳤다 — 추천인에게도 같은 비율의 할인을 얹어 둔다.
+ *
+ * 여기서 실패해도 친구의 결제를 되돌리지 않는다. 돈은 이미 정상적으로
+ * 받았고, 보상을 못 준 것은 사람이 나중에 채워 줄 수 있는 문제다.
+ * 대신 조용히 넘어가지 않고 관리자 화면에 남긴다.
+ */
+async function grantReferralReward(coupon: CouponRow | null, referredUserId: string): Promise<void> {
+  const referrerId = referrerIdFromNote(coupon?.note);
+  if (!referrerId || !coupon) return;
+  if (referrerId === referredUserId) return; // 자기 코드는 checkCoupon이 이미 막지만 한 번 더
+
+  // 보상액은 추천인이 어떤 플랜이든 같다 — 월간 정가의 10%로 고정한다.
+  // 비율로 두면 연간 추천인에게 35,760원이 나가고, 같은 '10%'라는 말로
+  // 월간 추천인(3,980원)과 열 배가 갈린다.
+  const amount = referralRewardAmount(await monthlyListPrice(), REFERRAL_REWARD_PERCENT);
+  if (amount <= 0) {
+    await logSystemError('친구추천', '월간 플랜 정가를 읽지 못해 추천 보상을 적립하지 못했습니다.', {
+      userId: referrerId, severity: 'warn',
+    });
+    return;
+  }
+
+  // unique(referred_user_id)가 재구독으로 보상이 반복 지급되는 것을 막는다
+  const { error } = await supabase.from('referral_rewards').insert({
+    referrer_id: referrerId,
+    referred_user_id: referredUserId,
+    amount,
+  });
+  if (error) {
+    if (error.code === '23505') return; // 이미 지급됨
+    await logSystemError('친구추천', `추천 보상 적립에 실패했습니다: ${error.message}`, {
+      userId: referrerId, severity: 'warn',
+    });
+    return;
+  }
+
+  const { data: referrer } = await supabase
+    .from('users').select('email, name').eq('id', referrerId).maybeSingle();
+  if (!referrer?.email) return;
+  const saving = withVat(amount).total;
+  await sendEmail(referrer.email, `[훈프로] 친구 추천 보상이 적립됐습니다`, wrapEmail(
+    '추천 보상이 적립됐습니다',
+    `<p>${referrer.name ?? ''}님이 공유하신 추천 코드로 새 구독자가 등록했습니다. 감사합니다.</p>` +
+    `<p>다음 결제에서 <b style="color:#e8ecf5;">${won(saving)}</b>이 자동으로 할인됩니다. (부가세 포함)</p>` +
+    `<p style="color:#b9c2d8;font-size:13px;">여러 명을 추천하셨다면 결제할 때마다 한 건씩 차례로 적용됩니다.</p>` +
+    emailButton('구독 관리 열기')));
+}
+
+/** 보상을 썼다고 표시한다. 이미 쓴 줄은 건드리지 않는다 (같은 보상의 중복 사용 방지) */
+async function consumeReferralReward(rewardId: string, orderId: string): Promise<void> {
+  await supabase
+    .from('referral_rewards')
+    .update({ consumed_at: new Date().toISOString(), consumed_order_id: orderId })
+    .eq('id', rewardId)
+    .is('consumed_at', null);
+}
+
+// ── 시스템 오류 로그 ──────────────────────────────────────
 
 /**
  * 서버 오류를 관리자 화면에 남긴다.
@@ -354,7 +425,13 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
     const { data } = await supabase.from('coupons').select('*').eq('id', sub.coupon_id).maybeSingle();
     if (data && data.type !== 'free_period') coupon = data as CouponRow;
   }
-  const { amount: supplyAmount, discount } = couponPrice(coupon, plan.price);
+  // 쌓여 있는 친구 추천 보상이 있으면 이번 결제에 한 건 쓴다. 여러 명을
+  // 추천했으면 한 번에 몰아 깎지 않고 결제할 때마다 하나씩 쓴다 — 10%를
+  // 세 번 받는 쪽이 30%를 한 번 받는 것보다 오래 남는다.
+  const reward = await pendingReferralReward(sub.user_id);
+  const { amount: supplyAmount, discount } = applyDiscounts(
+    plan.price, coupon, planMonths(plan), reward?.amount ?? 0,
+  );
   // 요금표 가격은 공급가액이다. 실제로 카드에 청구되는 금액은 세액을 더한 값이다.
   const { supply, vat, total: amount } = withVat(supplyAmount);
   const orderId = newOrderId();
@@ -402,6 +479,8 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
 
   const today = kstToday();
   if (result.ok) {
+    // 결제가 된 뒤에 소진한다. 먼저 지우면 결제가 실패했을 때 보상만 사라진다.
+    if (reward) await consumeReferralReward(reward.id, orderId);
     const nextBilling = addMonths(today, planMonths(plan));
     await supabase.from('subscriptions').update({
       status: 'active',
@@ -523,16 +602,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // ── 사용자 액션 ───────────────────────────────────────────
 
 async function getStatus(user: any, res: VercelResponse) {
-  const [{ data: sub }, { data: planRows }, { data: cfg }] = await Promise.all([
+  const [{ data: sub }, { data: planRows }, { data: cfg }, { data: limitCfg }] = await Promise.all([
     supabase.from('subscriptions').select('*').eq('user_id', user.userId).maybeSingle(),
     supabase.from('plans').select('*').eq('active', true).order('price', { ascending: false }),
     supabase.from('app_config').select('value').eq('key', 'billing_enforced').maybeSingle(),
+    // 기능 비교표의 '하루 N회'는 실제 한도를 그대로 보여준다. 화면에 숫자를
+    // 따로 적어 두면 관리자가 한도를 바꿔도 안내만 옛날 값으로 남는다.
+    supabase.from('app_config').select('value').eq('key', 'feature_limits').maybeSingle(),
   ]);
   const plans = (planRows ?? []).map(p => ({
     id: p.id, name: p.name, price: p.price, interval: p.interval ?? 'month',
     chargedPrice: withVat(p.price).total, vat: withVat(p.price).vat,
   }));
   const plan = plans.find(p => p.id === sub?.plan_id) ?? null;
+
+  const { count: rewardCount } = await supabase
+    .from('referral_rewards')
+    .select('id', { count: 'exact', head: true })
+    .eq('referrer_id', user.userId)
+    .is('consumed_at', null);
 
   let payments: any[] = [];
   if (sub) {
@@ -558,6 +646,8 @@ async function getStatus(user: any, res: VercelResponse) {
       failCount: sub.fail_count,
     } : null,
     payments,
+    referralRewards: { pending: rewardCount ?? 0 },
+    featureLimits: parseLimits(limitCfg?.value),
   });
 }
 
@@ -578,20 +668,31 @@ async function couponValidate(user: any, req: VercelRequest, res: VercelResponse
 
   const c = coupon as CouponRow;
   const intervalLabel = plan.interval === 'year' ? '연' : '월';
-  const { amount: supplyAmount, discount } = couponPrice(c, plan.price);
+  const months = plan.interval === 'year' ? 12 : 1;
+  const trialDays = trialDaysOf(c);
+  const { amount: supplyAmount, discount } = applyDiscounts(plan.price, c, months);
   const charged = withVat(supplyAmount);
   const planCharged = withVat(plan.price);
+
+  // 무료 기간과 할인이 함께 있는 쿠폰이 있다. 한쪽만 적으면 사용자는
+  // 무료가 끝난 뒤 정가가 빠지는 줄 알고, 실제로는 할인된 금액이 빠진다.
+  const afterTrial = discount > 0
+    ? `${won(charged.total)}/${intervalLabel}${c.duration_cycles === null ? '' : ` (첫 ${c.duration_cycles}회)`}`
+    : `${won(planCharged.total)}/${intervalLabel}`;
+  const description = trialDays > 0
+    ? `${trialDays}일 무료 이용 후 ${afterTrial} 자동결제 (부가세 포함)`
+    : `${c.duration_cycles === null ? '매' : `첫 ${c.duration_cycles}회`} 결제 ${won(charged.total)} (${won(discount)} 할인 · 부가세 포함)`;
+
   return res.status(200).json({
     valid: true,
     type: c.type,
     value: c.value,
     durationCycles: c.duration_cycles,
+    trialDays,
     // 화면에 보이는 숫자는 실제로 카드에 찍히는 금액이어야 한다
-    firstAmount: c.type === 'free_period' ? 0 : charged.total,
+    firstAmount: trialDays > 0 ? 0 : charged.total,
     discount,
-    description: c.type === 'free_period'
-      ? `${c.value}일 무료 이용 후 ${won(planCharged.total)}/${intervalLabel} 자동결제 (부가세 포함)`
-      : `첫 ${c.duration_cycles === null ? '매' : c.duration_cycles + '회'} 결제 ${won(charged.total)} (${won(discount)} 할인 · 부가세 포함)`,
+    description,
   });
 }
 
@@ -625,9 +726,16 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
   const billingKeyEnc = encryptBillingKey(billingKey);
 
   const today = kstToday();
-  const isTrial = coupon?.type === 'free_period';
-  const periodEnd = isTrial ? addDays(today, coupon!.value) : addMonths(today, planMonths(plan));
-  const { amount: supplyAmount, discount } = couponPrice(coupon, plan.price);
+  const months = planMonths(plan);
+  // 무료 기간은 이제 유형이 아니라 칸이다 — "30일 무료 + 이후 매달 할인"이
+  // 한 장의 쿠폰으로 가능하다. 옛 free_period 쿠폰도 같은 함수가 읽는다.
+  const trialDays = trialDaysOf(coupon);
+  const isTrial = trialDays > 0;
+  const periodEnd = isTrial ? addDays(today, trialDays) : addMonths(today, months);
+
+  // 구독 전에 친구를 추천해 둔 사람도 있다. 첫 결제부터 보상을 쓴다.
+  const reward = isTrial ? null : await pendingReferralReward(user.userId);
+  const { amount: supplyAmount, discount } = applyDiscounts(plan.price, coupon, months, reward?.amount ?? 0);
   const { supply, vat, total: amount } = withVat(supplyAmount);
 
   const subFields = {
@@ -638,9 +746,11 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
     customer_key: customerKey,
     card_summary: cardSummary,
     coupon_id: coupon?.id ?? null,
-    // 무료 기간 쿠폰은 여기서 소진 / 할인 쿠폰은 첫 결제에 1회 적용 후 잔여 회차 기록
-    coupon_remaining_cycles: coupon && !isTrial
-      ? (coupon.duration_cycles === null ? null : Math.max(0, coupon.duration_cycles - 1))
+    // 할인 쿠폰은 결제 1회를 쓴 만큼 회차를 깎는다. 무료 기간으로 시작하면
+    // 결제가 없었으므로 깎지 않는다 — 깎으면 "30일 무료 + 3개월 할인" 쿠폰이
+    // 무료 기간만으로 한 회차를 잃는다. 할인이 없는 쿠폰은 0으로 둔다.
+    coupon_remaining_cycles: coupon && coupon.type !== 'free_period'
+      ? (coupon.duration_cycles === null ? null : Math.max(0, coupon.duration_cycles - (isTrial ? 0 : 1)))
       : 0,
     current_period_start: new Date().toISOString(),
     current_period_end: `${periodEnd}T00:00:00+09:00`,
@@ -690,6 +800,9 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
       return res.status(402).json({ error: `결제에 실패했습니다: ${result.failReason}` });
     }
 
+    if (reward) await consumeReferralReward(reward.id, orderId);
+    await grantReferralReward(coupon, user.userId);
+
     await sendEmail(userRow?.email ?? user.email, `[훈프로] 구독 시작 — ${won(amount)} 결제 완료`, wrapEmail(
       '구독이 시작됐습니다',
       `<p>${userRow?.name ?? user.name}님, ${orderName} 구독이 시작됐습니다. 이제 모든 AI 도구를 이용할 수 있습니다.</p>` +
@@ -699,7 +812,9 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
     await sendEmail(userRow?.email ?? user.email, `[훈프로] 무료 이용 시작 (${coupon!.value}일)`, wrapEmail(
       '무료 이용이 시작됐습니다',
       `<p>${userRow?.name ?? user.name}님, 지금부터 모든 AI 도구를 무료로 이용할 수 있습니다.</p>` +
-      `<p>무료 기간 종료일 <b style="color:#e8ecf5;">${periodEnd}</b>부터 ${won(plan.price)}/${plan.interval === 'year' ? '연' : '월'}이 등록하신 카드로 자동결제됩니다.<br>그 전에 언제든 해지하실 수 있고, 해지하면 결제되지 않습니다.</p>` +
+      `<p>무료 기간 종료일 <b style="color:#e8ecf5;">${periodEnd}</b>부터 ${won(withVat(supplyAmount).total)}/${plan.interval === 'year' ? '연' : '월'}이 등록하신 카드로 자동결제됩니다.` +
+      (discount > 0 ? ` (쿠폰 할인 ${won(withVat(discount).total)} 적용가 · 부가세 포함)` : ' (부가세 포함)') +
+      `<br>그 전에 언제든 해지하실 수 있고, 해지하면 결제되지 않습니다.</p>` +
       emailButton('훈프로 열기')));
   }
 
@@ -1266,12 +1381,23 @@ async function getReferralCode(user: { userId: string }, res: VercelResponse) {
     }
     if (!existing) return res.status(500).json({ error: '추천 코드 생성에 실패했습니다.' });
   }
+  const [{ count: pending }, monthly] = await Promise.all([
+    supabase.from('referral_rewards')
+      .select('id', { count: 'exact', head: true })
+      .eq('referrer_id', user.userId)
+      .is('consumed_at', null),
+    monthlyListPrice(),
+  ]);
+
   return res.status(200).json({
     code: existing.code,
     type: existing.type,
     value: existing.value,
     redeemedCount: existing.redeemed_count ?? 0,
     active: existing.active !== false,
+    // 보상은 플랜과 무관하게 같은 금액이다 — 화면에도 금액으로 보여준다
+    rewardAmount: withVat(referralRewardAmount(monthly, REFERRAL_REWARD_PERCENT)).total,
+    rewardPending: pending ?? 0,
   });
 }
 
@@ -1475,19 +1601,27 @@ async function adminCoupons(res: VercelResponse) {
 }
 
 async function adminCouponCreate(req: VercelRequest, res: VercelResponse) {
-  const { code, type, value, durationCycles, maxRedemptions, expiresAt, note } = req.body ?? {};
+  const { code, type, value, durationCycles, maxRedemptions, expiresAt, note, trialDays } = req.body ?? {};
   if (!code || !type || !value) return res.status(400).json({ error: '코드·유형·값은 필수입니다.' });
-  if (!['free_period', 'percent', 'amount'].includes(type)) return res.status(400).json({ error: '잘못된 쿠폰 유형입니다.' });
+  if (!['free_period', 'percent', 'amount', 'amount_monthly'].includes(type)) {
+    return res.status(400).json({ error: '잘못된 쿠폰 유형입니다.' });
+  }
   const v = Number(value);
   if (!Number.isFinite(v) || v <= 0 || (type === 'percent' && v > 100)) {
     return res.status(400).json({ error: '쿠폰 값이 올바르지 않습니다.' });
+  }
+  const days = trialDays === null || trialDays === undefined || trialDays === '' ? 0 : Number(trialDays);
+  if (!Number.isFinite(days) || days < 0 || days > 3650) {
+    return res.status(400).json({ error: '무료 일수가 올바르지 않습니다.' });
   }
 
   const { data, error } = await supabase.from('coupons').insert({
     code: String(code).trim().toUpperCase(),
     type,
     value: v,
+    // 무료 기간만 주는 옛 유형은 회차가 1로 고정이다 (할인이 없어 쓸 자리가 없다)
     duration_cycles: type === 'free_period' ? 1 : (durationCycles === null || durationCycles === '' ? null : Number(durationCycles) || 1),
+    trial_days: type === 'free_period' ? 0 : Math.floor(days),
     max_redemptions: maxRedemptions ? Number(maxRedemptions) : null,
     expires_at: expiresAt || null,
     note: note || null,
