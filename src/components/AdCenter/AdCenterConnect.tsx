@@ -13,7 +13,7 @@
  * 크게 나오는데, 언제까지 들어와 있는지 모르면 그걸 알아챌 길이 없다.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookmarkPlus, Check, Copy, Megaphone } from 'lucide-react';
+import { BookmarkPlus, Check, Copy, Megaphone, PlayCircle } from 'lucide-react';
 import { AD_COLLECT_DAYS, buildAdBookmarklet } from '../../lib/adCollector';
 import { coupangApi, sinceText } from '../../lib/coupang';
 
@@ -131,6 +131,16 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
         </ol>
       )}
       <p className="mt-2 text-[11px] text-ink-3">PC 크롬·엣지에서 됩니다. 휴대폰에서는 [광고 성과 분석]의 파일 올리기를 이용해주세요.</p>
+
+      {/* 즐겨찾기를 끌어다 놓는 설정은 글로 읽으면 어렵다. 막히는 사람이 어디를
+          눌러야 하는지 이 자리에서 알아야 한다 — 나가서 찾게 하면 거기서 놓친다. */}
+      <p
+        className="mt-3 flex items-start gap-2 rounded-card border px-3.5 py-2.5 text-[12.5px] font-medium leading-relaxed"
+        style={{ borderColor: 'rgba(255,180,84,.35)', background: 'rgba(255,180,84,.08)', color: '#ffb454' }}
+      >
+        <PlayCircle className="mt-[1px] h-4 w-4 shrink-0" />
+        <span>설정이 어려우시면 <b>화면 오른쪽 위 [사용 방법]</b>을 눌러 영상을 확인해주세요.</span>
+      </p>
     </div>
   );
 }
