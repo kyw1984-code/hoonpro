@@ -23,6 +23,9 @@ const SHEET_COLUMNS = {
   vendorItemId: '옵션ID',
   productName: '상품명',
   optionName: '옵션명',
+  // 내려받은 파일만 보고는 어느 줄이 그로스인지 알 수 없어, 입출고비를 어디에
+  // 넣어야 할지 알 수 없었다. 읽기 전용 열이다 — 올릴 때는 무시한다.
+  channel: '배송유형',
   unitCost: '매입원가',
   packagingCost: '부자재',
   shippingCost: '출고배송',
@@ -159,6 +162,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
       [SHEET_COLUMNS.vendorItemId]: r.vendorItemId,
       [SHEET_COLUMNS.productName]: r.productName,
       [SHEET_COLUMNS.optionName]: r.optionName,
+      [SHEET_COLUMNS.channel]: isGrowth(r) ? '로켓그로스' : '판매자배송',
       [SHEET_COLUMNS.unitCost]: r.unitCost,
       [SHEET_COLUMNS.packagingCost]: r.packagingCost,
       [SHEET_COLUMNS.shippingCost]: r.shippingCost,
