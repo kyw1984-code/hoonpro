@@ -18,7 +18,10 @@ const supabase = createClient(
 );
 
 const MAX_WORKS_PER_USER = 50;
-const KINDS = ['detail-plan', 'thumbnail'];
+// 보관함에 담을 수 있는 종류.
+//   detail-plan / thumbnail  내린 기능 — 새로 쌓이지는 않지만 보던 것은 남긴다
+//   review                   리뷰 분석 결과. 화면을 닫으면 사라지던 것이라 제일 아쉬웠다
+const KINDS = ['detail-plan', 'thumbnail', 'review'];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');

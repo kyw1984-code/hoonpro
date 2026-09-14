@@ -421,6 +421,7 @@ alter table ad_reports enable row level security;
 create table if not exists saved_works (
   id bigserial primary key,
   user_id uuid not null,
+  -- 'detail-plan' | 'thumbnail' (내린 기능, 보기만) | 'review' (리뷰 분석 결과)
   kind text not null,
   title text,
   payload jsonb not null,

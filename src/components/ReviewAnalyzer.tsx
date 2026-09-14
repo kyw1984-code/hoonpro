@@ -5,7 +5,7 @@
  * 소싱AI의 상품 카드 [리뷰 분석] 모달과 결과 뷰(ReviewSummaryView)를 공유한다.
  */
 import { useState } from 'react';
-import { Loader2, MessageSquareText, Search } from 'lucide-react';
+import { Check, FolderOpen, Loader2, MessageSquareText, Search } from 'lucide-react';
 import { getToken } from '../lib/auth';
 
 const authHeaders = (): Record<string, string> => {
@@ -25,6 +25,70 @@ export const safeJson = async (res: Response): Promise<any> => {
     return { error: `서버 응답 오류 (HTTP ${res.status}) — 잠시 후 다시 시도해주세요.` };
   }
 };
+
+/**
+ * 분석 결과를 [내 작업]에 담는다.
+ *
+ * 리뷰 분석은 유료 기능 중 유일하게 결과가 휘발됐다. 화면을 닫으면 사라져서,
+ * 같은 상품을 다시 보려면 한도를 한 번 더 써 가며 다시 분석해야 했다.
+ *
+ * 소싱AI의 상품 카드 모달과 리뷰 분석 탭이 같은 결과 뷰를 쓰므로 버튼도
+ * 여기 둔다. 두 곳에 따로 두면 한쪽만 고쳐진다.
+ */
+export function SaveReviewButton({ data }: { data: any }) {
+  const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [err, setErr] = useState<string | null>(null);
+
+  // 분석이 실패했거나 요약이 없으면 담을 것이 없다
+  if (!data?.summary || data.error || data.summary.error) return null;
+
+  const save = async () => {
+    if (state !== 'idle') return;
+    setState('saving');
+    setErr(null);
+    try {
+      const res = await fetch('/api/works?action=save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({
+          kind: 'review',
+          title: data.productName && data.productName !== '상품' ? data.productName : '리뷰 분석',
+          payload: {
+            productId: data.productId ?? null,
+            productName: data.productName ?? null,
+            summary: data.summary,
+            // 샘플은 세 개만 남긴다. 리뷰 원문을 통째로 쌓을 이유가 없다.
+            samples: Array.isArray(data.samples) ? data.samples.slice(0, 3) : [],
+            reviewCount: data.reviewCount ?? 0,
+            analyzedAt: new Date().toISOString(),
+          },
+        }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok || json.error) { setErr(json.error || '저장에 실패했습니다.'); setState('idle'); return; }
+      setState('saved');
+    } catch (e: any) {
+      setErr(e?.message ?? '저장에 실패했습니다.');
+      setState('idle');
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        onClick={save}
+        disabled={state !== 'idle'}
+        className="flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink-2 transition-colors hover:border-accent-line hover:text-accent disabled:opacity-60"
+      >
+        {state === 'saving' ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          : state === 'saved' ? <Check className="h-3.5 w-3.5 text-positive" />
+          : <FolderOpen className="h-3.5 w-3.5" />}
+        {state === 'saved' ? '내 작업에 담았습니다' : '내 작업에 저장'}
+      </button>
+      {err && <span className="text-[11.5px] text-critical">{err}</span>}
+    </div>
+  );
+}
 
 // 분석 결과 렌더링 (소싱AI 모달과 공용)
 export function ReviewSummaryView({ data }: { data: any }) {
@@ -149,6 +213,9 @@ export function ReviewAnalyzer() {
             <h3 className="mb-3 truncate text-[15px] font-semibold text-ink">{data.productName}</h3>
           )}
           <ReviewSummaryView data={data} />
+          <div className="mt-4 border-t border-line pt-4">
+            <SaveReviewButton data={data} />
+          </div>
         </div>
       )}
 
