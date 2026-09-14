@@ -68,6 +68,9 @@ function CouponList({ rows, from, to }: {
   from: string;
   to: string;
 }) {
+  // 끝난 쿠폰은 기본으로 접어 둔다. 지금 무엇이 걸려 있는지가 먼저다.
+  // 다만 지운 게 아니라 접은 것이므로, 몇 건을 접었는지 옆에 적는다.
+  const [hideEnded, setHideEnded] = useState(true);
   const today = new Date().toISOString().slice(0, 10);
   const state = (c: { startAt: string | null; endAt: string | null }) =>
     c.startAt && c.startAt > today ? 'upcoming' : c.endAt && c.endAt < today ? 'ended' : 'live';
@@ -80,16 +83,38 @@ function CouponList({ rows, from, to }: {
     return String(b.endAt ?? '').localeCompare(String(a.endAt ?? ''));
   });
 
+  const endedCount = sorted.filter(c => state(c) === 'ended').length;
+  const visible = hideEnded ? sorted.filter(c => state(c) !== 'ended') : sorted;
+
   return (
     <div className="rounded-panel border border-line bg-paper px-5 py-4">
-      <h3 className="mb-1 text-sm font-semibold text-ink">발행한 쿠폰 {rows.length}건</h3>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <h3 className="text-sm font-semibold text-ink">발행한 쿠폰 {rows.length}건</h3>
+        {endedCount > 0 && (
+          <label className="flex cursor-pointer select-none items-center gap-1.5 py-1 text-[11.5px] text-ink-3 hover:text-ink-2">
+            <input
+              type="checkbox"
+              checked={hideEnded}
+              onChange={e => setHideEnded(e.target.checked)}
+              className="h-3.5 w-3.5 cursor-pointer accent-accent"
+            />
+            종료 {endedCount}건 숨기기
+          </label>
+        )}
+      </div>
       <p className="mb-3 text-[11.5px] leading-relaxed text-ink-3">
         쿠폰 관리에 등록된 값 그대로입니다. 위 쿠폰 금액은 이 설정이 아니라
         <b className="text-ink-2"> 주문에 실제로 적용된 할인</b>을 더한 것이라, 기간에 따라 평균이 달라집니다.
         기간을 좁혀 보시면 지금 걸린 쿠폰에 가까운 값이 나옵니다.
+        {hideEnded && endedCount > 0 && (
+          <> 끝난 쿠폰도 그 기간의 숫자에는 들어 있으니, 과거 구간을 보실 때는 체크를 풀어 함께 보세요.</>
+        )}
       </p>
       <div className="flex flex-col">
-        {sorted.map(c => {
+        {visible.length === 0 && (
+          <p className="py-2 text-[12.5px] text-ink-3">진행 중이거나 예정된 쿠폰이 없습니다.</p>
+        )}
+        {visible.map(c => {
           const st = state(c);
           const dim = !overlaps(c);
           return (

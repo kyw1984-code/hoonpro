@@ -24,6 +24,7 @@ interface Item {
   status: 'open' | 'planned' | 'done' | 'wontfix';
   note: string | null;
   createdAt: string;
+  userId: string | null;
   userEmail: string | null;
   userName: string | null;
 }
@@ -32,7 +33,12 @@ interface Group {
   summary: string;
   kind: string;
   severity: string;
+  /** 건수 */
   count: number;
+  /** 사람 수. 한 사람이 세 번 적으면 count는 3이고 people은 1이다 */
+  people: number;
+  /** 앞선 다섯 명의 이름 */
+  names: string[];
   ids: string[];
 }
 
@@ -153,7 +159,21 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
                     급함
                   </span>
                 )}
-                <span className="text-[12px] font-semibold tabular-nums text-accent">{g.count}명</span>
+                <span
+                  className="text-[12px] font-semibold tabular-nums text-accent"
+                  title={g.names.length ? g.names.join(', ') + (g.people > g.names.length ? ` 외 ${g.people - g.names.length}명` : '') : undefined}
+                >
+                  {g.people || g.count}명
+                  {g.count > (g.people || g.count) && (
+                    <span className="ml-1 font-normal text-ink-3">{g.count}건</span>
+                  )}
+                </span>
+                {g.names.length > 0 && (
+                  <span className="min-w-0 truncate text-[11px] text-ink-3">
+                    {g.names.slice(0, 3).join(', ')}
+                    {g.people > 3 ? ` 외 ${g.people - 3}명` : ''}
+                  </span>
+                )}
                 <div className="ml-auto flex gap-1">
                   <button
                     onClick={() => update(g.ids, 'planned')}
@@ -203,13 +223,18 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
                   </span>
                 )}
                 {i.area && <span className="text-[11px] text-ink-3">{i.area}</span>}
-                <span className="ml-auto text-[11px] text-ink-3">{ago(i.createdAt)}</span>
+                {/* 누가 적었는지는 아래 작은 글씨가 아니라 여기 있어야 눈에 든다.
+                    이름만 적으면 동명이인을 못 가리므로 메일도 함께 적는다. */}
+                <span className="min-w-0 truncate text-[11px] text-ink-2" title={i.userEmail ?? undefined}>
+                  {i.userName ?? '이름 없음'}
+                  {i.userEmail && <span className="text-ink-3"> · {i.userEmail}</span>}
+                </span>
+                <span className="ml-auto shrink-0 text-[11px] text-ink-3">{ago(i.createdAt)}</span>
               </div>
 
               <p className="mt-2 whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-2">{i.body}</p>
 
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] text-ink-3">{i.userName ?? i.userEmail ?? '알 수 없음'}</span>
                 {i.status !== 'open' && (
                   <span className="rounded-control border border-line px-1.5 py-0.5 text-[10.5px] text-ink-3">
                     {i.status === 'planned' ? '예정' : i.status === 'done' ? '완료' : '보류'}

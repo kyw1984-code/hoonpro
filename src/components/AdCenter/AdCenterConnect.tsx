@@ -2,18 +2,27 @@
  * 광고센터 연결 카드 — 광고비를 버튼 하나로 가져오게 하는 즐겨찾기.
  *
  * 즐겨찾기 바에 한 번 끌어다 놓으면, 이후 광고센터에 들어가 그 버튼을 누를 때마다
- * 최근 30일 광고비가 훈프로에 들어온다. 로그인 정보는 어디에도 저장되지 않는다.
+ * 고른 기간의 광고비가 훈프로에 들어온다. 로그인 정보는 어디에도 저장되지 않는다.
+ *
+ * 기간은 고르게 해 뒀다. 30일은 우리가 정한 값이지 쿠팡의 상한이 아니다. 다만
+ * 길게 잡을수록 보고서 생성이 오래 걸리고, 쿠팡이 어느 길이부터 거절하는지는
+ * 문서에 없다. 고정해 두면 거절당하는 날 코드를 고쳐 배포할 때까지 못 쓴다.
+ * 고르게 두면 그 자리에서 짧은 쪽을 눌러 쓰면 된다.
  *
  * "마지막 반영"을 함께 보여준다. 광고비가 빠진 채로 순이익을 보면 실제보다
  * 크게 나오는데, 언제까지 들어와 있는지 모르면 그걸 알아챌 길이 없다.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookmarkPlus, Check, Copy, Megaphone } from 'lucide-react';
-import { buildAdBookmarklet } from '../../lib/adCollector';
+import { AD_COLLECT_DAYS, buildAdBookmarklet } from '../../lib/adCollector';
 import { coupangApi, sinceText } from '../../lib/coupang';
 
+/** 고를 수 있는 수집 기간 */
+const DAY_CHOICES = [30, 90, 180, 365] as const;
+
 export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
-  const bookmarklet = useMemo(() => buildAdBookmarklet(window.location.origin), []);
+  const [days, setDays] = useState<number>(AD_COLLECT_DAYS);
+  const bookmarklet = useMemo(() => buildAdBookmarklet(window.location.origin, days), [days]);
   const [copied, setCopied] = useState(false);
   // React는 href에 javascript: 주소를 넣으면 보안상 막힌 주소로 바꿔 버린다.
   // 북마클릿은 그게 본질이라, React를 거치지 않고 DOM에 직접 넣는다.
@@ -59,13 +68,33 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
           <h3 className="text-sm font-semibold text-ink">광고센터 연결 — 광고비를 버튼 하나로</h3>
           <p className="mt-1 text-[12px] leading-relaxed text-ink-2">
             아래 버튼을 브라우저 <b className="text-ink">즐겨찾기 바에 한 번 끌어다 놓으세요</b>. 이후 광고센터에 들어가서 그 즐겨찾기를
-            누르면 최근 30일 광고비가 자동으로 들어옵니다. 로그인 정보는 어디에도 저장되지 않습니다.
+            누르면 최근 {days}일 광고비가 자동으로 들어옵니다. 로그인 정보는 어디에도 저장되지 않습니다.
           </p>
           <p className="mt-1 text-[11.5px] text-ink-3">광고비 마지막 반영: {last}</p>
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-[11.5px] text-ink-3">가져올 기간</span>
+        {DAY_CHOICES.map(d => (
+          <button
+            key={d}
+            type="button"
+            onClick={() => setDays(d)}
+            className={`min-h-[32px] rounded-control border px-2.5 text-[12px] font-medium transition-colors ${
+              days === d ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-3 hover:border-line-strong hover:text-ink-2'
+            }`}
+          >
+            {d}일
+          </button>
+        ))}
+      </div>
+      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-3">
+        길게 잡을수록 보고서가 만들어지는 데 오래 걸립니다. 쿠팡이 거절하면 짧은 쪽을 눌러 다시 끌어다 놓으세요.
+        이미 받아 둔 날짜는 덮어쓰기만 하므로 여러 번 눌러도 광고비가 두 번 잡히지 않습니다.
+      </p>
+
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {/* href가 javascript: 라 클릭은 막고 드래그만 살린다. 여기서 실행되면 광고센터가 아니라고 안내만 뜬다 */}
         <a
           ref={linkRef}
