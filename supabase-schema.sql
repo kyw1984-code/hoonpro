@@ -226,6 +226,40 @@ create index if not exists idx_payments_user on payments(user_id, created_at);
 
 alter table payments enable row level security;
 
+-- 결제 관련 메일 발송 기록.
+--
+-- 약관 제5조에 "정기결제일 최소 7일 전에 이메일로 고지한다"고 적어 두었는데,
+-- 보냈다는 것을 증명할 방법이 없었다. 고객이 "고지 못 받았다"고 하면 우리도
+-- 확인할 길이 없다. 크론이 하루 실패하면 그날 대상자는 영영 못 받고 그
+-- 사실조차 아무도 몰랐다.
+--
+-- ref는 중복 발송을 막는 열쇠다. 사전 고지는 '고지 대상 결제일'을 넣어
+-- 같은 결제일에 대해 두 번 보내지 않게 한다. 이게 있어야 놓친 고지를
+-- 따라잡는 재시도를 안전하게 돌릴 수 있다.
+create table if not exists email_log (
+  id bigserial primary key,
+  user_id uuid references users(id) on delete set null,
+  to_email text not null,
+  kind text not null,            -- billing-notice | payment-ok | payment-fail | etc
+  subject text,
+  ref text,                      -- 고지 대상 결제일, 주문번호 등
+  ok boolean not null default false,
+  error text,
+  provider_id text,
+  sent_at timestamptz default now()
+);
+
+create index if not exists idx_email_log_user on email_log(user_id, sent_at desc);
+create index if not exists idx_email_log_kind on email_log(kind, sent_at desc);
+
+-- 같은 사람에게 같은 종류·같은 대상으로 성공한 발송은 한 번뿐이다.
+-- 실패한 기록은 남겨 둬야 재시도할 수 있으므로 ok = true 인 줄만 막는다.
+create unique index if not exists idx_email_log_once
+  on email_log(user_id, kind, ref) where ref is not null and ok;
+
+alter table email_log enable row level security;
+revoke all on email_log from anon, authenticated;
+
 -- 쿠폰
 create table if not exists coupons (
   id uuid default gen_random_uuid() primary key,
