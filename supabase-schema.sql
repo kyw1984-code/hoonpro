@@ -702,6 +702,19 @@ create table if not exists coupang_settlements (
 create index if not exists idx_cpst_user_date on coupang_settlements(user_id, settlement_date);
 alter table coupang_settlements enable row level security;
 
+-- 정산서 대조 — 판매자가 정산서를 보고 옮겨 적은 실지급액.
+-- 쿠팡 지급내역 API에도 금액이 오지만, 정산서에만 있는 차감·장려금이 있어
+-- 판매자가 직접 적은 값이 있으면 그쪽을 기준으로 삼는다.
+create table if not exists coupang_settlement_checks (
+  user_id uuid not null references users(id) on delete cascade,
+  month text not null,                   -- 매출인식월 (YYYY-MM)
+  actual_amount bigint not null default 0,
+  note text,
+  updated_at timestamptz default now(),
+  primary key (user_id, month)
+);
+alter table coupang_settlement_checks enable row level security;
+
 -- 반품·교환 요청
 create table if not exists coupang_returns (
   user_id uuid not null references users(id) on delete cascade,
