@@ -386,6 +386,23 @@ export const coupangApi = {
     dateGroup?: string;
   }) =>
     request<{ ok: true; from: string; to: string; days: number; source: string; total: number; attributed?: number }>('ad-cost-save', { method: 'POST', body }),
+
+  /**
+   * 광고 보고서 원본을 그대로 저장한다 — 광고분석AI가 파일 없이 읽는다.
+   * 광고비만 뽑아 두던 것과 별개다. 키워드·노출·클릭·전환이 여기 남는다.
+   */
+  adReportRawSave: (body: { from: string; to: string; columns: string[]; rows: any[] }) =>
+    request<{ ok: true; rowCount: number; truncated: boolean }>('ad-report-raw-save', { method: 'POST', body }),
+
+  adReportRaw: () =>
+    request<{ report: null | { from: string; to: string; columns: string[]; rows: any[]; rowCount: number; truncated: boolean; savedAt: string } }>('ad-report-raw'),
+
+  /** 옵션별 판매가·원가·입출고비 — 마진 계산 칸을 손으로 채우지 않게 */
+  marginPreset: (days = 30) =>
+    request<{
+      from: string; to: string; days: number;
+      items: { vendorItemId: string; productName: string; channel: string; quantity: number; unitPrice: number; unitCost: number; fulfillmentCost: number; hasCost: boolean }[];
+    }>(`margin-preset&days=${days}`),
   /** 광고센터가 준 파일 주소(S3 등)를 서버가 대신 받아 광고비를 저장한다 — 브라우저는 다른 도메인이라 못 읽는다 */
   adImportUrl: (url: string, from: string, to: string) =>
     request<{ ok: true; from: string; to: string; days: number; source: string; total: number }>('ad-import-url', {

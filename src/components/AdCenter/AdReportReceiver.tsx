@@ -41,6 +41,17 @@ export function AdReportReceiver() {
     const rows = await parseAdReportBuffer(buf, hint);
     if (rows.length === 0) throw new Error('보고서가 비어 있습니다. 이 기간에 광고 집행이 없었을 수 있습니다.');
     const cols = Object.keys(rows[0] ?? {});
+
+    // 보고서 원본을 그대로 남긴다. 지금까지는 광고비만 뽑고 키워드·노출·클릭·
+    // 전환을 버려서, 버튼을 눌러도 광고분석AI 화면은 비어 있었다. 같은 보고서를
+    // 파일로 한 번 더 올려야 했다.
+    // 실패해도 광고비 저장은 계속한다 — 순이익 반영이 더 중요하다.
+    try {
+      await coupangApi.adReportRawSave({ from, to, columns: cols, rows });
+    } catch (e) {
+      console.warn('[광고보고서] 원본 저장 실패 — 광고비만 반영합니다', e);
+    }
+
     const daily = extractDailyAdCost(rows);
     if (daily) {
       // 보고서 안의 날짜가 기준이다. 요청 기간보다 좁을 수 있다(집행 없는 날).

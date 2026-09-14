@@ -958,6 +958,28 @@ create index if not exists idx_caci_user_date on coupang_ad_costs_items(user_id,
 alter table coupang_ad_costs_items enable row level security;
 revoke all on coupang_ad_costs_items from anon, authenticated;
 
+-- 광고센터 북마클릿이 받아 온 보고서 원본.
+--
+-- 지금까지 북마클릿은 보고서를 손에 쥐고도 (날짜, 옵션ID, 광고비) 세 가지만
+-- 저장하고 키워드·노출·클릭·전환을 버렸다. 그래서 버튼을 눌러도 광고분석AI
+-- 화면은 비어 있었고, 사용자는 같은 보고서를 파일로 또 올려야 했다.
+--
+-- 사용자당 가장 최근 것 하나만 둔다. 이력이 필요하면 ad_reports의 요약이
+-- 이미 24개까지 쌓인다. 원본을 여러 벌 쌓으면 용량만 먹는다.
+create table if not exists coupang_ad_report_raw (
+  user_id uuid primary key references users(id) on delete cascade,
+  date_from date,
+  date_to date,
+  columns jsonb,
+  rows jsonb,
+  row_count int not null default 0,
+  truncated boolean not null default false,
+  saved_at timestamptz default now()
+);
+
+alter table coupang_ad_report_raw enable row level security;
+revoke all on coupang_ad_report_raw from anon, authenticated;
+
 -- ─────────────────────────────────────────────────────────────
 -- 36. 마지막 광고 보고서의 모양 — 값은 없고 열 이름만
 -- ─────────────────────────────────────────────────────────────
