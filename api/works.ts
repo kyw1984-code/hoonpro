@@ -21,7 +21,8 @@ const MAX_WORKS_PER_USER = 50;
 // 보관함에 담을 수 있는 종류.
 //   detail-plan / thumbnail  내린 기능 — 새로 쌓이지는 않지만 보던 것은 남긴다
 //   review                   리뷰 분석 결과. 화면을 닫으면 사라지던 것이라 제일 아쉬웠다
-const KINDS = ['detail-plan', 'thumbnail', 'review'];
+//   sourcing                 소싱 검색 결과. 같은 키워드도 다시 조회하면 결과가 달라진다
+const KINDS = ['detail-plan', 'thumbnail', 'review', 'sourcing'];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');

@@ -18,6 +18,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { getToken } from '../lib/auth';
 import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
+import { SaveToWorksButton } from './SaveToWorks';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface KeywordStat {
@@ -952,6 +953,22 @@ export function SourcingFinder() {
                           쿠팡에서 보기 <ExternalLink className="w-3 h-3" />
                         </a>
                       </h3>
+                      {/* 같은 키워드를 다시 조회하면 결과가 달라진다. 그때 무엇을 보고
+                          판단했는지 남겨야 나중에 비교할 수 있다. */}
+                      <SaveToWorksButton
+                        kind="sourcing"
+                        title={activeKeyword || '소싱 검색'}
+                        label="이 검색 결과 저장"
+                        payload={() => ({
+                          keyword: activeKeyword,
+                          seed: currentSeed,
+                          market,
+                          // 화면에 보이는 상위 40개까지만. 전체를 담으면 보관함이 금방 무거워진다
+                          products: products.slice(0, 40),
+                          myProducts: myProducts.slice(0, 20),
+                          searchedAt: new Date().toISOString(),
+                        })}
+                      />
                       <div className="flex items-center gap-2 flex-wrap">
                         {(() => {
                           const s = seasonalitySummary(trendMap[activeKeyword || '']);
