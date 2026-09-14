@@ -17,6 +17,8 @@ import crypto from 'node:crypto';
 //   charge-due       크론 — 결제일 청구 + D+1/D+3 재시도 + 7일 전 사전 고지
 //   admin-*          관리자 — 쿠폰 관리 / 구독 현황
 
+import { usageChargeKrw } from '../src/lib/featureLimits.js';
+
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
@@ -734,6 +736,28 @@ async function cancelSubscription(user: any, req: VercelRequest, res: VercelResp
   const { data: sub } = await supabase.from('subscriptions').select('*').eq('user_id', user.userId).maybeSingle();
   if (!sub || sub.status === 'canceled') return res.status(404).json({ error: '진행 중인 구독이 없습니다.' });
 
+  // 환불은 계정당 한 번이다.
+  //
+  // 막지 않으면 구독 → 며칠 몰아 쓰기 → 환불 → 재구독을 무한히 돌릴 수 있다.
+  // 한도가 하루 단위라 그렇게 쓰면 우리가 무는 돈이 받은 돈보다 커지고, 그
+  // 부담은 성실하게 쓰는 다른 구독자에게 간다. 마음이 바뀐 사람에게 한 번은
+  // 충분하고, 그 뒤로도 해지는 언제든 된다 — 이미 낸 기간은 그대로 쓴다.
+  const { data: pastRefund, error: pastErr } = await supabase
+    .from('payments')
+    .select('id')
+    .eq('user_id', user.userId)
+    .in('status', ['refunded', 'partial_refund'])
+    .limit(1);
+  if (pastErr) {
+    console.error('[환불] 이전 환불 조회 실패', { code: pastErr.code, detail: pastErr.message });
+    return res.status(503).json({ error: '잠시 후 다시 시도해주세요.', retryable: true });
+  }
+  if ((pastRefund?.length ?? 0) > 0) {
+    return res.status(409).json({
+      error: '환불은 계정당 한 번만 가능합니다. [해지]를 누르면 이미 결제한 기간까지 이용하고 자동결제가 멈춥니다.',
+    });
+  }
+
   // 해지 사유 — 선택 입력. 개선 지점을 찾기 위한 수집이므로 없어도 해지는 진행한다.
   const reason = CANCEL_REASONS.includes(String(req.body?.reason)) ? String(req.body.reason) : null;
   const reasonDetail = String(req.body?.reasonDetail || '').trim().slice(0, 500) || null;
@@ -901,6 +925,22 @@ async function refund(user: any, res: VercelResponse) {
     !callsRes.error && (callsRes.count ?? 0) === 0 &&
     !usageRes.error && (usageRes.data?.length ?? 0) === 0;
 
+  // 실제로 쓴 만큼의 원가. 시간만으로 계산하면 짧은 기간에 한도를 끝까지 긁고
+  // 환불받는 길이 열린다. 시간 기준 사용료와 견줘 '큰 쪽'만 뗀다 — 둘 다 떼면
+  // 평범하게 쓴 사람에게 두 번 물리는 셈이 된다.
+  const { data: usedRows, error: usedErr } = await supabase
+    .from('feature_usage')
+    .select('feature, call_count')
+    .eq('user_id', user.userId)
+    .gte('date', usedFromDate);
+  const usedCounts: Record<string, number> = {};
+  for (const r of usedRows ?? []) {
+    usedCounts[String(r.feature)] = (usedCounts[String(r.feature)] ?? 0) + (Number(r.call_count) || 0);
+  }
+  // 조회가 실패하면 원가를 0으로 두지 않는다. 0이면 환불이 과다해진다.
+  const usageKrw = usedErr ? Number.POSITIVE_INFINITY : usageChargeKrw(usedCounts);
+  if (usedErr) console.error('[환불] 사용량 조회 실패', { code: usedErr.code, detail: usedErr.message });
+
   let refundAmount: number;
   let reason: string;
   if (within7Days && unusedConfirmed) {
@@ -918,15 +958,24 @@ async function refund(user: any, res: VercelResponse) {
       // 공급가액으로 빼면 사용료를 실제보다 적게 떼어 환불이 과다해진다.
       const monthlyPrice = withVat(monthlyPlan?.price ?? 39800).total;
       const usedDays = Math.max(1, Math.ceil((Date.now() - approvedAt.getTime()) / 86400000));
-      const usedCharge = Math.floor((monthlyPrice / 30) * usedDays);
-      refundAmount = Math.max(0, payment.amount - usedCharge);
-      reason = `연간 해지 재정산 (사용 ${usedDays}일 × 월간 요금 일할 ${won(usedCharge)} 차감)`;
+      const timeCharge = Math.floor((monthlyPrice / 30) * usedDays);
+      const charge = Math.max(timeCharge, usageKrw === Number.POSITIVE_INFINITY ? payment.amount : usageKrw);
+      refundAmount = Math.max(0, payment.amount - charge);
+      reason = charge > timeCharge
+        ? `연간 해지 재정산 (실제 사용 원가 ${won(charge)} 차감)`
+        : `연간 해지 재정산 (사용 ${usedDays}일 × 월간 요금 일할 ${won(timeCharge)} 차감)`;
     } else {
       // 월간 해지: 잔여 기간 일할 환불 (÷30)
       const periodEnd = new Date(sub.current_period_end);
       const remainingDays = Math.max(0, Math.floor((periodEnd.getTime() - Date.now()) / 86400000));
-      refundAmount = Math.floor((payment.amount / planBaseDays(subPlan ?? {})) * remainingDays);
-      reason = `잔여 ${remainingDays}일 일할 환불`;
+      const timeRefund = Math.floor((payment.amount / planBaseDays(subPlan ?? {})) * remainingDays);
+      // 시간으로 뗀 사용료보다 실제 원가가 크면 그쪽을 뗀다
+      const timeCharge = payment.amount - timeRefund;
+      const charge = Math.max(timeCharge, usageKrw === Number.POSITIVE_INFINITY ? payment.amount : usageKrw);
+      refundAmount = Math.max(0, payment.amount - charge);
+      reason = charge > timeCharge
+        ? `실제 사용 원가 ${won(charge)} 차감 후 환불`
+        : `잔여 ${remainingDays}일 일할 환불`;
     }
   }
 
