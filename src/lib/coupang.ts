@@ -419,7 +419,7 @@ export const coupangApi = {
   marginPreset: (days = 30) =>
     request<{
       from: string; to: string; days: number;
-      items: { vendorItemId: string; productName: string; optionName: string; channel: string; quantity: number; unitPrice: number; couponPerUnit: number; unitCost: number; fulfillmentCost: number; hasCost: boolean }[];
+      items: { vendorItemId: string; productName: string; optionName: string; channel: string; quantity: number; unitPrice: number; couponPerUnit: number; unitCost: number; fulfillmentCost: number; returnRate: number; returnShippingCost: number; hasCost: boolean }[];
     }>(`margin-preset&days=${days}`),
   /** 광고센터가 준 파일 주소(S3 등)를 서버가 대신 받아 광고비를 저장한다 — 브라우저는 다른 도메인이라 못 읽는다 */
   adImportUrl: (url: string, from: string, to: string) =>

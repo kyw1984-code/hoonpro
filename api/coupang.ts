@@ -3844,7 +3844,7 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
   const to = kstToday();
   const from = addDays(to, -(days - 1));
 
-  const [salesRes, costRes, couponRes, itemRes] = await Promise.all([
+  const [salesRes, costRes, couponRes, itemRes, returnRes] = await Promise.all([
     selectAll<{ vendor_item_id: string; product_name: string | null; quantity: number; sales_amount: number; channel: string }>((f, t) =>
       supabase!.from('coupang_sales_daily')
         .select('vendor_item_id, product_name, quantity, sales_amount, channel')
@@ -3869,6 +3869,14 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
         .select('vendor_item_id, option_name')
         .eq('user_id', userId)
         .order('vendor_item_id').range(f, t)),
+    // 반품 — 반품률 5%짜리 상품은 100개를 팔아도 95개치 마진만 남는다.
+    // 이걸 빼고 손익분기 ROAS를 잡으면 화면은 흑자인데 통장은 적자다.
+    selectAll<{ vendor_item_id: string | null; quantity: number; status: string; requested_at: string }>((f, t) =>
+      supabase!.from('coupang_returns')
+        .select('vendor_item_id, quantity, status, requested_at')
+        .eq('user_id', userId)
+        .gte('requested_at', `${from}T00:00:00+09:00`)
+        .order('requested_at').range(f, t)),
   ]);
 
   const costs = new Map<string, any>();
@@ -3882,6 +3890,14 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
 
   const optionNames = new Map<string, string>();
   for (const i of itemRes.rows) optionNames.set(String(i.vendor_item_id), i.option_name ?? '');
+
+  const returnQty = new Map<string, number>();
+  for (const r of returnRes.rows) {
+    // 취소·철회된 접수는 반품이 아니다. 세면 반품률이 부풀어 마진이 낮게 잡힌다.
+    if (!isActiveReturn(r.status) || !r.vendor_item_id) continue;
+    const id = String(r.vendor_item_id);
+    returnQty.set(id, (returnQty.get(id) ?? 0) + (Number(r.quantity) || 0));
+  }
 
   const agg = new Map<string, { vendorItemId: string; productName: string; quantity: number; salesAmount: number; channel: string }>();
   for (const r of salesRes.rows) {
@@ -3911,6 +3927,10 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
         // 매입 + 부자재 + 출고 택배비 = 개당 최종원가
         unitCost: c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) : 0,
         fulfillmentCost: c ? Number(c.fulfillment_cost) || 0 : 0,
+        // 반품률 — 같은 기간의 반품 접수 수량 ÷ 판매 수량. 100%를 넘을 수 있다
+        // (지난달 판매분이 이번 달에 반품되는 경우) 90%에서 자른다.
+        returnRate: Math.min(90, Math.round(((returnQty.get(a.vendorItemId) ?? 0) / a.quantity) * 1000) / 10),
+        returnShippingCost: c ? Number(c.return_shipping_cost) || 0 : 0,
         hasCost: Boolean(c),
       };
     })
