@@ -33,6 +33,61 @@ function verifyAdmin(req: VercelRequest): boolean {
 //
 // 중계 서버가 90분 죽어 있었는데 아무도 몰랐다. 로그는 Vercel에만 남고 운영자는
 // 그걸 열어 볼 이유가 없기 때문이다. 여기서 바로 보이면 알아챌 수 있다.
+/**
+ * 결제 관련 메일 발송 기록.
+ *
+ * 약관에 "정기결제일 7일 전에 이메일로 고지한다"고 적어 두었으므로, 고객이
+ * "고지 못 받았다"고 할 때 확인할 수 있어야 한다. 이메일로 찾는 것이 대부분이라
+ * 검색을 이메일 기준으로 둔다.
+ */
+async function handleEmailLog(req: VercelRequest, res: VercelResponse) {
+  if (!supabase) return res.status(500).json({ error: '서버 저장소가 설정되지 않았습니다.' });
+
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const kind = String(req.query.kind || '').trim();
+  const failedOnly = String(req.query.failed || '') === 'true';
+
+  let query = supabase
+    .from('email_log')
+    .select('id, to_email, kind, subject, ref, ok, error, sent_at, users(name)')
+    .order('sent_at', { ascending: false })
+    .limit(200);
+
+  if (q) query = query.ilike('to_email', `%${q}%`);
+  if (kind) query = query.eq('kind', kind);
+  if (failedOnly) query = query.eq('ok', false);
+
+  const { data, error } = await query;
+  if (error) {
+    if (error.code === '42P01') {
+      return res.status(400).json({ error: 'email_log 테이블이 없습니다. supabase-schema.sql을 실행해주세요.' });
+    }
+    return res.status(500).json({ error: `발송 기록 조회 실패: ${error.message}` });
+  }
+
+  const rows = (data ?? []).map((r: any) => ({
+    id: r.id,
+    to: r.to_email,
+    name: r.users?.name ?? null,
+    kind: r.kind,
+    subject: r.subject,
+    ref: r.ref,
+    ok: r.ok === true,
+    error: r.error,
+    sentAt: r.sent_at,
+  }));
+
+  // 최근 30일 실패 건수 — 목록을 안 봐도 문제가 있는지 알 수 있게
+  const since = new Date(Date.now() - 30 * 86400_000).toISOString();
+  const { count: failed30 } = await supabase
+    .from('email_log')
+    .select('id', { count: 'exact', head: true })
+    .eq('ok', false)
+    .gte('sent_at', since);
+
+  return res.status(200).json({ rows, failed30: failed30 ?? 0 });
+}
+
 async function handleErrors(req: VercelRequest, res: VercelResponse) {
   if (!supabase) return res.status(500).json({ error: '서버 저장소가 설정되지 않았습니다.' });
   const includeResolved = String(req.query.all || '') === 'true';
@@ -104,6 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'costs') return await handleCosts(req, res);
     if (action === 'limits') return await handleLimits(req, res);
     if (action === 'errors') return await handleErrors(req, res);
+    if (action === 'email-log') return await handleEmailLog(req, res);
     if (action === 'error-resolve') return await handleErrorResolve(req, res);
     return res.status(400).json({ error: '알 수 없는 action입니다.' });
   } catch (e) {

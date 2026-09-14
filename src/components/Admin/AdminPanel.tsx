@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Eye, EyeOff, Building2, Wallet, SlidersHorizontal, ShoppingBag, MessageSquare } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, Users, RefreshCw, CheckCheck, BarChart3, Image as ImageIcon, Loader2, Save, AlertTriangle, CreditCard, BookOpen, ArrowUp, ArrowDown, ListOrdered, Eye, EyeOff, Building2, Wallet, SlidersHorizontal, ShoppingBag, MessageSquare, Mail } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { USD_TO_KRW } from '../../lib/pricing';
 import { UsageStats } from './UsageStats';
 import { BillingAdmin } from './BillingAdmin';
 import { LimitsAdmin } from './LimitsAdmin';
 import { CostsAdmin } from './CostsAdmin';
+import { EmailLog } from './EmailLog';
 import { CoupangAdmin } from './CoupangAdmin';
 import { QAManager } from './QAManager';
 import { ErrorLog } from './ErrorLog';
@@ -52,7 +53,7 @@ const STATUS_COLOR: Record<string, string> = {
 export function AdminPanel() {
   // 다른 탭을 보고 있어도 오류가 났다는 걸 알아야 한다. 탭 라벨에 건수를 띄운다.
   const [openErrors, setOpenErrors] = useState(0);
-  const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'limits' | 'stats' | 'config' | 'taborder' | 'company' | 'qa' | 'coupang' | 'errors' | 'suggestions'>('users');
+  const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'limits' | 'stats' | 'config' | 'taborder' | 'company' | 'qa' | 'coupang' | 'errors' | 'suggestions' | 'email'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   // 화면에 40이라고 박혀 있었는데 그런 한도는 어디에도 없었다. 실제 한도는
   // 기능마다 다르고(소싱 60·리뷰 20·코칭 100…) 관리자가 바꿀 수도 있다.
@@ -249,6 +250,15 @@ export function AdminPanel() {
         >
           <MessageSquare className="w-4 h-4" /> 건의
         </button>
+        {/* 메일 기록 — "고지 못 받았다"는 문의에 답하는 자리라 오류 바로 앞에 둔다 */}
+        <button
+          onClick={() => setTab('email')}
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+            tab === 'email' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+          }`}
+        >
+          <Mail className="w-4 h-4" /> 메일 기록
+        </button>
         {/* 오류는 맨 끝에 두되, 열린 오류가 있으면 라벨이 빨갛게 눈에 띈다 */}
         <button
           onClick={() => setTab('errors')}
@@ -260,7 +270,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'suggestions' ? <Suggestions showToast={showToast} /> : tab === 'errors' ? <ErrorLog showToast={showToast} /> : tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
+      {tab === 'suggestions' ? <Suggestions showToast={showToast} /> : tab === 'email' ? <EmailLog /> : tab === 'errors' ? <ErrorLog showToast={showToast} /> : tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <ImageConfigTab showToast={showToast} />
       ) : tab === 'taborder' ? (
         <TabOrderConfig showToast={showToast} />
