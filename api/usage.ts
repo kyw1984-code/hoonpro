@@ -45,6 +45,9 @@ function nextResetIso(): string {
 
 
 
+/** 저장 한 건에 담는 최대 행 수. 넘으면 잘라 두고 잘렸다고 알린다 */
+const REPORT_MAX_ROWS = 20000;
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -84,9 +87,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ─── 광고 보고서 추이 (요약본 저장·조회 — 지난 보고서 대비 변화 비교용) ───
   if (action === 'report-save') {
-    const { summary } = req.body ?? {};
+    const { summary, rows } = req.body ?? {};
     if (!summary || typeof summary !== 'object') return res.status(400).json({ error: '저장할 요약이 없습니다.' });
-    const { error } = await supabase.from('ad_reports').insert({ user_id: decoded.userId, summary });
+
+    // 보고서 본문도 함께 남긴다. 요약만 저장하던 때는 "저장"을 눌러도 나중에
+    // 그 분석을 다시 열 수 없어, 같은 파일을 또 찾아 올려야 했다.
+    const all = Array.isArray(rows) ? rows : [];
+    const truncated = all.length > REPORT_MAX_ROWS;
+    const kept = truncated ? all.slice(0, REPORT_MAX_ROWS) : all;
+
+    const { error } = await supabase.from('ad_reports').insert({
+      user_id: decoded.userId,
+      summary,
+      rows: kept.length > 0 ? kept : null,
+      row_count: kept.length,
+      truncated,
+    });
     if (error) {
       if (/ad_reports/.test(error.message || '')) {
         return res.status(400).json({ error: 'ad_reports 테이블이 없습니다. supabase-schema.sql 마이그레이션을 실행해주세요.' });
@@ -108,10 +124,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ ok: true });
   }
 
+  // 본문 한 건 — 저장한 분석을 다시 연다. 목록에는 본문을 싣지 않는다
+  // (스무 건이 한꺼번에 오면 응답이 수십 MB가 된다).
+  if (action === 'report-get') {
+    const { id } = req.body ?? {};
+    if (!id) return res.status(400).json({ error: 'id가 필요합니다.' });
+    const { data, error } = await supabase
+      .from('ad_reports')
+      .select('id, summary, rows, row_count, truncated, created_at')
+      .eq('user_id', decoded.userId)
+      .eq('id', id)
+      .maybeSingle();
+    if (error || !data) return res.status(404).json({ error: '저장된 보고서를 찾지 못했습니다.' });
+    if (!data.rows || (data.row_count ?? 0) === 0) {
+      return res.status(409).json({ error: '이 보고서는 요약만 저장된 옛 기록이라 다시 열 수 없습니다. 비교에는 그대로 쓰입니다.' });
+    }
+    return res.status(200).json({ report: data });
+  }
+
   if (action === 'report-list') {
     const { data, error } = await supabase
       .from('ad_reports')
-      .select('id, summary, created_at')
+      .select('id, summary, row_count, created_at')
       .eq('user_id', decoded.userId)
       .order('created_at', { ascending: false })
       .limit(12);

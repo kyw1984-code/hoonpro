@@ -405,6 +405,11 @@ create table if not exists ad_reports (
   id bigserial primary key,
   user_id uuid not null,
   summary jsonb not null,
+  -- 보고서 본문. 요약만 남기던 때는 "저장"을 눌러도 그 분석을 다시 열 수
+  -- 없어서, 같은 파일을 또 찾아 올려야 했다. 2만 행에서 자른다.
+  rows jsonb,
+  row_count int not null default 0,
+  truncated boolean not null default false,
   created_at timestamptz default now()
 );
 
