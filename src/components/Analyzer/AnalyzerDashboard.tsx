@@ -5,6 +5,7 @@ import { coupangApi } from "../../lib/coupang";
 import { extractDailyAdCost, extractItemAdCost } from "../../lib/adcost";
 import { parseAdReportBuffer } from "../../lib/adReport";
 import { AdCenterConnect } from "../AdCenter/AdCenterConnect";
+import { computeMargin } from "../../lib/marginMath";
 
 // ─── 지면 분류 헬퍼 ("비검색"이 "검색"을 포함하는 substring 함정 방지) ───
 function isSearchPlatform(platform: string): boolean {
@@ -70,6 +71,11 @@ export function AnalyzerDashboard() {
   // 쓰지 않는다. 같은 계정에서 6.9%로 계산되는데 실제는 10.8%였다. 틀린 요율이
   // 자동으로 들어가면 마진이 실제보다 커 보이고 손익분기 판정이 통째로 어긋난다.
   const [coupangFeeRate, setCoupangFeeRate] = useState<number>(11.88);
+  // 반품률과 반품 배송비. 반품률 5%짜리 상품은 100개를 팔아도 95개치 마진만
+  // 남고 그 5개에는 배송비까지 나간다. 이걸 빼고 손익분기 ROAS를 잡으면
+  // 화면은 흑자인데 통장은 적자다. 쿠팡 연동에서 실측값을 불러온다.
+  const [returnRate, setReturnRate] = useState<number>(0);
+  const [returnShippingCost, setReturnShippingCost] = useState<number>(0);
   const [targetROAS, setTargetROAS] = useState<number>(300);
 
   const [rawData, setRawData] = useState<any[]>([]);
@@ -85,10 +91,16 @@ export function AnalyzerDashboard() {
   // 수수료도 마진도 이 금액이 기준이다. 쿠폰 전 금액으로 계산하면 들어오지도
   // 않은 돈에 수수료를 물리고 마진을 쿠폰만큼 부풀린다.
   const netUnitPrice = Math.max(0, unitPrice - couponPerUnit);
-  const totalFeeAmount = Math.round(netUnitPrice * (coupangFeeRate / 100));
-  const netUnitMargin = Math.round(netUnitPrice - unitCost - deliveryFee - totalFeeAmount);
-  const marginRate = netUnitPrice > 0 ? (netUnitMargin / netUnitPrice) * 100 : 0;
-  const breakEvenROAS = netUnitMargin > 0 ? (netUnitPrice / netUnitMargin) * 100 : 0;
+  // 마진 계산은 src/lib/marginMath.ts 한 곳에서만 한다. 화면에 식을 흩어 두면
+  // 한 곳만 고쳐지고 같은 화면이 서로 다른 마진을 보여 준다.
+  const margin = computeMargin({
+    netUnitPrice, unitCost, deliveryFee, feeRate: coupangFeeRate, returnRate, returnShippingCost,
+  });
+  const totalFeeAmount = margin.fee;
+  // 아래 판단(입찰·최대 CPC·키워드 제외)은 전부 반품까지 반영한 마진으로 한다
+  const netUnitMargin = margin.netMargin;
+  const marginRate = margin.marginRate;
+  const breakEvenROAS = margin.breakEvenROAS;
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -529,7 +541,7 @@ export function AnalyzerDashboard() {
         cpcEfficiency,
       },
     };
-  }, [rawData, unitPrice, couponPerUnit, netUnitPrice, unitCost, deliveryFee, coupangFeeRate, netUnitMargin, targetROAS, breakEvenROAS]);
+  }, [rawData, unitPrice, couponPerUnit, netUnitPrice, unitCost, deliveryFee, coupangFeeRate, returnRate, returnShippingCost, netUnitMargin, targetROAS, breakEvenROAS]);
 
   // ─── 성과 추이 — 보고서 요약을 저장해 지난 분석 대비 변화를 비교 ────────────
   const [savedReports, setSavedReports] = useState<any[] | null>(null);
@@ -596,8 +608,11 @@ export function AnalyzerDashboard() {
     setCouponPerUnit(it.couponPerUnit || 0);
     setUnitCost(it.unitCost || 0);
     setDeliveryFee(it.fulfillmentCost || 0);
+    setReturnRate(it.returnRate || 0);
+    setReturnShippingCost(it.returnShippingCost || 0);
     const net = Math.max(0, (it.unitPrice || 0) - (it.couponPerUnit || 0));
     const parts = [`${it.quantity}개 판매 기준 · 실결제가 ${net.toLocaleString()}원`];
+    if (it.returnRate > 0) parts.push(`반품률 ${it.returnRate}%.`);
     // 한두 개 팔린 옵션의 평균가는 쿠폰 한 번에 크게 흔들린다. 그대로 믿으면 안 된다.
     if (it.quantity < 5) parts.push("판매 건수가 적어 평균가가 흔들릴 수 있습니다.");
     if (!it.hasCost) parts.push("원가가 비어 있습니다 — 정산AI [원가 입력]에 넣으면 함께 채워집니다.");
@@ -652,7 +667,7 @@ export function AnalyzerDashboard() {
       label: reportLabel.trim() || null,
       // 어떤 마진 기준으로 계산한 순이익인지도 함께 남긴다 — 기준이 다르면
       // 순이익 비교가 사과와 오렌지가 된다.
-      basis: { unitPrice, couponPerUnit, unitCost, deliveryFee, feeRate: coupangFeeRate },
+      basis: { unitPrice, couponPerUnit, unitCost, deliveryFee, feeRate: coupangFeeRate, returnRate, returnShippingCost },
       grade: pd.precision?.grade ?? null,
       totalCost: Math.round(pd.tot?.광고비 || 0),
       totalRevenue: Math.round(pd.totalRevenue || 0),
@@ -734,6 +749,8 @@ export function AnalyzerDashboard() {
         if (typeof b.couponPerUnit === "number") setCouponPerUnit(b.couponPerUnit);
         if (typeof b.unitCost === "number") setUnitCost(b.unitCost);
         if (typeof b.deliveryFee === "number") setDeliveryFee(b.deliveryFee);
+        if (typeof b.returnRate === "number") setReturnRate(b.returnRate);
+        if (typeof b.returnShippingCost === "number") setReturnShippingCost(b.returnShippingCost);
         if (typeof b.feeRate === "number") setCoupangFeeRate(b.feeRate);
       }
       if (sum.from) setAdFrom(sum.from);
@@ -812,6 +829,7 @@ export function AnalyzerDashboard() {
           <p className="mt-1 text-[11px] leading-relaxed text-ink-3">
             수수료율은 가져오지 않습니다 — 기본값 11.88%(10.8% + 부가세)를 쓰고,
             카테고리가 다르면 직접 고쳐주세요. 수수료는 쿠폰을 뺀 <b>실결제가</b>에 붙습니다.
+            반품률은 같은 기간 반품 접수 수량으로 채우고, 반품 배송비는 정산AI [원가 입력]의 값을 씁니다.
           </p>
         </div>
 
@@ -822,6 +840,8 @@ export function AnalyzerDashboard() {
             { label: "최종원가(매입가 등) (원)", val: unitCost, set: setUnitCost, step: "1" },
             { label: "로켓그로스 입출고비 (원)", val: deliveryFee, set: setDeliveryFee, step: "1" },
             { label: "쿠팡 수수료 (부가세 포함, %)", val: coupangFeeRate, set: setCoupangFeeRate, step: "0.01" },
+            { label: "반품률 (%)", val: returnRate, set: setReturnRate, step: "0.1" },
+            { label: "반품 1건 배송비 (원)", val: returnShippingCost, set: setReturnShippingCost, step: "1" },
             { label: "현재 목표수익률 (%)", val: targetROAS, set: setTargetROAS, step: "50" },
           ].map(({ label, val, set, step }) => (
             <div key={label}>
@@ -838,9 +858,17 @@ export function AnalyzerDashboard() {
           <div className="flex justify-between text-sm"><span className="text-ink-2">💳 고객 실결제가:</span><span className="font-semibold text-ink">{netUnitPrice.toLocaleString()}원</span></div>
           <div className="flex justify-between text-sm"><span className="text-ink-2">📦 입출고비 합계:</span><span>{deliveryFee.toLocaleString()}원</span></div>
           <div className="flex justify-between text-sm"><span className="text-ink-2">📊 예상 수수료 ({coupangFeeRate}% · 실결제가 기준):</span><span>{totalFeeAmount.toLocaleString()}원</span></div>
+          {margin.returnLoss > 0 && (
+            <div className="flex justify-between text-sm"><span className="text-ink-2">↩️ 반품 손실 ({returnRate}% 반영):</span><span className="text-critical">-{margin.returnLoss.toLocaleString()}원</span></div>
+          )}
           <div className="flex justify-between text-base font-semibold"><span className="text-ink">💡 개당 예상 마진:</span><span className="text-positive">{netUnitMargin.toLocaleString()}원</span></div>
           {unitPrice > 0 && <div className="flex justify-between text-sm font-semibold"><span>📈 예상 마진율:</span><span className="text-accent">{marginRate.toFixed(1)}%</span></div>}
-          {breakEvenROAS > 0 && <div className="flex justify-between text-sm font-semibold"><span>🎯 손익분기 ROAS:</span><span className="text-orange-600">{breakEvenROAS.toFixed(0)}%</span></div>}
+          {breakEvenROAS > 0 && <div className="flex justify-between text-sm font-semibold"><span>🎯 손익분기 ROAS{margin.returnLoss > 0 ? " (반품 반영)" : ""}:</span><span className="text-orange-600">{breakEvenROAS.toFixed(0)}%</span></div>}
+          {netUnitPrice > 0 && netUnitMargin <= 0 && (
+            <p className="text-[11.5px] leading-relaxed text-critical">
+              개당 마진이 남지 않습니다. 어떤 ROAS로도 광고로는 흑자가 되지 않으니 판매가·원가·쿠폰부터 보셔야 합니다.
+            </p>
+          )}
         </div>
       </div>
 
