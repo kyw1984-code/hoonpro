@@ -3,6 +3,7 @@ import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
+import { isTransientDbError } from '../src/lib/dbRetry.js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
@@ -529,21 +530,6 @@ export function dateChunks(from: string, to: string, size = LIMITS.chunkDays): A
  * 그래도 상한(maxPages × pageSize)에 닿으면 truncated로 알린다. 부르는 쪽이
  * 그걸 무시하면 조용히 일부만 계산된다.
  */
-/**
- * 다시 불러 볼 만한 DB 오류인가.
- *
- * 게이트웨이 타임아웃(504)과 문장 취소는 잠깐 늦어서 나는 것이라 한 번 더
- * 부르면 지나간다. 문법 오류나 권한 문제는 몇 번을 불러도 같으므로 뺀다.
- */
-export function isTransientDbError(error: { message?: string; code?: string } | null | undefined): boolean {
-  if (!error) return false;
-  const msg = String(error.message ?? '');
-  const code = String(error.code ?? '');
-  // 57014 = query_canceled, 08006 = connection_failure
-  return /gateway timeout|timeout|timed out|fetch failed|ECONNRESET|EAI_AGAIN/i.test(msg)
-    || code === '57014' || code === '08006' || code === '504';
-}
-
 export async function selectAll<T = any>(
   build: (from: number, to: number) => any,
   pageSize = 1000,

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { retryOnce } from '../../src/lib/dbRetry.js';
 import crypto from 'node:crypto';
 
 // 가입 API — 이메일 인증코드 + 관리자 승인 (기본 운영 방식)
@@ -177,15 +178,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const newCode = String(crypto.randomInt(100000, 1000000));
-    const { error: upsertError } = await supabase.from('email_verifications').upsert({
+    const { error: upsertError } = await retryOnce(() => supabase.from('email_verifications').upsert({
       email: normalizedEmail,
       code_hash: hashCode(normalizedEmail, newCode),
       attempts: 0,
       purpose: 'signup',
       expires_at: new Date(Date.now() + CODE_TTL_MS).toISOString(),
       created_at: new Date().toISOString(),
-    });
-    if (upsertError) return res.status(500).json({ error: '인증코드 저장에 실패했습니다. (DB 마이그레이션 확인)' });
+    }));
+    if (upsertError) {
+      // 예전에는 원인을 아무 데도 남기지 않고 "(DB 마이그레이션 확인)"이라고만
+      // 적었다. 실제로는 대개 서울-미국 왕복이 시간 안에 안 끝난 것이라,
+      // 마이그레이션을 아무리 들여다봐도 나오는 게 없다.
+      console.error('[가입] 인증코드 저장 실패', { code: upsertError.code, detail: upsertError.message });
+      return res.status(503).json({
+        error: '인증코드를 저장하지 못했습니다. 잠시 후 [인증코드 받기]를 다시 눌러주세요.',
+        retryable: true,
+      });
+    }
 
     const sent = await sendCodeEmail(normalizedEmail, newCode);
     if (!sent) return res.status(502).json({ error: '인증코드 메일 발송에 실패했습니다. 이메일 주소를 확인해주세요.' });
@@ -261,8 +271,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 조회 실패와 '코드를 요청한 적 없음'은 다르다. 예전에는 둘을 같이 묶어,
     // DB가 잠깐 흔들리면 방금 메일로 코드를 받은 사람에게 "먼저 요청하라"고
     // 답했다. 시키는 대로 다시 요청해도 같은 자리에서 또 막힌다.
-    const { data: v, error: vErr } = await supabase
-      .from('email_verifications').select('*').eq('email', normalizedEmail).maybeSingle();
+    const { data: v, error: vErr } = await retryOnce(() => supabase
+      .from('email_verifications').select('*').eq('email', normalizedEmail).maybeSingle());
     if (vErr) {
       console.error('[가입] 인증코드 조회 실패', { code: vErr.code, detail: vErr.message });
       return res.status(503).json({ error: '잠시 후 다시 시도해주세요. 인증코드는 그대로 쓰실 수 있습니다.', retryable: true });

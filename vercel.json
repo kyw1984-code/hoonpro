@@ -40,5 +40,8 @@
     "api/coupang.ts": {
       "maxDuration": 300
     }
-  }
+  },
+  "regions": [
+    "icn1"
+  ]
 }

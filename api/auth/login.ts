@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import { retryOnce } from '../../src/lib/dbRetry.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 import { LOGIN_LOCK_MS, lockState, nextFailure } from '../../src/lib/loginGuard.js';
@@ -333,7 +334,7 @@ async function resetConfirm(req: VercelRequest, res: VercelResponse) {
   const problem = passwordProblem(password);
   if (problem) return res.status(400).json({ error: problem });
 
-  const { data: v, error: vErr } = await supabase.from('email_verifications').select('*').eq('email', email).maybeSingle();
+  const { data: v, error: vErr } = await retryOnce(() => supabase.from('email_verifications').select('*').eq('email', email).maybeSingle());
   if (vErr) {
     console.error('[재설정] 인증코드 조회 실패', { code: vErr.code, detail: vErr.message });
     return res.status(503).json({ error: '잠시 후 다시 시도해주세요. 인증코드는 그대로 쓰실 수 있습니다.', retryable: true });
