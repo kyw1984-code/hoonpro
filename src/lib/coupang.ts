@@ -219,6 +219,24 @@ export interface SettlementResponse {
   weekly: Array<{ weekStart: string; amount: number }>;
 }
 
+export interface SettlementCheckRow {
+  month: string;
+  marketSettlement: number;
+  growthSettlement: number;
+  growthNet: number;
+  coupangPaid: number | null;
+  actual: number | null;
+  returnQuantity: number;
+  ours: number;
+  reference: number | null;
+  referenceSource: 'actual' | 'coupang' | null;
+  diff: number | null;
+  diffRate: number | null;
+  impliedGrowthFeeRate: number | null;
+  verdict: 'ok' | 'watch' | 'off' | 'unknown';
+  note: string | null;
+}
+
 export interface WeeklyReport {
   period_start: string;
   period_end: string;
@@ -413,6 +431,14 @@ export const coupangApi = {
   saveCosts: (items: Array<Partial<CostRow> & { vendorItemId: string }>) =>
     request<{ ok: true; saved: number }>('cost-save', { method: 'POST', body: { items } }),
   settlement: () => request<SettlementResponse>('settlement'),
+  /** 정산서 대조 — 우리 계산과 실제 지급액을 인식월끼리 맞춘 결과 */
+  settlementCheck: (months = 6) =>
+    request<{ rows: SettlementCheckRow[]; feeRate: number }>(`settlement-check&months=${months}`),
+  /** 정산서에 적힌 실지급액을 옮겨 적는다. 0을 보내면 지운다 */
+  settlementCheckSave: (month: string, actualAmount: number, note?: string) =>
+    request<{ ok: true; month: string; actualAmount: number }>('settlement-check-save', {
+      method: 'POST', body: { month, actualAmount, note },
+    }),
   reports: () => request<{ reports: WeeklyReport[] }>('reports'),
   inventory: (leadTime: number, cover: number) =>
     request<InventoryResponse>(`inventory&leadTime=${leadTime}&cover=${cover}`),

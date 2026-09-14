@@ -9,6 +9,7 @@ import { KeySetup } from './KeySetup';
 import { ProfitDashboard } from './ProfitDashboard';
 import { CostEditor } from './CostEditor';
 import { SettlementCalendar } from './SettlementCalendar';
+import { SettlementCheck } from './SettlementCheck';
 import { WeeklyReports } from './WeeklyReports';
 import { InventoryForecast } from './InventoryForecast';
 import { ReturnAnalysis } from './ReturnAnalysis';
@@ -181,7 +182,12 @@ export function CoupangDashboard() {
           <CouponEffect days={90} />
         </div>
       )}
-      {view === 'settlement' && <SettlementCalendar />}
+      {view === 'settlement' && (
+        <div className="flex flex-col gap-5">
+          <SettlementCalendar />
+          <SettlementCheck />
+        </div>
+      )}
       {view === 'inventory' && <InventoryForecast />}
       {view === 'returns' && (
         <div className="flex flex-col gap-5">

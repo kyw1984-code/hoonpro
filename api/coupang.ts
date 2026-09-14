@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { COUPANG_FEE_RATE_PCT, growthSettlement } from '../src/lib/coupangFee.js';
+import { checkMonth, type MonthCheck } from '../src/lib/settlementCheck.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
@@ -2653,6 +2654,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'ad-report-raw-save': return await handleAdReportRawSave(userId, req, res);
       case 'margin-preset': return await handleMarginPreset(userId, req, res);
       case 'settlement': return await handleSettlement(userId, res);
+      case 'settlement-check': return await handleSettlementCheck(userId, req, res);
+      case 'settlement-check-save': return await handleSettlementCheckSave(userId, req, res);
       case 'reports': return await handleReports(userId, res);
       case 'brief-settings': return await handleBriefSettings(userId, req, res);
       case 'reorder-rule': return await handleReorderRule(userId, req, res);
@@ -3914,6 +3917,126 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
     .sort((x, y) => y.quantity * y.unitPrice - x.quantity * x.unitPrice);
 
   return res.status(200).json({ from, to, days, items });
+}
+
+/**
+ * 정산서 대조 — 우리가 계산한 정산예정액과 실제 지급액을 인식월끼리 맞춘다.
+ *
+ * 윙은 쿠팡이 준 정산예정액이라 맞는 게 정상이고, 로켓그로스는 우리가 만든
+ * 값이라 틀릴 수 있다. 여기서 매달 확인하지 않으면 순이익이 몇 달 동안 조용히
+ * 부풀어 있게 된다 — 즉시할인쿠폰을 빼지 않아 실제로 그랬던 적이 있다.
+ */
+async function handleSettlementCheck(userId: string, req: VercelRequest, res: VercelResponse) {
+  const months = Math.min(12, Math.max(1, Number(req.query.months) || 6));
+  const today = kstToday();
+  // 이번 달은 아직 지급이 끝나지 않아 늘 어긋나 보인다. 지난달까지만 본다.
+  const lastMonth = addDays(`${today.slice(0, 7)}-01`, -1).slice(0, 7);
+  // 31일씩 거슬러 가면 원하는 개월 수보다 한 달 더 잡힐 수 있어 뒤에서 자른다.
+  const wanted = monthsBetween(addDays(`${lastMonth}-01`, -31 * months), `${lastMonth}-01`).slice(-months);
+  const from = `${wanted[0]}-01`;
+  const to = monthEnd(lastMonth);
+
+  const [salesRes, setRes, checkRes, returnRes] = await Promise.all([
+    selectAll<{ sale_date: string; channel: string; settlement_amount: number; commission: number }>((f, t) => supabase!
+      .from('coupang_sales_daily')
+      .select('sale_date, channel, settlement_amount, commission')
+      .eq('user_id', userId)
+      .gte('sale_date', from).lte('sale_date', to)
+      .order('sale_date').range(f, t)),
+    selectAll<{ recognition_month: string; settlement_date: string; amount: number }>((f, t) => supabase!
+      .from('coupang_settlements')
+      .select('recognition_month, settlement_date, amount')
+      .eq('user_id', userId)
+      .order('settlement_date').range(f, t)),
+    selectAll<{ month: string; actual_amount: number; note: string | null }>((f, t) => supabase!
+      .from('coupang_settlement_checks')
+      .select('month, actual_amount, note')
+      .eq('user_id', userId)
+      .order('month').range(f, t)),
+    selectAll<{ requested_at: string; quantity: number; status: string }>((f, t) => supabase!
+      .from('coupang_returns')
+      .select('requested_at, quantity, status')
+      .eq('user_id', userId)
+      .gte('requested_at', `${from}T00:00:00+09:00`)
+      .order('requested_at').range(f, t)),
+  ]);
+
+  const blank = () => ({ market: 0, growth: 0, growthNet: 0 });
+  const byMonth = new Map<string, ReturnType<typeof blank>>();
+  for (const s of salesRes.rows) {
+    const m = String(s.sale_date).slice(0, 7);
+    const cur = byMonth.get(m) ?? blank();
+    const settlement = Number(s.settlement_amount) || 0;
+    if (s.channel === 'growth') {
+      cur.growth += settlement;
+      // 실결제액 = 정산예정액 + 수수료. 역산할 때 분모로 쓴다.
+      cur.growthNet += settlement + (Number(s.commission) || 0);
+    } else {
+      cur.market += settlement;
+    }
+    byMonth.set(m, cur);
+  }
+
+  const paidByMonth = new Map<string, number>();
+  for (const r of setRes.rows) {
+    const m = String(r.recognition_month ?? '').slice(0, 7) || String(r.settlement_date).slice(0, 7);
+    paidByMonth.set(m, (paidByMonth.get(m) ?? 0) + (Number(r.amount) || 0));
+  }
+
+  const actualByMonth = new Map<string, { amount: number; note: string | null }>();
+  for (const c of checkRes.rows) {
+    actualByMonth.set(String(c.month).slice(0, 7), { amount: Number(c.actual_amount) || 0, note: c.note ?? null });
+  }
+
+  const returnsByMonth = new Map<string, number>();
+  for (const r of returnRes.rows) {
+    if (!isActiveReturn(r.status)) continue;
+    const m = kstDateOf(r.requested_at)?.slice(0, 7);
+    if (!m) continue;
+    returnsByMonth.set(m, (returnsByMonth.get(m) ?? 0) + (Number(r.quantity) || 0));
+  }
+
+  const rows: Array<MonthCheck & { note: string | null }> = wanted.map(month => {
+    const v = byMonth.get(month) ?? blank();
+    const manual = actualByMonth.get(month);
+    return {
+      ...checkMonth({
+        month,
+        marketSettlement: Math.round(v.market),
+        growthSettlement: Math.round(v.growth),
+        growthNet: Math.round(v.growthNet),
+        // 0원 지급은 '아직 안 들어왔다'는 뜻이라 기준으로 쓰지 않는다
+        coupangPaid: paidByMonth.get(month) ? Math.round(paidByMonth.get(month)!) : null,
+        actual: manual && manual.amount > 0 ? manual.amount : null,
+        returnQuantity: returnsByMonth.get(month) ?? 0,
+      }),
+      note: manual?.note ?? null,
+    };
+  }).reverse(); // 최근 달이 위로
+
+  return res.status(200).json({ rows, feeRate: COUPANG_FEE_RATE_PCT });
+}
+
+/** 정산서에 적힌 실지급액을 옮겨 적는다. 0을 넣으면 지운다 (쿠팡 지급내역으로 되돌아간다) */
+async function handleSettlementCheckSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  const month = String(req.body?.month ?? '').trim().slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: '월 형식이 올바르지 않습니다. (YYYY-MM)' });
+
+  const raw = Number(req.body?.actualAmount);
+  if (!Number.isFinite(raw) || raw < 0) return res.status(400).json({ error: '금액을 확인해주세요.' });
+  const amount = Math.round(raw);
+
+  if (amount === 0) {
+    await supabase!.from('coupang_settlement_checks').delete().eq('user_id', userId).eq('month', month);
+    return res.status(200).json({ ok: true, month, actualAmount: 0 });
+  }
+
+  const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 300) : null;
+  const { error } = await supabase!.from('coupang_settlement_checks').upsert({
+    user_id: userId, month, actual_amount: amount, note, updated_at: new Date().toISOString(),
+  });
+  if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
+  return res.status(200).json({ ok: true, month, actualAmount: amount });
 }
 
 async function handleSettlement(userId: string, res: VercelResponse) {
