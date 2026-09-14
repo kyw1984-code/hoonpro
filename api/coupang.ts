@@ -3857,8 +3857,9 @@ async function handleAdReportRawSave(userId: string, req: VercelRequest, res: Ve
 /**
  * 옵션별 판매가·원가·입출고비를 모아 준다.
  *
- * 판매가는 매출액 ÷ 수량이다. 쿠팡이 알려준 고객 실결제액이므로 쿠폰·즉시할인이
- * 이미 빠져 있다. 정가를 쓰면 할인하는 상품일수록 마진이 실제보다 커 보인다.
+ * 판매가는 매출액 ÷ 수량이다. 이 값은 주문금액이라 즉시할인쿠폰이 아직
+ * 빠지지 않았다 — 이 판매자는 쿠폰이 주문금액의 절반이라, 쿠폰을 빼지 않으면
+ * 개당 마진이 1만 6천원씩 부풀어 보인다. 쿠폰은 따로 내려보내 화면에서 뺀다.
  *
  * 수수료율은 여기서 주지 않는다. 매출내역의 수수료 값이 실제 요율과 맞지
  * 않는 경우가 확인됐고(같은 계정에서 6.9%로 계산되는데 실제는 10.8%),
@@ -3870,7 +3871,7 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
   const to = kstToday();
   const from = addDays(to, -(days - 1));
 
-  const [salesRes, costRes] = await Promise.all([
+  const [salesRes, costRes, couponRes, itemRes] = await Promise.all([
     selectAll<{ vendor_item_id: string; product_name: string | null; quantity: number; sales_amount: number; channel: string }>((f, t) =>
       supabase!.from('coupang_sales_daily')
         .select('vendor_item_id, product_name, quantity, sales_amount, channel')
@@ -3881,10 +3882,33 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
     selectAll<any>((f, t) =>
       supabase!.from('coupang_costs').select('*').eq('user_id', userId)
         .order('vendor_item_id').range(f, t)),
+    // 즉시할인쿠폰 — 주문금액에서 따로 빠진다
+    selectAll<{ vendor_item_id: string; discount: number }>((f, t) =>
+      supabase!.from('coupang_order_coupons')
+        .select('vendor_item_id, discount')
+        .eq('user_id', userId)
+        .gte('sale_date', from)
+        .lte('sale_date', to)
+        .order('vendor_item_id').range(f, t)),
+    // 옵션명 — 상품명만 보여주면 같은 상품의 여러 옵션이 전부 같은 줄로 보인다
+    selectAll<{ vendor_item_id: string; option_name: string | null }>((f, t) =>
+      supabase!.from('coupang_items')
+        .select('vendor_item_id, option_name')
+        .eq('user_id', userId)
+        .order('vendor_item_id').range(f, t)),
   ]);
 
   const costs = new Map<string, any>();
   for (const c of costRes.rows) costs.set(String(c.vendor_item_id), c);
+
+  const coupons = new Map<string, number>();
+  for (const c of couponRes.rows) {
+    const id = String(c.vendor_item_id);
+    coupons.set(id, (coupons.get(id) ?? 0) + (Number(c.discount) || 0));
+  }
+
+  const optionNames = new Map<string, string>();
+  for (const i of itemRes.rows) optionNames.set(String(i.vendor_item_id), i.option_name ?? '');
 
   const agg = new Map<string, { vendorItemId: string; productName: string; quantity: number; salesAmount: number; channel: string }>();
   for (const r of salesRes.rows) {
@@ -3904,10 +3928,13 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
       return {
         vendorItemId: a.vendorItemId,
         productName: a.productName,
+        optionName: optionNames.get(a.vendorItemId) ?? '',
         channel: a.channel,
         quantity: a.quantity,
-        // 쿠폰·즉시할인이 빠진 실제 판매가
+        // 주문금액 ÷ 수량 — 쿠폰이 아직 빠지지 않은 값이다
         unitPrice: Math.round(a.salesAmount / a.quantity),
+        // 개당 즉시할인쿠폰
+        couponPerUnit: Math.round((coupons.get(a.vendorItemId) ?? 0) / a.quantity),
         // 매입 + 부자재 + 출고 택배비 = 개당 최종원가
         unitCost: c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) : 0,
         fulfillmentCost: c ? Number(c.fulfillment_cost) || 0 : 0,
