@@ -31,6 +31,28 @@ const DEMO_PRODUCTS = [
   { cat: 'OUTDOOR · 의류',  name: '고어텍스 등산복 자켓 방풍',   price: '149,000원', q: '10,010', comp: '높음', trend: '+9%',  score: 64 },
 ];
 
+/* --- 라이브 데모: 정산AI가 계산한 순이익 ---
+ * 상품명과 숫자는 전부 지어낸 예시다. 실제 판매자의 매출이 랜딩에 노출되면
+ * 안 되고, 우리 계정의 실적을 자랑처럼 보여주는 것도 정직하지 않다.
+ * 계산의 구조(무엇을 빼면 무엇이 남는가)만 사실 그대로다. */
+const DEMO_SETTLE = {
+  period: '최근 30일',
+  revenue: 18_420_000,
+  rows: [
+    { k: '쿠팡 수수료', v: -1_933_000, hint: '판매가의 약 10.5%' },
+    { k: '광고비', v: -2_180_000, hint: '광고센터에서 자동 수집' },
+    { k: '쿠폰 할인', v: -742_000, hint: '주문에 실제로 적용된 금액' },
+    { k: '반품 손실', v: -556_000, hint: '반품 배송비 + 되돌린 매출' },
+    { k: '매입 원가', v: -9_670_000, hint: '직접 입력한 개당 사입가' },
+  ],
+  profit: 3_339_000,
+  items: [
+    { name: '데일리 라운드넥 니트 2종', profit: 1_284_000, margin: 21.4, good: true },
+    { name: '기모 조거팬츠 블랙', profit: 862_000, margin: 18.1, good: true },
+    { name: '경량 바람막이 자켓', profit: -118_000, margin: -4.2, good: false },
+  ],
+};
+
 const TYPE_PHRASES = [
   'AI가 먼저 찾습니다',
   'AI가 자동 발굴합니다',
@@ -1165,6 +1187,110 @@ export function AuthGate({ onSuccess }: Props) {
       </main>
 
       {/* ─── 요금 안내 (비회원도 가입 전에 가격을 확인할 수 있어야 한다) ─── */}
+      {/* ─── 훈프로 정산AI ─── */}
+      <section className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#31406b' }}>
+        <div className="mx-auto grid max-w-[1120px] items-center gap-10 md:grid-cols-[1fr_1.15fr]">
+          <div>
+            <p className="text-[11.5px] font-semibold uppercase tracking-[0.16em]" style={{ color: '#7cf5ff' }}>
+              SETTLEMENT AI
+            </p>
+            <h2
+              className="mt-2.5 text-[clamp(38px,4.6vw,64px)] font-bold leading-[1.05] tracking-[-0.03em] text-white"
+              style={{ wordBreak: 'keep-all' }}
+            >
+              <span className="block">판 돈이 아니라,</span>
+              <span className="hp-accent">남은 돈을 봅니다</span>
+            </h2>
+            <p className="mt-4 text-[14px] leading-relaxed text-[#b9c2d8]">
+              쿠팡이 알려주는 것은 매출까지입니다. 수수료·광고비·쿠폰·반품·원가를 다 빼고 나면
+              생각보다 적게 남습니다. <b className="text-white">어느 상품이 실제로 돈을 벌고, 어느 상품이
+              팔수록 손해인지</b> 한 화면에서 갈립니다.
+            </p>
+
+            <ul className="mt-6 flex flex-col gap-2.5">
+              {[
+                '쿠팡 키를 한 번 넣으면 매시간 자동으로 가져옵니다',
+                '상품별 순이익과 마진율 — 손해 보는 상품이 위로 올라옵니다',
+                '정산 캘린더로 언제 얼마가 들어오는지 미리 봅니다',
+                '재고 예측·반품 사유·고객문의 초안까지 같은 탭 안에',
+              ].map(t => (
+                <li key={t} className="flex items-start gap-2 text-[13.5px] leading-relaxed text-[#dae1f0]">
+                  <Check className="mt-[3px] h-3.5 w-3.5 shrink-0" style={{ color: '#3ee7a3' }} />
+                  {t}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* 순이익 계산 예시 */}
+          <div
+            className="rounded-[20px] border p-5 sm:p-6"
+            style={{ background: 'rgba(38,52,88,.55)', borderColor: '#31406b', backdropFilter: 'blur(10px)' }}
+          >
+            <div className="mb-4 flex items-center gap-2">
+              <div
+                className="flex h-7 w-7 items-center justify-center rounded-[9px]"
+                style={{ background: 'linear-gradient(135deg,#7cf5ff,#8b7bff)' }}
+              >
+                <ShoppingBag className="h-4 w-4" style={{ color: '#101a2e' }} />
+              </div>
+              <span className="text-[13px] font-semibold text-white">훈프로 정산AI</span>
+              <span className="ml-auto text-[11.5px] text-[#98a3bf]">{DEMO_SETTLE.period}</span>
+            </div>
+
+            <div className="flex items-baseline justify-between border-b pb-3" style={{ borderColor: '#31406b' }}>
+              <span className="text-[13px] text-[#b9c2d8]">매출</span>
+              <span className="text-[18px] font-semibold tabular-nums text-white">
+                {DEMO_SETTLE.revenue.toLocaleString('ko-KR')}원
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-1.5 py-3">
+              {DEMO_SETTLE.rows.map(r => (
+                <div key={r.k} className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 text-[13px] text-[#b9c2d8]">
+                    {r.k}
+                    <span className="ml-1.5 text-[11px] text-[#7c88a8]">{r.hint}</span>
+                  </span>
+                  <span className="shrink-0 text-[13.5px] tabular-nums" style={{ color: '#ff8b8b' }}>
+                    {r.v.toLocaleString('ko-KR')}원
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div
+              className="flex items-baseline justify-between rounded-[12px] px-3.5 py-3"
+              style={{ background: 'rgba(62,231,163,.09)', border: '1px solid rgba(62,231,163,.24)' }}
+            >
+              <span className="text-[13px] font-semibold" style={{ color: '#3ee7a3' }}>실제로 남은 돈</span>
+              <span className="text-[20px] font-bold tabular-nums" style={{ color: '#3ee7a3' }}>
+                {DEMO_SETTLE.profit.toLocaleString('ko-KR')}원
+              </span>
+            </div>
+
+            <p className="mt-4 mb-2 text-[11.5px] font-semibold uppercase tracking-[0.1em] text-[#98a3bf]">
+              상품별
+            </p>
+            <div className="flex flex-col gap-1.5">
+              {DEMO_SETTLE.items.map(it => (
+                <div key={it.name} className="flex items-baseline justify-between gap-3 rounded-[10px] px-3 py-2"
+                     style={{ background: 'rgba(255,255,255,.04)', border: '1px solid #31406b' }}>
+                  <span className="min-w-0 truncate text-[12.5px] text-[#dae1f0]">{it.name}</span>
+                  <span className="shrink-0 text-[12.5px] tabular-nums" style={{ color: it.good ? '#3ee7a3' : '#ff8b8b' }}>
+                    {it.profit.toLocaleString('ko-KR')}원 · {it.margin}%
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <p className="mt-3 border-t pt-3 text-[11.5px] leading-relaxed text-[#98a3bf]" style={{ borderColor: '#31406b' }}>
+              상품명과 숫자는 예시입니다. 실제 화면에는 사장님 쿠팡 계정의 값이 들어갑니다.
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* ─── 훈프로 코칭AI ─── */}
       <section className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#31406b' }}>
         <div className="mx-auto grid max-w-[1120px] items-center gap-10 md:grid-cols-[1.15fr_1fr]">
