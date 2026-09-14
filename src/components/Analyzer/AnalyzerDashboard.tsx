@@ -54,6 +54,9 @@ function getGrade(score: number): "S" | "A" | "B" | "C" | "D" {
 const fmt = (n: number) => Math.round(n).toLocaleString();
 const pct = (n: number) => n.toFixed(2);
 
+/** 내 작업에서 넘겨주는 저장본 id. 탭을 옮기면서 값을 건네는 유일한 통로다 */
+export const OPEN_REPORT_KEY = 'hoonpro_open_ad_report';
+
 export function AnalyzerDashboard() {
   const [unitPrice, setUnitPrice] = useState<number>(0);
   const [unitCost, setUnitCost] = useState<number>(0);
@@ -616,7 +619,18 @@ export function AnalyzerDashboard() {
 
   // 파일을 올리지 않았어도 광고센터에서 가져온 보고서가 있으면 그걸로 채운다.
   // 예전에는 버튼을 눌러도 이 화면이 비어 있어서 같은 보고서를 파일로 또 올려야 했다.
-  useEffect(() => { void loadSavedAdReport(); }, []);
+  //
+  // 내 작업에서 "광고분석AI에서 열기"로 넘어온 경우에는 그 저장본이 우선이다.
+  // 사용자가 고른 것이 최근 것보다 먼저다.
+  useEffect(() => {
+    let requested: string | null = null;
+    try {
+      requested = sessionStorage.getItem(OPEN_REPORT_KEY);
+      if (requested) sessionStorage.removeItem(OPEN_REPORT_KEY);
+    } catch { /* 무시 */ }
+    if (requested) void openReport(Number(requested));
+    else void loadSavedAdReport();
+  }, []);
 
   // 마진 칸도 열릴 때 알아서 채운다. 버튼을 한 번 더 누르게 할 이유가 없다.
   // 이미 값이 들어 있으면 건드리지 않는다 — 사용자가 고쳐 둔 값을 덮으면 안 된다.
