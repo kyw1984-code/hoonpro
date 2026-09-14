@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { COUPANG_FEE_RATE_PCT } from '../src/lib/coupangFee.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
@@ -3099,16 +3100,21 @@ export async function computeProfit(
   }
   // 그로스 주문수량 — 쿠폰과 같은 결제일 기준이라 매출 행의 그로스 수량이 곧 주문수량이다
   const growthQtyAgg = new Map<string, number>();
-  const rowQty = new Map<string, { market: number; growth: number }>();
+  // 채널별 금액도 함께 센다. 윙은 쿠팡이 준 정산예정액이 정확하고, 그로스는
+  // 우리가 만들어야 해서 둘을 갈라 놔야 한다.
+  const rowQty = new Map<string, { market: number; growth: number; growthSales: number; mktCommission: number; mktSettlement: number }>();
   for (const sale of salesRes.rows) {
     const id = String(sale.vendor_item_id);
     const q = Number(sale.quantity) || 0;
-    const rq = rowQty.get(id) ?? { market: 0, growth: 0 };
+    const rq = rowQty.get(id) ?? { market: 0, growth: 0, growthSales: 0, mktCommission: 0, mktSettlement: 0 };
     if (sale.channel === 'growth') {
       rq.growth += q;
+      rq.growthSales += Number(sale.sales_amount) || 0;
       growthQtyAgg.set(id, (growthQtyAgg.get(id) ?? 0) + q);
     } else {
       rq.market += q;
+      rq.mktCommission += Number(sale.commission) || 0;
+      rq.mktSettlement += Number(sale.settlement_amount) || 0;
     }
     rowQty.set(id, rq);
   }
@@ -3189,7 +3195,7 @@ export async function computeProfit(
     row.returnQuantity = ret.quantity;
     // 배송비는 건수로 곱한다. 3개짜리 반품 한 건에 배송비가 세 번 나가지 않는다.
     row.returnCost = row.returnCount * (c ? Number(c.return_shipping_cost) || 0 : 0);
-    const rq = rowQty.get(row.vendorItemId) ?? { market: 0, growth: 0 };
+    const rq = rowQty.get(row.vendorItemId) ?? { market: 0, growth: 0, growthSales: 0, mktCommission: 0, mktSettlement: 0 };
     const wing = wingAgg.get(row.vendorItemId);
     // 개당 쿠폰의 출처는 셋이고 앞의 것이 있으면 그것을 쓴다.
     //  1) 쿠폰 관리의 설정값 — 판매자가 아는 바로 그 숫자 (1건당 11,500원)
@@ -3223,6 +3229,30 @@ export async function computeProfit(
     }
     row.couponDiscount = couponForRow(rq.market, rq.growth, wingUnit, growthUnit, row.salesAmount);
     row.channel = rq.growth > 0 && rq.market > 0 ? 'both' : rq.growth > 0 ? 'growth' : 'marketplace';
+
+    // ── 로켓그로스 정산 다시 세우기 ──────────────────────────────
+    //
+    // 쿠팡은 로켓그로스에 수수료도 정산예정액도 주지 않는다. 지금까지는
+    //   수수료  = 윙에서 뽑은 요율 × 주문금액
+    //   정산액  = 주문금액 − 그 수수료
+    // 로 만들었다. 두 군데가 틀렸다.
+    //
+    //   ① 요율의 분모가 주문금액이었다. 쿠팡 수수료는 쿠폰을 뺀 실결제액에
+    //      붙는다. 윙 실적으로 확인하면 수수료 ÷ (주문금액 − 쿠폰)이
+    //      10.6%로, 확정 요율 10.8%와 맞는다. 주문금액으로 나누면 6.9%가
+    //      나와 요율이 절반으로 보였다.
+    //   ② 쿠폰이 아예 빠지지 않았다. 윙은 쿠팡이 준 정산예정액에 쿠폰이
+    //      이미 반영돼 있는데, 그로스는 우리가 만들면서 빠뜨렸다.
+    //
+    // 이 판매자는 쿠폰이 주문금액의 절반이고 매출의 여덟 할이 그로스라,
+    // 순이익이 크게 부풀려져 있었다.
+    if (rq.growth > 0) {
+      const growthCoupon = Math.min(Math.round(growthUnit * rq.growth), rq.growthSales);
+      const growthNet = Math.max(0, rq.growthSales - growthCoupon);
+      const growthFee = Math.round((growthNet * COUPANG_FEE_RATE_PCT) / 100);
+      row.commission = rq.mktCommission + growthFee;
+      row.settlementAmount = rq.mktSettlement + (growthNet - growthFee);
+    }
     // 반품액 = 실판매가 × 반품수량. 이 기간 판매가 없으면 등록 판매가에서 쿠폰 단가를 뺀다.
     const unitNet = row.quantity > 0
       ? (row.salesAmount - row.couponDiscount) / row.quantity
