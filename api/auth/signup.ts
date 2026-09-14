@@ -258,10 +258,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const pwProblem = passwordProblem(password);
     if (pwProblem) return res.status(400).json({ error: pwProblem });
 
-    const { data: v } = await supabase.from('email_verifications').select('*').eq('email', normalizedEmail).maybeSingle();
-    if (!v || (v.purpose && v.purpose !== 'signup')) return res.status(400).json({ error: '인증코드를 먼저 요청해주세요.' });
+    // 조회 실패와 '코드를 요청한 적 없음'은 다르다. 예전에는 둘을 같이 묶어,
+    // DB가 잠깐 흔들리면 방금 메일로 코드를 받은 사람에게 "먼저 요청하라"고
+    // 답했다. 시키는 대로 다시 요청해도 같은 자리에서 또 막힌다.
+    const { data: v, error: vErr } = await supabase
+      .from('email_verifications').select('*').eq('email', normalizedEmail).maybeSingle();
+    if (vErr) {
+      console.error('[가입] 인증코드 조회 실패', { code: vErr.code, detail: vErr.message });
+      return res.status(503).json({ error: '잠시 후 다시 시도해주세요. 인증코드는 그대로 쓰실 수 있습니다.', retryable: true });
+    }
+    if (!v) return res.status(400).json({ error: '인증코드를 먼저 요청해주세요.', needCode: true });
+    if (v.purpose && v.purpose !== 'signup') {
+      return res.status(400).json({ error: '이 코드는 가입용이 아닙니다. [인증코드 받기]를 다시 눌러주세요.', needCode: true });
+    }
     if (new Date(v.expires_at).getTime() < Date.now()) {
-      return res.status(400).json({ error: '인증코드가 만료됐습니다. 다시 요청해주세요.' });
+      return res.status(400).json({ error: '인증코드가 만료됐습니다. 다시 요청해주세요.', needCode: true });
     }
     if (v.attempts >= MAX_ATTEMPTS) {
       return res.status(429).json({ error: '시도 횟수를 초과했습니다. 인증코드를 다시 요청해주세요.' });
