@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { CreditCard, Ticket, Plus, RefreshCw, Power, Loader2, AlertTriangle } from 'lucide-react';
+import { couponBenefitLabel } from '../../lib/coupon';
 import { getToken } from '../../lib/auth';
 import { won } from '../../lib/coupang';
 
@@ -22,8 +23,9 @@ interface SubRow {
 interface CouponRow {
   id: string;
   code: string;
-  type: 'free_period' | 'percent' | 'amount';
+  type: 'free_period' | 'percent' | 'amount' | 'amount_monthly';
   value: number;
+  trial_days?: number | null;
   duration_cycles: number | null;
   max_redemptions: number | null;
   redeemed_count: number;
@@ -62,13 +64,8 @@ const COUPON_TYPE: Record<string, string> = {
   free_period: '무료 기간',
   percent: '정률 할인',
   amount: '정액 할인',
+  amount_monthly: '정액 할인 (월 기준)',
 };
-
-function couponValueLabel(c: CouponRow): string {
-  if (c.type === 'free_period') return `${c.value}일 무료`;
-  if (c.type === 'percent') return `${c.value}% 할인`;
-  return `${c.value.toLocaleString()}원 할인`;
-}
 
 async function callBilling(action: string, body?: Record<string, unknown>) {
   const res = await fetch(`/api/billing?action=${action}`, {
@@ -95,7 +92,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
 
   const [form, setForm] = useState({
     code: '', type: 'free_period' as CouponRow['type'], value: '30',
-    durationCycles: '1', maxRedemptions: '', expiresAt: '', note: '',
+    trialDays: '', durationCycles: '1', maxRedemptions: '', expiresAt: '', note: '',
   });
 
   const reload = async () => {
@@ -149,6 +146,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
         code: form.code.trim(),
         type: form.type,
         value: Number(form.value),
+        trialDays: form.type === 'free_period' ? 0 : (form.trialDays === '' ? 0 : Number(form.trialDays)),
         durationCycles: form.type === 'free_period' ? 1 : (form.durationCycles === '' ? null : Number(form.durationCycles)),
         maxRedemptions: form.maxRedemptions ? Number(form.maxRedemptions) : null,
         expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
@@ -156,7 +154,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
       });
       showToast('쿠폰이 생성됐습니다.');
       setShowCreate(false);
-      setForm({ code: '', type: 'free_period', value: '30', durationCycles: '1', maxRedemptions: '', expiresAt: '', note: '' });
+      setForm({ code: '', type: 'free_period', value: '30', trialDays: '', durationCycles: '1', maxRedemptions: '', expiresAt: '', note: '' });
       await reload();
     } catch (e: any) {
       showToast(e?.message ?? '쿠폰 생성에 실패했습니다.');
@@ -482,25 +480,41 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
               <div>
                 <label className="mb-1 block text-[12px] font-medium text-ink-2">유형</label>
                 <select className={inputCls} value={form.type}
-                  onChange={e => setForm(f => ({ ...f, type: e.target.value as CouponRow['type'], value: e.target.value === 'free_period' ? '30' : e.target.value === 'percent' ? '30' : '10000' }))}>
-                  <option value="free_period">무료 기간 (일)</option>
+                  onChange={e => setForm(f => ({
+                    ...f,
+                    type: e.target.value as CouponRow['type'],
+                    value: e.target.value === 'free_period' ? '30'
+                      : e.target.value === 'percent' ? '30'
+                      : e.target.value === 'amount_monthly' ? '5000' : '10000',
+                  }))}>
+                  <option value="free_period">무료 기간만 (일)</option>
                   <option value="percent">정률 할인 (%)</option>
-                  <option value="amount">정액 할인 (원)</option>
+                  <option value="amount">정액 할인 (원 · 플랜 무관 고정)</option>
+                  <option value="amount_monthly">정액 할인 (월 기준 원 · 연간은 ×12)</option>
                 </select>
               </div>
               <div>
                 <label className="mb-1 block text-[12px] font-medium text-ink-2">
-                  {form.type === 'free_period' ? '무료 일수' : form.type === 'percent' ? '할인율 (%)' : '할인액 (원)'}
+                  {form.type === 'free_period' ? '무료 일수'
+                    : form.type === 'percent' ? '할인율 (%)'
+                    : form.type === 'amount_monthly' ? '월 기준 할인액 (원)' : '할인액 (원)'}
                 </label>
                 <input className={inputCls} type="number" value={form.value}
                   onChange={e => setForm(f => ({ ...f, value: e.target.value }))} />
               </div>
               {form.type !== 'free_period' && (
-                <div>
-                  <label className="mb-1 block text-[12px] font-medium text-ink-2">할인 적용 회차 (비우면 계속)</label>
-                  <input className={inputCls} type="number" placeholder="예: 3 = 첫 3개월" value={form.durationCycles}
-                    onChange={e => setForm(f => ({ ...f, durationCycles: e.target.value }))} />
-                </div>
+                <>
+                  <div>
+                    <label className="mb-1 block text-[12px] font-medium text-ink-2">할인 적용 회차 (비우면 계속)</label>
+                    <input className={inputCls} type="number" placeholder="비우면 갱신 때마다 계속" value={form.durationCycles}
+                      onChange={e => setForm(f => ({ ...f, durationCycles: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[12px] font-medium text-ink-2">무료 일수 (비우면 없음)</label>
+                    <input className={inputCls} type="number" placeholder="예: 30 = 30일 무료 후 할인가로 결제" value={form.trialDays}
+                      onChange={e => setForm(f => ({ ...f, trialDays: e.target.value }))} />
+                  </div>
+                </>
               )}
               <div>
                 <label className="mb-1 block text-[12px] font-medium text-ink-2">총 사용 한도 (비우면 무제한)</label>
@@ -525,7 +539,10 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} 생성
             </button>
-            <p className="mt-2 text-[12px] text-ink-3">모든 쿠폰은 1인(본인인증 CI 기준) 1회만 사용할 수 있습니다.</p>
+            <p className="mt-2 text-[12px] text-ink-3">
+              모든 쿠폰은 1인(본인인증 CI 기준) 1회만 사용할 수 있습니다.
+              {' '}수강생용 예: <b className="text-ink-2">월 기준 5,000원 · 회차 비움 · 무료 30일</b> → 30일 무료 후 월간은 5,000원, 연간은 60,000원이 갱신할 때마다 계속 할인됩니다.
+            </p>
           </div>
         )}
 
@@ -548,7 +565,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
                   {coupons.map(c => (
                     <tr key={c.id} className="transition-colors hover:bg-paper-2">
                       <td className="px-4 py-3 font-mono text-[13px] font-semibold text-ink">{c.code}</td>
-                      <td className="whitespace-nowrap px-4 py-3 text-ink">{couponValueLabel(c)}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-ink">{couponBenefitLabel(c)}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-ink-2">
                         {c.type === 'free_period' ? '가입 시 1회' : c.duration_cycles === null ? '계속' : `첫 ${c.duration_cycles}회`}
                       </td>

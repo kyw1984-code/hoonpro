@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { withVat } from '../../lib/vat';
+import { won } from '../../lib/coupang';
+import { FeatureCompare } from './FeatureCompare';
 import { CreditCard, BadgeCheck, AlertTriangle, Ticket, Loader2, CalendarClock, Receipt, Gift } from 'lucide-react';
 import { getToken, removeToken } from '../../lib/auth';
 import {
@@ -642,6 +644,9 @@ export function SubscriptionPage() {
         </div>
       )}
 
+      {/* 무료 가입 vs 구독 기능 비교 */}
+      <FeatureCompare limits={status?.featureLimits} />
+
       {/* 친구 추천 */}
       {referral && referral.active && (
         <div className="rounded-panel border border-line bg-paper p-6">
@@ -650,7 +655,8 @@ export function SubscriptionPage() {
             <h3 className="text-[15px] font-semibold text-ink">친구 추천</h3>
           </div>
           <p className="text-[12.5px] text-ink-2">
-            이 코드를 동료 셀러에게 공유하세요. 친구가 구독할 때 쿠폰 코드로 입력하면 <b>첫 결제 {referral.value}% 할인</b>을 받습니다.
+            이 코드를 동료 셀러에게 공유하세요. 친구는 <b>첫 결제 {referral.value}% 할인</b>을 받고,
+            친구가 결제를 마치면 <b className="text-accent">내 다음 결제에서 {won(referral.rewardAmount ?? 0)} 할인</b>됩니다.
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span className="rounded-control border border-accent-line bg-accent-soft px-4 py-2 font-mono text-[15px] font-semibold tracking-wide text-accent">{referral.code}</span>
@@ -660,6 +666,15 @@ export function SubscriptionPage() {
             </button>
             <span className="ml-auto text-[12px] tabular-nums text-ink-3">지금까지 {referral.redeemedCount ?? 0}명이 사용했습니다</span>
           </div>
+          {(referral.rewardPending ?? 0) > 0 && (
+            <p className="mt-3 rounded-card border border-accent-line bg-accent-soft px-3 py-2 text-[12.5px] text-accent">
+              적립된 추천 보상 <b>{referral.rewardPending}건</b> · 총 {won((referral.rewardAmount ?? 0) * referral.rewardPending)} — 다음 결제부터 한 건씩 자동으로 할인됩니다.
+            </p>
+          )}
+          <p className="mt-2 text-[12px] text-ink-3">
+            보상은 결제할 때마다 한 건씩 쓰입니다. 3명을 추천하면 다음 세 번의 결제가 각각 {won(referral.rewardAmount ?? 0)} 할인됩니다.
+            월간·연간 어느 플랜이든 보상 금액은 같습니다.
+          </p>
         </div>
       )}
 

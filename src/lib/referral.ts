@@ -27,3 +27,15 @@ export function isOwnReferral(note: string | null | undefined, userId: string): 
   if (!note || !userId) return false;
   return note === referralNote(userId);
 }
+
+/**
+ * 이 note를 쓴 추천 코드의 주인 userId. 추천 코드가 아니면 null.
+ *
+ * 친구가 결제를 마치면 추천인에게도 보상을 줘야 하는데, 그 추천인이
+ * 누구인지는 이 note에만 적혀 있다.
+ */
+export function referrerIdFromNote(note: string | null | undefined): string | null {
+  if (!note || !note.startsWith('referral:')) return null;
+  const id = note.slice('referral:'.length).trim();
+  return id.length > 0 ? id : null;
+}
