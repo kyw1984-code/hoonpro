@@ -57,6 +57,8 @@ const pct = (n: number) => n.toFixed(2);
 export function AnalyzerDashboard() {
   const [unitPrice, setUnitPrice] = useState<number>(0);
   const [unitCost, setUnitCost] = useState<number>(0);
+  /** 개당 즉시할인쿠폰. 주문금액에서 이걸 빼야 고객이 실제로 낸 돈이 된다 */
+  const [couponPerUnit, setCouponPerUnit] = useState<number>(0);
   const [deliveryFee, setDeliveryFee] = useState<number>(3650);
   // 쿠팡 판매수수료 기본값. 요금표 기준 10.8%(부가세 별도)이고 이 칸은
   // 부가세 포함 값을 받으므로 10.8 × 1.1 = 11.88이다.
@@ -76,10 +78,14 @@ export function AnalyzerDashboard() {
   const [presetMsg, setPresetMsg] = useState<string>("");
   const [error, setError] = useState<string>("");
 
-  const totalFeeAmount = unitPrice * (coupangFeeRate / 100);
-  const netUnitMargin = unitPrice - unitCost - deliveryFee - totalFeeAmount;
-  const marginRate = unitPrice > 0 ? (netUnitMargin / unitPrice) * 100 : 0;
-  const breakEvenROAS = netUnitMargin > 0 ? (unitPrice / netUnitMargin) * 100 : 0;
+  // 고객이 실제로 낸 돈 = 주문금액 − 즉시할인쿠폰.
+  // 수수료도 마진도 이 금액이 기준이다. 쿠폰 전 금액으로 계산하면 들어오지도
+  // 않은 돈에 수수료를 물리고 마진을 쿠폰만큼 부풀린다.
+  const netUnitPrice = Math.max(0, unitPrice - couponPerUnit);
+  const totalFeeAmount = Math.round(netUnitPrice * (coupangFeeRate / 100));
+  const netUnitMargin = Math.round(netUnitPrice - unitCost - deliveryFee - totalFeeAmount);
+  const marginRate = netUnitPrice > 0 ? (netUnitMargin / netUnitPrice) * 100 : 0;
+  const breakEvenROAS = netUnitMargin > 0 ? (netUnitPrice / netUnitMargin) * 100 : 0;
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -138,9 +144,9 @@ export function AnalyzerDashboard() {
 
     // 매출 산정 모드: 실측 컬럼이 있으면 실측, 없으면 판매수량 × 입력 판매가
     const revenueMode: "actual" | "estimated" = colRevenue ? "actual" : "estimated";
-    const rowRevenue = (row: any) => (revenueMode === "actual" ? row.실측매출 : (row[colQty] || 0) * unitPrice);
+    const rowRevenue = (row: any) => (revenueMode === "actual" ? row.실측매출 : (row[colQty] || 0) * netUnitPrice);
     // 순이익: 실측 모드에서는 마진율(개당마진 ÷ 판매가)을 실측 매출에 적용해 옵션별 단가 차이를 흡수
-    const netMarginRate = unitPrice > 0 ? netUnitMargin / unitPrice : 0;
+    const netMarginRate = netUnitPrice > 0 ? netUnitMargin / netUnitPrice : 0;
     // 마진 미입력(판매가 0 등) 시: 순이익은 계산 불가로 표시하고,
     // 판정은 쿠팡 셀러 통상 기준선(손익분기 ROAS 300%)으로 폴백해 어긋난 판정을 막는다
     const marginProvided = breakEvenROAS > 0;
@@ -396,7 +402,7 @@ export function AnalyzerDashboard() {
     // 2. 손익 구조 분석
     if (netUnitMargin > 0) {
       const adCostPerSale = tot.판매수량 > 0 ? tot.광고비 / tot.판매수량 : 0;
-      const adCostRatio = unitPrice > 0 ? (adCostPerSale / unitPrice) * 100 : 0;
+      const adCostRatio = netUnitPrice > 0 ? (adCostPerSale / netUnitPrice) * 100 : 0;
       recommendations.push(`💰 [손익 구조] 개당 마진 ₩${fmt(netUnitMargin)} | 판매 1건에 광고비 ₩${fmt(adCostPerSale)} 소요 (판매가의 ${pct(adCostRatio)}%). ${adCostPerSale > netUnitMargin ? `광고비가 마진 초과 — 팔수록 적자입니다. 광고 효율 개선 시급!` : `판매 1건당 순수익 ₩${fmt(netUnitMargin - adCostPerSale)}이 남습니다.`}`);
     }
 
@@ -520,7 +526,7 @@ export function AnalyzerDashboard() {
         cpcEfficiency,
       },
     };
-  }, [rawData, unitPrice, unitCost, deliveryFee, coupangFeeRate, netUnitMargin, targetROAS, breakEvenROAS]);
+  }, [rawData, unitPrice, couponPerUnit, netUnitPrice, unitCost, deliveryFee, coupangFeeRate, netUnitMargin, targetROAS, breakEvenROAS]);
 
   // ─── 성과 추이 — 보고서 요약을 저장해 지난 분석 대비 변화를 비교 ────────────
   const [savedReports, setSavedReports] = useState<any[] | null>(null);
@@ -584,13 +590,15 @@ export function AnalyzerDashboard() {
   const applyPreset = (it: any) => {
     if (!it) return;
     setUnitPrice(it.unitPrice || 0);
+    setCouponPerUnit(it.couponPerUnit || 0);
     setUnitCost(it.unitCost || 0);
     setDeliveryFee(it.fulfillmentCost || 0);
-    setPresetMsg(
-      it.hasCost
-        ? `${it.quantity}개 판매 기준 실판매가입니다 (쿠폰 할인 후).`
-        : "원가가 비어 있습니다. 정산AI [원가 입력]에 넣으면 함께 채워집니다.",
-    );
+    const net = Math.max(0, (it.unitPrice || 0) - (it.couponPerUnit || 0));
+    const parts = [`${it.quantity}개 판매 기준 · 실결제가 ${net.toLocaleString()}원`];
+    // 한두 개 팔린 옵션의 평균가는 쿠폰 한 번에 크게 흔들린다. 그대로 믿으면 안 된다.
+    if (it.quantity < 5) parts.push("판매 건수가 적어 평균가가 흔들릴 수 있습니다.");
+    if (!it.hasCost) parts.push("원가가 비어 있습니다 — 정산AI [원가 입력]에 넣으면 함께 채워집니다.");
+    setPresetMsg(parts.join(" "));
   };
 
   /** 광고센터 버튼으로 저장해 둔 보고서를 파일 없이 읽는다 */
@@ -630,7 +638,7 @@ export function AnalyzerDashboard() {
       label: reportLabel.trim() || null,
       // 어떤 마진 기준으로 계산한 순이익인지도 함께 남긴다 — 기준이 다르면
       // 순이익 비교가 사과와 오렌지가 된다.
-      basis: { unitPrice, unitCost, deliveryFee, feeRate: coupangFeeRate },
+      basis: { unitPrice, couponPerUnit, unitCost, deliveryFee, feeRate: coupangFeeRate },
       grade: pd.precision?.grade ?? null,
       totalCost: Math.round(pd.tot?.광고비 || 0),
       totalRevenue: Math.round(pd.totalRevenue || 0),
@@ -709,6 +717,7 @@ export function AnalyzerDashboard() {
       const b = sum.basis;
       if (b) {
         if (typeof b.unitPrice === "number") setUnitPrice(b.unitPrice);
+        if (typeof b.couponPerUnit === "number") setCouponPerUnit(b.couponPerUnit);
         if (typeof b.unitCost === "number") setUnitCost(b.unitCost);
         if (typeof b.deliveryFee === "number") setDeliveryFee(b.deliveryFee);
         if (typeof b.feeRate === "number") setCoupangFeeRate(b.feeRate);
@@ -777,7 +786,7 @@ export function AnalyzerDashboard() {
             >
               {presetItems.map((i) => (
                 <option key={i.vendorItemId} value={i.vendorItemId}>
-                  {(i.productName || i.vendorItemId).slice(0, 28)} · {i.unitPrice.toLocaleString()}원
+                  {(i.optionName || i.productName || i.vendorItemId).slice(0, 30)} · {i.quantity}개 · 실결제 {Math.max(0, i.unitPrice - (i.couponPerUnit || 0)).toLocaleString()}원
                 </option>
               ))}
             </select>
@@ -788,13 +797,14 @@ export function AnalyzerDashboard() {
           </p>
           <p className="mt-1 text-[11px] leading-relaxed text-ink-3">
             수수료율은 가져오지 않습니다 — 기본값 11.88%(10.8% + 부가세)를 쓰고,
-            카테고리가 다르면 직접 고쳐주세요.
+            카테고리가 다르면 직접 고쳐주세요. 수수료는 쿠폰을 뺀 <b>실결제가</b>에 붙습니다.
           </p>
         </div>
 
         <div className="space-y-4">
           {[
-            { label: "상품 판매가 (원)", val: unitPrice, set: setUnitPrice, step: "1" },
+            { label: "상품 판매가 (쿠폰 전, 원)", val: unitPrice, set: setUnitPrice, step: "1" },
+            { label: "개당 즉시할인쿠폰 (원)", val: couponPerUnit, set: setCouponPerUnit, step: "1" },
             { label: "최종원가(매입가 등) (원)", val: unitCost, set: setUnitCost, step: "1" },
             { label: "로켓그로스 입출고비 (원)", val: deliveryFee, set: setDeliveryFee, step: "1" },
             { label: "쿠팡 수수료 (부가세 포함, %)", val: coupangFeeRate, set: setCoupangFeeRate, step: "0.01" },
@@ -811,8 +821,9 @@ export function AnalyzerDashboard() {
           ))}
         </div>
         <div className="mt-6 pt-6 border-t border-line space-y-3">
+          <div className="flex justify-between text-sm"><span className="text-ink-2">💳 고객 실결제가:</span><span className="font-semibold text-ink">{netUnitPrice.toLocaleString()}원</span></div>
           <div className="flex justify-between text-sm"><span className="text-ink-2">📦 입출고비 합계:</span><span>{deliveryFee.toLocaleString()}원</span></div>
-          <div className="flex justify-between text-sm"><span className="text-ink-2">📊 예상 수수료 ({coupangFeeRate}%):</span><span>{totalFeeAmount.toLocaleString()}원</span></div>
+          <div className="flex justify-between text-sm"><span className="text-ink-2">📊 예상 수수료 ({coupangFeeRate}% · 실결제가 기준):</span><span>{totalFeeAmount.toLocaleString()}원</span></div>
           <div className="flex justify-between text-base font-semibold"><span className="text-ink">💡 개당 예상 마진:</span><span className="text-positive">{netUnitMargin.toLocaleString()}원</span></div>
           {unitPrice > 0 && <div className="flex justify-between text-sm font-semibold"><span>📈 예상 마진율:</span><span className="text-accent">{marginRate.toFixed(1)}%</span></div>}
           {breakEvenROAS > 0 && <div className="flex justify-between text-sm font-semibold"><span>🎯 손익분기 ROAS:</span><span className="text-orange-600">{breakEvenROAS.toFixed(0)}%</span></div>}
