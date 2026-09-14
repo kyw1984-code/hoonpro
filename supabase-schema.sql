@@ -154,7 +154,8 @@ alter table sourcing_rank_obs enable row level security;
 -- 11. 유료화(월 구독 자동결제) — plans / subscriptions / payments / coupons
 -- ─────────────────────────────────────────────────────────────
 
--- 플랜 — 월간 39,800원 / 연간은 월 29,800원 기준 357,600원 일시 결제 (약 25% 할인)
+-- 플랜 — 월간 49,800원(공급가) / 연간은 10개월치 498,000원 일시 결제 (2개월 무료 = 16.7% 할인)
+-- 요금표 가격은 전부 공급가액이다. 카드에 찍히는 금액은 여기에 부가세 10%를 더한 값이다.
 create table if not exists plans (
   id text primary key,
   name text not null,
@@ -167,8 +168,8 @@ create table if not exists plans (
 alter table plans add column if not exists interval text not null default 'month';
 
 insert into plans (id, name, price, interval) values
-  ('standard', '훈프로 월간', 39800, 'month'),
-  ('yearly', '훈프로 연간', 357600, 'year')
+  ('standard', '훈프로 월간', 49800, 'month'),
+  ('yearly', '훈프로 연간', 498000, 'year')
 on conflict (id) do nothing;
 
 update plans set name = '훈프로 월간' where id = 'standard' and name = '훈프로 스탠다드';
@@ -266,7 +267,7 @@ alter table coupon_redemptions enable row level security;
 -- 구독 행의 coupon_id는 한 칸뿐이라 여기에 얹으면 친구가 쓴 쿠폰이 지워진다.
 -- 별도 줄로 쌓아 두고 결제할 때 오래된 것부터 하나씩 쓴다.
 --
--- 보상은 비율이 아니라 금액이다. 비율로 두면 연간 구독자(357,600원)를 추천한
+-- 보상은 비율이 아니라 금액이다. 비율로 두면 연간 구독자(498,000원)를 추천한
 -- 사람에게 35,760원이 나가고, 월간 추천인(3,980원)과 같은 '10%'라는 말로
 -- 열 배가 갈린다. 적립 시점의 월간 정가 10%로 고정한다.
 create table if not exists referral_rewards (

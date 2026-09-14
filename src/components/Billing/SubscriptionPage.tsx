@@ -174,15 +174,16 @@ export function SubscriptionPage() {
 
   // 플랜 목록 — 연간 우선. DB 마이그레이션 전에는 기본값으로 표시
   const plans = status?.plans?.length ? status.plans : [
-    { id: 'yearly', name: '훈프로 연간', price: 357600, interval: 'year' as const },
-    { id: 'standard', name: '훈프로 월간', price: 39800, chargedPrice: withVat(39800).total, vat: withVat(39800).vat, interval: 'month' as const },
+    { id: 'yearly', name: '훈프로 연간', price: 498000, chargedPrice: withVat(498000).total, vat: withVat(498000).vat, interval: 'year' as const },
+    { id: 'standard', name: '훈프로 월간', price: 49800, chargedPrice: withVat(49800).total, vat: withVat(49800).vat, interval: 'month' as const },
   ];
   const yearlyPlan = plans.find(p => p.interval === 'year');
   const monthlyPlan = plans.find(p => p.interval === 'month');
   const selectedPlan = plans.find(p => p.id === selectedPlanId) ?? yearlyPlan ?? plans[0];
   // 연간이 월간 대비 몇 % 저렴한지 (월 환산 기준)
+  // 올림하지 않는다. 16.67%를 17%로 적으면 실제보다 후하게 말하는 셈이다.
   const discountPct = yearlyPlan && monthlyPlan
-    ? Math.round((1 - yearlyPlan.price / 12 / monthlyPlan.price) * 100)
+    ? Math.floor((1 - yearlyPlan.price / 12 / monthlyPlan.price) * 100)
     : 0;
 
   const selectPlan = (id: string) => {

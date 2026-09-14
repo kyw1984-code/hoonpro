@@ -1066,7 +1066,7 @@ async function refund(user: any, res: VercelResponse) {
         .from('plans').select('price').eq('interval', 'month').eq('active', true).maybeSingle();
       // 결제액(payment.amount)이 세액 포함이므로 차감할 월간 요금도 같은 기준으로 맞춘다.
       // 공급가액으로 빼면 사용료를 실제보다 적게 떼어 환불이 과다해진다.
-      const monthlyPrice = withVat(monthlyPlan?.price ?? 39800).total;
+      const monthlyPrice = withVat(monthlyPlan?.price ?? 49800).total;
       const usedDays = Math.max(1, Math.ceil((Date.now() - approvedAt.getTime()) / 86400000));
       const usedCharge = Math.floor((monthlyPrice / 30) * usedDays);
       refundAmount = Math.max(0, payment.amount - usedCharge);
