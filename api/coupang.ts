@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { COUPANG_FEE_RATE_PCT } from '../src/lib/coupangFee.js';
+import { COUPANG_FEE_RATE_PCT, growthSettlement } from '../src/lib/coupangFee.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
@@ -1178,51 +1178,6 @@ function kstDateOf(value: unknown): string | null {
   return pickDate({ v: value }, ['v']);
 }
 
-/**
- * 윙(마켓플레이스) 실적에서 관측된 판매수수료율.
- *
- * 로켓그로스 주문 API는 수수료를 주지 않지만, 판매수수료율 자체는 윙과 같다.
- * 카테고리마다 요율이 다르므로 상품별로 뽑고, 그 상품의 윙 실적이 없으면
- * 이 판매자의 전체 평균을 쓴다. 윙 실적이 하나도 없으면 null을 돌려준다 —
- * 업계 평균 같은 걸 끌어다 쓰면 순이익이 조용히 틀린다.
- */
-async function marketplaceCommissionRates(
-  userId: string,
-): Promise<{ byItem: Map<string, number>; overall: number | null }> {
-  const byItem = new Map<string, number>();
-  if (!supabase) return { byItem, overall: null };
-
-  const { rows } = await selectAll<{ vendor_item_id: string; sales_amount: number; commission: number }>((f, t) =>
-    supabase!
-      .from('coupang_sales_daily')
-      .select('vendor_item_id, sales_amount, commission')
-      .eq('user_id', userId)
-      .eq('channel', 'marketplace')
-      .order('vendor_item_id').range(f, t));
-
-  const acc = new Map<string, { sales: number; fee: number }>();
-  let totalSales = 0;
-  let totalFee = 0;
-  for (const r of rows) {
-    const sales = Number(r.sales_amount) || 0;
-    const fee = Number(r.commission) || 0;
-    if (sales <= 0) continue;
-    const id = String(r.vendor_item_id);
-    const cur = acc.get(id) ?? { sales: 0, fee: 0 };
-    cur.sales += sales;
-    cur.fee += fee;
-    acc.set(id, cur);
-    totalSales += sales;
-    totalFee += fee;
-  }
-  for (const [id, v] of acc) {
-    // 수수료가 0으로만 쌓인 상품은 아직 확정 전이다. 0%로 굳히면 그 상품
-    // 그로스 매출이 수수료 없는 매출로 잡힌다.
-    if (v.fee > 0) byItem.set(id, v.fee / v.sales);
-  }
-  const overall = totalSales > 0 && totalFee > 0 ? totalFee / totalSales : null;
-  return { byItem, overall };
-}
 
 async function syncRocketGrowth(
   userId: string,
@@ -1333,24 +1288,38 @@ async function syncRocketGrowth(
     if (failedThisRun) break;
   }
 
-  // 수수료는 이 API로 오지 않는다. 다만 로켓그로스의 판매수수료율은 윙과 같아서,
-  // 이미 들어와 있는 윙 실적에서 상품별 실제 요율을 뽑아 그대로 쓸 수 있다.
-  // 카테고리마다 요율이 다르므로 상품별 요율이 있으면 그것을, 없으면 이 판매자의
-  // 전체 평균을 쓴다. 둘 다 없으면(윙 실적이 아직 없으면) 수수료를 지어내지 않는다.
-  // 그로스 주문이 한 건도 없으면 요율을 뽑을 이유가 없다 (매출 테이블 전체 조회다)
-  const rate = agg.size > 0
-    ? await marketplaceCommissionRates(userId)
-    : { byItem: new Map<string, number>(), overall: null as number | null };
+  // 쿠폰을 먼저 채운다. 수수료가 쿠폰을 뺀 실결제액에 붙기 때문이다.
+  // 예전에는 매출을 먼저 쓰고 쿠폰을 나중에 채워서, 수수료를 계산할 때 이번
+  // 회차의 쿠폰을 알 수 없었다.
+  await syncOrderCoupons(userId, creds, orderMeta, 'growth', sum, deadline);
+
+  // 수수료와 정산예정액은 이 API로 오지 않아 우리가 만든다.
+  //
+  // 예전에는 윙 실적에서 뽑은 요율을 주문금액에 그대로 곱했다. 두 군데가
+  // 틀렸다. ① 쿠팡 수수료는 쿠폰을 뺀 실결제액에 붙는데 분모가 주문금액이라
+  // 요율이 절반으로 보였다. ② 쿠폰이 아예 빠지지 않아 정산예정액이 부풀었다.
+  // 쿠폰을 많이 쓰는 판매자일수록 순이익이 크게 어긋났다.
+  const { rows: couponRows } = await selectAll<{ sale_date: string; vendor_item_id: string; discount: number }>((f, t) =>
+    supabase!
+      .from('coupang_order_coupons')
+      .select('sale_date, vendor_item_id, discount')
+      .eq('user_id', userId)
+      .eq('channel', 'growth')
+      .gte('sale_date', from)
+      .lte('sale_date', to)
+      .order('sale_date').range(f, t));
+
+  const couponByKey = new Map<string, number>();
+  for (const c of couponRows) {
+    const key = `${String(c.sale_date).slice(0, 10)}:${c.vendor_item_id}`;
+    couponByKey.set(key, (couponByKey.get(key) ?? 0) + (Number(c.discount) || 0));
+  }
+
   const batchAt = new Date().toISOString();
   const rows = [...agg.values()].map(r => {
-    const pct = rate.byItem.get(String(r.vendor_item_id)) ?? rate.overall;
-    const commission = pct === null ? 0 : Math.round(r.sales_amount * pct);
-    return {
-      ...r,
-      commission,
-      settlement_amount: Math.max(0, r.sales_amount - commission),
-      updated_at: batchAt,
-    };
+    const coupon = couponByKey.get(`${r.sale_date}:${r.vendor_item_id}`) ?? 0;
+    const { commission, settlement } = growthSettlement(r.sales_amount, coupon);
+    return { ...r, commission, settlement_amount: settlement, updated_at: batchAt };
   });
 
   // 윙과 같은 이유로 먼저 덮어쓰고 나중에 치운다. 이 판매자는 매출의 여덟 할이
@@ -1372,8 +1341,6 @@ async function syncRocketGrowth(
       .lt('updated_at', batchAt);
   }
   sum.growthCancelled = cancelled;
-
-  await syncOrderCoupons(userId, creds, orderMeta, 'growth', sum, deadline);
 }
 
 // ── 그로스 주문별 쿠폰 ────────────────────────────────────────
@@ -3100,21 +3067,16 @@ export async function computeProfit(
   }
   // 그로스 주문수량 — 쿠폰과 같은 결제일 기준이라 매출 행의 그로스 수량이 곧 주문수량이다
   const growthQtyAgg = new Map<string, number>();
-  // 채널별 금액도 함께 센다. 윙은 쿠팡이 준 정산예정액이 정확하고, 그로스는
-  // 우리가 만들어야 해서 둘을 갈라 놔야 한다.
-  const rowQty = new Map<string, { market: number; growth: number; growthSales: number; mktCommission: number; mktSettlement: number }>();
+  const rowQty = new Map<string, { market: number; growth: number }>();
   for (const sale of salesRes.rows) {
     const id = String(sale.vendor_item_id);
     const q = Number(sale.quantity) || 0;
-    const rq = rowQty.get(id) ?? { market: 0, growth: 0, growthSales: 0, mktCommission: 0, mktSettlement: 0 };
+    const rq = rowQty.get(id) ?? { market: 0, growth: 0 };
     if (sale.channel === 'growth') {
       rq.growth += q;
-      rq.growthSales += Number(sale.sales_amount) || 0;
       growthQtyAgg.set(id, (growthQtyAgg.get(id) ?? 0) + q);
     } else {
       rq.market += q;
-      rq.mktCommission += Number(sale.commission) || 0;
-      rq.mktSettlement += Number(sale.settlement_amount) || 0;
     }
     rowQty.set(id, rq);
   }
@@ -3195,7 +3157,7 @@ export async function computeProfit(
     row.returnQuantity = ret.quantity;
     // 배송비는 건수로 곱한다. 3개짜리 반품 한 건에 배송비가 세 번 나가지 않는다.
     row.returnCost = row.returnCount * (c ? Number(c.return_shipping_cost) || 0 : 0);
-    const rq = rowQty.get(row.vendorItemId) ?? { market: 0, growth: 0, growthSales: 0, mktCommission: 0, mktSettlement: 0 };
+    const rq = rowQty.get(row.vendorItemId) ?? { market: 0, growth: 0 };
     const wing = wingAgg.get(row.vendorItemId);
     // 개당 쿠폰의 출처는 셋이고 앞의 것이 있으면 그것을 쓴다.
     //  1) 쿠폰 관리의 설정값 — 판매자가 아는 바로 그 숫자 (1건당 11,500원)
@@ -3230,37 +3192,15 @@ export async function computeProfit(
     row.couponDiscount = couponForRow(rq.market, rq.growth, wingUnit, growthUnit, row.salesAmount);
     row.channel = rq.growth > 0 && rq.market > 0 ? 'both' : rq.growth > 0 ? 'growth' : 'marketplace';
 
-    // ── 로켓그로스 정산 다시 세우기 ──────────────────────────────
-    //
-    // 쿠팡은 로켓그로스에 수수료도 정산예정액도 주지 않는다. 지금까지는
-    //   수수료  = 윙에서 뽑은 요율 × 주문금액
-    //   정산액  = 주문금액 − 그 수수료
-    // 로 만들었다. 두 군데가 틀렸다.
-    //
-    //   ① 요율의 분모가 주문금액이었다. 쿠팡 수수료는 쿠폰을 뺀 실결제액에
-    //      붙는다. 윙 실적으로 확인하면 수수료 ÷ (주문금액 − 쿠폰)이
-    //      10.6%로, 확정 요율 10.8%와 맞는다. 주문금액으로 나누면 6.9%가
-    //      나와 요율이 절반으로 보였다.
-    //   ② 쿠폰이 아예 빠지지 않았다. 윙은 쿠팡이 준 정산예정액에 쿠폰이
-    //      이미 반영돼 있는데, 그로스는 우리가 만들면서 빠뜨렸다.
-    //
-    // 이 판매자는 쿠폰이 주문금액의 절반이고 매출의 여덟 할이 그로스라,
-    // 순이익이 크게 부풀려져 있었다.
-    if (rq.growth > 0) {
-      const growthCoupon = Math.min(Math.round(growthUnit * rq.growth), rq.growthSales);
-      const growthNet = Math.max(0, rq.growthSales - growthCoupon);
-      const growthFee = Math.round((growthNet * COUPANG_FEE_RATE_PCT) / 100);
-      row.commission = rq.mktCommission + growthFee;
-      row.settlementAmount = rq.mktSettlement + (growthNet - growthFee);
-    }
     // 반품액 = 실판매가 × 반품수량. 이 기간 판매가 없으면 등록 판매가에서 쿠폰 단가를 뺀다.
     const unitNet = row.quantity > 0
       ? (row.salesAmount - row.couponDiscount) / row.quantity
       : Math.max(0, (row.salePrice ?? 0) - Math.max(wingUnit, growthUnit));
     row.returnAmount = Math.round(row.returnQuantity * unitNet);
     row.adCost = adItemAgg.get(row.vendorItemId) ?? 0;
-    // 순이익 = 매출 − 수수료 − 원가·배송 − 반품 − 광고비. 정산예정액이 이미 수수료를
-    // 뺀 값이라 거기서 나머지를 뺀다. 광고비는 옵션에 붙은 몫만 — 옵션 없이 캠페인
+    // 순이익 = 매출 − 쿠폰 − 수수료 − 원가·배송 − 반품 − 광고비.
+    // 정산예정액이 이미 쿠폰과 수수료를 뺀 값이라 거기서 나머지를 뺀다.
+    // (윙은 쿠팡이 준 값, 그로스는 동기화가 같은 기준으로 만들어 둔 값이다) 광고비는 옵션에 붙은 몫만 — 옵션 없이 캠페인
     // 단위로만 잡힌 광고비는 합계 카드에서만 빠지고, 그 차이를 화면에 밝힌다.
     row.profit = row.settlementAmount - row.unitCostTotal - row.returnCost - row.adCost;
     row.marginRate = row.salesAmount > 0 ? (row.profit / row.salesAmount) * 100 : 0;
@@ -5994,7 +5934,7 @@ async function handleRankRevenue(userId: string, res: VercelResponse) {
 // 중앙값을 쓴다. 여기서 Bright Data를 다시 호출하면 사용자당 월 비용이 붙는다.
 // ═══════════════════════════════════════════════════════════════
 
-const DEFAULT_COMMISSION_RATE = 10.8; // 그 상품의 실적으로 못 구할 때만 쓰는 대략치
+const DEFAULT_COMMISSION_RATE = COUPANG_FEE_RATE_PCT; // 그 상품의 실적으로 못 구할 때만 쓰는 대략치 (부가세 포함)
 const AUTO_APPLY_MAX_CHANGE_PCT = 10;      // 자동 반영 시 하루 변동 한도
 const AUTO_APPLY_MAX_WEEKLY_PCT = 20;      // 자동 반영 7일 누적 한도 — 틀린 시장가가 며칠 이어져도 여기서 멈춘다
 
@@ -6057,7 +5997,7 @@ async function buildPriceSuggestions(userId: string): Promise<PriceSuggestion[]>
       .order('vendor_item_id').range(f, t)),
     selectAll((f, t) => supabase
       .from('coupang_sales_daily')
-      .select('vendor_item_id, sales_amount, commission')
+      .select('vendor_item_id, sales_amount, commission, settlement_amount')
       .eq('user_id', userId)
       .gte('sale_date', addDays(today, -30))
       .order('sale_date').range(f, t)),
@@ -6068,13 +6008,26 @@ async function buildPriceSuggestions(userId: string): Promise<PriceSuggestion[]>
   const rules = new Map<string, any>();
   for (const r of ruleRes.rows) rules.set(String(r.vendor_item_id), r);
 
-  // 상품별 실제 수수료율 — 카테고리마다 달라 고정값을 쓰면 적자가 난다
-  const feeAgg = new Map<string, { sales: number; fee: number }>();
+  // 상품별 실제 수수료율 — 카테고리마다 달라 고정값을 쓰면 적자가 난다.
+  //
+  // 분모는 주문금액이 아니라 '쿠폰을 뺀 실결제액'이다. 쿠팡은 쿠폰을 뺀 금액에
+  // 수수료를 매기므로, 주문금액으로 나누면 즉시할인쿠폰을 많이 쓰는 상품일수록
+  // 수수료율이 실제보다 낮게 나온다(11.88%가 6.96%로 보이던 이유다). 그 낮은
+  // 값으로 최저 판매가를 잡으면 그대로 적자가 된다.
+  //
+  // 실결제액은 정산예정액 + 수수료로 되찾는다. 두 값 모두 쿠폰을 이미 반영한
+  // 값이라 윙과 그로스가 같은 식으로 풀린다.
+  const feeAgg = new Map<string, { net: number; fee: number }>();
   for (const s of salesRes.rows) {
     const id = String(s.vendor_item_id);
-    const cur = feeAgg.get(id) ?? { sales: 0, fee: 0 };
-    cur.sales += Number(s.sales_amount) || 0;
-    cur.fee += Number(s.commission) || 0;
+    const fee = Number(s.commission) || 0;
+    const settlement = Number(s.settlement_amount) || 0;
+    // 정산예정액이 아직 없는 옛 행은 주문금액으로 되돌아간다 — 낮게 나오더라도
+    // 0으로 나누는 것보다는 낫다.
+    const net = settlement > 0 ? settlement + fee : Number(s.sales_amount) || 0;
+    const cur = feeAgg.get(id) ?? { net: 0, fee: 0 };
+    cur.net += net;
+    cur.fee += fee;
     feeAgg.set(id, cur);
   }
 
@@ -6113,7 +6066,9 @@ async function buildPriceSuggestions(userId: string): Promise<PriceSuggestion[]>
 
     const fee = feeAgg.get(id);
     const commissionRate =
-      fee && fee.sales > 0 ? Math.min(40, (fee.fee / fee.sales) * 100) : DEFAULT_COMMISSION_RATE;
+      fee && fee.net > 0 && fee.fee > 0
+        ? Math.min(40, (fee.fee / fee.net) * 100)
+        : DEFAULT_COMMISSION_RATE;
 
     const minMarginRate = Number(rule?.min_margin_rate ?? 10);
     const floor = costEntered ? floorPriceFor(unitCost, commissionRate, minMarginRate) : null;

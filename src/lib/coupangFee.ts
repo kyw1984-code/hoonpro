@@ -17,3 +17,25 @@ export const COUPANG_FEE_RATE_PCT = 11.88;
 export function coupangCommission(netAmount: number, ratePct = COUPANG_FEE_RATE_PCT): number {
   return Math.round((Math.max(0, netAmount) * ratePct) / 100);
 }
+
+/**
+ * 로켓그로스 한 줄의 수수료와 정산예정액.
+ *
+ * 쿠팡은 그로스 주문에 수수료도 정산예정액도 내려주지 않아 우리가 만든다.
+ * 윙은 쿠팡이 준 값이 정확하므로 이 함수를 쓰지 않는다.
+ *
+ * 기준을 여기 한 곳에 둔다. 예전에는 이 계산이 동기화에 한 벌, 순이익 화면에
+ * 한 벌로 갈라져 있어 합계 카드와 일별 차트가 서로 다른 순이익을 보여줬다.
+ */
+export function growthSettlement(
+  salesAmount: number,
+  coupon: number,
+  ratePct = COUPANG_FEE_RATE_PCT,
+): { net: number; commission: number; settlement: number } {
+  const sales = Math.max(0, Math.round(salesAmount));
+  // 쿠폰이 주문금액을 넘으면 계산이 틀린 것이다. 거기서 자른다 —
+  // 음수 매출을 만들어 두면 그 행만 순이익이 튄다.
+  const net = Math.max(0, sales - Math.max(0, Math.round(coupon)));
+  const commission = coupangCommission(net, ratePct);
+  return { net, commission, settlement: net - commission };
+}
