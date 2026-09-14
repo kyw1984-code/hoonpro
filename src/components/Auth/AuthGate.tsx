@@ -132,6 +132,10 @@ export function AuthGate({ onSuccess }: Props) {
   const [verificationRequired, setVerificationRequired] = useState(false);
   const [emailCodeRequired, setEmailCodeRequired] = useState(false);
   const [codeSent, setCodeSent] = useState(false);
+  // 코드를 어느 주소로 보냈는지 기억한다. 예전에는 이메일 칸에 글자 하나만
+  // 스쳐도 codeSent를 끄고 입력한 코드를 지웠다. 자동완성이나 한글 입력기가
+  // 같은 값으로 onChange를 한 번 더 쏘면, 멀쩡히 받은 코드가 사라졌다.
+  const [codeSentTo, setCodeSentTo] = useState('');
   const [sendingCode, setSendingCode] = useState(false);
   const [signupCode, setSignupCode] = useState('');
   const [ageChecked, setAgeChecked] = useState(false);
@@ -187,6 +191,7 @@ export function AuthGate({ onSuccess }: Props) {
       const data = await res.json();
       if (!res.ok) return setMessage({ text: data.error, type: 'error' });
       setCodeSent(true);
+      setCodeSentTo(signupEmail.trim().toLowerCase());
       setMessage({ text: data.message, type: 'success' });
     } catch {
       setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
@@ -343,10 +348,16 @@ export function AuthGate({ onSuccess }: Props) {
         }),
       });
       const data = await res.json();
-      if (!res.ok) return setMessage({ text: data.error, type: 'error' });
+      if (!res.ok) {
+        // 서버가 "코드부터 다시 받으라"고 하면 화면도 그 상태로 되돌린다.
+        // 예전에는 버튼이 [재발송]인 채로 남아, 화면은 코드를 보냈다고 하고
+        // 서버는 아니라고 해서 사용자가 빠져나갈 길이 없었다.
+        if (data.needCode) { setCodeSent(false); setCodeSentTo(''); setSignupCode(''); }
+        return setMessage({ text: data.error, type: 'error' });
+      }
       setMessage({ text: data.message, type: 'success' });
       setSignupName(''); setSignupPhone(''); setSignupEmail('');
-      setSignupCode(''); setAgeChecked(false); setCodeSent(false); setSignupPassword('');
+      setSignupCode(''); setAgeChecked(false); setCodeSent(false); setCodeSentTo(''); setSignupPassword('');
     } catch {
       setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
     } finally {
@@ -1067,7 +1078,15 @@ export function AuthGate({ onSuccess }: Props) {
                   <input
                     type="email"
                     value={signupEmail}
-                    onChange={e => { setSignupEmail(e.target.value); setCodeSent(false); setSignupCode(''); }}
+                    onChange={e => {
+                      const next = e.target.value;
+                      setSignupEmail(next);
+                      // 주소가 실제로 바뀐 경우에만 코드를 버린다
+                      if (codeSent && next.trim().toLowerCase() !== codeSentTo) {
+                        setCodeSent(false);
+                        setSignupCode('');
+                      }
+                    }}
                     onKeyDown={e => e.key === 'Enter' && (emailCodeRequired ? handleSendCode() : handleSignup())}
                     placeholder="이메일 주소"
                     autoFocus={verificationRequired}

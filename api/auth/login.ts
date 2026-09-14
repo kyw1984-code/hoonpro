@@ -333,8 +333,12 @@ async function resetConfirm(req: VercelRequest, res: VercelResponse) {
   const problem = passwordProblem(password);
   if (problem) return res.status(400).json({ error: problem });
 
-  const { data: v } = await supabase.from('email_verifications').select('*').eq('email', email).maybeSingle();
-  if (!v || v.purpose !== 'reset') return res.status(400).json({ error: '인증코드를 먼저 요청해주세요.' });
+  const { data: v, error: vErr } = await supabase.from('email_verifications').select('*').eq('email', email).maybeSingle();
+  if (vErr) {
+    console.error('[재설정] 인증코드 조회 실패', { code: vErr.code, detail: vErr.message });
+    return res.status(503).json({ error: '잠시 후 다시 시도해주세요. 인증코드는 그대로 쓰실 수 있습니다.', retryable: true });
+  }
+  if (!v || v.purpose !== 'reset') return res.status(400).json({ error: '인증코드를 먼저 요청해주세요.', needCode: true });
   if (new Date(v.expires_at).getTime() < Date.now()) {
     return res.status(400).json({ error: '인증코드가 만료됐습니다. 다시 요청해주세요.' });
   }
