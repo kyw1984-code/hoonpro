@@ -993,10 +993,25 @@ async function refund(user: any, res: VercelResponse) {
 async function tossWebhook(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const paymentKey = req.body?.data?.paymentKey || req.body?.paymentKey;
+
+  // 웹훅이 실제로 도착하는지 로그로 남긴다. 주소가 살아 있는 것과 토스가
+  // 진짜 보내는 것은 다르고, 이 핸들러는 성공해도 눈에 보이는 흔적이 없어
+  // 첫 실거래 때 도착 여부를 확인할 방법이 없었다.
+  // 키 값은 남기지 않는다 — 이벤트 종류와 우리 주문번호만 남긴다.
+  console.log('[토스 웹훅] 수신', {
+    eventType: req.body?.eventType ?? null,
+    orderId: req.body?.data?.orderId ?? req.body?.orderId ?? null,
+    status: req.body?.data?.status ?? null,
+    hasPaymentKey: Boolean(paymentKey),
+  });
+
   if (!paymentKey || !process.env.TOSS_SECRET_KEY) return res.status(200).json({ ok: true });
 
   const lookup = await fetch(`${TOSS_API}/v1/payments/${encodeURIComponent(paymentKey)}`, { headers: tossHeaders() });
-  if (!lookup.ok) return res.status(200).json({ ok: true });
+  if (!lookup.ok) {
+    console.error('[토스 웹훅] 결제 조회 실패', { status: lookup.status });
+    return res.status(200).json({ ok: true });
+  }
   const payment: any = await lookup.json();
 
   const statusMap: Record<string, string> = {
@@ -1020,6 +1035,7 @@ async function tossWebhook(req: VercelRequest, res: VercelResponse) {
       approved_at: payment.approvedAt ?? null,
       ...(isRefund ? { refunded_amount: refundedAmount, refunded_at: new Date().toISOString() } : {}),
     }).eq('order_id', payment.orderId);
+    console.log('[토스 웹훅] 반영', { orderId: payment.orderId, status: mapped });
 
     // 앱이 아닌 토스 관리자 화면에서 전액 취소했거나 카드사 이의제기가 들어온 경우.
     // 결제만 되돌리고 구독을 그대로 두면 환불받은 사용자가 계속 이용하고
