@@ -24,6 +24,13 @@ export interface HowToGuide {
   steps: HowToStep[];
   /** 여기서 사람들이 실제로 틀리는 것 하나 */
   caution?: string;
+  /**
+   * 화면을 눈으로 보여주는 짧은 영상. public/howto/ 아래 파일 주소다.
+   *
+   * 글로 다섯 줄 적는 것보다 삼십 초 보는 게 빠른 화면이 있다. 다만 영상은
+   * 화면이 바뀌면 바로 낡으므로, 자주 손대는 화면에는 붙이지 않는다.
+   */
+  video?: string;
 }
 
 export const HOWTO: Record<string, HowToGuide> = {
@@ -116,6 +123,7 @@ export const HOWTO: Record<string, HowToGuide> = {
       { title: '나머지 화면', desc: '정산 캘린더·재고 예측·반품 분석·고객문의·순위·매출·가격 관리가 있습니다. 화면마다 [사용 방법]이 따로 있습니다.' },
     ],
     caution: '광고비만은 쿠팡이 API로 주지 않아 직접 가져와야 합니다. 며칠 잊으면 그 기간 순이익이 부풀려 보입니다.',
+    video: '/howto/coupang-guide.mp4',
   },
 
   qa: {

@@ -91,6 +91,20 @@ export function HowTo({
             </div>
 
             <div className="flex flex-col gap-2.5 overflow-y-auto px-6 pb-4 pt-2">
+              {/* 글 다섯 줄보다 삼십 초 보는 게 빠른 화면이 있다. 자동 재생은 하지
+                  않는다 — 안내를 열자마자 소리가 나면 그건 안내가 아니라 방해다.
+                  preload="metadata"라 재생을 눌러야 실제 파일을 받는다. */}
+              {guide.video && (
+                <video
+                  src={guide.video}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="w-full rounded-card border border-line bg-black"
+                >
+                  이 브라우저는 영상을 재생하지 못합니다.
+                </video>
+              )}
               {guide.steps.map((s, i) => (
                 <div key={s.title} className="flex items-start gap-3 rounded-card border border-line bg-paper-2 p-3.5">
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink text-[12px] font-semibold text-paper">
