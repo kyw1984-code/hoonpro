@@ -2681,6 +2681,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'ad-cost-save': return await handleAdCostSave(userId, req, res);
       case 'ad-cost-delete': return await handleAdCostDelete(userId, req, res);
       case 'ad-import-url': return await handleAdImportUrl(userId, req, res);
+      case 'ad-report-raw': return await handleAdReportRaw(userId, res);
+      case 'ad-report-raw-save': return await handleAdReportRawSave(userId, req, res);
+      case 'margin-preset': return await handleMarginPreset(userId, req, res);
       case 'settlement': return await handleSettlement(userId, res);
       case 'reports': return await handleReports(userId, res);
       case 'brief-settings': return await handleBriefSettings(userId, req, res);
@@ -3793,6 +3796,128 @@ async function handleAdCostDelete(userId: string, req: VercelRequest, res: Verce
 // 않은 매출은 '미배정'으로 따로 보여준다. 둘을 섞으면 실제 입금일이 없는
 // 돈까지 캘린더에 찍혀 계획을 그르친다.
 // ═══════════════════════════════════════════════════════════════
+
+// ── 광고 보고서 원본 (광고분석AI가 그대로 읽는다) ────────────────
+
+/** 한 번에 담을 수 있는 최대 행 수. 넘으면 잘라 두고 잘렸다고 알린다 */
+const AD_RAW_MAX_ROWS = 20000;
+
+async function handleAdReportRaw(userId: string, res: VercelResponse) {
+  const { data, error } = await supabase!
+    .from('coupang_ad_report_raw')
+    .select('date_from, date_to, columns, rows, row_count, truncated, saved_at')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) return res.status(200).json({ report: null });
+  if (!data) return res.status(200).json({ report: null });
+  return res.status(200).json({
+    report: {
+      from: data.date_from,
+      to: data.date_to,
+      columns: data.columns ?? [],
+      rows: data.rows ?? [],
+      rowCount: data.row_count ?? 0,
+      truncated: data.truncated === true,
+      savedAt: data.saved_at,
+    },
+  });
+}
+
+async function handleAdReportRawSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  const body: any = req.body ?? {};
+  const rows = Array.isArray(body.rows) ? body.rows : [];
+  if (rows.length === 0) return res.status(400).json({ error: '저장할 보고서 행이 없습니다.' });
+
+  const truncated = rows.length > AD_RAW_MAX_ROWS;
+  const kept = truncated ? rows.slice(0, AD_RAW_MAX_ROWS) : rows;
+  const columns = Array.isArray(body.columns) && body.columns.length > 0
+    ? body.columns
+    : Object.keys(kept[0] ?? {});
+
+  const { error } = await supabase!.from('coupang_ad_report_raw').upsert({
+    user_id: userId,
+    date_from: body.from || null,
+    date_to: body.to || null,
+    columns,
+    rows: kept,
+    row_count: kept.length,
+    truncated,
+    saved_at: new Date().toISOString(),
+  }, { onConflict: 'user_id' });
+
+  if (error) {
+    console.error('[광고보고서] 원본 저장 실패', { code: error.code, detail: error.message });
+    return res.status(500).json({ error: '보고서를 저장하지 못했습니다.' });
+  }
+  return res.status(200).json({ ok: true, rowCount: kept.length, truncated });
+}
+
+// ── 마진 계산 기본값 (광고분석AI가 손입력 대신 불러온다) ──────────
+
+/**
+ * 옵션별 판매가·원가·입출고비를 모아 준다.
+ *
+ * 판매가는 매출액 ÷ 수량이다. 쿠팡이 알려준 고객 실결제액이므로 쿠폰·즉시할인이
+ * 이미 빠져 있다. 정가를 쓰면 할인하는 상품일수록 마진이 실제보다 커 보인다.
+ *
+ * 수수료율은 여기서 주지 않는다. 매출내역의 수수료 값이 실제 요율과 맞지
+ * 않는 경우가 확인됐고(같은 계정에서 6.9%로 계산되는데 실제는 10.8%),
+ * 틀린 요율을 자동으로 넣으면 손익분기 판정이 통째로 어긋난다. 요율은
+ * 화면의 기본값(부가세 포함)을 쓰고 사용자가 고친다.
+ */
+async function handleMarginPreset(userId: string, req: VercelRequest, res: VercelResponse) {
+  const days = Math.min(Math.max(Number(req.query.days) || 30, 7), 180);
+  const to = kstToday();
+  const from = addDays(to, -(days - 1));
+
+  const [salesRes, costRes] = await Promise.all([
+    selectAll<{ vendor_item_id: string; product_name: string | null; quantity: number; sales_amount: number; channel: string }>((f, t) =>
+      supabase!.from('coupang_sales_daily')
+        .select('vendor_item_id, product_name, quantity, sales_amount, channel')
+        .eq('user_id', userId)
+        .gte('sale_date', from)
+        .lte('sale_date', to)
+        .order('vendor_item_id').range(f, t)),
+    selectAll<any>((f, t) =>
+      supabase!.from('coupang_costs').select('*').eq('user_id', userId)
+        .order('vendor_item_id').range(f, t)),
+  ]);
+
+  const costs = new Map<string, any>();
+  for (const c of costRes.rows) costs.set(String(c.vendor_item_id), c);
+
+  const agg = new Map<string, { vendorItemId: string; productName: string; quantity: number; salesAmount: number; channel: string }>();
+  for (const r of salesRes.rows) {
+    const id = String(r.vendor_item_id);
+    const cur = agg.get(id) ?? { vendorItemId: id, productName: r.product_name ?? '', quantity: 0, salesAmount: 0, channel: r.channel ?? 'marketplace' };
+    cur.quantity += Number(r.quantity) || 0;
+    cur.salesAmount += Number(r.sales_amount) || 0;
+    if (!cur.productName && r.product_name) cur.productName = r.product_name;
+    if (r.channel === 'growth') cur.channel = 'growth';
+    agg.set(id, cur);
+  }
+
+  const items = [...agg.values()]
+    .filter(a => a.quantity > 0)
+    .map(a => {
+      const c = costs.get(a.vendorItemId);
+      return {
+        vendorItemId: a.vendorItemId,
+        productName: a.productName,
+        channel: a.channel,
+        quantity: a.quantity,
+        // 쿠폰·즉시할인이 빠진 실제 판매가
+        unitPrice: Math.round(a.salesAmount / a.quantity),
+        // 매입 + 부자재 + 출고 택배비 = 개당 최종원가
+        unitCost: c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) : 0,
+        fulfillmentCost: c ? Number(c.fulfillment_cost) || 0 : 0,
+        hasCost: Boolean(c),
+      };
+    })
+    .sort((x, y) => y.quantity * y.unitPrice - x.quantity * x.unitPrice);
+
+  return res.status(200).json({ from, to, days, items });
+}
 
 async function handleSettlement(userId: string, res: VercelResponse) {
   const today = kstToday();

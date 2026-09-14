@@ -71,7 +71,7 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
           <h3 className="text-sm font-semibold text-ink">광고센터 연결 — 광고비를 버튼 하나로</h3>
           <p className="mt-1 text-[12px] leading-relaxed text-ink-2">
             아래 버튼을 브라우저 <b className="text-ink">즐겨찾기 바에 한 번 끌어다 놓으세요</b>. 이후 광고센터에 들어가서 그 즐겨찾기를
-            누르면 최근 {days}일 광고비가 자동으로 들어옵니다. 로그인 정보는 어디에도 저장되지 않습니다.
+            누르면 최근 {days}일 광고비와 보고서가 자동으로 들어옵니다. 로그인 정보는 어디에도 저장되지 않습니다.
           </p>
           <p className="mt-1 text-[11.5px] text-ink-3">광고비 들어온 기간: {last}</p>
         </div>
@@ -130,7 +130,7 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
           <li>훈프로 창이 하나 열리고 10~40초 뒤 "광고비가 반영됐습니다"가 뜹니다. 끝입니다.</li>
         </ol>
       )}
-      <p className="mt-2 text-[11px] text-ink-3">PC 크롬·엣지에서 됩니다. 휴대폰에서는 [광고분석AI]의 파일 올리기를 이용해주세요.</p>
+      <p className="mt-2 text-[11px] text-ink-3">PC 크롬·엣지에서 됩니다. 가져온 보고서는 광고분석AI 화면에도 그대로 들어갑니다 — 파일을 따로 올리지 않아도 됩니다. 휴대폰에서는 파일 올리기를 이용해주세요.</p>
 
       {/* 즐겨찾기를 끌어다 놓는 설정은 글로 읽으면 어렵다. 막히는 사람이 어디를
           눌러야 하는지 이 자리에서 알아야 한다 — 나가서 찾게 하면 거기서 놓친다. */}

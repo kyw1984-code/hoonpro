@@ -58,11 +58,22 @@ export function AnalyzerDashboard() {
   const [unitPrice, setUnitPrice] = useState<number>(0);
   const [unitCost, setUnitCost] = useState<number>(0);
   const [deliveryFee, setDeliveryFee] = useState<number>(3650);
-  const [coupangFeeRate, setCoupangFeeRate] = useState<number>(11.55);
+  // 쿠팡 판매수수료 기본값. 요금표 기준 10.8%(부가세 별도)이고 이 칸은
+  // 부가세 포함 값을 받으므로 10.8 × 1.1 = 11.88이다.
+  //
+  // 매출내역 API의 수수료 값으로 실측 요율을 계산해 자동으로 넣는 안을 검토했지만
+  // 쓰지 않는다. 같은 계정에서 6.9%로 계산되는데 실제는 10.8%였다. 틀린 요율이
+  // 자동으로 들어가면 마진이 실제보다 커 보이고 손익분기 판정이 통째로 어긋난다.
+  const [coupangFeeRate, setCoupangFeeRate] = useState<number>(11.88);
   const [targetROAS, setTargetROAS] = useState<number>(300);
 
   const [rawData, setRawData] = useState<any[]>([]);
   const [fileName, setFileName] = useState<string>("");
+  // 쿠팡 연동에서 불러온 옵션별 판매가·원가
+  const [presetItems, setPresetItems] = useState<any[] | null>(null);
+  const [presetPick, setPresetPick] = useState<string>("");
+  const [presetBusy, setPresetBusy] = useState(false);
+  const [presetMsg, setPresetMsg] = useState<string>("");
   const [error, setError] = useState<string>("");
 
   const totalFeeAmount = unitPrice * (coupangFeeRate / 100);
@@ -542,6 +553,57 @@ export function AnalyzerDashboard() {
   };
   useEffect(() => { loadReports(); }, []);
 
+  /** 쿠팡 연동에서 옵션별 판매가·원가를 가져온다 (수수료율은 건드리지 않는다) */
+  const loadMarginPreset = async () => {
+    setPresetBusy(true);
+    setPresetMsg("");
+    try {
+      const r = await coupangApi.marginPreset(30);
+      const items = r.items ?? [];
+      if (items.length === 0) {
+        setPresetMsg("최근 30일 판매 기록이 없습니다. 정산AI에서 쿠팡을 먼저 연동해주세요.");
+        setPresetItems([]);
+        return;
+      }
+      setPresetItems(items);
+      applyPreset(items[0]);
+      setPresetPick(items[0].vendorItemId);
+    } catch (e: any) {
+      setPresetMsg(e?.message ?? "불러오지 못했습니다.");
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const applyPreset = (it: any) => {
+    if (!it) return;
+    setUnitPrice(it.unitPrice || 0);
+    setUnitCost(it.unitCost || 0);
+    setDeliveryFee(it.fulfillmentCost || 0);
+    setPresetMsg(
+      it.hasCost
+        ? `${it.quantity}개 판매 기준 실판매가입니다 (쿠폰 할인 후).`
+        : "원가가 비어 있습니다. 정산AI [원가 입력]에 넣으면 함께 채워집니다.",
+    );
+  };
+
+  /** 광고센터 버튼으로 저장해 둔 보고서를 파일 없이 읽는다 */
+  const loadSavedAdReport = async () => {
+    try {
+      const { report } = await coupangApi.adReportRaw();
+      if (!report || !report.rows?.length) return false;
+      setRawData(report.rows);
+      setFileName(`광고센터에서 가져온 보고서 (${report.from} ~ ${report.to}${report.truncated ? " · 일부만" : ""})`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // 파일을 올리지 않았어도 광고센터에서 가져온 보고서가 있으면 그걸로 채운다.
+  // 예전에는 버튼을 눌러도 이 화면이 비어 있어서 같은 보고서를 파일로 또 올려야 했다.
+  useEffect(() => { void loadSavedAdReport(); }, []);
+
   const buildReportSummary = () => {
     if (!processedData) return null;
     const pd: any = processedData;
@@ -631,13 +693,51 @@ export function AnalyzerDashboard() {
     <div className="flex h-[calc(100vh-4rem)] bg-paper-2 overflow-hidden">
       {/* Sidebar */}
       <div className="w-80 bg-paper border-r border-line p-6 flex flex-col h-full overflow-y-auto shrink-0">
-        <h2 className="text-lg font-semibold text-ink mb-6">💰 마진 계산 설정</h2>
+        <h2 className="text-lg font-semibold text-ink mb-4">💰 마진 계산 설정</h2>
+
+        {/* 손으로 넣지 않아도 되는 값은 연동에서 가져온다 */}
+        <div className="mb-5 rounded-card border border-accent-line bg-accent-soft p-3">
+          <button
+            onClick={loadMarginPreset}
+            disabled={presetBusy}
+            className="flex w-full items-center justify-center gap-1.5 rounded-control bg-accent px-3 py-2 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            {presetBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <TrendingUp className="h-4 w-4" />}
+            쿠팡 연동에서 불러오기
+          </button>
+
+          {presetItems && presetItems.length > 0 && (
+            <select
+              value={presetPick}
+              onChange={(e) => {
+                setPresetPick(e.target.value);
+                applyPreset(presetItems.find((i) => i.vendorItemId === e.target.value));
+              }}
+              className="mt-2 w-full rounded-control border border-line bg-paper px-2 py-1.5 text-[12px] text-ink"
+            >
+              {presetItems.map((i) => (
+                <option key={i.vendorItemId} value={i.vendorItemId}>
+                  {(i.productName || i.vendorItemId).slice(0, 28)} · {i.unitPrice.toLocaleString()}원
+                </option>
+              ))}
+            </select>
+          )}
+
+          <p className="mt-2 text-[11.5px] leading-relaxed text-ink-2">
+            {presetMsg || "최근 30일 실제 판매가(쿠폰 할인 후)와 원가 입력값을 가져옵니다."}
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-ink-3">
+            수수료율은 가져오지 않습니다 — 기본값 11.88%(10.8% + 부가세)를 쓰고,
+            카테고리가 다르면 직접 고쳐주세요.
+          </p>
+        </div>
+
         <div className="space-y-4">
           {[
             { label: "상품 판매가 (원)", val: unitPrice, set: setUnitPrice, step: "1" },
             { label: "최종원가(매입가 등) (원)", val: unitCost, set: setUnitCost, step: "1" },
             { label: "로켓그로스 입출고비 (원)", val: deliveryFee, set: setDeliveryFee, step: "1" },
-            { label: "쿠팡 수수료(vat포함) (%)", val: coupangFeeRate, set: setCoupangFeeRate, step: "0.1" },
+            { label: "쿠팡 수수료 (부가세 포함, %)", val: coupangFeeRate, set: setCoupangFeeRate, step: "0.01" },
             { label: "현재 목표수익률 (%)", val: targetROAS, set: setTargetROAS, step: "50" },
           ].map(({ label, val, set, step }) => (
             <div key={label}>
@@ -664,7 +764,9 @@ export function AnalyzerDashboard() {
         <div className="max-w-6xl mx-auto">
           <div className="mb-8">
             <h1 className="text-[20px] font-semibold text-ink mb-2">📊 쇼크트리 훈프로 쿠팡 광고 성과 분석기</h1>
-            <p className="text-ink-2">쿠팡 보고서(CSV 또는 XLSX)를 업로드하면 훈프로의 정밀 운영 전략이 자동으로 생성됩니다.</p>
+            <p className="text-ink-2">
+              아래 [광고센터 연결]로 버튼 한 번에 가져오거나, 쿠팡 보고서(CSV·XLSX)를 직접 올리면 운영 전략이 자동으로 만들어집니다.
+            </p>
           </div>
 
           {/* File Upload */}
