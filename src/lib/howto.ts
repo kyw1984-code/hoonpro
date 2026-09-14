@@ -40,7 +40,7 @@ export const HOWTO: Record<string, HowToGuide> = {
     lead: '오늘 무엇부터 할지 한 화면에서 봅니다.',
     steps: [
       { title: '오늘 남은 사용량', desc: '기능별로 오늘 몇 번 더 쓸 수 있는지 보여줍니다. 매일 0시(한국 시각)에 초기화됩니다.' },
-      { title: '바로가기', desc: '자주 쓰는 기능으로 바로 들어갑니다. 처음이라면 [훈프로 정산AI → 연동 설정]에서 쿠팡을 먼저 연결하세요.' },
+      { title: '바로가기', desc: '자주 쓰는 기능으로 바로 들어갑니다. 처음이라면 [정산AI → 연동 설정]에서 쿠팡을 먼저 연결하세요.' },
       { title: '연결 상태', desc: '쿠팡 연동이 끊기면 여기에 먼저 표시됩니다. 수집이 멈추면 매출·재고 숫자가 그 시점에서 멈춥니다.' },
     ],
     caution: '쿠팡을 연결하지 않으면 정산AI의 대부분 화면이 비어 있습니다. 연결이 첫 단추입니다.',
@@ -67,7 +67,7 @@ export const HOWTO: Record<string, HowToGuide> = {
     caution: '한 장 만들 때마다 비용이 듭니다. 평소에는 꺼 두고 필요할 때만 [관리자 → 한도 설정]에서 켜세요.',
   },
   sourcing: {
-    title: '훈프로 소싱AI',
+    title: '소싱AI',
     lead: '무엇을 팔지 정합니다. 검색량과 경쟁, 그리고 원가 상한까지.',
     steps: [
       { title: '키워드 찾기', desc: '떠오르는 게 없으면 월별 시즌 칩(✓ 표시가 지금 준비할 달)이나 카테고리를 누르세요. 아이디어가 있으면 검색창에 직접 넣습니다.' },
@@ -80,7 +80,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   },
 
   ranktracker: {
-    title: '순위 추적',
+    title: '순위추적AI',
     lead: '등록한 상품이 키워드 검색에서 몇 위인지 매일 기록합니다.',
     steps: [
       { title: '상품 등록', desc: '키워드와 상품을 짝지어 등록합니다. 내 상품뿐 아니라 소싱AI에서 찾은 경쟁 상품도 담을 수 있습니다.' },
@@ -92,7 +92,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   },
 
   review: {
-    title: '리뷰 분석',
+    title: '리뷰 분석AI',
     lead: '고객이 실제로 무엇에 만족하고 무엇에 불만인지 뽑아냅니다.',
     steps: [
       { title: '상품 넣기', desc: '쿠팡 상품 주소나 상품ID를 넣습니다. 소싱AI의 상품 카드에서 바로 열 수도 있습니다.' },
@@ -103,10 +103,10 @@ export const HOWTO: Record<string, HowToGuide> = {
   },
 
   analyzer: {
-    title: '광고 성과 분석',
+    title: '광고분석AI',
     lead: '어느 광고가 돈을 벌고 어느 광고가 태우는지 가릅니다.',
     steps: [
-      { title: '보고서 올리기', desc: '광고센터에서 받은 보고서 파일을 올립니다. [훈프로 정산AI → 순이익]의 [광고센터 연결]을 쓰면 파일 없이 버튼 하나로 가져올 수 있습니다.' },
+      { title: '보고서 올리기', desc: '광고센터에서 받은 보고서 파일을 올립니다. [정산AI → 순이익]의 [광고센터 연결]을 쓰면 파일 없이 버튼 하나로 가져올 수 있습니다.' },
       { title: '성과 보기', desc: '키워드·캠페인별로 쓴 돈과 거둔 매출을 견줍니다.' },
       { title: '정리하기', desc: '전환이 없는데 돈만 쓰는 키워드는 끄고, 잘 도는 쪽에 예산을 옮깁니다.' },
     ],
@@ -114,7 +114,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   },
 
   coupang: {
-    title: '훈프로 정산AI',
+    title: '정산AI',
     lead: '얼마나 남았는지, 무엇을 채워야 하는지 답합니다.',
     steps: [
       { title: '연동 설정', desc: '먼저 쿠팡 윙 API 키를 등록합니다. 이후 매시간 자동으로 매출·정산·재고·반품·문의를 가져옵니다.' },

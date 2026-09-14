@@ -14,7 +14,7 @@ const FEATURE_LABEL: Record<string, string> = {
   'sourcing-reviews': '소싱AI · 리뷰 수집',
   'sourcing-review-summary': '소싱AI · 리뷰 요약',
   'sourcing-cron': '소싱AI · 자동 수집',
-  'rank-check': '순위 추적',
+  'rank-check': '순위추적AI',
   'qa-ask': '훈프로 코칭AI',
   'email-notify': '알림 메일',
   'thumbnail-image': '썸네일 제작',

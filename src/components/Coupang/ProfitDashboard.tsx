@@ -6,7 +6,7 @@
  * 원가와 반품 배송비를 빼야 비로소 남는 돈이 나온다.
  *
  * 광고비는 상품 단위로 알 수 없어(쿠팡 Open API에 광고 엔드포인트 자체가 없다)
- * 기간 총액으로만 반영한다. [광고 성과 분석]에서 보고서를 올려 두면 날짜별로
+ * 기간 총액으로만 반영한다. [광고분석AI]에서 보고서를 올려 두면 날짜별로
  * 쌓이고, 여기서는 조회 기간에 겹치는 날만 합산해 자동으로 채운다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -282,7 +282,7 @@ export function ProfitDashboard({ onEditCosts }: Props) {
   const hasCoupon = data.rows.some(r => (r.couponDiscount ?? 0) > 0);
   const adNote = (() => {
     if (!ac || ac.coveredDays === 0) {
-      return '쿠팡은 광고 데이터를 API로 제공하지 않습니다. 아래 [광고센터 연결]로 가져오거나 [광고 성과 분석]에서 보고서를 올리면 이 칸이 기간에 맞춰 자동으로 채워집니다.';
+      return '쿠팡은 광고 데이터를 API로 제공하지 않습니다. 아래 [광고센터 연결]로 가져오거나 [광고분석AI]에서 보고서를 올리면 이 칸이 기간에 맞춰 자동으로 채워집니다.';
     }
     const missing = ac.spanDays - ac.coveredDays;
     const est = ac.estimatedDays > 0 ? ` 이 중 ${ac.estimatedDays}일은 기간 총액을 일수로 나눈 추정치입니다.` : '';

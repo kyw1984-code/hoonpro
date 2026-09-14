@@ -107,8 +107,8 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
     .slice(0, 4);
 
   const quickLinks = [
-    { tab: 'sourcing', label: '훈프로 소싱AI', desc: '오늘 팔릴 상품 찾기', icon: TrendingUp },
-    { tab: 'coupang', label: '훈프로 정산AI', desc: '매출·순이익·재고 한눈에', icon: ShoppingBag },
+    { tab: 'sourcing', label: '소싱AI', desc: '오늘 팔릴 상품 찾기', icon: TrendingUp },
+    { tab: 'coupang', label: '정산AI', desc: '매출·순이익·재고 한눈에', icon: ShoppingBag },
     { tab: 'analyzer', label: '광고 성과 분석', desc: '보고서 올리고 코칭 받기', icon: BarChart3 },
   ].filter(q => shown(q.tab));
 
