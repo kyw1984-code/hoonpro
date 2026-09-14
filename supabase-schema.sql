@@ -1306,3 +1306,17 @@ begin
   return json_build_object('refunded', true, 'count', v_count - 1);
 end;
 $$;
+
+-- 크론 실행 기록 (심장박동)
+-- 크론이 멈춰도 화면은 어제 숫자를 그대로 보여 준다. 오류가 찍히지 않는
+-- 고장이라 실행마다 한 줄을 남기고 관리자 [오류 관리]에서 확인한다.
+create table if not exists cron_runs (
+  job text not null,                     -- coupang-sync / billing-charge / ...
+  run_at timestamptz not null default now(),
+  ok boolean not null default true,
+  duration_ms int,
+  detail text,                           -- 응답에서 뽑은 한 줄 (처리 건수 등)
+  primary key (job, run_at)
+);
+create index if not exists idx_cron_runs_job on cron_runs(job, run_at desc);
+alter table cron_runs enable row level security;
