@@ -20,7 +20,21 @@ interface UserRow {
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
   today_calls: number;
+  /** 기능별 오늘 사용 횟수. 한도가 기능마다 달라 합계만으로는 판단할 수 없다 */
+  today_by_feature?: Record<string, number>;
 }
+
+/** 한도 설정 화면과 같은 이름을 쓴다. 두 화면이 다른 말을 하면 안 된다 */
+const FEATURE_LABEL: Record<string, string> = {
+  image: '이미지',
+  qa: '코칭AI',
+  sourcing: '소싱',
+  reviews: '리뷰',
+  rank: '순위',
+  analyze: '분석',
+  inquiry: '문의답변',
+  general: '기타',
+};
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '대기',
@@ -34,13 +48,15 @@ const STATUS_COLOR: Record<string, string> = {
   rejected: 'bg-critical-soft text-critical',
 };
 
-const DAILY_USAGE_LIMIT = 40;
 
 export function AdminPanel() {
   // 다른 탭을 보고 있어도 오류가 났다는 걸 알아야 한다. 탭 라벨에 건수를 띄운다.
   const [openErrors, setOpenErrors] = useState(0);
   const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'limits' | 'stats' | 'config' | 'taborder' | 'company' | 'qa' | 'coupang' | 'errors' | 'suggestions'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
+  // 화면에 40이라고 박혀 있었는데 그런 한도는 어디에도 없었다. 실제 한도는
+  // 기능마다 다르고(소싱 60·리뷰 20·코칭 100…) 관리자가 바꿀 수도 있다.
+  const [limits, setLimits] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -53,7 +69,9 @@ export function AdminPanel() {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       const data = await res.json();
-      setUsers(Array.isArray(data) ? data : []);
+      // 예전 응답은 배열이었다. 배포 직후 열려 있던 화면이 깨지지 않게 둘 다 받는다.
+      setUsers(Array.isArray(data) ? data : Array.isArray(data?.users) ? data.users : []);
+      setLimits(data?.limits && typeof data.limits === 'object' ? data.limits : {});
     } finally {
       setLoading(false);
     }
@@ -258,6 +276,7 @@ export function AdminPanel() {
         handleAction={handleAction}
         handleBulkApprove={handleBulkApprove}
         handleReset={handleReset}
+        limits={limits}
       />}
 
       {toast && (
@@ -281,9 +300,11 @@ interface UsersTabProps {
   handleAction: (userId: string, action: 'approve' | 'reject') => void;
   handleBulkApprove: () => void;
   handleReset: (userId: string, userName: string) => void;
+  /** 지금 설정된 기능별 한도 */
+  limits: Record<string, number>;
 }
 
-function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionLoading, fetchUsers, handleAction, handleBulkApprove, handleReset }: UsersTabProps) {
+function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionLoading, fetchUsers, handleAction, handleBulkApprove, handleReset, limits }: UsersTabProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -352,7 +373,30 @@ function UsersTab({ users, loading, filter, setFilter, counts, filtered, actionL
                   </td>
                   <td className="px-4 py-3 text-ink-2">
                     <div className="flex items-center gap-2">
-                      <span>{user.today_calls} / {DAILY_USAGE_LIMIT}</span>
+                      {(() => {
+                        const used = Object.entries(user.today_by_feature ?? {}).filter(([, n]) => n > 0);
+                        // 한도에 닿은 기능이 하나라도 있으면 그것이 이 회원의 상태다
+                        const maxed = used.filter(([k, n]) => limits[k] !== undefined && n >= limits[k]);
+                        const detail = used.length
+                          ? used.map(([k, n]) => `${FEATURE_LABEL[k] ?? k} ${n}/${limits[k] ?? '?'}`).join(' · ')
+                          : '오늘 사용 없음';
+                        return (
+                          <span className="flex flex-wrap items-center gap-1" title={detail}>
+                            <span className="tabular-nums">{user.today_calls}회</span>
+                            {used.length > 0 && (
+                              <span className="text-[11px] text-ink-3">
+                                {used.slice(0, 2).map(([k, n]) => `${FEATURE_LABEL[k] ?? k} ${n}/${limits[k] ?? '?'}`).join(' · ')}
+                                {used.length > 2 ? ` 외 ${used.length - 2}` : ''}
+                              </span>
+                            )}
+                            {maxed.length > 0 && (
+                              <span className="rounded-control bg-critical-soft px-1.5 py-0.5 text-[10.5px] font-semibold text-critical">
+                                한도 도달
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })()}
                       <button
                         onClick={() => handleReset(user.id, user.name)}
                         disabled={actionLoading === user.id + 'reset' || user.today_calls === 0}

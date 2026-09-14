@@ -137,23 +137,32 @@ async function handleUsers(req: VercelRequest, res: VercelResponse) {
 
   // api_usage가 아니라 feature_usage를 읽는다. api_usage에는 쓰는 코드가
   // 하나도 없어 늘 비어 있었고, 회원마다 사용량이 항상 0으로 보였다.
-  // feature_usage는 기능별로 한 줄씩이라 회원 단위로 다시 합친다.
-  const { data: usages } = await supabase
-    .from('feature_usage')
-    .select('user_id, call_count')
-    .eq('date', today);
+  const [{ data: usages }, cfg] = await Promise.all([
+    supabase.from('feature_usage').select('user_id, feature, call_count').eq('date', today),
+    supabase.from('app_config').select('value').eq('key', 'feature_limits').maybeSingle(),
+  ]);
 
-  const usageMap: Record<string, number> = {};
+  // 한도는 기능마다 다르고 관리자가 바꿀 수도 있다. 화면에 숫자를 박아 두면
+  // 한도를 바꾼 날부터 거짓말이 된다. 지금 설정값을 함께 내려보낸다.
+  const limits = parseLimits(cfg?.data?.value);
+
+  const totalMap: Record<string, number> = {};
+  const byFeature: Record<string, Record<string, number>> = {};
   for (const u of usages ?? []) {
-    usageMap[u.user_id] = (usageMap[u.user_id] ?? 0) + (Number(u.call_count) || 0);
+    const n = Number(u.call_count) || 0;
+    totalMap[u.user_id] = (totalMap[u.user_id] ?? 0) + n;
+    (byFeature[u.user_id] ??= {})[String(u.feature)] = n;
   }
 
   const result = (users ?? []).map((u: any) => ({
     ...u,
-    today_calls: usageMap[u.id] ?? 0,
+    today_calls: totalMap[u.id] ?? 0,
+    // 기능별로 따로 세므로 합계만으로는 한도에 걸렸는지 알 수 없다.
+    // 소싱 60회를 다 쓴 사람과 여덟 기능을 골고루 쓴 사람의 합계가 같을 수 있다.
+    today_by_feature: byFeature[u.id] ?? {},
   }));
 
-  return res.status(200).json(result);
+  return res.status(200).json({ users: result, limits });
 }
 
 // ── 회원 관리 액션 (승인/거절/일괄승인/리셋) ───────────────
