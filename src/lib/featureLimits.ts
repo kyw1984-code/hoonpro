@@ -184,3 +184,40 @@ export function quotaResponse(
     body: { error: '사용량을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.', retryable: true },
   };
 }
+
+/**
+ * 기능 1회당 우리가 실제로 무는 돈(원). 환불할 때 "쓴 만큼"을 셈하는 근거다.
+ *
+ * 관리자 [한도 설정]의 원가 표와 같은 값을 써야 한다. 두 벌로 두면 한쪽만
+ * 고쳐져, 화면에 보이는 원가와 환불에서 떼는 원가가 달라진다.
+ */
+export const FEATURE_UNIT_KRW: Record<string, number> = {
+  image: 7,      // 이미지 1장
+  qa: 5,         // 코칭AI 질문 1건
+  sourcing: 3,   // 키워드 수집 1회
+  reviews: 12,   // 리뷰 수집 + 요약 1상품
+  rank: 3,       // 검색 페이지 1장
+  analyze: 3,    // 경쟁상품 분석 1회
+  inquiry: 2,    // 고객문의 답변 초안 1건
+  general: 1,    // 기획·문구 등 내부 호출
+};
+
+/**
+ * 이 사람이 쓴 만큼의 원가.
+ *
+ * 환불에서 이걸 떼는 이유는 남는 장사를 하려는 게 아니다. 한도가 하루 단위라
+ * 짧게 몰아 쓰고 환불받으면 우리가 무는 돈이 받은 돈보다 커진다. 그러면 그
+ * 부담이 성실하게 쓰는 다른 구독자에게 간다.
+ *
+ * @param counts 기능별 사용 횟수
+ */
+export function usageChargeKrw(counts: Record<string, number>): number {
+  let sum = 0;
+  for (const [feature, n] of Object.entries(counts ?? {})) {
+    const unit = FEATURE_UNIT_KRW[feature];
+    const count = Number(n);
+    if (!unit || !Number.isFinite(count) || count <= 0) continue;
+    sum += unit * count;
+  }
+  return Math.floor(sum);
+}

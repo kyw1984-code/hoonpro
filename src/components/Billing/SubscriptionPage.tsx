@@ -495,7 +495,14 @@ export function SubscriptionPage() {
                   const detail = plan?.interval === 'year'
                     ? '그 외에는 사용 기간을 월간 요금(할인 미적용)으로 재정산한 차액이 환불됩니다.'
                     : '그 외에는 잔여 기간 일할 환불됩니다.';
-                  if (window.confirm(`환불과 함께 즉시 해지됩니다. 결제 후 7일 이내 미사용 시 전액, ${detail} 진행할까요?`)) {
+                  if (window.confirm(
+                    `환불과 함께 즉시 이용이 종료됩니다.\n\n`
+                    + `· 결제 후 7일 이내 미사용이면 전액\n`
+                    + `· ${detail}\n`
+                    + `· 사용량이 많으면 실제 사용 원가를 뺀 금액이 환불됩니다\n`
+                    + `· 환불은 계정당 한 번뿐입니다\n\n`
+                    + `기간을 끝까지 쓰고 자동결제만 멈추려면 [해지]를 눌러주세요. 진행할까요?`,
+                  )) {
                     act(requestRefund, '환불 처리가 완료됐습니다.');
                   }
                 }}
@@ -505,6 +512,12 @@ export function SubscriptionPage() {
                 환불 요청
               </button>
             </div>
+
+            {/* 두 버튼의 차이를 누르기 전에 알려준다. 확인창은 이미 누른 뒤다 */}
+            <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">
+              <b className="text-ink-2">해지</b>는 결제한 기간까지 그대로 쓰고 다음 결제만 멈춥니다(환불 없음, 되돌릴 수 있음).
+              <b className="text-ink-2"> 환불 요청</b>은 지금 바로 끝내고 남은 금액을 돌려받습니다(계정당 1회).
+            </p>
 
             {/* 해지 사유 — 선택하지 않아도 해지는 진행된다 */}
             {cancelOpen && (
