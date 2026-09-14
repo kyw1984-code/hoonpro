@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { COUPANG_FEE_RATE_PCT, growthSettlement } from '../src/lib/coupangFee.js';
 import { checkMonth, type MonthCheck } from '../src/lib/settlementCheck.js';
+import { runCron } from '../src/lib/cronHeartbeat.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
@@ -2606,11 +2607,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!cronSecret || req.headers.authorization !== `Bearer ${cronSecret}`) {
       return res.status(401).json({ error: 'unauthorized' });
     }
+    // 실행 기록을 남긴다. 크론이 멈춰도 화면은 어제 숫자를 그대로 보여 줘서
+    // 아무 일도 없어 보인다 — 관리자 [시스템 상태]에서 확인한다.
     const type = String(req.query.type || 'sync');
-    if (type === 'daily') return cronDaily(res);
-    if (type === 'weekly') return cronWeeklyReport(res);
-    if (type === 'brief') return cronMorningBrief(res);
-    return cronSync(res);
+    if (type === 'daily') return await runCron(supabase, 'coupang-daily', res, () => cronDaily(res));
+    if (type === 'weekly') return await runCron(supabase, 'coupang-weekly', res, () => cronWeeklyReport(res));
+    if (type === 'brief') return await runCron(supabase, 'coupang-brief', res, () => cronMorningBrief(res));
+    return await runCron(supabase, 'coupang-sync', res, () => cronSync(res));
   }
 
   if (!supabase) return res.status(500).json({ error: 'Supabase가 설정되지 않았습니다.' });

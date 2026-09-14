@@ -4,6 +4,7 @@ import { buildSellerProfile, sellerFit, blendScore, type SellerProfile } from ".
 import { detectOffCategory, scoreReasons } from "../src/lib/productRelevance.js";
 import { DEFAULT_FEATURE_LIMITS, decideQuota, isDisabled, parseLimits } from "../src/lib/featureLimits.js";
 import { createClient } from "@supabase/supabase-js";
+import { runCron } from "../src/lib/cronHeartbeat.js";
 import { createHmac } from "crypto";
 import jwt from "jsonwebtoken";
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
@@ -2602,8 +2603,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const type = typeof req.query.type === "string" ? req.query.type : "";
 
-  // 크론은 CRON_SECRET으로 자체 인증
-  if (type === "cron") return handleCron(req, res);
+  // 크론은 CRON_SECRET으로 자체 인증. 실행 기록은 관리자 [시스템 상태]에 남는다.
+  if (type === "cron") return await runCron(supabase, "sourcing-cron", res, () => handleCron(req, res));
 
   // JWT 인증 (외부 남용 시 네이버/Bright Data 비용이 발생하므로 필수)
   const auth = req.headers.authorization;

@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { clampLimit, DEFAULT_FEATURE_LIMITS, parseLimits } from '../src/lib/featureLimits.js';
+import { foldCronHealth } from '../src/lib/cronHeartbeat.js';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
@@ -88,6 +89,40 @@ async function handleEmailLog(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ rows, failed30: failed30 ?? 0 });
 }
 
+/**
+ * 크론이 돌고 있는가.
+ *
+ * 이 서비스의 데이터는 대부분 크론이 채운다. 크론이 멈춰도 화면은 어제
+ * 숫자를 그대로 보여 줘서 아무 일도 없어 보인다 — 자동결제가 사흘 멈춘 것을
+ * 사흘 뒤에 아는 건 너무 늦다.
+ */
+async function handleCronHealth(res: VercelResponse) {
+  if (!supabase) return res.status(500).json({ error: '서버 저장소가 설정되지 않았습니다.' });
+
+  const { data, error } = await supabase
+    .from('cron_runs')
+    .select('job, run_at, ok, detail, duration_ms')
+    .order('run_at', { ascending: false })
+    .limit(300);
+
+  if (error) {
+    if (error.code === '42P01') {
+      return res.status(400).json({ error: 'cron_runs 테이블이 없습니다. supabase-schema.sql을 실행해주세요.' });
+    }
+    return res.status(500).json({ error: `크론 기록 조회 실패: ${error.message}` });
+  }
+
+  const rows = data ?? [];
+  return res.status(200).json({
+    jobs: foldCronHealth(rows as any),
+    // 최근 실패만 따로 — 어느 잡이 언제 왜 실패했는지 보려고
+    recentFailures: rows.filter((r: any) => !r.ok).slice(0, 20).map((r: any) => ({
+      job: r.job, runAt: r.run_at, detail: r.detail,
+    })),
+    checkedAt: new Date().toISOString(),
+  });
+}
+
 async function handleErrors(req: VercelRequest, res: VercelResponse) {
   if (!supabase) return res.status(500).json({ error: '서버 저장소가 설정되지 않았습니다.' });
   const includeResolved = String(req.query.all || '') === 'true';
@@ -159,6 +194,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'costs') return await handleCosts(req, res);
     if (action === 'limits') return await handleLimits(req, res);
     if (action === 'errors') return await handleErrors(req, res);
+    if (action === 'cron-health') return await handleCronHealth(res);
     if (action === 'email-log') return await handleEmailLog(req, res);
     if (action === 'error-resolve') return await handleErrorResolve(req, res);
     return res.status(400).json({ error: '알 수 없는 action입니다.' });

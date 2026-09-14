@@ -7,6 +7,7 @@ import { BillingAdmin } from './BillingAdmin';
 import { LimitsAdmin } from './LimitsAdmin';
 import { CostsAdmin } from './CostsAdmin';
 import { EmailLog } from './EmailLog';
+import { CronHealth } from './CronHealth';
 import { CoupangAdmin } from './CoupangAdmin';
 import { QAManager } from './QAManager';
 import { ErrorLog } from './ErrorLog';
@@ -270,7 +271,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'suggestions' ? <Suggestions showToast={showToast} /> : tab === 'email' ? <EmailLog /> : tab === 'errors' ? <ErrorLog showToast={showToast} /> : tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
+      {tab === 'suggestions' ? <Suggestions showToast={showToast} /> : tab === 'email' ? <EmailLog /> : tab === 'errors' ? <div className="flex flex-col gap-5"><CronHealth /><ErrorLog showToast={showToast} /></div> : tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <ImageConfigTab showToast={showToast} />
       ) : tab === 'taborder' ? (
         <TabOrderConfig showToast={showToast} />

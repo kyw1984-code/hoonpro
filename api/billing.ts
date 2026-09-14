@@ -4,6 +4,7 @@ import { isOwnReferral, referralNote, referrerIdFromNote } from '../src/lib/refe
 import { applyDiscounts, trialDaysOf, referralRewardAmount } from '../src/lib/coupon.js';
 import { parseLimits } from '../src/lib/featureLimits.js';
 import { withVat } from '../src/lib/vat.js';
+import { runCron } from '../src/lib/cronHeartbeat.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 
@@ -597,7 +598,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     // ── 크론 (CRON_SECRET 자체 인증) ──
-    if (action === 'charge-due') return await chargeDue(req, res);
+    // 실행 기록을 남긴다. 자동결제가 사흘 멈춘 것을 사흘 뒤에 아는 건 너무 늦다.
+    if (action === 'charge-due') return await runCron(supabase, 'billing-charge', res, () => chargeDue(req, res));
 
     // ── 토스 웹훅 (서명 없음 → paymentKey 재조회로 검증) ──
     if (action === 'webhook') return await tossWebhook(req, res);
