@@ -155,11 +155,51 @@ function emailButton(label: string, href = 'https://hoonproai.com'): string {
 }
 
 // 이메일 발송 (Resend) — 키가 없으면 조용히 스킵 (개발 환경)
-async function sendEmail(to: string, subject: string, html: string): Promise<void> {
-  const key = process.env.RESEND_API_KEY;
-  if (!key || !to) return;
+/** 발송 기록 한 줄. 실패해도 본래 작업을 막지 않는다 */
+async function recordEmail(
+  row: { userId?: string | null; to: string; kind: string; subject: string; ref?: string | null; ok: boolean; error?: string | null; providerId?: string | null },
+): Promise<void> {
   try {
-    await fetch('https://api.resend.com/emails', {
+    await supabase.from('email_log').insert({
+      user_id: row.userId ?? null,
+      to_email: row.to,
+      kind: row.kind,
+      subject: row.subject.slice(0, 300),
+      ref: row.ref ?? null,
+      ok: row.ok,
+      error: row.error ? String(row.error).slice(0, 500) : null,
+      provider_id: row.providerId ?? null,
+    });
+  } catch { /* 기록 실패가 결제 흐름을 막지 않도록 */ }
+}
+
+/**
+ * 메일 발송.
+ *
+ * 예전에는 응답을 보지 않았다. fetch는 400이나 500을 받아도 예외를 던지지
+ * 않으므로, 메일 발송사가 거부해도 성공처럼 지나갔다. 게다가 catch가 비어
+ * 있어 예외까지 삼켰다. 약관에 "이메일로 고지한다"고 적어 둔 이상 보냈는지
+ * 못 보냈는지는 알아야 한다.
+ *
+ * 보낸 결과를 email_log에 남긴다. 고객이 "고지 못 받았다"고 할 때 확인할
+ * 근거이자, 놓친 고지를 다시 보낼 때 중복을 막는 열쇠다.
+ */
+async function sendEmail(
+  to: string,
+  subject: string,
+  html: string,
+  log?: { userId?: string | null; kind?: string; ref?: string | null },
+): Promise<boolean> {
+  const kind = log?.kind ?? 'etc';
+  const key = process.env.RESEND_API_KEY;
+  if (!key || !to) {
+    const why = !key ? 'RESEND_API_KEY가 없습니다' : '받는 주소가 없습니다';
+    await recordEmail({ userId: log?.userId, to: to || '(없음)', kind, subject, ref: log?.ref, ok: false, error: why });
+    if (!key) await logSystemError('메일', `메일을 보내지 못했습니다: ${why}`, { severity: 'error' });
+    return false;
+  }
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -169,8 +209,19 @@ async function sendEmail(to: string, subject: string, html: string): Promise<voi
         html,
       }),
     });
-  } catch {
-    // 이메일 실패가 결제 흐름을 막지 않도록
+    const body: any = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const why = `${res.status} ${body?.message ?? body?.name ?? ''}`.trim();
+      await recordEmail({ userId: log?.userId, to, kind, subject, ref: log?.ref, ok: false, error: why });
+      await logSystemError('메일', `메일 발송이 거부됐습니다 (${kind}): ${why}`, { userId: log?.userId ?? null, severity: 'error' });
+      return false;
+    }
+    await recordEmail({ userId: log?.userId, to, kind, subject, ref: log?.ref, ok: true, providerId: body?.id ?? null });
+    return true;
+  } catch (e: any) {
+    await recordEmail({ userId: log?.userId, to, kind, subject, ref: log?.ref, ok: false, error: e?.message ?? String(e) });
+    await logSystemError('메일', `메일 발송 중 오류 (${kind}): ${e?.message ?? e}`, { userId: log?.userId ?? null, severity: 'error' });
+    return false;
   }
 }
 
@@ -288,7 +339,8 @@ async function grantReferralReward(coupon: CouponRow | null, referredUserId: str
     `<p>${referrer.name ?? ''}님이 공유하신 추천 코드로 새 구독자가 등록했습니다. 감사합니다.</p>` +
     `<p>다음 결제에서 <b style="color:#e8ecf5;">${won(saving)}</b>이 자동으로 할인됩니다. (부가세 포함)</p>` +
     `<p style="color:#b9c2d8;font-size:13px;">여러 명을 추천하셨다면 결제할 때마다 한 건씩 차례로 적용됩니다.</p>` +
-    emailButton('구독 관리 열기')));
+    emailButton('구독 관리 열기')),
+    { userId: referrerId, kind: 'referral-reward', ref: referredUserId });
 }
 
 /** 보상을 썼다고 표시한다. 이미 쓴 줄은 건드리지 않는다 (같은 보상의 중복 사용 방지) */
@@ -500,7 +552,8 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
       `<p style="color:#b9c2d8;font-size:13px;">공급가액 ${won(supply)} + 부가세 ${won(vat)}<br>` +
       `신용카드 매출전표가 부가가치세법상 적격증빙입니다 — 매입세액 공제에 그대로 쓰실 수 있습니다.</p>` +
       `<p>다음 결제 예정일: <b style="color:#e8ecf5;">${nextBilling}</b></p>` +
-      (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('구독 관리 열기'))));
+      (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('구독 관리 열기'))),
+      { userId: sub.user_id, kind: 'payment-ok', ref: orderId });
     return { ok: true };
   }
 
@@ -526,7 +579,8 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
       `<p>${user.name}님, ${orderName} 결제가 실패했습니다.</p>` +
       `<p style="color:#8a92a6;">사유: ${result.failReason}</p>` +
       `<p><b style="color:#e8ecf5;">${retryDate}</b>에 다시 시도합니다. 카드 한도·유효기간을 확인하시거나 카드를 변경해주세요.</p>` +
-      emailButton('카드 변경하기')));
+      emailButton('카드 변경하기')),
+      { userId: sub.user_id, kind: 'payment-fail', ref: orderId });
   }
   return { ok: false, failReason: result.failReason };
 }
@@ -807,7 +861,8 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
       '구독이 시작됐습니다',
       `<p>${userRow?.name ?? user.name}님, ${orderName} 구독이 시작됐습니다. 이제 모든 AI 도구를 이용할 수 있습니다.</p>` +
       `<p>결제 금액: <b style="color:#e8ecf5;">${won(amount)}</b>${discount > 0 ? ` (쿠폰 할인 ${won(discount)})` : ''}<br>다음 결제일: <b style="color:#e8ecf5;">${periodEnd}</b></p>` +
-      (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('훈프로 열기'))));
+      (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('훈프로 열기'))),
+      { userId: user.userId, kind: 'subscribe-ok', ref: orderId });
   } else {
     await sendEmail(userRow?.email ?? user.email, `[훈프로] 무료 이용 시작 (${coupon!.value}일)`, wrapEmail(
       '무료 이용이 시작됐습니다',
@@ -815,7 +870,10 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
       `<p>무료 기간 종료일 <b style="color:#e8ecf5;">${periodEnd}</b>부터 ${won(withVat(supplyAmount).total)}/${plan.interval === 'year' ? '연' : '월'}이 등록하신 카드로 자동결제됩니다.` +
       (discount > 0 ? ` (쿠폰 할인 ${won(withVat(discount).total)} 적용가 · 부가세 포함)` : ' (부가세 포함)') +
       `<br>그 전에 언제든 해지하실 수 있고, 해지하면 결제되지 않습니다.</p>` +
-      emailButton('훈프로 열기')));
+      emailButton('훈프로 열기')),
+      // 무료 기간 시작 메일이 곧 그 기간의 사전 고지다. 종료일과 금액을
+      // 함께 적었으므로, 크론이 같은 결제일로 또 보내지 않게 같은 열쇠를 쓴다.
+      { userId: user.userId, kind: 'billing-notice', ref: periodEnd });
   }
 
   // 쿠폰 사용 기록 (CI 기준 1인 1회 어뷰징 차단)
@@ -1098,7 +1156,8 @@ async function refund(user: any, res: VercelResponse) {
     '환불 및 해지가 완료됐습니다',
     `<p>${user.name}님, 구독이 해지됐습니다.</p>` +
     `<p>환불 금액: <b style="color:#e8ecf5;">${won(refundAmount)}</b><br><span style="color:#8a92a6;">${reason}</span></p>` +
-    `<p style="color:#8a92a6;">카드사 사정에 따라 환불 반영까지 3~7영업일이 소요될 수 있습니다.</p>`));
+    `<p style="color:#8a92a6;">카드사 사정에 따라 환불 반영까지 3~7영업일이 소요될 수 있습니다.</p>`),
+    { userId: user.userId, kind: 'refund-ok', ref: payment.order_id });
   return res.status(200).json({ ok: true, refunded: refundAmount, message: reason });
 }
 
@@ -1187,23 +1246,62 @@ async function chargeDue(req: VercelRequest, res: VercelResponse) {
   const today = kstToday();
   const summary = { charged: 0, failed: 0, canceled: 0, notified: 0 };
 
-  // 1) 결제 7일 전 사전 고지 (여신전문금융업법 의무)
-  const noticeDate = addDays(today, 7);
+  // 1) 결제 7일 전 사전 고지 — 놓친 것까지 따라잡는다
+  //
+  // 예전에는 결제일이 '정확히 7일 뒤'인 구독만 찾았다. 크론이 하루 실패하면
+  // 그날 대상자는 영영 고지를 못 받고, 그 사실조차 아무도 몰랐다. 약관에
+  // 적어 둔 의무를 하루치 장애로 어기게 된다.
+  //
+  // 이제 '7일 안에 결제될 구독' 전부를 보고, 그중 아직 안 보낸 것만 보낸다.
+  // 중복은 email_log의 (사용자, 종류, 결제일) 유일 색인이 막는다.
+  const noticeHorizon = addDays(today, 7);
   const { data: upcoming } = await supabase
     .from('subscriptions')
-    .select('*, users(email, name), plans(name, price)')
+    .select('*, users(email, name), plans(name, price, interval)')
     .in('status', ['trial', 'active'])
-    .eq('next_billing_at', noticeDate)
+    .gte('next_billing_at', today)
+    .lte('next_billing_at', noticeHorizon)
     .eq('cancel_at_period_end', false);
 
-  for (const sub of upcoming ?? []) {
+  const pending = upcoming ?? [];
+  const alreadySent = new Set<string>();
+  if (pending.length > 0) {
+    const { data: sentRows } = await supabase
+      .from('email_log')
+      .select('user_id, ref')
+      .eq('kind', 'billing-notice')
+      .eq('ok', true)
+      .in('ref', [...new Set(pending.map(s => String(s.next_billing_at)))]);
+    for (const r of sentRows ?? []) alreadySent.add(`${r.user_id}|${r.ref}`);
+  }
+
+  for (const sub of pending) {
     const u = (sub as any).users, p = (sub as any).plans;
-    if (!u?.email) continue;
-    await sendEmail(u.email, `[훈프로] ${noticeDate} 정기결제 예정 안내`, wrapEmail(
+    if (!u?.email || !p) continue;
+    const billDate = String(sub.next_billing_at);
+    if (alreadySent.has(`${sub.user_id}|${billDate}`)) continue;
+
+    // 고지 금액은 실제로 빠질 금액이어야 한다. 요금표 가격은 공급가액이고,
+    // 쿠폰과 추천 보상이 붙으면 더 내려간다. 정가를 적어 보내면 카드에
+    // 찍히는 금액과 달라져 고지가 제 역할을 못 한다.
+    let coupon: CouponRow | null = null;
+    if (sub.coupon_id && (sub.coupon_remaining_cycles === null || sub.coupon_remaining_cycles > 0)) {
+      const { data } = await supabase.from('coupons').select('*').eq('id', sub.coupon_id).maybeSingle();
+      if (data && data.type !== 'free_period') coupon = data as CouponRow;
+    }
+    const reward = await pendingReferralReward(sub.user_id);
+    const { amount: supplyAmount, discount } = applyDiscounts(p.price, coupon, planMonths(p), reward?.amount ?? 0);
+    const charged = withVat(supplyAmount);
+
+    await sendEmail(u.email, `[훈프로] ${billDate} 정기결제 예정 안내`, wrapEmail(
       '정기결제 예정 안내',
-      `<p>${u.name}님, <b style="color:#e8ecf5;">${noticeDate}</b>에 ${p?.name ?? '훈프로'} 구독 요금 <b style="color:#e8ecf5;">${won(p?.price ?? 0)}</b>이 등록하신 카드(${sub.card_summary ?? ''})로 자동결제될 예정입니다.</p>` +
+      `<p>${u.name}님, <b style="color:#e8ecf5;">${billDate}</b>에 ${p.name} 구독 요금 ` +
+      `<b style="color:#e8ecf5;">${won(charged.total)}</b>이 등록하신 카드(${sub.card_summary ?? ''})로 자동결제될 예정입니다.</p>` +
+      `<p style="color:#b9c2d8;font-size:13px;">공급가액 ${won(charged.supply)} + 부가세 ${won(charged.vat)}` +
+      (discount > 0 ? ` · 할인 ${won(withVat(discount).total)} 반영된 금액입니다` : '') + `</p>` +
       `<p>결제를 원치 않으시면 그 전에 해지해주세요. 해지해도 남은 기간까지는 그대로 이용할 수 있습니다.</p>` +
-      emailButton('구독 관리 열기')));
+      emailButton('구독 관리 열기')),
+      { userId: sub.user_id, kind: 'billing-notice', ref: billDate });
     summary.notified++;
   }
 
