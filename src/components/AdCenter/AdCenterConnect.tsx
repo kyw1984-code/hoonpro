@@ -130,7 +130,7 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
           <li>훈프로 창이 하나 열리고 10~40초 뒤 "광고비가 반영됐습니다"가 뜹니다. 끝입니다.</li>
         </ol>
       )}
-      <p className="mt-2 text-[11px] text-ink-3">PC 크롬·엣지에서 됩니다. 휴대폰에서는 [광고 성과 분석]의 파일 올리기를 이용해주세요.</p>
+      <p className="mt-2 text-[11px] text-ink-3">PC 크롬·엣지에서 됩니다. 휴대폰에서는 [광고분석AI]의 파일 올리기를 이용해주세요.</p>
 
       {/* 즐겨찾기를 끌어다 놓는 설정은 글로 읽으면 어렵다. 막히는 사람이 어디를
           눌러야 하는지 이 자리에서 알아야 한다 — 나가서 찾게 하면 거기서 놓친다. */}

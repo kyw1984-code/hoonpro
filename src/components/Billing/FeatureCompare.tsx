@@ -23,12 +23,12 @@ interface Row {
 }
 
 const ROWS: Row[] = [
-  { name: '훈프로 소싱AI', hint: '팔릴 상품 발굴 + 점수 근거', free: false, limitKey: 'sourcing' },
-  { name: '순위 추적', hint: '오가닉 순위 + 광고 순위', free: false, limitKey: 'rank' },
+  { name: '소싱AI', hint: '팔릴 상품 발굴 + 점수 근거', free: false, limitKey: 'sourcing' },
+  { name: '순위추적AI', hint: '오가닉 순위 + 광고 순위', free: false, limitKey: 'rank' },
   { name: '키워드 경쟁 분석', hint: '내 위에 누가 있나', free: false },
-  { name: '리뷰 분석', hint: '경쟁사 리뷰 요약', free: false, limitKey: 'reviews' },
-  { name: '광고 성과 분석', hint: '상품·옵션별 광고비와 전환', free: false, limitKey: 'analyze' },
-  { name: '훈프로 정산AI', hint: '매출·수수료·순이익 자동 정산', free: false },
+  { name: '리뷰 분석AI', hint: '경쟁사 리뷰 요약', free: false, limitKey: 'reviews' },
+  { name: '광고분석AI', hint: '상품·옵션별 광고비와 전환', free: false, limitKey: 'analyze' },
+  { name: '정산AI', hint: '매출·수수료·순이익 자동 정산', free: false },
   { name: '로켓그로스 매출 합산', hint: '윙/그로스 분리 표시', free: false },
   { name: '원가 입력 · 마진 계산', free: false },
   { name: '반품 사유 분석', free: false },

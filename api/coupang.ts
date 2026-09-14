@@ -2290,9 +2290,9 @@ async function setAccountStatus(userId: string, status: string, error: string | 
       status === 'expired' ? '[훈프로] 쿠팡 API 키가 만료됐습니다' : '[훈프로] 쿠팡 수집이 멈췄습니다',
       wrapEmail(
         status === 'expired' ? '쿠팡 API 키 만료' : '쿠팡 연동 확인 필요',
-        `<p>${escapeHtml(String((before as any)?.users?.name ?? ''))}님, 훈프로 정산AI 자동 수집이 멈췄습니다.</p>` +
+        `<p>${escapeHtml(String((before as any)?.users?.name ?? ''))}님, 정산AI 자동 수집이 멈췄습니다.</p>` +
           `<p style="color:#ffb454;">${escapeHtml(error ?? '')}</p>` +
-          `<p>윙에서 키와 등록 IP를 확인한 뒤 [훈프로 정산AI → 연동 설정]에서 다시 등록해주세요. ` +
+          `<p>윙에서 키와 등록 IP를 확인한 뒤 [정산AI → 연동 설정]에서 다시 등록해주세요. ` +
           `이미 다른 주문수집 프로그램을 쓰신다면 키를 새로 발급하지 말고 기존 키를 그대로 넣어야 그쪽 연동이 끊기지 않습니다.</p>` +
           emailButtonLink('연동 설정 열기'),
       ),
@@ -4384,7 +4384,7 @@ export function briefHtml(name: string, day: string, d: BriefData): string {
   html +=
     `<p style="margin:14px 0 0;font-size:11px;color:#7c88a3;line-height:1.6;">` +
     `금액은 <b style="color:#a8b3c9;">주문액</b>입니다. 수수료·광고비를 뺀 순이익은 정산이 끝나야 확정되므로 ` +
-    `[훈프로 정산AI]에서 확인하세요. 이 메일은 [연동 설정]에서 끌 수 있습니다.</p>` +
+    `[정산AI]에서 확인하세요. 이 메일은 [연동 설정]에서 끌 수 있습니다.</p>` +
     emailButtonLink('훈프로 열기');
 
   return html;

@@ -113,7 +113,7 @@ export function SourcingProfit({
         </h4>
         <p className="mt-1.5 text-[12px] leading-relaxed text-ink-2">
           {data.reason ?? '아직 판매 실적이 없어 계산할 수 없습니다.'}
-          {' '}[훈프로 정산AI]에서 쿠팡을 연동하고 수집이 끝나면, 대표님의 실제 수수료·광고비·반품·쿠폰 비율로
+          {' '}[정산AI]에서 쿠팡을 연동하고 수집이 끝나면, 대표님의 실제 수수료·광고비·반품·쿠폰 비율로
           원가 상한을 계산해 드립니다.
         </p>
       </div>

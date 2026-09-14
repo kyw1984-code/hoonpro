@@ -244,7 +244,7 @@ export function AdReportReceiver() {
             <p className="mt-3 break-words text-[13px] leading-relaxed text-ink-2">{phase.message}</p>
             <p className="mt-3 text-[12px] leading-relaxed text-ink-3">
               광고센터 창에서 즐겨찾기를 다시 눌러보세요. 계속 안 되면 이 문구를 그대로 알려주시면 고치겠습니다.
-              그동안은 [광고 성과 분석]에서 보고서 파일을 올려도 같은 결과가 됩니다.
+              그동안은 [광고분석AI]에서 보고서 파일을 올려도 같은 결과가 됩니다.
             </p>
             <button
               onClick={() => window.close()}

@@ -120,7 +120,7 @@ export function ReviewAnalyzer() {
         <p className="mb-4 text-[12px] leading-relaxed text-ink-2">
           쿠팡 상품 URL을 넣으면 실제 고객 리뷰를 수집해 <b>불만·숨은 니즈·공략 포인트</b>를 분석합니다.
           경쟁 상품의 불만은 내 상세페이지의 <b>핵심 차별점</b>이 되고, <b>내 상품</b>을 넣으면 개선할 점이 보입니다.
-          훈프로 소싱AI의 상품 카드 [리뷰 분석]에서도 바로 실행할 수 있습니다.
+          소싱AI의 상품 카드 [리뷰 분석AI]에서도 바로 실행할 수 있습니다.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyze()}

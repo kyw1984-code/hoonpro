@@ -64,11 +64,11 @@ const TYPE_PHRASES = [
 // 화면에 실제로 있는 것만 적는다. 없는 기능을 보고 들어온 사람은 찾다가
 // 신뢰를 잃는다. 썸네일·상세페이지 제작은 내렸으므로 여기서도 뺐다.
 const TOOLS = [
-  { icon: TrendingUp,         label: '훈프로 소싱AI' },
-  { icon: ShoppingBag,        label: '훈프로 정산AI' },
-  { icon: ListOrdered,        label: '순위 추적' },
-  { icon: MessageSquareText,  label: '리뷰 분석' },
-  { icon: BarChart3,          label: '광고 성과 분석' },
+  { icon: TrendingUp,         label: '소싱AI' },
+  { icon: ShoppingBag,        label: '정산AI' },
+  { icon: ListOrdered,        label: '순위추적AI' },
+  { icon: MessageSquareText,  label: '리뷰 분석AI' },
+  { icon: BarChart3,          label: '광고분석AI' },
   { icon: MessageCircleQuestion, label: '훈프로 코칭AI' },
 ];
 
@@ -784,7 +784,7 @@ export function AuthGate({ onSuccess }: Props) {
                 <i className="block h-2.5 w-2.5 rounded-full" style={{ background: '#febc2e' }} />
                 <i className="block h-2.5 w-2.5 rounded-full" style={{ background: '#28c840' }} />
               </div>
-              <div className="text-[12px] tracking-wide text-[#98a3bf]">훈프로 소싱AI · 실시간 분석</div>
+              <div className="text-[12px] tracking-wide text-[#98a3bf]">소싱AI · 실시간 분석</div>
               <div className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px]" style={{ background: 'rgba(62,231,163,.08)', borderColor: 'rgba(62,231,163,.2)', color: '#3ee7a3' }}>
                 <span className="hp-badge-dot" style={{ background: '#3ee7a3', boxShadow: '0 0 8px #3ee7a3' }} />
                 LIVE
@@ -1215,7 +1215,7 @@ export function AuthGate({ onSuccess }: Props) {
       </main>
 
       {/* ─── 요금 안내 (비회원도 가입 전에 가격을 확인할 수 있어야 한다) ─── */}
-      {/* ─── 훈프로 정산AI ─── */}
+      {/* ─── 정산AI ─── */}
       <section className="relative z-[5] border-t px-4 py-14 sm:px-6 md:px-12 md:py-20" style={{ borderColor: '#31406b' }}>
         <div className="mx-auto grid max-w-[1120px] items-center gap-10 md:grid-cols-[1fr_1.15fr]">
           <div>
@@ -1262,7 +1262,7 @@ export function AuthGate({ onSuccess }: Props) {
               >
                 <ShoppingBag className="h-4 w-4" style={{ color: '#101a2e' }} />
               </div>
-              <span className="text-[13px] font-semibold text-white">훈프로 정산AI</span>
+              <span className="text-[13px] font-semibold text-white">정산AI</span>
               <span className="ml-auto text-[11.5px] text-[#98a3bf]">{DEMO_SETTLE.period}</span>
             </div>
 
