@@ -355,9 +355,17 @@ export function AuthGate({ onSuccess }: Props) {
         if (data.needCode) { setCodeSent(false); setCodeSentTo(''); setSignupCode(''); }
         return setMessage({ text: data.error, type: 'error' });
       }
-      setMessage({ text: data.message, type: 'success' });
       setSignupName(''); setSignupPhone(''); setSignupEmail('');
       setSignupCode(''); setAgeChecked(false); setCodeSent(false); setCodeSentTo(''); setSignupPassword('');
+      // 이메일 코드를 맞혔거나 본인인증을 통과한 사람은 이미 본인임을 증명했다.
+      // 여기서 로그인 화면으로 돌려보내면 방금 정한 비밀번호를 다시 치게 된다.
+      if (data.token) {
+        setToken(data.token);
+        setMessage({ text: data.message, type: 'success' });
+        return onSuccess();
+      }
+      // 관리자 승인이 필요한 모드에서는 토큰이 없다. 그때는 안내만 한다.
+      setMessage({ text: data.message, type: 'success' });
     } catch {
       setMessage({ text: '네트워크 오류가 발생했습니다.', type: 'error' });
     } finally {
