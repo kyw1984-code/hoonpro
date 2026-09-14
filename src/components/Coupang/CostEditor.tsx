@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Save, Search, Upload } from 'lucide-react';
 import { coupangApi, won, type CostRow } from '../../lib/coupang';
+import { fillOptionNames } from '../../lib/optionName';
 
 /**
  * 엑셀 라이브러리는 쓸 때만 받는다.
@@ -154,6 +155,15 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
     }
   };
 
+  // 쿠팡이 옵션명을 안 주는 줄이 섞인다. 상품명에서 되살려 화면과 엑셀이
+  // 같은 값을 쓰게 한다 — 화면에는 보이는데 받은 파일에는 없으면 헷갈린다.
+  const optionOf = useMemo(() => {
+    const labels = fillOptionNames(rows ?? []);
+    const map = new Map<string, string>();
+    (rows ?? []).forEach((r, i) => map.set(r.vendorItemId, labels[i]));
+    return (r: CostRow) => map.get(r.vendorItemId) ?? r.optionName;
+  }, [rows]);
+
   // 옵션이 수백 개인 판매자는 하나씩 타이핑하지 않는다. 현재 상품 목록을
   // 양식으로 내려주고, 채워서 올리면 옵션ID로 맞춰 한 번에 저장한다.
   const downloadTemplate = async () => {
@@ -161,7 +171,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
     const data = rows.map(r => ({
       [SHEET_COLUMNS.vendorItemId]: r.vendorItemId,
       [SHEET_COLUMNS.productName]: r.productName,
-      [SHEET_COLUMNS.optionName]: r.optionName,
+      [SHEET_COLUMNS.optionName]: optionOf(r),
       [SHEET_COLUMNS.channel]: isGrowth(r) ? '로켓그로스' : '판매자배송',
       [SHEET_COLUMNS.unitCost]: r.unitCost,
       [SHEET_COLUMNS.packagingCost]: r.packagingCost,
@@ -213,8 +223,8 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
     if (!rows) return [];
     const needle = q.trim().toLowerCase();
     if (!needle) return rows;
-    return rows.filter(r => `${r.productName} ${r.optionName}`.toLowerCase().includes(needle));
-  }, [rows, q]);
+    return rows.filter(r => `${r.productName} ${optionOf(r)}`.toLowerCase().includes(needle));
+  }, [rows, q, optionOf]);
 
   // 로켓그로스 상품이 하나도 없는 판매자에게 입출고비 열은 빈 칸만 늘린다.
   // 검색 결과가 아니라 전체 목록으로 판단해야 검색할 때마다 열이 사라지지 않는다.
@@ -327,7 +337,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
                         )}
                         {r.productName}
                       </p>
-                      {r.optionName && <p className="truncate text-[11px] text-ink-3">{r.optionName}</p>}
+                      {optionOf(r) && <p className="truncate text-[11px] text-ink-3">{optionOf(r)}</p>}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink-2">{r.salePrice ? won(r.salePrice) : '-'}</td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink-3">{r.soldLast30.toLocaleString('ko-KR')}</td>
