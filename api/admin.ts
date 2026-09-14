@@ -636,7 +636,7 @@ async function handleCosts(req: VercelRequest, res: VercelResponse) {
     fixedCosts,
     fixedTotalKrw,
     subscribers,
-    // 구독자 1명당 이번 달 변동비 — 39,800원과 비교할 기준선
+    // 구독자 1명당 이번 달 변동비 — 49,800원(공급가)과 비교할 기준선
     perSubscriberKrw: subscribers > 0 ? Math.round(monthVariableKrw / subscribers) : 0,
     totalMonthKrw: monthVariableKrw + fixedTotalKrw,
   });
@@ -646,10 +646,10 @@ async function handleCosts(req: VercelRequest, res: VercelResponse) {
 // 한도 값 자체는 app_config.feature_limits에 저장하고, api/usage.ts와
 // api/sourcing.ts가 60초 캐시로 읽어 간다. (키는 세 곳이 동일해야 한다)
 //
-// 이 화면의 목적은 "한도 × 실측 단가 = 최악의 경우 월 원가"를 요금(39,800원)과
+// 이 화면의 목적은 "한도 × 실측 단가 = 최악의 경우 월 원가"를 요금(49,800원)과
 // 나란히 보여주는 것이다. 단가는 추정이 아니라 api_calls 30일치 실측으로 뽑는다.
 
-const PRICE_KRW = 39800;
+const PRICE_KRW = 49800;
 
 const LIMIT_META: {
   key: string; label: string; hint: string; fallbackKrw: number; calls: string[];

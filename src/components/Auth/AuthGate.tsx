@@ -6,6 +6,7 @@ import {
   KeyRound, ArrowLeft, Mail, Check,
 } from 'lucide-react';
 import { setToken } from '../../lib/auth';
+import { withVat } from '../../lib/vat';
 import { certificationAvailable, requestCertification } from '../../lib/certification';
 import { loadCachedCompany, fetchCompanyInfo, type CompanyInfo } from '../../lib/company';
 
@@ -156,8 +157,8 @@ export function AuthGate({ onSuccess }: Props) {
 
   // 요금제 — 비회원에게도 가격을 보여준다 (서버 값 우선, 실패 시 기본가)
   const [plans, setPlans] = useState<{ id: string; name: string; price: number; interval: string }[]>([
-    { id: 'yearly', name: '훈프로 연간', price: 357600, interval: 'year' },
-    { id: 'standard', name: '훈프로 월간', price: 39800, interval: 'month' },
+    { id: 'yearly', name: '훈프로 연간', price: 498000, interval: 'year' },
+    { id: 'standard', name: '훈프로 월간', price: 49800, interval: 'month' },
   ]);
   useEffect(() => {
     fetch('/api/billing?action=plans')
@@ -169,7 +170,7 @@ export function AuthGate({ onSuccess }: Props) {
   const yearly = plans.find(p => p.interval === 'year');
   const monthly = plans.find(p => p.interval === 'month');
   const yearlyDiscount = yearly && monthly
-    ? Math.round((1 - yearly.price / 12 / monthly.price) * 100)
+    ? Math.floor((1 - yearly.price / 12 / monthly.price) * 100)
     : 0;
 
   // 사업자 정보 (전자상거래법 표기용) — 캐시된 값 먼저, 서버 응답으로 갱신
@@ -1472,11 +1473,14 @@ export function AuthGate({ onSuccess }: Props) {
                   <span className="text-[14px] font-medium text-[#b9c2d8]">원 / 월</span>
                 </div>
                 <p className="mt-1.5 text-[12.5px] text-[#98a3bf]">
-                  연 {yearly.price.toLocaleString()}원 일시 결제 · 매년 자동갱신
+                  부가세 별도 · 연 {yearly.price.toLocaleString()}원 일시 결제 · 매년 자동갱신
+                </p>
+                <p className="mt-1 text-[12.5px] font-medium text-[#dae1f0]">
+                  실제 결제 {withVat(yearly.price).total.toLocaleString()}원 (연 1회)
                 </p>
                 {monthly && yearlyDiscount > 0 && (
                   <p className="mt-3 text-[12.5px] font-medium" style={{ color: '#3ee7a3' }}>
-                    월간 결제 대비 연 {(monthly.price * 12 - yearly.price).toLocaleString()}원 절약
+                    2개월분 무료 — 월간 결제 대비 연 {(monthly.price * 12 - yearly.price).toLocaleString()}원 절약
                   </p>
                 )}
                 <button
@@ -1521,7 +1525,10 @@ export function AuthGate({ onSuccess }: Props) {
                   </span>
                   <span className="text-[14px] font-medium text-[#b9c2d8]">원 / 월</span>
                 </div>
-                <p className="mt-1.5 text-[12.5px] text-[#98a3bf]">매월 자동결제 · 부담 없이 시작</p>
+                <p className="mt-1.5 text-[12.5px] text-[#98a3bf]">부가세 별도 · 매월 자동결제</p>
+                <p className="mt-1 text-[12.5px] font-medium text-[#dae1f0]">
+                  실제 결제 {withVat(monthly.price).total.toLocaleString()}원/월
+                </p>
                 <button
                   onClick={e => { e.stopPropagation(); startSignup('month'); }}
                   className="mt-6 min-h-[48px] w-full rounded-[11px] border py-3 text-[14px] font-medium text-white transition-colors hover:border-[#7cf5ff]/40 hover:bg-[#7cf5ff]/5"
@@ -1555,7 +1562,8 @@ export function AuthGate({ onSuccess }: Props) {
               {pickedInterval === 'year' ? '연간 결제' : '월간 결제'}를 선택하셨습니다.
             </b>{' '}
             [시작하기]를 누르면 가입 화면으로 이동하고, 가입 후 이 플랜이 자동으로 선택됩니다.
-            <br />표시 금액은 부가세 포함입니다. 결제 후 7일 이내 미사용 시 전액 환불되며,
+            <br />표시 금액은 <b className="text-[#dae1f0]">부가세 별도</b>입니다. 사업자는 신용카드 매출전표로 매입세액 공제를 받으실 수 있습니다.
+            결제 후 7일 이내 미사용 시 전액 환불되며,
             그 외에는 <a href="/terms.html#refund" target="_blank" rel="noreferrer" className="underline hover:text-white">환불 정책</a>에 따라 처리됩니다.
             <br />결제일 7일 전 이메일로 미리 안내드립니다.
           </p>

@@ -5,7 +5,7 @@ import { won } from '../../lib/coupang';
 
 // 관리자 — 원가 현황
 // 변동비(AI·크롤링·메일)는 api_calls 실측, 고정비는 관리자가 입력한다.
-// 요금(39,800원) 대비 구독자 1인당 원가를 보는 게 이 화면의 목적이다.
+// 요금(49,800원 공급가) 대비 구독자 1인당 원가를 보는 게 이 화면의 목적이다.
 
 const MARK = '#22a3b8'; // 채움색 — 밝은 UI 액센트는 면에 쓰지 않는다
 
@@ -75,7 +75,7 @@ export function CostsAdmin({ showToast }: { showToast: (msg: string) => void }) 
   if (!data) return null;
 
   const peak = Math.max(1, ...(data.month?.byFeature ?? []).map((f: any) => f.krw));
-  const priceKrw = 39800;
+  const priceKrw = 49800;
   const perSub = data.perSubscriberKrw ?? 0;
   const marginPct = priceKrw > 0 ? Math.round(((priceKrw - perSub) / priceKrw) * 100) : 0;
   const risky = perSub > priceKrw * 0.3;
