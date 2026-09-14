@@ -341,3 +341,40 @@ test('쿠폰 행 계산: 개당 쿠폰은 개당 판매가를 넘지 않는다',
   // 실매출이 남는다 — 쿠폰이 매출을 통째로 먹지 않는다
   assert.ok(sales - paired * qty > 0);
 });
+
+test('selectAll: 게이트웨이 타임아웃은 한 번 다시 부른다', async () => {
+  let calls = 0;
+  const build = (from: number, to: number) => {
+    calls++;
+    // 첫 호출만 타임아웃, 두 번째는 성공
+    if (calls === 1) return Promise.resolve({ data: null, error: { message: 'Gateway Timeout' } });
+    return Promise.resolve({ data: [{ i: from }], error: null });
+  };
+  const { rows, truncated } = await selectAll<{ i: number }>(build, 1000);
+  assert.equal(calls, 2, '한 번만 다시 부른다');
+  assert.equal(rows.length, 1);
+  assert.equal(truncated, false);
+});
+
+test('selectAll: 다시 불러도 안 되면 어느 단계인지 밝히며 던진다', async () => {
+  const build = () => Promise.resolve({ data: null, error: { message: 'Gateway Timeout', code: '57014' } });
+  await assert.rejects(
+    () => selectAll(build, 1000),
+    (e: Error) => {
+      assert.match(e.message, /DB 조회 실패/, '쿠팡이 아니라 DB 문제임을 밝힌다');
+      assert.match(e.message, /1쪽/);
+      assert.match(e.message, /57014/);
+      return true;
+    },
+  );
+});
+
+test('selectAll: 고칠 수 없는 오류는 다시 부르지 않는다', async () => {
+  let calls = 0;
+  const build = () => {
+    calls++;
+    return Promise.resolve({ data: null, error: { message: 'column "foo" does not exist', code: '42703' } });
+  };
+  await assert.rejects(() => selectAll(build, 1000));
+  assert.equal(calls, 1, '문법 오류는 다시 불러도 같다');
+});
