@@ -898,18 +898,30 @@ async function handleSuggestList(req: VercelRequest, res: VercelResponse) {
     status: r.status,
     note: r.note,
     createdAt: r.created_at,
+    userId: r.user_id ? String(r.user_id) : null,
     userEmail: r.users?.email ?? null,
     userName: r.users?.name ?? null,
   }));
 
   // 같은 요약끼리 묶는다. 한 사람이 한 말과 열 사람이 한 말은 무게가 다르다.
-  const groups = new Map<string, { summary: string; kind: string; severity: string; count: number; ids: string[] }>();
+  const groups = new Map<string, {
+    summary: string; kind: string; severity: string; count: number; ids: string[];
+    people: Set<string>; names: string[];
+  }>();
   for (const r of rows) {
     if (!r.summary || r.kind === 'howto' || r.kind === 'praise') continue;
     const key = r.summary;
-    const g = groups.get(key) ?? { summary: key, kind: r.kind, severity: r.severity, count: 0, ids: [] };
+    const g = groups.get(key)
+      ?? { summary: key, kind: r.kind, severity: r.severity, count: 0, ids: [], people: new Set<string>(), names: [] };
     g.count++;
     g.ids.push(r.id);
+    // 몇 건인지와 몇 사람인지는 다르다. 한 사람이 세 번 적은 것과 세 사람이
+    // 한 번씩 적은 것은 무게가 다른데, 건수만 세면 둘이 똑같아 보인다.
+    const who = r.userId ?? r.userEmail ?? '';
+    if (who && !g.people.has(who)) {
+      g.people.add(who);
+      if (g.names.length < 5) g.names.push(r.userName ?? r.userEmail ?? '이름 없음');
+    }
     // 한 건이라도 급하면 그 묶음이 급한 것이다
     if (r.severity === 'high') g.severity = 'high';
     groups.set(key, g);
@@ -918,7 +930,9 @@ async function handleSuggestList(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({
     items: rows,
     // 여러 사람이 같은 말을 한 것부터
-    groups: [...groups.values()].sort((a, b) => b.count - a.count || (a.severity === 'high' ? -1 : 1)),
+    groups: [...groups.values()]
+      .map(g => ({ summary: g.summary, kind: g.kind, severity: g.severity, count: g.count, ids: g.ids, people: g.people.size, names: g.names }))
+      .sort((a, b) => b.people - a.people || b.count - a.count || (a.severity === 'high' ? -1 : 1)),
     counts: {
       open: rows.filter(r => r.status === 'open').length,
       bug: rows.filter(r => r.kind === 'bug').length,
