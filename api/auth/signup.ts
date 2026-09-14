@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
+import jwt from 'jsonwebtoken';
 import { retryOnce } from '../../src/lib/dbRetry.js';
 import crypto from 'node:crypto';
 
@@ -20,6 +21,18 @@ function portoneEnabled(): boolean {
 
 function emailCodeEnabled(): boolean {
   return Boolean(process.env.RESEND_API_KEY) && !portoneEnabled();
+}
+
+/**
+ * 가입 직후 바로 쓸 토큰. 로그인 쪽과 같은 모양이어야 한다 — 여기만 달라지면
+ * 가입해서 들어온 사람만 권한이 다르게 동작한다.
+ */
+function issueToken(user: { id: string; email: string; name: string }): string {
+  return jwt.sign(
+    { userId: user.id, email: user.email, name: user.name, isAdmin: user.email === process.env.ADMIN_EMAIL },
+    process.env.JWT_SECRET!,
+    { expiresIn: '7d' },
+  );
 }
 
 // ── 비밀번호 해시 (scrypt) ──
@@ -230,7 +243,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(409).json({ error: `이미 가입된 계정이 있습니다. (${masked}) 기존 계정으로 로그인해주세요.` });
     }
 
-    const { error } = await supabase.from('users').insert({
+    const { data: created, error } = await supabase.from('users').insert({
       name: cert.name || name || '',
       phone: cert.phone || phone || '',
       email: String(email).trim().toLowerCase(),
@@ -239,7 +252,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       birth_date: cert.birthday,
       status: 'approved', // 본인인증 통과 → 자동 승인 (이용 게이트는 구독 상태가 담당)
       password_hash: hashPassword(String(password)),
-    });
+    }).select('id, email, name').single();
 
     if (error) {
       if (error.code === '23505') {
@@ -251,7 +264,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.error('[가입] DB 오류', { code: error.code, detail: error.message });
       return res.status(500).json({ error: '가입 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' });
     }
-    return res.status(201).json({ message: '가입이 완료됐습니다. 바로 로그인해주세요.', verified: true });
+    return res.status(201).json({
+      message: '가입이 완료됐습니다.',
+      verified: true,
+      token: created ? issueToken(created) : undefined,
+    });
   }
 
   // ── 이메일 인증코드 모드 (기본 운영) — 코드 확인 후 가입 신청, 관리자 승인은 그대로 유지 ──
@@ -294,10 +311,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 이메일 인증 통과 → 자동 승인. 이용 게이트는 구독이, 무료쿠폰 통제는
     // 관리자가 발급한 쿠폰 코드 자체가 담당한다 (관리자 차단 기능은 유지)
-    const { error } = await supabase.from('users').insert({
+    // 방금 만든 줄을 돌려받는다. 토큰에 넣을 id가 필요하고, 다시 조회하면
+    // 태평양을 한 번 더 건넌다.
+    const { data: created, error } = await supabase.from('users').insert({
       name, phone, email: normalizedEmail, status: 'approved',
       password_hash: hashPassword(String(password)),
-    });
+    }).select('id, email, name').single();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: '이미 등록된 이메일입니다.' });
       // 오류 원문에는 테이블·열 이름과 제약 조건 이름이 들어 있다. 인증 없이
@@ -307,7 +326,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: '가입 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' });
     }
     await supabase.from('email_verifications').delete().eq('email', normalizedEmail);
-    return res.status(201).json({ message: '가입이 완료됐습니다. 바로 로그인해주세요.' });
+
+    // 이메일 코드를 맞힌 사람은 그 주소의 주인이고, 상태도 이미 approved다.
+    // 여기서 또 로그인을 시키는 건 방금 증명한 것을 한 번 더 증명하라는 말이다.
+    // 비밀번호도 방금 정했으니 바로 들여보낸다.
+    return res.status(201).json({
+      message: '가입이 완료됐습니다.',
+      token: created ? issueToken(created) : undefined,
+    });
   }
 
   // ── 인증 수단이 없는 경우 (RESEND·PASS 모두 미설정) — 관리자 수동 승인 ──
