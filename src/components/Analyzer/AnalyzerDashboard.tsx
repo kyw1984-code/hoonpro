@@ -526,6 +526,10 @@ export function AnalyzerDashboard() {
   const [savedReports, setSavedReports] = useState<any[] | null>(null);
   const [reportSaving, setReportSaving] = useState(false);
   const [reportMsg, setReportMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  /** 저장할 때 붙이는 이름 — "8월 나시티" 처럼 나중에 알아볼 수 있게 */
+  const [reportLabel, setReportLabel] = useState<string>("");
+  /** 무엇과 비교할지. 비어 있으면 가장 최근 저장본 */
+  const [compareId, setCompareId] = useState<string>("");
 
   // 광고비를 순이익 화면으로 넘기기 위한 기간. 보고서에 일자 컬럼이 있으면
   // 자동으로 채워지고, 없으면 사용자가 직접 넣는다.
@@ -554,14 +558,16 @@ export function AnalyzerDashboard() {
   useEffect(() => { loadReports(); }, []);
 
   /** 쿠팡 연동에서 옵션별 판매가·원가를 가져온다 (수수료율은 건드리지 않는다) */
-  const loadMarginPreset = async () => {
+  const loadMarginPreset = async (opts?: { silent?: boolean }) => {
     setPresetBusy(true);
-    setPresetMsg("");
+    if (!opts?.silent) setPresetMsg("");
     try {
       const r = await coupangApi.marginPreset(30);
       const items = r.items ?? [];
       if (items.length === 0) {
-        setPresetMsg("최근 30일 판매 기록이 없습니다. 정산AI에서 쿠팡을 먼저 연동해주세요.");
+        // 화면을 열자마자 자동으로 돈 경우에는 조용히 넘어간다. 쿠팡을 아직
+        // 연동하지 않은 사람에게 열자마자 빨간 안내가 뜰 이유가 없다.
+        if (!opts?.silent) setPresetMsg("최근 30일 판매 기록이 없습니다. 정산AI에서 쿠팡을 먼저 연동해주세요.");
         setPresetItems([]);
         return;
       }
@@ -569,7 +575,7 @@ export function AnalyzerDashboard() {
       applyPreset(items[0]);
       setPresetPick(items[0].vendorItemId);
     } catch (e: any) {
-      setPresetMsg(e?.message ?? "불러오지 못했습니다.");
+      if (!opts?.silent) setPresetMsg(e?.message ?? "불러오지 못했습니다.");
     } finally {
       setPresetBusy(false);
     }
@@ -604,10 +610,27 @@ export function AnalyzerDashboard() {
   // 예전에는 버튼을 눌러도 이 화면이 비어 있어서 같은 보고서를 파일로 또 올려야 했다.
   useEffect(() => { void loadSavedAdReport(); }, []);
 
+  // 마진 칸도 열릴 때 알아서 채운다. 버튼을 한 번 더 누르게 할 이유가 없다.
+  // 이미 값이 들어 있으면 건드리지 않는다 — 사용자가 고쳐 둔 값을 덮으면 안 된다.
+  useEffect(() => {
+    if (unitPrice > 0) return;
+    void loadMarginPreset({ silent: true });
+    // 최초 1회만. 의존성에 unitPrice를 넣으면 불러온 직후 다시 돈다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const buildReportSummary = () => {
     if (!processedData) return null;
     const pd: any = processedData;
     return {
+      // 언제 집행한 보고서인지 남긴다. 이게 없으면 저장 목록에 저장 시각만
+      // 보여서 8월 것과 9월 것을 구분할 수 없었다.
+      from: adFrom || null,
+      to: adTo || null,
+      label: reportLabel.trim() || null,
+      // 어떤 마진 기준으로 계산한 순이익인지도 함께 남긴다 — 기준이 다르면
+      // 순이익 비교가 사과와 오렌지가 된다.
+      basis: { unitPrice, unitCost, deliveryFee, feeRate: coupangFeeRate },
       grade: pd.precision?.grade ?? null,
       totalCost: Math.round(pd.tot?.광고비 || 0),
       totalRevenue: Math.round(pd.totalRevenue || 0),
@@ -628,7 +651,8 @@ export function AnalyzerDashboard() {
     try {
       const res = await fetch("/api/usage?action=report-save", {
         method: "POST", headers: usageHeaders(),
-        body: JSON.stringify({ action: "report-save", summary }),
+        // 본문도 함께 보낸다. 요약만 저장하면 나중에 그 분석을 다시 열 수 없다.
+        body: JSON.stringify({ action: "report-save", summary, rows: rawData }),
       });
       const data = await res.json();
       if (!res.ok || data.error) { setReportMsg({ text: data.error || "저장 실패", ok: false }); return; }
@@ -652,12 +676,48 @@ export function AnalyzerDashboard() {
       }
       // 광고비가 실패했으면 초록색으로 띄우지 않는다. 성공으로 읽고 넘어가면
       // 순이익 화면에 광고비가 빠진 채로 남는다.
-      setReportMsg({ text: "저장됐습니다. 다음 보고서 분석 때 자동으로 비교됩니다." + adMsg, ok: adOk });
+      setReportMsg({ text: "저장됐습니다. 아래 목록에서 비교 기준으로 고를 수 있습니다." + adMsg, ok: adOk });
+      setReportLabel("");
       loadReports();
     } catch (e: any) {
       setReportMsg({ text: e.message, ok: false });
     } finally {
       setReportSaving(false);
+    }
+  };
+
+  /** 저장해 둔 분석을 다시 연다 */
+  const openReport = async (id: number) => {
+    setReportMsg(null);
+    try {
+      const res = await fetch("/api/usage?action=report-get", {
+        method: "POST", headers: usageHeaders(),
+        body: JSON.stringify({ action: "report-get", id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.report?.rows?.length) {
+        setReportMsg({ text: data.error ?? "이 보고서는 다시 열 수 없습니다.", ok: false });
+        return;
+      }
+      const sum = data.report.summary ?? {};
+      setRawData(data.report.rows);
+      setFileName(
+        `저장본: ${sum.label ? sum.label + " · " : ""}${sum.from && sum.to ? `${sum.from} ~ ${sum.to}` : new Date(data.report.created_at).toLocaleDateString("ko-KR")}`,
+      );
+      // 저장 당시의 마진 기준까지 되살린다. 기준이 다르면 순이익이 달라져
+      // 같은 보고서인데 다른 숫자가 나온다.
+      const b = sum.basis;
+      if (b) {
+        if (typeof b.unitPrice === "number") setUnitPrice(b.unitPrice);
+        if (typeof b.unitCost === "number") setUnitCost(b.unitCost);
+        if (typeof b.deliveryFee === "number") setDeliveryFee(b.deliveryFee);
+        if (typeof b.feeRate === "number") setCoupangFeeRate(b.feeRate);
+      }
+      if (sum.from) setAdFrom(sum.from);
+      if (sum.to) setAdTo(sum.to);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (e: any) {
+      setReportMsg({ text: e?.message ?? "불러오지 못했습니다.", ok: false });
     }
   };
 
@@ -698,7 +758,7 @@ export function AnalyzerDashboard() {
         {/* 손으로 넣지 않아도 되는 값은 연동에서 가져온다 */}
         <div className="mb-5 rounded-card border border-accent-line bg-accent-soft p-3">
           <button
-            onClick={loadMarginPreset}
+            onClick={() => loadMarginPreset()}
             disabled={presetBusy}
             className="flex w-full items-center justify-center gap-1.5 rounded-control bg-accent px-3 py-2 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
           >
@@ -724,7 +784,7 @@ export function AnalyzerDashboard() {
           )}
 
           <p className="mt-2 text-[11.5px] leading-relaxed text-ink-2">
-            {presetMsg || "최근 30일 실제 판매가(쿠폰 할인 후)와 원가 입력값을 가져옵니다."}
+            {presetMsg || "화면을 열면 최근 30일 실제 판매가(쿠폰 할인 후)와 원가를 자동으로 불러옵니다. 다른 상품을 보려면 위에서 고르세요."}
           </p>
           <p className="mt-1 text-[11px] leading-relaxed text-ink-3">
             수수료율은 가져오지 않습니다 — 기본값 11.88%(10.8% + 부가세)를 쓰고,
@@ -930,7 +990,12 @@ export function AnalyzerDashboard() {
                 <div className="rounded-card border border-line bg-paper p-5">
                   {(() => {
                     const cur = buildReportSummary();
-                    const prev = savedReports && savedReports.length > 0 ? savedReports[0].summary : null;
+                    // 비교 기준은 고를 수 있다. 고르지 않았으면 가장 최근 저장본.
+                    // 예전에는 늘 최근 것과만 비교돼서 "지난달과 비교"가 불가능했다.
+                    const prevRow = savedReports && savedReports.length > 0
+                      ? (savedReports.find((r: any) => String(r.id) === compareId) ?? savedReports[0])
+                      : null;
+                    const prev = prevRow ? prevRow.summary : null;
                     const deltaBadge = (d: number | null, unit: string, goodUp: boolean, digits = 0) => {
                       if (d === null || Math.abs(d) < 0.05) return <span className="text-[11px] text-ink-3">변화 없음</span>;
                       const good = goodUp ? d > 0 : d < 0;
@@ -963,10 +1028,28 @@ export function AnalyzerDashboard() {
                             아직 저장된 보고서가 없습니다. 아래 버튼으로 이번 분석을 저장해두면, <b>다음 보고서를 올릴 때 지난번 대비 변화</b>(ROAS·순이익·제외 키워드)가 여기 표시됩니다 — 코칭을 반영한 결과를 데이터로 확인하세요.
                           </p>
                         )}
-                        {cur && prev && (
-                          <p className="mb-4 text-[11px] text-ink-3">
-                            비교 기준: {new Date(savedReports![0].created_at).toLocaleDateString("ko-KR")} 저장 보고서 · 광고비 증가는 확장 중이면 정상이니 ROAS·순이익과 함께 보세요.
-                          </p>
+                        {cur && prev && prevRow && (
+                          <div className="mb-4 flex flex-wrap items-center gap-2">
+                            <span className="text-[11.5px] text-ink-3">비교 기준</span>
+                            <select
+                              value={compareId || String(prevRow.id)}
+                              onChange={e => setCompareId(e.target.value)}
+                              className="rounded-control border border-line bg-paper px-2 py-1 text-[12px] text-ink"
+                            >
+                              {savedReports!.map((r: any) => (
+                                <option key={r.id} value={String(r.id)}>
+                                  {r.summary?.label ? `${r.summary.label} · ` : ""}
+                                  {r.summary?.from && r.summary?.to ? `${r.summary.from}~${r.summary.to}` : new Date(r.created_at).toLocaleDateString("ko-KR")}
+                                  {` · ROAS ${Number(r.summary?.roasPct ?? 0).toFixed(0)}%`}
+                                </option>
+                              ))}
+                            </select>
+                            {prevRow.summary?.basis && prevRow.summary.basis.feeRate !== coupangFeeRate && (
+                              <span className="text-[11px] text-caution">
+                                마진 기준이 다릅니다 (저장 당시 수수료 {prevRow.summary.basis.feeRate}%) — 순이익 비교는 참고만 하세요.
+                              </span>
+                            )}
+                          </div>
                         )}
                         {/* 광고비 기간 — 이 값이 순이익 화면의 광고비가 된다.
                             쿠팡은 광고 API를 제공하지 않아 여기서 받는 수밖에 없다. */}
@@ -990,6 +1073,12 @@ export function AnalyzerDashboard() {
                         </div>
 
                         <div className="flex items-center gap-3 flex-wrap">
+                          <input
+                            value={reportLabel}
+                            onChange={e => setReportLabel(e.target.value.slice(0, 40))}
+                            placeholder="이름 (예: 8월 나시티)"
+                            className="w-48 rounded-control border border-line bg-paper px-2.5 py-2 text-[12.5px] text-ink outline-none focus:ring-2 focus:ring-accent"
+                          />
                           <button onClick={saveReport} disabled={reportSaving || !cur}
                             className="flex items-center gap-1.5 rounded-control bg-ink px-4 py-2 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
                             {reportSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1007,7 +1096,7 @@ export function AnalyzerDashboard() {
                               <table className="w-full text-[13px]">
                                 <thead className="bg-paper-2 text-[11px] font-semibold uppercase tracking-wider text-ink-3">
                                   <tr>
-                                    <th className="px-4 py-2 text-left">저장일</th>
+                                    <th className="px-4 py-2 text-left">이름 · 기간</th>
                                     <th className="px-4 py-2 text-center">등급</th>
                                     <th className="px-4 py-2 text-right">광고비</th>
                                     <th className="px-4 py-2 text-right">매출</th>
@@ -1020,7 +1109,15 @@ export function AnalyzerDashboard() {
                                 <tbody>
                                   {savedReports.map((r: any) => (
                                     <tr key={r.id} className="border-t border-line bg-paper hover:bg-paper-2">
-                                      <td className="px-4 py-2 whitespace-nowrap text-ink">{new Date(r.created_at).toLocaleDateString("ko-KR")} {new Date(r.created_at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</td>
+                                      <td className="px-4 py-2 whitespace-nowrap text-ink">
+                                        {r.summary?.label && <span className="font-semibold">{r.summary.label}</span>}
+                                        {r.summary?.label && <br />}
+                                        <span className={r.summary?.label ? "text-[11.5px] text-ink-3" : ""}>
+                                          {r.summary?.from && r.summary?.to
+                                            ? `${r.summary.from} ~ ${r.summary.to}`
+                                            : `${new Date(r.created_at).toLocaleDateString("ko-KR")} 저장`}
+                                        </span>
+                                      </td>
                                       <td className="px-4 py-2 text-center font-semibold text-ink">{r.summary?.grade ?? "—"}</td>
                                       <td className="px-4 py-2 text-right tabular-nums text-ink-2">{Number(r.summary?.totalCost ?? 0).toLocaleString()}원</td>
                                       <td className="px-4 py-2 text-right tabular-nums text-ink-2">{Number(r.summary?.totalRevenue ?? 0).toLocaleString()}원</td>
@@ -1030,9 +1127,21 @@ export function AnalyzerDashboard() {
                                       </td>
                                       <td className="px-4 py-2 text-right tabular-nums text-ink-2">{r.summary?.drainCount ?? "—"}</td>
                                       <td className="px-2 py-2 text-right">
-                                        <button onClick={() => deleteReport(r.id)} title="삭제" className="rounded-control p-1 text-ink-3 hover:bg-paper-2 hover:text-critical">
-                                          <X className="h-3.5 w-3.5" />
-                                        </button>
+                                        <div className="flex items-center justify-end gap-1">
+                                          {(r.row_count ?? 0) > 0 ? (
+                                            <button
+                                              onClick={() => openReport(r.id)}
+                                              className="rounded-control border border-line px-2 py-1 text-[11.5px] font-semibold text-ink-2 hover:border-accent-line hover:text-accent"
+                                            >
+                                              열기
+                                            </button>
+                                          ) : (
+                                            <span className="text-[11px] text-ink-3" title="요약만 저장된 옛 기록입니다">요약만</span>
+                                          )}
+                                          <button onClick={() => deleteReport(r.id)} title="삭제" className="rounded-control p-1 text-ink-3 hover:bg-paper-2 hover:text-critical">
+                                            <X className="h-3.5 w-3.5" />
+                                          </button>
+                                        </div>
                                       </td>
                                     </tr>
                                   ))}

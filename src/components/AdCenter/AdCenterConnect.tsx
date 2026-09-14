@@ -133,14 +133,20 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
       <p className="mt-2 text-[11px] text-ink-3">PC 크롬·엣지에서 됩니다. 가져온 보고서는 광고분석AI 화면에도 그대로 들어갑니다 — 파일을 따로 올리지 않아도 됩니다. 휴대폰에서는 파일 올리기를 이용해주세요.</p>
 
       {/* 즐겨찾기를 끌어다 놓는 설정은 글로 읽으면 어렵다. 막히는 사람이 어디를
-          눌러야 하는지 이 자리에서 알아야 한다 — 나가서 찾게 하면 거기서 놓친다. */}
-      <p
-        className="mt-3 flex items-start gap-2 rounded-card border px-3.5 py-2.5 text-[12.5px] font-medium leading-relaxed"
-        style={{ borderColor: 'rgba(255,180,84,.35)', background: 'rgba(255,180,84,.08)', color: '#ffb454' }}
-      >
-        <PlayCircle className="mt-[1px] h-4 w-4 shrink-0" />
-        <span>설정이 어려우시면 <b>화면 오른쪽 위 [사용 방법]</b>을 눌러 영상을 확인해주세요.</span>
-      </p>
+          눌러야 하는지 이 자리에서 알아야 한다 — 나가서 찾게 하면 거기서 놓친다.
+
+          정산AI에서만 띄운다. 안내 영상은 정산AI 가이드에만 붙어 있어서,
+          광고분석AI에서 [사용 방법]을 누르면 영상이 없는 화면이 열린다.
+          없는 것을 가리키는 안내는 안 하느니만 못하다. */}
+      {!compact && (
+        <p
+          className="mt-3 flex items-start gap-2 rounded-card border px-3.5 py-2.5 text-[12.5px] font-medium leading-relaxed"
+          style={{ borderColor: 'rgba(255,180,84,.35)', background: 'rgba(255,180,84,.08)', color: '#ffb454' }}
+        >
+          <PlayCircle className="mt-[1px] h-4 w-4 shrink-0" />
+          <span>설정이 어려우시면 <b>화면 오른쪽 위 [사용 방법]</b>을 눌러 영상을 확인해주세요.</span>
+        </p>
+      )}
     </div>
   );
 }
