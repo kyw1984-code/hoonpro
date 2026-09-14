@@ -168,22 +168,3 @@ test('한도 응답: 갈래마다 다른 상태코드를 준다', () => {
   assert.equal(err.status, 503);
   assert.equal(err.body.retryable, true);
 });
-
-test('usageChargeKrw: 기능별 단가를 곱해 더한다', async () => {
-  const { usageChargeKrw } = await import('../src/lib/featureLimits.ts');
-  // 리뷰 20건(12원) + 소싱 60회(3원) = 240 + 180
-  assert.equal(usageChargeKrw({ reviews: 20, sourcing: 60 }), 420);
-});
-
-test('usageChargeKrw: 모르는 기능과 0 이하는 세지 않는다', async () => {
-  const { usageChargeKrw } = await import('../src/lib/featureLimits.ts');
-  assert.equal(usageChargeKrw({ unknown: 100, qa: 0, sourcing: -5 }), 0);
-  assert.equal(usageChargeKrw({}), 0);
-  assert.equal(usageChargeKrw(undefined as any), 0);
-});
-
-test('usageChargeKrw: 한도를 다 쓴 하루는 1,660원이다', async () => {
-  const { usageChargeKrw, DEFAULT_FEATURE_LIMITS } = await import('../src/lib/featureLimits.ts');
-  // 이 값이 월 요금의 하루치(1,459원)를 넘는다는 것이 환불에서 원가를 떼는 이유다
-  assert.equal(usageChargeKrw(DEFAULT_FEATURE_LIMITS), 1660);
-});

@@ -17,8 +17,6 @@ import crypto from 'node:crypto';
 //   charge-due       크론 — 결제일 청구 + D+1/D+3 재시도 + 7일 전 사전 고지
 //   admin-*          관리자 — 쿠폰 관리 / 구독 현황
 
-import { usageChargeKrw } from '../src/lib/featureLimits.js';
-
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
@@ -35,9 +33,6 @@ const CANCEL_REASONS = ['price', 'not-using', 'missing-feature', 'quality', 'tem
 // 청구 주기 — 월간 1개월 / 연간 12개월, 일할 환불 기준일도 주기에 따름
 function planMonths(plan: { interval?: string }): number {
   return plan?.interval === 'year' ? 12 : 1;
-}
-function planBaseDays(plan: { interval?: string }): number {
-  return plan?.interval === 'year' ? 365 : 30;
 }
 
 // ── 공통 유틸 ─────────────────────────────────────────────
@@ -925,22 +920,6 @@ async function refund(user: any, res: VercelResponse) {
     !callsRes.error && (callsRes.count ?? 0) === 0 &&
     !usageRes.error && (usageRes.data?.length ?? 0) === 0;
 
-  // 실제로 쓴 만큼의 원가. 시간만으로 계산하면 짧은 기간에 한도를 끝까지 긁고
-  // 환불받는 길이 열린다. 시간 기준 사용료와 견줘 '큰 쪽'만 뗀다 — 둘 다 떼면
-  // 평범하게 쓴 사람에게 두 번 물리는 셈이 된다.
-  const { data: usedRows, error: usedErr } = await supabase
-    .from('feature_usage')
-    .select('feature, call_count')
-    .eq('user_id', user.userId)
-    .gte('date', usedFromDate);
-  const usedCounts: Record<string, number> = {};
-  for (const r of usedRows ?? []) {
-    usedCounts[String(r.feature)] = (usedCounts[String(r.feature)] ?? 0) + (Number(r.call_count) || 0);
-  }
-  // 조회가 실패하면 원가를 0으로 두지 않는다. 0이면 환불이 과다해진다.
-  const usageKrw = usedErr ? Number.POSITIVE_INFINITY : usageChargeKrw(usedCounts);
-  if (usedErr) console.error('[환불] 사용량 조회 실패', { code: usedErr.code, detail: usedErr.message });
-
   let refundAmount: number;
   let reason: string;
   if (within7Days && unusedConfirmed) {
@@ -949,7 +928,23 @@ async function refund(user: any, res: VercelResponse) {
   } else {
     const { data: subPlan } = await supabase.from('plans').select('interval').eq('id', sub.plan_id).maybeSingle();
 
-    if (subPlan?.interval === 'year') {
+    // 월간은 쓰기 시작했으면 환불하지 않는다. 결제한 달 끝까지 그대로 쓰고
+    // 다음 결제만 멈춘다 — 넷플릭스·쿠팡와우를 비롯한 구독 서비스의 일반적인
+    // 방식이고, 결제한 기간의 서비스를 다 제공하므로 '공급되지 않은 부분'이
+    // 없다. 일할 환불을 없애면 구독→몰아쓰기→환불→재구독 경로도 함께 막힌다.
+    //
+    // 연간은 다르다. 열 달치를 안 돌려주면 계속거래로 다툼의 여지가 있고,
+    // 한국의 연간 구독 상품들도 대개 정가 월 환산으로 재정산해 돌려준다.
+    if (subPlan?.interval !== 'year') {
+      // 자리를 잡아 둔 것을 되돌리고, 기간 만료 해지로 안내한다
+      await releaseClaim();
+      return res.status(409).json({
+        error: '이미 이용하신 기간은 환불되지 않습니다. [해지]를 누르면 결제한 기간까지 그대로 이용하고 다음 결제가 멈춥니다.',
+        useCancel: true,
+      });
+    }
+
+    {
       // 연간 해지: 할인 없는 월간 요금으로 사용 기간을 재정산한 뒤 차액 환불
       // 환불액 = 연간 결제액 − (월간 요금 ÷ 30 × 사용일수, 사용일은 올림)
       const { data: monthlyPlan } = await supabase
@@ -958,24 +953,9 @@ async function refund(user: any, res: VercelResponse) {
       // 공급가액으로 빼면 사용료를 실제보다 적게 떼어 환불이 과다해진다.
       const monthlyPrice = withVat(monthlyPlan?.price ?? 39800).total;
       const usedDays = Math.max(1, Math.ceil((Date.now() - approvedAt.getTime()) / 86400000));
-      const timeCharge = Math.floor((monthlyPrice / 30) * usedDays);
-      const charge = Math.max(timeCharge, usageKrw === Number.POSITIVE_INFINITY ? payment.amount : usageKrw);
-      refundAmount = Math.max(0, payment.amount - charge);
-      reason = charge > timeCharge
-        ? `연간 해지 재정산 (실제 사용 원가 ${won(charge)} 차감)`
-        : `연간 해지 재정산 (사용 ${usedDays}일 × 월간 요금 일할 ${won(timeCharge)} 차감)`;
-    } else {
-      // 월간 해지: 잔여 기간 일할 환불 (÷30)
-      const periodEnd = new Date(sub.current_period_end);
-      const remainingDays = Math.max(0, Math.floor((periodEnd.getTime() - Date.now()) / 86400000));
-      const timeRefund = Math.floor((payment.amount / planBaseDays(subPlan ?? {})) * remainingDays);
-      // 시간으로 뗀 사용료보다 실제 원가가 크면 그쪽을 뗀다
-      const timeCharge = payment.amount - timeRefund;
-      const charge = Math.max(timeCharge, usageKrw === Number.POSITIVE_INFINITY ? payment.amount : usageKrw);
-      refundAmount = Math.max(0, payment.amount - charge);
-      reason = charge > timeCharge
-        ? `실제 사용 원가 ${won(charge)} 차감 후 환불`
-        : `잔여 ${remainingDays}일 일할 환불`;
+      const usedCharge = Math.floor((monthlyPrice / 30) * usedDays);
+      refundAmount = Math.max(0, payment.amount - usedCharge);
+      reason = `연간 해지 재정산 (사용 ${usedDays}일 × 월간 요금 일할 ${won(usedCharge)} 차감)`;
     }
   }
 
