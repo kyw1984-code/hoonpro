@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getToken } from '../lib/auth';
-import { ReviewSummaryView, safeJson } from './ReviewAnalyzer';
+import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface KeywordStat {
@@ -1283,7 +1283,12 @@ export function SourcingFinder() {
                       <p className="text-sm font-semibold">실제 리뷰를 수집해 훈프로AI가 분석하는 중... (10~30초)</p>
                     </div>
                   ) : (
-                    <ReviewSummaryView data={reviewData} />
+                    <>
+                      <ReviewSummaryView data={reviewData} />
+                      <div className="mt-4 border-t border-line pt-4">
+                        <SaveReviewButton data={reviewData} />
+                      </div>
+                    </>
                   )}
                 </div>
               </motion.div>

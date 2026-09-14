@@ -1,12 +1,22 @@
 /**
- * 내 작업 — 예전에 저장한 상세페이지 기획안·썸네일을 다시 보는 보관함.
+ * 내 작업 — 저장해 둔 결과를 다시 보는 보관함.
  *
- * 두 제작 기능은 내렸다. 하지만 만들어 둔 것까지 없앨 이유는 없어서 보는
- * 것과 내려받는 것은 그대로 둔다. 새로 쌓이지는 않는다.
+ * 상세페이지 기획안·썸네일은 내린 기능이라 새로 쌓이지 않지만, 만들어 둔
+ * 것까지 없앨 이유는 없어 보는 것과 내려받는 것은 그대로 둔다.
+ * 리뷰 분석은 여기에 새로 쌓인다 — 예전에는 화면을 닫으면 사라졌다.
  */
 import { useEffect, useState } from 'react';
-import { FolderOpen, FileText, Image as ImageIcon, Loader2, RefreshCw, X, Copy, Download } from 'lucide-react';
+import { FolderOpen, FileText, Image as ImageIcon, Loader2, RefreshCw, X, Copy, Download, MessageSquareText } from 'lucide-react';
 import { getToken } from '../../lib/auth';
+import { ReviewSummaryView } from '../ReviewAnalyzer';
+
+/** 종류마다 이름·아이콘이 다르다. 한 곳에 둬야 카드와 모달이 어긋나지 않는다 */
+const KIND_META: Record<string, { label: string; badge: string; Icon: typeof FileText }> = {
+  thumbnail: { label: '썸네일', badge: 'Thumbnail', Icon: ImageIcon },
+  'detail-plan': { label: '상세페이지 기획안', badge: 'Detail Plan', Icon: FileText },
+  review: { label: '리뷰 분석', badge: '리뷰 분석AI', Icon: MessageSquareText },
+};
+const metaOf = (kind: string) => KIND_META[kind] ?? KIND_META['detail-plan'];
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -74,8 +84,8 @@ export function WorksLibrary() {
           </button>
         </div>
         <p className="text-[12px] text-ink-2">
-          예전에 저장해 두신 상세페이지 기획안과 썸네일입니다. 두 기능은 내렸지만
-          만들어 두신 것은 그대로 두었습니다. 내려받기는 계속 됩니다.
+          저장해 두신 결과가 모입니다. 리뷰 분석AI에서 [내 작업에 저장]을 누르면 여기 쌓입니다.
+          상세페이지 기획안·썸네일은 내린 기능이라 새로 쌓이지는 않지만, 만들어 두신 것은 그대로 보실 수 있습니다.
         </p>
         {error && <p className="mt-2 text-[12px] text-critical">{error}</p>}
       </div>
@@ -88,7 +98,7 @@ export function WorksLibrary() {
         <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">
           <FolderOpen className="mb-4 h-12 w-12 opacity-20" />
           <p className="text-sm font-semibold">저장된 작업이 없습니다</p>
-          <p className="mt-1.5 text-[12px]">상세페이지·썸네일 제작으로 저장해 두신 것이 있으면 여기 보입니다</p>
+          <p className="mt-1.5 text-[12px]">리뷰 분석AI에서 분석한 뒤 [내 작업에 저장]을 누르면 여기 모입니다</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
@@ -100,13 +110,16 @@ export function WorksLibrary() {
                 </button>
               ) : (
                 <button onClick={() => setViewer(w)} className="flex aspect-square w-full flex-col items-center justify-center gap-2 bg-paper-2 p-4">
-                  <FileText className="h-8 w-8 text-ink-3" />
-                  <span className="line-clamp-3 text-center text-[12px] font-medium leading-snug text-ink-2">{w.title || '상세페이지 기획안'}</span>
+                  {(() => { const I = metaOf(w.kind).Icon; return <I className="h-8 w-8 text-ink-3" />; })()}
+                  <span className="line-clamp-3 text-center text-[12px] font-medium leading-snug text-ink-2">{w.title || metaOf(w.kind).label}</span>
+                  {w.kind === 'review' && w.payload?.summary?.oneLine && (
+                    <span className="line-clamp-2 text-center text-[10.5px] leading-snug text-ink-3">{w.payload.summary.oneLine}</span>
+                  )}
                 </button>
               )}
               <div className="flex items-center gap-1.5 border-t border-line px-3 py-2">
-                {w.kind === 'thumbnail' ? <ImageIcon className="h-3 w-3 shrink-0 text-ink-3" /> : <FileText className="h-3 w-3 shrink-0 text-ink-3" />}
-                <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-ink">{w.title || (w.kind === 'thumbnail' ? '썸네일' : '기획안')}</span>
+                {(() => { const I = metaOf(w.kind).Icon; return <I className="h-3 w-3 shrink-0 text-ink-3" />; })()}
+                <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-ink">{w.title || metaOf(w.kind).label}</span>
                 <span className="shrink-0 text-[10px] tabular-nums text-ink-3">{fmtDate(w.created_at)}</span>
               </div>
             </div>
@@ -121,8 +134,13 @@ export function WorksLibrary() {
           <div className="fixed inset-0 z-[90] m-auto flex h-fit max-h-[88vh] w-[92%] max-w-[720px] flex-col overflow-hidden rounded-panel border border-line bg-paper shadow-overlay">
             <div className="flex items-start justify-between gap-3 border-b border-line px-6 py-4">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-widest text-accent">{viewer.kind === 'thumbnail' ? 'Thumbnail' : 'Detail Plan'}</p>
-                <h3 className="truncate text-[15px] font-semibold text-ink">{viewer.title || (viewer.kind === 'thumbnail' ? '썸네일' : '상세페이지 기획안')}</h3>
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-accent">{metaOf(viewer.kind).badge}</p>
+                <h3 className="truncate text-[15px] font-semibold text-ink">{viewer.title || metaOf(viewer.kind).label}</h3>
+                {viewer.kind === 'review' && (
+                  <p className="mt-0.5 text-[11.5px] text-ink-3">
+                    리뷰 {viewer.payload?.reviewCount ?? 0}개 분석 · {fmtDate(viewer.created_at)}
+                  </p>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 {viewer.kind === 'thumbnail' && viewer.payload?.url && (
@@ -147,7 +165,9 @@ export function WorksLibrary() {
               </div>
             </div>
             <div className="overflow-y-auto p-6">
-              {viewer.kind === 'thumbnail' && viewer.payload?.url ? (
+              {viewer.kind === 'review' ? (
+                <ReviewSummaryView data={viewer.payload} />
+              ) : viewer.kind === 'thumbnail' && viewer.payload?.url ? (
                 <img src={viewer.payload.url} alt="" className="mx-auto max-h-[65vh] rounded-card border border-line" />
               ) : (
                 <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-ink-2">
