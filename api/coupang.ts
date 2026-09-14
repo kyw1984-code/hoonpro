@@ -529,6 +529,21 @@ export function dateChunks(from: string, to: string, size = LIMITS.chunkDays): A
  * 그래도 상한(maxPages × pageSize)에 닿으면 truncated로 알린다. 부르는 쪽이
  * 그걸 무시하면 조용히 일부만 계산된다.
  */
+/**
+ * 다시 불러 볼 만한 DB 오류인가.
+ *
+ * 게이트웨이 타임아웃(504)과 문장 취소는 잠깐 늦어서 나는 것이라 한 번 더
+ * 부르면 지나간다. 문법 오류나 권한 문제는 몇 번을 불러도 같으므로 뺀다.
+ */
+export function isTransientDbError(error: { message?: string; code?: string } | null | undefined): boolean {
+  if (!error) return false;
+  const msg = String(error.message ?? '');
+  const code = String(error.code ?? '');
+  // 57014 = query_canceled, 08006 = connection_failure
+  return /gateway timeout|timeout|timed out|fetch failed|ECONNRESET|EAI_AGAIN/i.test(msg)
+    || code === '57014' || code === '08006' || code === '504';
+}
+
 export async function selectAll<T = any>(
   build: (from: number, to: number) => any,
   pageSize = 1000,
@@ -536,8 +551,19 @@ export async function selectAll<T = any>(
 ): Promise<{ rows: T[]; truncated: boolean }> {
   const out: T[] = [];
   for (let page = 0; page < maxPages; page++) {
-    const { data, error } = await build(page * pageSize, (page + 1) * pageSize - 1);
-    if (error) throw new Error(error.message);
+    let res = await build(page * pageSize, (page + 1) * pageSize - 1);
+    // 게이트웨이가 잠깐 늦어서 나는 타임아웃은 한 번 더 부르면 대개 지나간다.
+    // 여기서 그냥 던지면 그 사용자의 그 회차 수집이 통째로 죽고, 다음 시간까지
+    // 숫자가 한 시간 낡은 채로 남는다. 한 번만 다시 본다.
+    if (res?.error && isTransientDbError(res.error)) {
+      await new Promise(r => setTimeout(r, 1200));
+      res = await build(page * pageSize, (page + 1) * pageSize - 1);
+    }
+    const { data, error } = res;
+    // 어느 단계에서 났는지 밝힌다. 예전에는 "Gateway Timeout" 한 마디만 남아서,
+    // 관리자 화면에 '쿠팡 수집' 딱지를 달고 뜨면 쿠팡이 늦은 것처럼 읽혔다.
+    // 실제로는 우리 DB 조회가 늦은 것이다.
+    if (error) throw new Error(`DB 조회 실패 (${page + 1}쪽${error.code ? `, ${error.code}` : ''}): ${error.message}`);
     const chunk = (data ?? []) as T[];
     out.push(...chunk);
     if (chunk.length < pageSize) return { rows: out, truncated: false };
