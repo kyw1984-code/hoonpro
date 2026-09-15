@@ -6,22 +6,12 @@ import { extractDailyAdCost, extractItemAdCost } from "../../lib/adcost";
 import { parseAdReportBuffer } from "../../lib/adReport";
 import { AdCenterConnect } from "../AdCenter/AdCenterConnect";
 import { computeMargin } from "../../lib/marginMath";
-
-// ─── 지면 분류 헬퍼 ("비검색"이 "검색"을 포함하는 substring 함정 방지) ───
-function isSearchPlatform(platform: string): boolean {
-  if (!platform) return false;
-  const lower = platform.toLowerCase();
-  if (platform.includes("비검색") || lower.includes("non-search") || lower.includes("nonsearch")) return false;
-  return platform.includes("검색") || lower.includes("search");
-}
-
-function isNonSearchPlatform(platform: string): boolean {
-  if (!platform) return false;
-  const lower = platform.toLowerCase();
-  if (platform.includes("비검색") || lower.includes("non-search") || lower.includes("nonsearch")) return true;
-  if (platform.includes("검색") || lower.includes("search")) return false;
-  return false;
-}
+// 지면 분류·열 찾기·숫자 읽기는 한 곳에서만 한다. 지금 보고서와 저장본을
+// 같은 규칙으로 읽어야 변화가 아닌 것이 변화로 보이지 않는다.
+import {
+  aggregateKeywords, diffKeywords, detectColumns, isNonSearchPlatform, isSearchPlatform,
+  parseNum, normalizeRows, type KeywordDiff,
+} from "../../lib/adReportKeywords";
 
 // ─── 정밀 분석 ───
 const CTR_THRESHOLDS = { VERY_LOW: 0.0003, LOW: 0.0005, MEDIUM: 0.001, HIGH: 0.003 };
@@ -120,31 +110,16 @@ export function AnalyzerDashboard() {
   const processedData = useMemo(() => {
     if (!rawData || rawData.length === 0) return null;
 
-    const normalizedData = rawData.map((row) => {
-      const newRow: any = {};
-      Object.keys(row).forEach((key) => { newRow[key.trim()] = row[key]; });
-      return newRow;
-    });
-
-    const qtyTargets = ["총 판매수량(14일)", "총 판매수량(1일)", "총 판매수량", "전환 판매수량", "판매수량"];
+    const normalizedData = normalizeRows(rawData);
     const sampleRow = normalizedData[0] || {};
-    const colQty = qtyTargets.find((c) => c in sampleRow);
+    const cols = detectColumns(sampleRow);
+    const colQty = cols.qty;
     if (!colQty) return { error: "판매수량 컬럼을 찾을 수 없습니다." };
 
-    // 실제 전환매출액 컬럼 자동 감지 — 있으면 '판매수량 × 입력 판매가' 추정 대신 실측 사용
-    const revenueTargets = ["총 전환매출액(14일)", "총 전환매출액(1일)", "총 전환매출액", "전환매출액"];
-    const colRevenue = revenueTargets.find((c) => c in sampleRow) || null;
-    const colRevenue1d = colRevenue === "총 전환매출액(14일)" && "총 전환매출액(1일)" in sampleRow ? "총 전환매출액(1일)" : null;
-    const colIndirectRev = colRevenue === "총 전환매출액(14일)" && "간접 전환매출액(14일)" in sampleRow
-      ? "간접 전환매출액(14일)"
-      : "간접 전환매출액(1일)" in sampleRow ? "간접 전환매출액(1일)" : null;
-
-    const parseNum = (val: any) => {
-      if (typeof val === "number") return val;
-      if (!val) return 0;
-      const num = parseFloat(String(val).replace(/,/g, "").replace(/%/g, "").replace(/^-$/, "0"));
-      return isNaN(num) ? 0 : num;
-    };
+    // 실제 전환매출액 컬럼이 있으면 '판매수량 × 입력 판매가' 추정 대신 실측을 쓴다
+    const colRevenue = cols.revenue;
+    const colRevenue1d = cols.revenue1d;
+    const colIndirectRev = cols.indirect;
 
     const cleanedData = normalizedData.map((row) => ({
       ...row,
@@ -551,6 +526,18 @@ export function AnalyzerDashboard() {
   const [reportLabel, setReportLabel] = useState<string>("");
   /** 무엇과 비교할지. 비어 있으면 가장 최근 저장본 */
   const [compareId, setCompareId] = useState<string>("");
+  /**
+   * 키워드 단위 비교.
+   *
+   * 합계만 견주면 부족하다. ROAS가 그대로여도 안에서는 스타 키워드 하나가
+   * 죽고 다른 하나가 살아난 것일 수 있다. 무엇을 손봐야 하는지는 키워드
+   * 단위로만 보인다. 저장본의 원본 줄은 무거워서 목록에 실려 오지 않으므로
+   * 누를 때 한 건만 따로 받는다.
+   */
+  const [kwDiff, setKwDiff] = useState<ReturnType<typeof diffKeywords> | null>(null);
+  const [kwDiffFor, setKwDiffFor] = useState<string>("");
+  const [kwDiffBusy, setKwDiffBusy] = useState(false);
+  const [kwDiffMsg, setKwDiffMsg] = useState<string | null>(null);
 
   // 광고비를 순이익 화면으로 넘기기 위한 기간. 보고서에 일자 컬럼이 있으면
   // 자동으로 채워지고, 없으면 사용자가 직접 넣는다.
@@ -720,6 +707,49 @@ export function AnalyzerDashboard() {
       setReportMsg({ text: e.message, ok: false });
     } finally {
       setReportSaving(false);
+    }
+  };
+
+  /**
+   * 저장본과 지금을 키워드 단위로 견준다.
+   *
+   * 두 보고서의 매출 산정 방식이 다르면(한쪽은 실측 전환매출, 한쪽은
+   * 판매수량 × 판매가 추정) ROAS를 나란히 놓을 수 없다. 그럴 때는 비교를
+   * 내놓지 않고 그 이유를 말한다 — 틀린 비교보다 낫다.
+   */
+  const runKeywordDiff = async (id: string) => {
+    setKwDiffBusy(true);
+    setKwDiffMsg(null);
+    try {
+      const res = await fetch("/api/usage?action=report-get", {
+        method: "POST", headers: usageHeaders(),
+        body: JSON.stringify({ action: "report-get", id: Number(id) }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.report?.rows?.length) {
+        setKwDiff(null);
+        setKwDiffMsg(data.error ?? "이 저장본에는 원본이 없어 키워드까지 견줄 수 없습니다.");
+        return;
+      }
+      const prev = aggregateKeywords(data.report.rows, netUnitPrice);
+      const cur = aggregateKeywords(rawData, netUnitPrice);
+      if (!prev.hasKeywordColumn || !cur.hasKeywordColumn) {
+        setKwDiff(null);
+        setKwDiffMsg("두 보고서 중 하나에 키워드 열이 없습니다. 광고센터에서 키워드 보고서로 받아주세요.");
+        return;
+      }
+      if (prev.revenueMode !== cur.revenueMode) {
+        setKwDiff(null);
+        setKwDiffMsg("두 보고서의 매출 기준이 다릅니다(한쪽은 실측 전환매출, 한쪽은 추정). ROAS를 나란히 놓을 수 없어 비교하지 않습니다.");
+        return;
+      }
+      setKwDiff(diffKeywords(prev.keywords, cur.keywords));
+      setKwDiffFor(id);
+    } catch (e: any) {
+      setKwDiff(null);
+      setKwDiffMsg(e?.message ?? "견주지 못했습니다.");
+    } finally {
+      setKwDiffBusy(false);
     }
   };
 
@@ -1102,7 +1132,20 @@ export function AnalyzerDashboard() {
                                 마진 기준이 다릅니다 (저장 당시 수수료 {prevRow.summary.basis.feeRate}%) — 순이익 비교는 참고만 하세요.
                               </span>
                             )}
+                            <button
+                              onClick={() => void runKeywordDiff(String(compareId || prevRow.id))}
+                              disabled={kwDiffBusy}
+                              className="inline-flex items-center gap-1.5 rounded-control border border-line px-2.5 py-1 text-[11.5px] font-semibold text-ink-2 transition-colors hover:border-accent-line hover:text-accent disabled:opacity-50"
+                            >
+                              {kwDiffBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <TrendingUp className="h-3 w-3" />}
+                              키워드까지 견주기
+                            </button>
                           </div>
+                        )}
+
+                        {kwDiffMsg && <p className="mb-4 text-[12px] text-caution">{kwDiffMsg}</p>}
+                        {kwDiff && kwDiffFor === String(compareId || (prevRow?.id ?? "")) && (
+                          <KeywordDiffPanel diff={kwDiff} />
                         )}
                         {/* 광고비 기간 — 이 값이 순이익 화면의 광고비가 된다.
                             쿠팡은 광고 API를 제공하지 않아 여기서 받는 수밖에 없다. */}
@@ -1385,6 +1428,116 @@ export function AnalyzerDashboard() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 키워드 단위 비교표.
+ *
+ * 전부 늘어놓지 않는다. 키워드가 수백 개인 계정에서 표를 끝까지 내리는
+ * 사람은 없다. 손봐야 할 것부터 짚어 준다 —
+ *   ① 돈은 더 썼는데 ROAS가 떨어진 키워드 (가장 먼저)
+ *   ② 사라진 키워드와 그 돈이 어디로 갔는지
+ *   ③ 살아난 키워드 (같은 처방을 다른 데도 쓸 수 있다)
+ */
+function KeywordDiffPanel({ diff }: { diff: { rows: KeywordDiff[]; summary: any } }) {
+  const { summary } = diff;
+  const won = (n: number) => `${Math.round(n).toLocaleString()}원`;
+  const roas = (n: number | null | undefined) => (typeof n === "number" ? `${n.toFixed(0)}%` : "—");
+
+  const Section = ({ title, hint, rows, tone }: { title: string; hint: string; rows: KeywordDiff[]; tone: string }) => {
+    if (rows.length === 0) return null;
+    return (
+      <div className="mb-3">
+        <p className={`mb-1 text-[12.5px] font-semibold ${tone}`}>{title} <span className="font-normal text-ink-3">· {hint}</span></p>
+        <div className="overflow-x-auto rounded-card border border-line bg-paper">
+          <table className="w-full min-w-[440px] text-[12px]">
+            <thead className="bg-paper-2 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+              <tr>
+                <th className="px-2.5 py-1.5 text-left">키워드</th>
+                <th className="px-2.5 py-1.5 text-right">광고비</th>
+                <th className="px-2.5 py-1.5 text-right">ROAS</th>
+                <th className="px-2.5 py-1.5 text-right">판매</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(0, 10).map(d => (
+                <tr key={d.keyword} className="border-t border-line">
+                  <td className="max-w-[200px] px-2.5 py-1.5"><span className="line-clamp-1 text-ink">{d.keyword}</span></td>
+                  <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-ink-2">
+                    {won(d.current?.cost ?? 0)}
+                    {d.costDelta !== 0 && (
+                      <span className={`ml-1 text-[10px] ${d.costDelta > 0 ? "text-critical" : "text-ink-3"}`}>
+                        {d.costDelta > 0 ? "+" : ""}{Math.round(d.costDelta).toLocaleString()}
+                      </span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums">
+                    <span className="text-ink-3">{roas(d.prev?.roasPct)}</span>
+                    <span className="mx-1 text-ink-3">→</span>
+                    <span className={d.change === "better" ? "font-semibold text-positive" : d.change === "worse" ? "font-semibold text-critical" : "text-ink"}>
+                      {roas(d.current?.roasPct)}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap px-2.5 py-1.5 text-right tabular-nums text-ink-2">
+                    {d.current?.qty ?? 0}건
+                    {d.qtyDelta !== 0 && (
+                      <span className={`ml-1 text-[10px] ${d.qtyDelta > 0 ? "text-positive" : "text-ink-3"}`}>
+                        {d.qtyDelta > 0 ? "+" : ""}{d.qtyDelta}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rows.length > 10 && <p className="mt-1 text-[10.5px] text-ink-3">광고비가 큰 10개만 보여줍니다 (전체 {rows.length}개).</p>}
+      </div>
+    );
+  };
+
+  return (
+    <div className="mb-4 rounded-card border border-line bg-paper-2 p-4">
+      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          { k: "악화 + 증액", v: `${summary.worseAndCostlier.length}개`, tone: "text-critical" },
+          { k: "개선", v: `${summary.improved.length}개`, tone: "text-positive" },
+          { k: "새 키워드", v: `${summary.added}개`, tone: "text-ink" },
+          { k: "사라진 키워드", v: `${summary.removed}개`, tone: "text-ink-2" },
+        ].map(c => (
+          <div key={c.k} className="rounded-card border border-line bg-paper px-2.5 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">{c.k}</p>
+            <p className={`text-[15px] font-semibold tabular-nums ${c.tone}`}>{c.v}</p>
+          </div>
+        ))}
+      </div>
+
+      {summary.removed > 0 && (
+        <p className="mb-3 rounded-card border border-line bg-paper px-2.5 py-2 text-[12px] leading-relaxed text-ink-2">
+          사라진 키워드가 지난번 쓰던 광고비 <b>{won(summary.removedCost)}</b>, 새로 생긴 키워드가 쓴 광고비 <b>{won(summary.addedCost)}</b>입니다.
+          {summary.addedCost > summary.removedCost * 1.2 && " 예산이 새 키워드 쪽으로 옮겨 갔습니다 — 그 키워드들의 ROAS를 먼저 보세요."}
+        </p>
+      )}
+
+      <Section
+        title="🔴 돈은 더 썼는데 ROAS가 떨어졌습니다"
+        hint="가장 먼저 손볼 것"
+        rows={summary.worseAndCostlier}
+        tone="text-critical"
+      />
+      <Section
+        title="🟢 살아난 키워드"
+        hint="같은 처방을 다른 키워드에도"
+        rows={summary.improved}
+        tone="text-positive"
+      />
+
+      <p className="text-[10.5px] leading-relaxed text-ink-3">
+        ROAS가 10%p 안쪽으로 움직인 것은 '변화 없음'으로 봅니다 — 광고 성과는 날마다 흔들려서,
+        그보다 작은 차이를 변화로 읽으면 없는 추세를 쫓게 됩니다.
+      </p>
     </div>
   );
 }
