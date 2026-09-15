@@ -2698,6 +2698,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'price-apply': return await handlePriceApply(userId, req, res);
       case 'admin-overview': return await handleAdminOverview(decoded, res);
       case 'admin-vendors': return await handleAdminVendors(decoded, req, res);
+      case 'admin-probe-rg-settlement': return await handleProbeRgSettlement(decoded, req, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -2705,6 +2706,84 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('coupang api error:', e);
     return res.status(500).json({ error: e?.message || '처리 중 오류가 발생했습니다.' });
   }
+}
+
+/**
+ * [임시] 로켓그로스 정산 엔드포인트가 존재하는지 확인한다.
+ *
+ * 쿠팡 지급내역(settlement-histories)에는 판매자배송(윙)만 들어온다는 것을
+ * 실제 자료로 확인했다. 그로스 매출 477만 원인 달의 정산대상액이 99만 원이고
+ * 그 99만이 같은 달 윙 매출과 맞는다. 그래서 그로스 정산액을 받아올 다른
+ * 창구가 있는지 알아야 하는데, 쿠팡 개발자 문서가 우리 망에서 막혀 있어
+ * 읽을 수가 없다. 남은 방법은 실제로 불러 보는 것뿐이다.
+ *
+ * 쿠팡 게이트웨이는 응답으로 구분이 된다.
+ *   404 / 'No exactly matching API specification'  → 그런 엔드포인트가 없다
+ *   403                                            → 있는데 이 키에 권한이 없다
+ *   400 MISSING_PARAMETER                          → 있다. 인자만 맞추면 된다
+ *
+ * 후보는 손으로 적은 것이라 다 없을 수도 있다. 그래도 '없다'는 답을 받는 것과
+ * 모르는 채 두는 것은 다르다. 답을 얻으면 이 핸들러는 지운다.
+ *
+ * 읽기(GET)만 한다. 판매자 키로 그 판매자 본인의 정산 자료를 묻는 것이라
+ * 매일 돌리는 수집과 성격이 같다.
+ */
+async function handleProbeRgSettlement(decoded: any, req: VercelRequest, res: VercelResponse) {
+  if (!decoded?.isAdmin) return res.status(403).json({ error: '관리자만 쓸 수 있습니다.' });
+
+  const targetUserId = String(req.query.userId ?? '').trim();
+  if (!targetUserId) return res.status(400).json({ error: 'userId가 필요합니다.' });
+
+  const acc = await loadAccount(targetUserId);
+  if (!acc) return res.status(404).json({ error: '쿠팡 계정이 연결돼 있지 않습니다.' });
+  const creds = credsOf(acc);
+  const v = creds.vendorId;
+  const month = String(req.query.month ?? '2026-08').slice(0, 7);
+
+  const candidates: Array<{ name: string; path: string; query: string }> = [
+    { name: 'rg/settlement-histories',
+      path: `/v2/providers/rg_open_api/apis/api/v1/vendors/${v}/rg/settlement-histories`,
+      query: `revenueRecognitionYearMonth=${month}` },
+    { name: 'rg/settlements',
+      path: `/v2/providers/rg_open_api/apis/api/v1/vendors/${v}/rg/settlements`,
+      query: `revenueRecognitionYearMonth=${month}` },
+    { name: 'rg/revenue-history',
+      path: `/v2/providers/rg_open_api/apis/api/v1/vendors/${v}/rg/revenue-history`,
+      query: `recognitionDateFrom=${month}-01&recognitionDateTo=${monthEnd(month)}` },
+    { name: 'rg_open_api/settlement-histories (vendor 없이)',
+      path: '/v2/providers/rg_open_api/apis/api/v1/settlement-histories',
+      query: `vendorId=${v}&revenueRecognitionYearMonth=${month}` },
+    { name: 'marketplace_openapi/rg/settlement-histories',
+      path: '/v2/providers/marketplace_openapi/apis/api/v1/rg/settlement-histories',
+      query: `vendorId=${v}&revenueRecognitionYearMonth=${month}` },
+    { name: 'openapi/vendors/{v}/rg/settlement-histories',
+      path: `/v2/providers/openapi/apis/api/v1/vendors/${v}/rg/settlement-histories`,
+      query: `revenueRecognitionYearMonth=${month}` },
+    // 대조군 — 이건 반드시 200이어야 한다. 아니면 키·중계 쪽 문제라
+    // 나머지 결과를 '없다'로 읽으면 안 된다.
+    { name: '[대조군] marketplace settlement-histories',
+      path: EP.settlementHistories,
+      query: `vendorId=${v}&revenueRecognitionYearMonth=${month}` },
+  ];
+
+  const results: any[] = [];
+  for (const c of candidates) {
+    const r = await coupangCallOnce(creds, 'GET', c.path, c.query);
+    results.push({
+      name: c.name,
+      path: c.path,
+      ok: r.ok,
+      status: r.status,
+      // 응답 본문은 정산 금액이라 통째로 내보내지 않는다. 건수와 첫 행의
+      // 키 이름만 본다 — 엔드포인트가 있는지는 그걸로 충분하다.
+      rows: r.ok ? listOf(r.data).length : null,
+      firstRowKeys: r.ok ? Object.keys(listOf(r.data)[0] ?? {}).slice(0, 40) : null,
+      error: r.ok ? null : String(r.error ?? '').slice(0, 300),
+    });
+    await sleep(1300); // rg_open_api 분당 50회 한도
+  }
+
+  return res.status(200).json({ vendorId: v, month, results });
 }
 
 // ── 주문수집 업체 IP 목록 ─────────────────────────────────────
