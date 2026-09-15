@@ -10,6 +10,10 @@ const base: MonthFigures = {
   coupangPaid: null,
   actual: null,
   returnQuantity: 0,
+  // 기본은 '견줄 수 있는 달'로 둔다. 못 견주는 경우는 아래에서 따로 본다.
+  salesCovered: true,
+  cycleComplete: true,
+  pendingLast: 0,
 };
 
 test('기준이 없으면 판정하지 않는다 — 없는 차이를 지어내지 않는다', () => {
@@ -93,4 +97,36 @@ test('판정 이름은 한 곳에서만 만든다', () => {
   assert.equal(verdictLabel('ok'), '맞습니다');
   assert.equal(verdictLabel('off'), '어긋났습니다');
   assert.equal(verdictLabel('unknown'), '기준 없음');
+});
+
+// ── 견줄 수 없는 달은 판정하지 않는다 ──
+// 쿠팡 주정산은 정산대상액의 70%를 먼저 주고 나머지 30%(최종액)를 익익월
+// 1일에 준다. 매출 수집이 늦게 시작된 달도 있다. 그런 달에 '어긋났습니다'를
+// 띄우면 진짜 어긋난 달이 그 속에 묻힌다.
+
+test('매출 자료가 모자란 달은 집계 중으로 둔다', () => {
+  const r = checkMonth({ ...base, coupangPaid: 3_218_552, salesCovered: false });
+  assert.equal(r.verdict, 'pending');
+  assert.equal(r.diffRate, null);
+  assert.equal(verdictLabel('pending'), '집계 중');
+});
+
+test('최종액이 아직 안 들어온 달도 집계 중이다', () => {
+  const r = checkMonth({ ...base, coupangPaid: 1_600_000, cycleComplete: false, pendingLast: 671_850 });
+  assert.equal(r.verdict, 'pending');
+  // 차이 금액 자체는 보여준다 — 얼마가 남았는지는 알아야 한다
+  assert.notEqual(r.diff, null);
+  assert.equal(r.pendingLast, 671_850);
+});
+
+test('판매자가 정산서를 직접 적었으면 그 제한을 받지 않는다', () => {
+  // 정산서에 적힌 금액은 그 자체로 완결이다
+  const r = checkMonth({ ...base, actual: 1_598_906, salesCovered: false, cycleComplete: false });
+  assert.equal(r.verdict, 'ok');
+  assert.equal(r.referenceSource, 'actual');
+});
+
+test('둘 다 갖춰진 달만 실제로 판정한다', () => {
+  const ok = checkMonth({ ...base, coupangPaid: 1_600_000, salesCovered: true, cycleComplete: true });
+  assert.equal(ok.verdict, 'ok');
 });

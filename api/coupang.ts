@@ -1790,7 +1790,12 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
       const date = pickDate(s, ['settlementDate', 'paymentDate', 'expectedSettlementDate', 'settlementCompleteDate']);
       if (!date) continue;
       const type = pickStr(s, ['settlementType', 'settlementTypeName', 'paymentType'], '정산');
-      const month = pickStr(s, ['recognitionMonth', 'revenueRecognitionDate', 'salesMonth'], date.slice(0, 7)).slice(0, 7);
+      // 쿠팡이 주는 이름은 revenueRecognitionYearMonth 다. 예전에는
+      // recognitionMonth·revenueRecognitionDate·salesMonth 를 찾고 있었고
+      // 셋 다 없어서 매번 폴백이 걸렸다 — '지급일이 속한 달'이 인식월로
+      // 저장됐고, 10월 1일에 들어온 8월 매출분이 '2026-10 인식'이 됐다.
+      // 그래서 정산서 대조가 매달 엉뚱한 달끼리 견주고 있었다.
+      const month = pickStr(s, ['revenueRecognitionYearMonth', 'recognitionMonth', 'salesMonth'], date.slice(0, 7)).slice(0, 7);
 
       const group = `${date}|${type}|${month}`;
       const seq = ordinal.get(group) ?? 0;
@@ -1803,6 +1808,14 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
         settlement_type: type,
         recognition_month: month,
         amount: pickNum(s, ['settlementAmount', 'amount', 'finalAmount', 'paymentAmount'], 0),
+        // 매출 인식 기간 — 이 지급이 어느 기간 매출에 대한 것인가
+        recognition_from: pickDate(s, ['revenueRecognitionDateFrom']),
+        recognition_to: pickDate(s, ['revenueRecognitionDateTo']),
+        // 주정산은 정산대상액(수수료 뺀 금액)의 70%를 먼저 주고, 나머지
+        // 30%(최종액)를 익익월 1일에 RESERVE로 준다. 우리 계산과 맞춰야 할
+        // 값은 그때그때 들어온 '지급액'이 아니라 '정산대상액'이다.
+        target_amount: pickNum(s, ['settlementTargetAmount'], 0),
+        last_amount: pickNum(s, ['lastAmount'], 0),
         status: pickStr(s, ['settlementStatus', 'status', 'statusName']),
         raw: s,
         updated_at: new Date().toISOString(),
@@ -4020,9 +4033,9 @@ async function handleSettlementCheck(userId: string, req: VercelRequest, res: Ve
       .eq('user_id', userId)
       .gte('sale_date', from).lte('sale_date', to)
       .order('sale_date').range(f, t)),
-    selectAll<{ recognition_month: string; settlement_date: string; amount: number }>((f, t) => supabase!
+    selectAll<{ recognition_month: string; settlement_date: string; amount: number; target_amount: number | null; last_amount: number | null }>((f, t) => supabase!
       .from('coupang_settlements')
-      .select('recognition_month, settlement_date, amount')
+      .select('recognition_month, settlement_date, amount, target_amount, last_amount')
       .eq('user_id', userId)
       .order('settlement_date').range(f, t)),
     selectAll<{ month: string; actual_amount: number; note: string | null }>((f, t) => supabase!
@@ -4054,11 +4067,27 @@ async function handleSettlementCheck(userId: string, req: VercelRequest, res: Ve
     byMonth.set(m, cur);
   }
 
-  const paidByMonth = new Map<string, number>();
+  // 쿠팡이 잡은 '정산대상액'(수수료 차감 후)으로 견준다. 통장에 들어온
+  // 돈으로 견주면 안 된다 — 주정산은 70%만 먼저 주고 나머지 30%(최종액)를
+  // 익익월 1일에 주기 때문에, 매달 30%씩 어긋난 것처럼 보인다.
+  const targetByMonth = new Map<string, number>();
+  const pendingLastByMonth = new Map<string, number>();
   for (const r of setRes.rows) {
     const m = String(r.recognition_month ?? '').slice(0, 7) || String(r.settlement_date).slice(0, 7);
-    paidByMonth.set(m, (paidByMonth.get(m) ?? 0) + (Number(r.amount) || 0));
+    // 옛 행은 target_amount가 없다. 그때는 지급액이라도 쓴다.
+    const target = Number(r.target_amount) || Number(r.amount) || 0;
+    targetByMonth.set(m, (targetByMonth.get(m) ?? 0) + target);
+    // 지급일이 아직 안 온 최종액 = 아직 안 들어온 30%
+    if (String(r.settlement_date) > today) {
+      pendingLastByMonth.set(m, (pendingLastByMonth.get(m) ?? 0) + (Number(r.last_amount) || 0));
+    }
   }
+
+  // 매출 자료가 언제부터 있나. 그 전 달은 우리 계산이 0이라 견줄 수 없다.
+  const { rows: firstSale } = await selectAll<{ sale_date: string }>((f, t) => supabase!
+    .from('coupang_sales_daily').select('sale_date').eq('user_id', userId)
+    .order('sale_date').range(f, Math.min(t, 0)));
+  const salesFrom = firstSale[0]?.sale_date ? String(firstSale[0].sale_date).slice(0, 10) : null;
 
   const actualByMonth = new Map<string, { amount: number; note: string | null }>();
   for (const c of checkRes.rows) {
@@ -4082,10 +4111,15 @@ async function handleSettlementCheck(userId: string, req: VercelRequest, res: Ve
         marketSettlement: Math.round(v.market),
         growthSettlement: Math.round(v.growth),
         growthNet: Math.round(v.growthNet),
-        // 0원 지급은 '아직 안 들어왔다'는 뜻이라 기준으로 쓰지 않는다
-        coupangPaid: paidByMonth.get(month) ? Math.round(paidByMonth.get(month)!) : null,
+        // 0원은 '아직 안 들어왔다'는 뜻이라 기준으로 쓰지 않는다
+        coupangPaid: targetByMonth.get(month) ? Math.round(targetByMonth.get(month)!) : null,
         actual: manual && manual.amount > 0 ? manual.amount : null,
         returnQuantity: returnsByMonth.get(month) ?? 0,
+        // 그 달 1일부터 매출이 있어야 온전한 달이다
+        salesCovered: Boolean(salesFrom && salesFrom <= `${month}-01`),
+        // 주정산 최종액은 익익월 1일에 들어온다. 그 날이 지나야 완결이다.
+        cycleComplete: `${month}-01` < addDays(today, -62),
+        pendingLast: Math.round(pendingLastByMonth.get(month) ?? 0),
       }),
       note: manual?.note ?? null,
     };

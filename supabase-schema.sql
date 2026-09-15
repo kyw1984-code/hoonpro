@@ -1347,3 +1347,16 @@ create index if not exists idx_qa_pending
 create index if not exists idx_qa_answered_user
   on qa_logs (user_id, answered_at desc)
   where admin_answer is not null;
+
+-- 지급내역에서 읽지 못하고 있던 값들
+-- 수집이 recognitionMonth·revenueRecognitionDate·salesMonth 를 찾고 있었는데
+-- 쿠팡이 주는 이름은 revenueRecognitionYearMonth 다. 셋 다 없어 폴백이 걸려
+-- '지급일이 속한 달'이 인식월로 저장됐고, 10월 1일에 들어온 8월 매출분이
+-- '2026-10 인식'으로 잡혀 정산서 대조가 엉뚱한 달끼리 견주고 있었다.
+alter table coupang_settlements
+  add column if not exists recognition_from date,   -- 매출 인식 시작일
+  add column if not exists recognition_to date,     -- 매출 인식 종료일
+  add column if not exists target_amount bigint,    -- 정산대상액 (수수료 차감 후)
+  add column if not exists last_amount bigint;      -- 최종액 (30%, 익익월 1일 지급)
+create index if not exists idx_cpst_recognition
+  on coupang_settlements (user_id, recognition_month);

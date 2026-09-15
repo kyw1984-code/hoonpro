@@ -253,7 +253,11 @@ export interface SettlementCheckRow {
   diff: number | null;
   diffRate: number | null;
   impliedGrowthFeeRate: number | null;
-  verdict: 'ok' | 'watch' | 'off' | 'unknown';
+  verdict: 'ok' | 'watch' | 'off' | 'pending' | 'unknown';
+  salesCovered: boolean;
+  cycleComplete: boolean;
+  /** 아직 안 들어온 최종액(30%) */
+  pendingLast: number;
   note: string | null;
 }
 
