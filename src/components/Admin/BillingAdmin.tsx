@@ -84,6 +84,14 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
   const [revenue, setRevenue] = useState<any | null>(null);
   const [hoverMonth, setHoverMonth] = useState<number | null>(null);
   const [byStatus, setByStatus] = useState<Record<string, number>>({});
+  /**
+   * 상태별 보기.
+   *
+   * 예전에는 숫자만 보여줘서 '재시도 중 3'을 보고도 누구인지 알려면 표를
+   * 끝까지 훑어야 했다. 손이 가야 하는 사람(재시도 중·정지)을 바로 추려
+   * 보려고 칩을 누를 수 있게 했다. 'all'이 기본이다.
+   */
+  const [subFilter, setSubFilter] = useState<string>('all');
   const [coupons, setCoupons] = useState<CouponRow[]>([]);
   const [enforced, setEnforced] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -182,6 +190,15 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
 
   const today = stats?.today;
   const needsAttention = (today?.needsAttention ?? 0) > 0 || (today?.failed ?? 0) > 0;
+
+  // 전체 수는 서버가 센 값을 더한다. 표는 최근 200건까지만 내려오므로
+  // subs.length로 세면 200명이 넘는 순간 '전체'가 실제보다 적게 나온다.
+  const subTotal = Object.values(byStatus).reduce((n, v) => n + v, 0);
+  const shownSubs = subFilter === 'all' ? subs : subs.filter(s => s.status === subFilter);
+  // 고른 상태의 사람이 표에 다 안 들어온 경우 — 그렇다고 말해 준다
+  const subTruncated = subFilter === 'all'
+    ? subTotal > subs.length
+    : (byStatus[subFilter] ?? 0) > shownSubs.length;
 
   return (
     <div className="space-y-8">
@@ -610,15 +627,44 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
         </div>
 
         <div className="mb-4 flex flex-wrap gap-2">
-          {(['trial', 'active', 'past_due', 'paused', 'canceled'] as const).map(s => (
-            <span key={s} className={`rounded-full px-3 py-1 text-[12px] font-medium ${SUB_STATUS[s].cls}`}>
-              {SUB_STATUS[s].text} {byStatus[s] ?? 0}
-            </span>
-          ))}
+          {/* 전체가 맨 앞이다. 걸러 놓은 것을 되돌릴 자리가 눈에 안 보이면
+              사용자는 새로고침을 누른다. */}
+          <button
+            onClick={() => setSubFilter('all')}
+            aria-pressed={subFilter === 'all'}
+            className={`rounded-full px-3 py-1 text-[12px] font-medium transition-all ${
+              subFilter === 'all'
+                ? 'bg-accent-soft text-accent ring-1 ring-accent'
+                : 'bg-paper-2 text-ink-2 hover:text-ink'
+            }`}
+          >
+            전체 {subTotal}
+          </button>
+          {(['trial', 'active', 'past_due', 'paused', 'canceled'] as const).map(st => {
+            const n = byStatus[st] ?? 0;
+            const on = subFilter === st;
+            return (
+              <button
+                key={st}
+                // 한 번 더 누르면 전체로 돌아온다 — 끄는 법을 따로 찾지 않게
+                onClick={() => setSubFilter(on ? 'all' : st)}
+                aria-pressed={on}
+                className={`rounded-full px-3 py-1 text-[12px] font-medium transition-all ${SUB_STATUS[st].cls} ${
+                  on ? 'ring-1 ring-accent' : n === 0 ? 'opacity-45 hover:opacity-70' : 'hover:opacity-80'
+                }`}
+              >
+                {SUB_STATUS[st].text} {n}
+              </button>
+            );
+          })}
         </div>
 
-        {subs.length === 0 ? (
-          <p className="rounded-card border border-line bg-paper px-4 py-8 text-center text-[13px] text-ink-3">아직 구독이 없습니다.</p>
+        {shownSubs.length === 0 ? (
+          <p className="rounded-card border border-line bg-paper px-4 py-8 text-center text-[13px] text-ink-3">
+            {subs.length === 0
+              ? '아직 구독이 없습니다.'
+              : `${SUB_STATUS[subFilter]?.text ?? '해당 상태'}인 회원이 없습니다.`}
+          </p>
         ) : (
           <div className="overflow-hidden rounded-card border border-line bg-paper">
             <div className="overflow-x-auto">
@@ -631,7 +677,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {subs.map(s => (
+                  {shownSubs.map(s => (
                     <tr key={s.id} className="transition-colors hover:bg-paper-2">
                       <td className="px-4 py-3">
                         <div className="font-medium text-ink">{s.users?.name ?? '-'}</div>
@@ -656,6 +702,12 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
               </table>
             </div>
           </div>
+        )}
+
+        {subTruncated && (
+          <p className="mt-2 text-[11.5px] text-ink-3">
+            최근 200건까지만 보여줍니다 — 위 숫자는 전체 기준입니다.
+          </p>
         )}
       </div>
     </div>
