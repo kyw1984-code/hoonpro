@@ -3,6 +3,7 @@ import { COUPANG_FEE_RATE_PCT, growthSettlement } from '../src/lib/coupangFee.js
 import { checkMonth, type MonthCheck } from '../src/lib/settlementCheck.js';
 import { rollupMonths, type MonthProfit } from '../src/lib/monthlyProfit.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
+import { emailFrom } from '../src/lib/emailFrom.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
@@ -2313,7 +2314,7 @@ async function sendEmail(to: string, subject: string, html: string): Promise<boo
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'no-reply@hoonpro.app',
+        from: emailFrom(),
         to: [to],
         subject,
         html,

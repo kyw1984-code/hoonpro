@@ -5,6 +5,7 @@ import { detectOffCategory, scoreReasons } from "../src/lib/productRelevance.js"
 import { DEFAULT_FEATURE_LIMITS, decideQuota, isDisabled, parseLimits } from "../src/lib/featureLimits.js";
 import { createClient } from "@supabase/supabase-js";
 import { runCron } from "../src/lib/cronHeartbeat.js";
+import { emailFrom } from "../src/lib/emailFrom.js";
 import { createHmac } from "crypto";
 import jwt from "jsonwebtoken";
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
@@ -2382,7 +2383,7 @@ async function sendEmail(to: string, subject: string, html: string, userId: stri
     const r = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: process.env.EMAIL_FROM || "no-reply@hoonpro.app", to: [to], subject, html }),
+      body: JSON.stringify({ from: emailFrom(), to: [to], subject, html }),
     });
     if (r.ok) await logCost(userId, "email-notify", "resend-email");
   } catch { /* 발송 실패가 수집을 막지 않도록 */ }

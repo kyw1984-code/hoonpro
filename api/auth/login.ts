@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { retryOnce } from '../../src/lib/dbRetry.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
+import { emailFrom } from '../../src/lib/emailFrom.js';
 import { LOGIN_LOCK_MS, lockState, nextFailure } from '../../src/lib/loginGuard.js';
 
 // 인증 통합 엔드포인트 (Vercel 함수 개수 제한 대응 — action으로 분기)
@@ -122,7 +123,7 @@ async function sendEmail(to: string, subject: string, html: string): Promise<boo
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'no-reply@hoonproai.com',
+        from: emailFrom(),
         to: [to],
         subject,
         html,
