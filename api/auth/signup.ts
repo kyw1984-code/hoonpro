@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { retryOnce } from '../../src/lib/dbRetry.js';
 import crypto from 'node:crypto';
+import { emailFrom } from '../../src/lib/emailFrom.js';
 
 // 가입 API — 이메일 인증코드 + 관리자 승인 (기본 운영 방식)
 //   RESEND_API_KEY가 설정되면: 6자리 인증코드로 메일함 소유 확인 + 만 14세 확인
@@ -82,7 +83,7 @@ async function sendCodeEmail(to: string, code: string): Promise<boolean> {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'no-reply@hoonpro.app',
+        from: emailFrom(),
         to: [to],
         subject: `[훈프로] 가입 인증코드: ${code}`,
         html: wrapEmail('가입 인증코드',

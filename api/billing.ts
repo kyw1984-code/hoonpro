@@ -5,6 +5,7 @@ import { applyDiscounts, trialDaysOf, referralRewardAmount } from '../src/lib/co
 import { parseLimits } from '../src/lib/featureLimits.js';
 import { withVat } from '../src/lib/vat.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
+import { emailFrom } from '../src/lib/emailFrom.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 
@@ -204,7 +205,7 @@ async function sendEmail(
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'no-reply@hoonpro.app',
+        from: emailFrom(),
         to: [to],
         subject,
         html,
