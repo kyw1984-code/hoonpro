@@ -219,6 +219,26 @@ export interface SettlementResponse {
   weekly: Array<{ weekStart: string; amount: number }>;
 }
 
+export interface MonthProfitRow {
+  month: string;
+  quantity: number;
+  salesAmount: number;
+  couponDiscount: number;
+  commission: number;
+  unitCost: number;
+  returnCost: number;
+  returnAmount: number;
+  adCost: number;
+  profit: number;
+  marginRate: number;
+  hasData: boolean;
+  prevMonth: string | null;
+  salesDelta: number | null;
+  profitDelta: number | null;
+  marginRateDelta: number | null;
+  driver: { key: string; label: string; delta: number } | null;
+}
+
 export interface SettlementCheckRow {
   month: string;
   marketSettlement: number;
@@ -430,6 +450,9 @@ export const coupangApi = {
     request<{ ok: true }>('ad-cost-delete', { method: 'POST', body: { from, to } }),
   saveCosts: (items: Array<Partial<CostRow> & { vendorItemId: string }>) =>
     request<{ ok: true; saved: number }>('cost-save', { method: 'POST', body: { items } }),
+  /** 월별 순이익 리포트 — 지난달 대비 증감과 '왜 그랬는지' 한 줄 */
+  profitMonthly: (months = 6) =>
+    request<{ rows: MonthProfitRow[]; thisMonth: string; today: string }>(`profit-monthly&months=${months}`),
   settlement: () => request<SettlementResponse>('settlement'),
   /** 정산서 대조 — 우리 계산과 실제 지급액을 인식월끼리 맞춘 결과 */
   settlementCheck: (months = 6) =>

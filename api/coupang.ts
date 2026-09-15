@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { COUPANG_FEE_RATE_PCT, growthSettlement } from '../src/lib/coupangFee.js';
 import { checkMonth, type MonthCheck } from '../src/lib/settlementCheck.js';
+import { rollupMonths, type MonthProfit } from '../src/lib/monthlyProfit.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
@@ -2647,6 +2648,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'key-delete': return await handleKeyDelete(userId, res);
       case 'sync': return await handleSync(userId, req, res);
       case 'profit': return await handleProfit(userId, req, res);
+      case 'profit-monthly': return await handleProfitMonthly(userId, req, res);
       case 'costs': return await handleCosts(userId, res);
       case 'cost-save': return await handleCostSave(userId, req, res);
       case 'ad-costs': return await handleAdCosts(userId, req, res);
@@ -3361,6 +3363,57 @@ export async function computeProfit(
       estimatedDays: adCostSpread,
     },
   };
+}
+
+/**
+ * 월별 순이익 리포트.
+ *
+ * 순이익 화면은 기간을 골라 보는 곳이라 '지난달보다 나아졌나'에 답하지 못한다.
+ * 정산서 대조도 월 단위라 같은 눈금을 쓰면 두 화면이 맞물린다.
+ *
+ * 계산은 computeProfit을 달마다 부르는 방식이다. 월별로 다시 짜면 순이익
+ * 공식이 두 벌이 되고, 언젠가 한쪽만 고쳐져 같은 사람의 두 화면이 다른
+ * 순이익을 보여 준다. 이미 한 번 겪은 일이다.
+ */
+async function handleProfitMonthly(userId: string, req: VercelRequest, res: VercelResponse) {
+  const want = Math.min(12, Math.max(2, Number(req.query.months) || 6));
+  const today = kstToday();
+  // 이번 달도 넣는다. 아직 안 끝난 달이라는 것은 화면에서 밝힌다 —
+  // 빼 두면 '이번 달은 왜 없나'를 매번 묻게 된다.
+  const thisMonth = today.slice(0, 7);
+  const months = monthsBetween(addDays(`${thisMonth}-01`, -31 * (want - 1)), `${thisMonth}-01`).slice(-want);
+
+  const results = await Promise.all(
+    months.map(async (month): Promise<MonthProfit> => {
+      const from = `${month}-01`;
+      // 이번 달은 오늘까지만. 월말까지 잡으면 아직 오지 않은 날이 섞인다.
+      const to = month === thisMonth ? today : monthEnd(month);
+      const p = await computeProfit(userId, from, to, { totalsOnly: true });
+      const t = p.totals;
+      // totalsOnly는 옵션별 광고비를 뽑지 않아 totals.adCost가 0이다.
+      // 일자별 합계(adCostHint)가 이 달의 광고비 전부다.
+      const adCost = p.adCostHint ?? 0;
+      return {
+        month,
+        quantity: t.quantity,
+        salesAmount: Math.round(t.salesAmount),
+        couponDiscount: Math.round(t.couponDiscount),
+        commission: Math.round(t.commission),
+        unitCost: Math.round(t.unitCostTotal),
+        returnCost: Math.round(t.returnCost),
+        returnAmount: Math.round(t.returnAmount),
+        adCost: Math.round(adCost),
+        // 상품에 붙은 광고비는 이미 빠져 있다. 옵션에 못 붙은 몫만 더 뺀다.
+        profit: Math.round(t.profit - Math.max(0, adCost - (t.adCost ?? 0))),
+      };
+    }),
+  );
+
+  return res.status(200).json({
+    rows: rollupMonths(results),
+    thisMonth,
+    today,
+  });
 }
 
 async function handleProfit(userId: string, req: VercelRequest, res: VercelResponse) {

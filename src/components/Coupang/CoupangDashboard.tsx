@@ -10,6 +10,7 @@ import { ProfitDashboard } from './ProfitDashboard';
 import { CostEditor } from './CostEditor';
 import { SettlementCalendar } from './SettlementCalendar';
 import { SettlementCheck } from './SettlementCheck';
+import { MonthlyProfit } from './MonthlyProfit';
 import { WeeklyReports } from './WeeklyReports';
 import { InventoryForecast } from './InventoryForecast';
 import { ReturnAnalysis } from './ReturnAnalysis';
@@ -179,6 +180,7 @@ export function CoupangDashboard() {
       {view === 'profit' && (
         <div className="flex flex-col gap-5">
           <ProfitDashboard onEditCosts={() => setView('costs')} />
+          <MonthlyProfit />
           <CouponEffect days={90} />
         </div>
       )}
