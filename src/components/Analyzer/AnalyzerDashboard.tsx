@@ -5,13 +5,14 @@ import { coupangApi } from "../../lib/coupang";
 import { extractDailyAdCost, extractItemAdCost } from "../../lib/adcost";
 import { parseAdReportBuffer } from "../../lib/adReport";
 import { AdCenterConnect } from "../AdCenter/AdCenterConnect";
-import { computeMargin } from "../../lib/marginMath";
+import { computeMargin, optionMarginTable } from "../../lib/marginMath";
 // 지면 분류·열 찾기·숫자 읽기는 한 곳에서만 한다. 지금 보고서와 저장본을
 // 같은 규칙으로 읽어야 변화가 아닌 것이 변화로 보이지 않는다.
 import {
   aggregateKeywords, diffKeywords, detectColumns, isNonSearchPlatform, isSearchPlatform,
   parseNum, normalizeRows, type KeywordDiff,
 } from "../../lib/adReportKeywords";
+import { AD_OPTION_COLUMNS } from "../../lib/adcost";
 
 // ─── 정밀 분석 ───
 const CTR_THRESHOLDS = { VERY_LOW: 0.0003, LOW: 0.0005, MEDIUM: 0.001, HIGH: 0.003 };
@@ -137,30 +138,64 @@ export function AnalyzerDashboard() {
     const rowRevenue = (row: any) => (revenueMode === "actual" ? row.실측매출 : (row[colQty] || 0) * netUnitPrice);
     // 순이익: 실측 모드에서는 마진율(개당마진 ÷ 판매가)을 실측 매출에 적용해 옵션별 단가 차이를 흡수
     const netMarginRate = netUnitPrice > 0 ? netUnitMargin / netUnitPrice : 0;
+    // ── 옵션별 마진 ──
+    //
+    // 보고서 한 장에 옵션이 여럿 들어 있는 것이 보통인데 마진 계산 칸은 하나다.
+    // 3,000원짜리와 30,000원짜리를 같은 마진으로 계산하면 옵션별 순이익이 통째로
+    // 틀리고, 그 값으로 키워드를 제외하게 된다. 쿠팡 연동에서 불러온 옵션별
+    // 판매가·원가가 있으면 줄마다 제 옵션 값을 쓴다.
+    const optMargins = optionMarginTable(presetItems ?? [], coupangFeeRate);
+    const optCol = AD_OPTION_COLUMNS.find((c) => c in sampleRow) ?? null;
+    const optionIdOf = (row: any) => {
+      if (!optCol) return null;
+      const v = String(row[optCol] ?? "").replace(/\.0$/, "").trim();
+      return /^\d+$/.test(v) ? v : null;
+    };
+    /** 이 줄에 쓸 마진. 옵션을 못 찾으면 화면에 입력된 값으로 돌아간다 */
+    const marginOfRow = (row: any) => {
+      const id = optionIdOf(row);
+      const m = id ? optMargins.get(id) : undefined;
+      return m ?? { netUnitMargin, netMarginRate };
+    };
+    // 순이익은 줄 단위로 내고 더한다. 합계에 한 번 곱하면 옵션별 마진이 섞이지 않는다.
+    const rowProfit = (row: any) => {
+      const m = marginOfRow(row);
+      const adCost = row["광고비"] || 0;
+      return revenueMode === "actual"
+        ? rowRevenue(row) * m.netMarginRate - adCost
+        : (row[colQty] || 0) * m.netUnitMargin - adCost;
+    };
+
+    // 옵션별 마진이 실제로 몇 %에 적용됐는지. 화면에 밝혀야 판매자가
+    // '원가를 더 넣으면 정확해진다'는 것을 안다.
+    let optionCoveredCost = 0;
+    let totalRowCost = 0;
+    for (const row of cleanedData) {
+      const c = row["광고비"] || 0;
+      totalRowCost += c;
+      const id = optionIdOf(row);
+      if (id && optMargins.has(id)) optionCoveredCost += c;
+    }
+    const optionMarginCoverage = totalRowCost > 0 ? (optionCoveredCost / totalRowCost) * 100 : 0;
+
     // 마진 미입력(판매가 0 등) 시: 순이익은 계산 불가로 표시하고,
-    // 판정은 쿠팡 셀러 통상 기준선(손익분기 ROAS 300%)으로 폴백해 어긋난 판정을 막는다
-    const marginProvided = breakEvenROAS > 0;
-    const effectiveBE = marginProvided ? breakEvenROAS : 300;
-    // 순이익 계산은 이 한 곳에서만 한다. 예전에는 여기 정의해 놓고 아무도
-    // 부르지 않은 채, 같은 식을 아래에 다섯 번 손으로 옮겨 적어 두었다.
-    // 마진 규칙을 바꾸려면 다섯 곳을 찾아야 하고, 하나를 놓치면 표의 합계와
-    // 행별 합이 어긋나는데 아무 오류도 나지 않는다.
-    const profitOf = (revenue: number, qty: number, adCost: number) =>
-      revenueMode === "actual"
-        ? revenue * netMarginRate - adCost
-        : qty * netUnitMargin - adCost;
+    // 판정은 쿠팡 셀러 통상 기준선(손익분기 ROAS 300%)으로 폴백해 어긋난 판정을 막는다.
+    // 옵션별 마진이 하나라도 있으면 화면 칸이 비어 있어도 순이익을 낼 수 있다.
+    const marginProvided = breakEvenROAS > 0 || optMargins.size > 0;
+    const effectiveBE = breakEvenROAS > 0 ? breakEvenROAS : 300;
 
     // ── 지면별 집계 ──
     const placementMap = new Map<string, any>();
     cleanedData.forEach((row) => {
       const p = row["광고 노출 지면"] || "미확인";
-      if (!placementMap.has(p)) placementMap.set(p, { 지면: p, 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0 });
+      if (!placementMap.has(p)) placementMap.set(p, { 지면: p, 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0, 순이익: 0 });
       const acc = placementMap.get(p);
       acc.노출수 += row["노출수"] || 0;
       acc.클릭수 += row["클릭수"] || 0;
       acc.광고비 += row["광고비"] || 0;
       acc.판매수량 += row[colQty] || 0;
       acc.매출 += rowRevenue(row);
+      acc.순이익 += rowProfit(row);
     });
 
     const placementSummary = Array.from(placementMap.values()).map((p) => {
@@ -169,18 +204,18 @@ export function AnalyzerDashboard() {
       const 클릭률 = p.노출수 > 0 ? p.클릭수 / p.노출수 : 0;
       const 구매전환율 = p.클릭수 > 0 ? p.판매수량 / p.클릭수 : 0;
       const CPC = p.클릭수 > 0 ? p.광고비 / p.클릭수 : 0;
-      const 실질순이익 = profitOf(실제매출액, p.판매수량, p.광고비);
+      const 실질순이익 = p.순이익;
       return { ...p, 실제매출액, 실제ROAS, 클릭률, 구매전환율, CPC, 실질순이익 };
     });
 
     // ── 전체 합계 ──
     const tot = placementSummary.reduce(
-      (acc, curr) => { acc.노출수 += curr.노출수; acc.클릭수 += curr.클릭수; acc.광고비 += curr.광고비; acc.판매수량 += curr.판매수량; acc.매출 += curr.실제매출액; return acc; },
-      { 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0 }
+      (acc, curr) => { acc.노출수 += curr.노출수; acc.클릭수 += curr.클릭수; acc.광고비 += curr.광고비; acc.판매수량 += curr.판매수량; acc.매출 += curr.실제매출액; acc.순이익 += curr.실질순이익; return acc; },
+      { 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0, 순이익: 0 }
     );
     const totalRevenue = tot.매출;
     const totalRealRoas = tot.광고비 > 0 ? totalRevenue / tot.광고비 : 0;
-    const totalProfit = profitOf(totalRevenue, tot.판매수량, tot.광고비);
+    const totalProfit = tot.순이익;
     const totalCtr = tot.노출수 > 0 ? tot.클릭수 / tot.노출수 : 0;
     const totalCvr = tot.클릭수 > 0 ? tot.판매수량 / tot.클릭수 : 0;
     const avgCPC = tot.클릭수 > 0 ? tot.광고비 / tot.클릭수 : 0;
@@ -192,11 +227,12 @@ export function AnalyzerDashboard() {
       const campMap = new Map<string, any>();
       cleanedData.forEach((row) => {
         const c = row["캠페인명"] || "미확인";
-        if (!campMap.has(c)) campMap.set(c, { 캠페인: c, 광고유형: row["광고유형"] || "", 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0, 검색광고비: 0, 검색매출: 0, 검색클릭: 0, 비검색광고비: 0, 비검색매출: 0, 비검색클릭: 0 });
+        if (!campMap.has(c)) campMap.set(c, { 캠페인: c, 광고유형: row["광고유형"] || "", 노출수: 0, 클릭수: 0, 광고비: 0, 판매수량: 0, 매출: 0, 순이익: 0, 검색광고비: 0, 검색매출: 0, 검색클릭: 0, 비검색광고비: 0, 비검색매출: 0, 비검색클릭: 0 });
         const acc = campMap.get(c);
         acc.노출수 += row["노출수"] || 0; acc.클릭수 += row["클릭수"] || 0;
         acc.광고비 += row["광고비"] || 0; acc.판매수량 += row[colQty] || 0;
         acc.매출 += rowRevenue(row);
+        acc.순이익 += rowProfit(row);
         // 목표수익률 레버 판단용: 캠페인 내 검색/비검색 분해
         const area = row["광고 노출 지면"] || "";
         if (isSearchPlatform(area)) { acc.검색광고비 += row["광고비"] || 0; acc.검색매출 += rowRevenue(row); acc.검색클릭 += row["클릭수"] || 0; }
@@ -207,7 +243,7 @@ export function AnalyzerDashboard() {
         const ctr = c.노출수 > 0 ? c.클릭수 / c.노출수 : 0;
         const cvr = c.클릭수 > 0 ? c.판매수량 / c.클릭수 : 0;
         const cpc = c.클릭수 > 0 ? c.광고비 / c.클릭수 : 0;
-        const 순이익 = profitOf(c.매출, c.판매수량, c.광고비);
+        const 순이익 = c.순이익;
         const 검색ROAS = c.검색광고비 > 0 ? (c.검색매출 / c.검색광고비) * 100 : 0;
         const 비검색ROAS = c.비검색광고비 > 0 ? (c.비검색매출 / c.비검색광고비) * 100 : 0;
         const 검색비중 = c.광고비 > 0 ? (c.검색광고비 / c.광고비) * 100 : 0;
@@ -265,15 +301,16 @@ export function AnalyzerDashboard() {
       const prodMap = new Map<string, any>();
       cleanedData.forEach((row) => {
         const prod = row["광고집행 상품명"] || "미확인";
-        if (!prodMap.has(prod)) prodMap.set(prod, { 상품명: prod, 광고비: 0, 판매수량: 0, 노출수: 0, 클릭수: 0, 매출: 0 });
+        if (!prodMap.has(prod)) prodMap.set(prod, { 상품명: prod, 광고비: 0, 판매수량: 0, 노출수: 0, 클릭수: 0, 매출: 0, 순이익: 0 });
         const acc = prodMap.get(prod);
         acc.광고비 += row["광고비"] || 0; acc.판매수량 += row[colQty] || 0;
         acc.노출수 += row["노출수"] || 0; acc.클릭수 += row["클릭수"] || 0;
         acc.매출 += rowRevenue(row);
+        acc.순이익 += rowProfit(row);
       });
       productSummary = Array.from(prodMap.values()).map((p) => ({
         ...p,
-        실질순이익: profitOf(p.매출, p.판매수량, p.광고비),
+        실질순이익: p.순이익,
       }));
     }
 
@@ -509,6 +546,7 @@ export function AnalyzerDashboard() {
       productSummary, badKeywords, recommendations,
       revenueMode, campaignSummary, keywordDiag, indirectShare, attributionLag,
       marginProvided, effectiveBE,
+      optionMarginCoverage, optionMarginCount: optMargins.size, hasOptionColumn: Boolean(optCol),
       precision: {
         ctrScore: ctrResult.score, ctrLevel: ctrResult.level,
         cvrScore: cvrResult.score, cvrLevel: cvrResult.level,
@@ -516,7 +554,7 @@ export function AnalyzerDashboard() {
         cpcEfficiency,
       },
     };
-  }, [rawData, unitPrice, couponPerUnit, netUnitPrice, unitCost, deliveryFee, coupangFeeRate, returnRate, returnShippingCost, netUnitMargin, targetROAS, breakEvenROAS]);
+  }, [rawData, unitPrice, couponPerUnit, netUnitPrice, unitCost, deliveryFee, coupangFeeRate, returnRate, returnShippingCost, netUnitMargin, targetROAS, breakEvenROAS, presetItems]);
 
   // ─── 성과 추이 — 보고서 요약을 저장해 지난 분석 대비 변화를 비교 ────────────
   const [savedReports, setSavedReports] = useState<any[] | null>(null);
@@ -898,6 +936,22 @@ export function AnalyzerDashboard() {
             <p className="text-[11.5px] leading-relaxed text-critical">
               개당 마진이 남지 않습니다. 어떤 ROAS로도 광고로는 흑자가 되지 않으니 판매가·원가·쿠폰부터 보셔야 합니다.
             </p>
+          )}
+          {/* 보고서에 옵션이 여럿이면 위 칸 하나로는 순이익이 맞지 않는다.
+              옵션별 원가가 들어와 있는 만큼은 그 옵션 값으로 계산한다. */}
+          {processedData && !processedData.error && processedData.hasOptionColumn && (
+            processedData.optionMarginCount > 0 ? (
+              <p className="rounded-card border border-accent-line bg-accent-soft px-2.5 py-2 text-[11.5px] leading-relaxed text-ink-2">
+                옵션 <b>{processedData.optionMarginCount}개</b>는 각자의 판매가·원가로 순이익을 계산했습니다
+                (광고비 기준 <b>{processedData.optionMarginCoverage.toFixed(0)}%</b>).
+                {processedData.optionMarginCoverage < 95 && ' 나머지는 위 칸 값을 씁니다 — 정산AI [원가 입력]에 원가를 더 넣으면 그만큼 정확해집니다.'}
+              </p>
+            ) : (
+              <p className="text-[11.5px] leading-relaxed text-ink-3">
+                이 보고서에는 옵션이 여럿입니다. 정산AI [원가 입력]에 옵션별 원가를 넣으면 옵션마다 제 마진으로 순이익을 계산합니다
+                — 지금은 위 칸 하나를 모든 옵션에 똑같이 적용하고 있습니다.
+              </p>
+            )
           )}
         </div>
       </div>

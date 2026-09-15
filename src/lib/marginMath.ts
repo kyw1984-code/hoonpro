@@ -69,3 +69,62 @@ export function computeMargin(i: MarginInput): MarginResult {
     breakEvenROAS: netMargin > 0 ? (net / netMargin) * 100 : 0,
   };
 }
+
+/** 옵션 하나의 마진 — 광고 보고서의 줄마다 제 옵션 값을 쓰기 위한 것 */
+export interface OptionMargin {
+  vendorItemId: string;
+  netUnitPrice: number;
+  netUnitMargin: number;
+  /** 마진 ÷ 실결제가. 실측 전환매출에 곱해 순이익을 낸다 */
+  netMarginRate: number;
+}
+
+export interface PresetItem {
+  vendorItemId: string;
+  unitPrice?: number;
+  couponPerUnit?: number;
+  unitCost?: number;
+  fulfillmentCost?: number;
+  returnRate?: number;
+  returnShippingCost?: number;
+  hasCost?: boolean;
+}
+
+/**
+ * 옵션별 마진표.
+ *
+ * 광고 보고서 한 장에 옵션이 여럿 들어 있는 것이 보통인데, 마진 계산 칸은
+ * 하나뿐이다. 3,000원짜리와 30,000원짜리를 같은 마진으로 계산하면 옵션별
+ * 순이익이 통째로 틀리고, 그 값으로 키워드를 제외하게 된다.
+ *
+ * 원가가 없는 옵션은 아예 넣지 않는다. 원가 0으로 계산하면 마진이 판매가만큼
+ * 나와서, 원가를 안 넣은 옵션일수록 제일 돈을 잘 버는 것처럼 보인다.
+ */
+export function optionMarginTable(items: PresetItem[], feeRate: number): Map<string, OptionMargin> {
+  const out = new Map<string, OptionMargin>();
+  for (const it of items ?? []) {
+    const id = String(it.vendorItemId ?? '').trim();
+    if (!id) continue;
+    const unitCost = Number(it.unitCost) || 0;
+    if (!it.hasCost || unitCost <= 0) continue;
+
+    const netUnitPrice = Math.max(0, (Number(it.unitPrice) || 0) - (Number(it.couponPerUnit) || 0));
+    if (netUnitPrice <= 0) continue;
+
+    const m = computeMargin({
+      netUnitPrice,
+      unitCost,
+      deliveryFee: Number(it.fulfillmentCost) || 0,
+      feeRate,
+      returnRate: Number(it.returnRate) || 0,
+      returnShippingCost: Number(it.returnShippingCost) || 0,
+    });
+    out.set(id, {
+      vendorItemId: id,
+      netUnitPrice,
+      netUnitMargin: m.netMargin,
+      netMarginRate: m.netMargin / netUnitPrice,
+    });
+  }
+  return out;
+}
