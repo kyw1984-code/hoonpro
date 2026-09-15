@@ -18,6 +18,7 @@ const VERDICT = {
   ok:      { label: '맞습니다',    cls: 'border-positive/35 bg-positive-soft text-positive' },
   watch:   { label: '한 번 보세요', cls: 'border-caution/40 bg-caution-soft text-caution' },
   off:     { label: '어긋났습니다', cls: 'border-critical/35 bg-critical-soft text-critical' },
+  pending: { label: '집계 중',     cls: 'border-line bg-paper-2 text-ink-2' },
   unknown: { label: '기준 없음',   cls: 'border-line bg-paper-2 text-ink-3' },
 } as const;
 
@@ -76,6 +77,7 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
   }
 
   const off = rows.filter(r => r.verdict === 'off');
+  const pending = rows.filter(r => r.verdict === 'pending');
 
   return (
     <div className="rounded-panel border border-line bg-paper p-5">
@@ -84,10 +86,17 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
         <h3 className="text-[15px] font-semibold text-ink">정산서 대조</h3>
       </div>
       <p className="text-[12.5px] leading-relaxed text-ink-2">
-        우리가 계산한 정산예정액과 실제 지급액을 매출인식월끼리 맞춰 봅니다.
+        우리가 계산한 정산예정액과 쿠팡이 잡은 <b>정산대상액</b>(수수료 뺀 금액)을 매출인식월끼리 맞춰 봅니다.
         윙은 쿠팡이 준 금액이라 맞는 게 정상이고, <b>로켓그로스는 우리가 만든 값</b>이라 여기서 확인해야 합니다.
       </p>
       {error && <p className="mt-2 text-[12px] text-critical">{error}</p>}
+
+      {off.length === 0 && pending.length > 0 && (
+        <p className="mt-3 rounded-card border border-line bg-paper-2 px-3 py-2 text-[12.5px] leading-relaxed text-ink-2">
+          {pending.map(r => monthLabel(r.month)).join(', ')}은 아직 집계 중입니다 —
+          최종액(30%)이 안 들어왔거나 그 달 매출 자료가 온전하지 않습니다. 어긋난 것이 아닙니다.
+        </p>
+      )}
 
       {off.length > 0 && (
         <p className="mt-3 flex items-start gap-1.5 rounded-card border border-critical/30 bg-critical-soft px-3 py-2 text-[12.5px] text-critical">
@@ -105,7 +114,7 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
         <table className="w-full min-w-[680px] text-sm">
           <thead className="border-b border-line">
             <tr>
-              {['매출인식월', '우리 계산', '실제 지급액', '차이', '역산 수수료율', ''].map((h, i) => (
+              {['매출인식월', '우리 계산', '쿠팡 정산대상액', '차이', '역산 수수료율', ''].map((h, i) => (
                 <th key={h || i}
                   className={`whitespace-nowrap px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-ink-2 ${i === 0 || i === 5 ? 'text-left' : 'text-right'}`}>
                   {h}
@@ -153,6 +162,11 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
                         <span className="text-[13px] text-ink">{won(r.reference)}</span>
                         <span className="mt-0.5 block text-[11px] text-ink-3">
                           {r.referenceSource === 'actual' ? '정산서 입력값' : '쿠팡 지급내역'}
+                          {r.pendingLast > 0 && (
+                            <span className="mt-0.5 block text-[10.5px] text-caution">
+                              최종액 {won(r.pendingLast)} 미도래
+                            </span>
+                          )}
                         </span>
                       </>
                     )}
@@ -201,6 +215,19 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
         <p>
           <b>실제 지급액</b>은 쿠팡 지급내역을 자동으로 씁니다. 정산서에만 있는 차감이나 장려금이 있으면
           [정산서 입력]으로 실제 받은 금액을 적어 주세요 — 적어 둔 값이 우선합니다. 0을 넣으면 지워집니다.
+        </p>
+        <p>
+          <b>쿠팡 주정산은 두 번에 나눠 들어옵니다.</b> 한 주(월~일) 구매확정 매출에서 판매수수료를 뺀 것이
+          <b>정산대상액</b>이고, 그 <b>70%</b>가 일요일 기준 15영업일 뒤에 먼저 들어옵니다.
+          나머지 <b>30%(최종액)</b>는 환불·교환에 대비해 쿠팡이 들고 있다가 <b>익익월 1일</b>에 줍니다.
+          (월정산은 최종액 없이 100% 한 번에 들어옵니다.)
+          그래서 이 표는 통장에 들어온 돈이 아니라 <b>정산대상액</b>과 견줍니다 — 들어온 돈과 견주면 매달 30%씩
+          어긋난 것처럼 보입니다.
+        </p>
+        <p>
+          <b>집계 중</b>은 아직 견줄 때가 아니라는 뜻입니다. 최종액이 안 들어왔거나, 그 달 매출 자료를 우리가
+          온전히 갖고 있지 않은 경우입니다. 그런 달까지 '어긋났습니다'로 칠하면 진짜 어긋난 달이 묻힙니다.
+          정산서 금액을 직접 적어 넣으시면 그 달은 바로 판정합니다.
         </p>
         <p>
           <b>역산 수수료율</b>은 차이를 전부 로켓그로스 수수료 탓으로 돌렸을 때 나오는 값입니다.

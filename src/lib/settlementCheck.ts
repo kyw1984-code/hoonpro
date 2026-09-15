@@ -23,13 +23,35 @@ export const OFF_RATE = 5;
 export interface MonthFigures {
   /** 매출인식월 YYYY-MM */
   month: string;
+  /**
+   * 그 달 매출 자료를 우리가 온전히 갖고 있나.
+   *
+   * 쿠팡 지급내역은 120일을 주는데 매출 수집은 그보다 짧게 시작된 계정이 있다.
+   * 자료가 반만 있는 달을 견주면 '어긋났습니다'가 뜨지만 어긋난 게 아니다.
+   */
+  salesCovered: boolean;
+  /**
+   * 주정산의 최종액(30%)까지 다 들어왔나.
+   *
+   * 쿠팡 주정산은 정산대상액의 70%를 먼저 주고, 나머지 30%를 익익월 1일에
+   * 준다. 아직 그 날이 안 왔으면 지급액이 적은 게 정상이다.
+   */
+  cycleComplete: boolean;
+  /** 아직 안 들어온 최종액(30%) 합 */
+  pendingLast: number;
   /** 윙 정산예정액 — 쿠팡이 준 값 */
   marketSettlement: number;
   /** 그로스 정산예정액 — 우리가 만든 값 */
   growthSettlement: number;
   /** 그로스 실결제액(쿠폰 차감 후) = 정산예정액 + 수수료. 역산의 분모다 */
   growthNet: number;
-  /** 쿠팡 지급내역 API가 이 인식월로 내려준 금액 합 (없으면 null) */
+  /**
+   * 쿠팡이 잡은 정산대상액 합 (수수료 차감 후, 최종액 포함).
+   *
+   * 실제로 통장에 들어온 금액이 아니라 '이 달 매출로 정산될 총액'이다.
+   * 우리가 계산한 정산예정액과 같은 성격이라 이것끼리 견뎌야 맞다.
+   * 들어온 돈(70%)과 견주면 매달 30%씩 어긋난 것처럼 보인다.
+   */
   coupangPaid: number | null;
   /** 판매자가 정산서를 보고 적어 넣은 실지급액 (없으면 null) */
   actual: number | null;
@@ -37,7 +59,11 @@ export interface MonthFigures {
   returnQuantity: number;
 }
 
-export type Verdict = 'ok' | 'watch' | 'off' | 'unknown';
+/**
+ * pending — 아직 견줄 때가 아니다 (매출 자료가 모자라거나 최종액 미도래).
+ * unknown — 견줄 기준 자체가 없다 (지급내역도 입력값도 없음).
+ */
+export type Verdict = 'ok' | 'watch' | 'off' | 'unknown' | 'pending';
 
 export interface MonthCheck extends MonthFigures {
   /** 우리 계산 합 */
@@ -70,6 +96,18 @@ export function checkMonth(f: MonthFigures): MonthCheck {
     };
   }
 
+  // 견줄 수 없는 달은 판정하지 않는다. 매출 자료가 반만 있거나 최종액이
+  // 아직 안 들어온 달에 '어긋났습니다'를 띄우면, 진짜 어긋난 달이 그 속에
+  // 묻힌다. 판매자가 직접 적어 넣은 정산서 금액은 그 자체로 완결이라
+  // 이 제한을 받지 않는다.
+  if (f.actual === null && (!f.salesCovered || !f.cycleComplete)) {
+    return {
+      ...f, ours, reference, referenceSource,
+      diff: reference - ours, diffRate: null,
+      impliedGrowthFeeRate: null, verdict: 'pending',
+    };
+  }
+
   const diff = reference - ours;
   const diffRate = (diff / reference) * 100;
   const abs = Math.abs(diffRate);
@@ -99,5 +137,6 @@ export function verdictLabel(v: Verdict): string {
   return v === 'ok' ? '맞습니다'
     : v === 'watch' ? '한 번 보세요'
     : v === 'off' ? '어긋났습니다'
+    : v === 'pending' ? '집계 중'
     : '기준 없음';
 }
