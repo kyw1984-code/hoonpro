@@ -331,11 +331,11 @@ function ConnectionBar({
         </div>
       )}
 
-      {status.lastSyncError && !broken && (
-        <div className="rounded-panel border border-line bg-paper px-5 py-3 text-[12px] text-ink-3">
-          일부 항목을 못 가져왔습니다: {status.lastSyncError}
-        </div>
-      )}
+      {/* 수집 중 일부 항목이 실패한 것은 판매자에게 알리지 않는다.
+          대부분 쿠팡 쪽 일시적인 호출 제한(HTTP 429)이고 다음 회차에 저절로
+          채워지는데, "반품요청(UC): HTTP 429" 같은 원문을 띄워 봐야 판매자가
+          할 수 있는 일이 없다. 키가 끊긴 경우(broken)는 위에서 따로 안내한다.
+          실패 내용은 관리자 [쿠팡 연동]과 오류 기록에 그대로 남는다. */}
 
       {syncMsg && !syncing && (
         <div
