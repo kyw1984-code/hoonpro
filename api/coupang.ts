@@ -1846,6 +1846,9 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
   const err = await upsertChunked('coupang_settlements', rows, 'user_id,settlement_key');
   if (err) sum.errors.push(err);
   sum.settlements = rows.length;
+
+  // [임시] 로켓그로스 정산 창구가 있는지 한 번만 확인한다. 답을 얻으면 지운다.
+  await runRgSettlementProbeOnce(userId, creds);
 }
 
 /** 취소·철회된 접수는 손실로 세지 않는다. 상태 원문은 엔드포인트마다 달라 부분 일치로 본다. */
@@ -2736,9 +2739,18 @@ async function handleProbeRgSettlement(decoded: any, req: VercelRequest, res: Ve
 
   const acc = await loadAccount(targetUserId);
   if (!acc) return res.status(404).json({ error: '쿠팡 계정이 연결돼 있지 않습니다.' });
-  const creds = credsOf(acc);
-  const v = creds.vendorId;
+
   const month = String(req.query.month ?? '2026-08').slice(0, 7);
+  const results = await probeRgSettlement(credsOf(acc), month);
+  return res.status(200).json({ vendorId: acc.vendor_id, month, results });
+}
+
+/**
+ * 관리자 토큰을 손에 쥘 수 없는 자리(크론)에서도 부를 수 있게 따로 뒀다.
+ * 부를 목록은 여기 박혀 있고 바깥에서 바꿀 수 없다.
+ */
+async function probeRgSettlement(creds: CoupangCreds, month: string): Promise<any[]> {
+  const v = creds.vendorId;
 
   const candidates: Array<{ name: string; path: string; query: string }> = [
     { name: 'rg/settlement-histories',
@@ -2783,7 +2795,37 @@ async function handleProbeRgSettlement(decoded: any, req: VercelRequest, res: Ve
     await sleep(1300); // rg_open_api 분당 50회 한도
   }
 
-  return res.status(200).json({ vendorId: v, month, results });
+  return results;
+}
+
+/**
+ * [임시] 수집 크론이 한 번만 대신 찔러 본다.
+ *
+ * 이 진단은 관리자 토큰이 있어야 부를 수 있는데, 지금 그 토큰을 만들 자리가
+ * 없다. 대신 app_config에 'pending'으로 적어 두면 다음 수집 회차가 한 번
+ * 실행하고 결과를 같은 자리에 적는다. 적고 나면 스스로 꺼진다 — 매 회차 도는
+ * 진단은 판매자 키의 호출 한도만 축낸다.
+ */
+async function runRgSettlementProbeOnce(userId: string, creds: CoupangCreds): Promise<void> {
+  if (!supabase) return;
+  try {
+    const { data } = await supabase
+      .from('app_config').select('value').eq('key', 'rg_settlement_probe').maybeSingle();
+    if (!data?.value) return;
+    const cfg = JSON.parse(data.value);
+    if (cfg?.status !== 'pending' || cfg?.userId !== userId) return;
+
+    const month = String(cfg.month ?? '2026-08').slice(0, 7);
+    const results = await probeRgSettlement(creds, month);
+    await supabase.from('app_config').upsert({
+      key: 'rg_settlement_probe',
+      value: JSON.stringify({ status: 'done', userId, month, ranAt: new Date().toISOString(), results }),
+      updated_at: new Date().toISOString(),
+    });
+  } catch (e: any) {
+    // 진단이 실패해도 수집은 계속돼야 한다
+    console.error('[coupang] rg 정산 진단 실패', e?.message ?? e);
+  }
 }
 
 // ── 주문수집 업체 IP 목록 ─────────────────────────────────────
