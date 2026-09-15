@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { COUPANG_FEE_RATE_PCT, growthSettlement } from '../src/lib/coupangFee.js';
-import { checkMonth, type MonthCheck } from '../src/lib/settlementCheck.js';
+import { checkMonth, isReserveSettlement, type MonthCheck } from '../src/lib/settlementCheck.js';
 import { rollupMonths, type MonthProfit } from '../src/lib/monthlyProfit.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
 import { emailFrom } from '../src/lib/emailFrom.js';
@@ -1807,7 +1807,12 @@ async function syncSettlements(userId: string, creds: CoupangCreds, sum: SyncSum
         settlement_date: date,
         settlement_type: type,
         recognition_month: month,
-        amount: pickNum(s, ['settlementAmount', 'amount', 'finalAmount', 'paymentAmount'], 0),
+        // RESERVE 행은 그 달 WEEKLY를 통째로 다시 적은 요약이라 settlementAmount가
+        // '이미 지급된 70% 합'이다. 그 날 통장에 실제로 들어오는 돈은 최종액
+        // (lastAmount)뿐이다. 그대로 쓰면 캘린더에서 같은 돈이 두 번 잡힌다.
+        amount: isReserveSettlement(type)
+          ? pickNum(s, ['lastAmount'], 0)
+          : pickNum(s, ['settlementAmount', 'amount', 'finalAmount', 'paymentAmount'], 0),
         // 매출 인식 기간 — 이 지급이 어느 기간 매출에 대한 것인가
         recognition_from: pickDate(s, ['revenueRecognitionDateFrom']),
         recognition_to: pickDate(s, ['revenueRecognitionDateTo']),
@@ -4033,9 +4038,9 @@ async function handleSettlementCheck(userId: string, req: VercelRequest, res: Ve
       .eq('user_id', userId)
       .gte('sale_date', from).lte('sale_date', to)
       .order('sale_date').range(f, t)),
-    selectAll<{ recognition_month: string; settlement_date: string; amount: number; target_amount: number | null; last_amount: number | null }>((f, t) => supabase!
+    selectAll<{ recognition_month: string; settlement_date: string; settlement_type: string | null; recognition_to: string | null; amount: number; target_amount: number | null; last_amount: number | null }>((f, t) => supabase!
       .from('coupang_settlements')
-      .select('recognition_month, settlement_date, amount, target_amount, last_amount')
+      .select('recognition_month, settlement_date, settlement_type, recognition_to, amount, target_amount, last_amount')
       .eq('user_id', userId)
       .order('settlement_date').range(f, t)),
     selectAll<{ month: string; actual_amount: number; note: string | null }>((f, t) => supabase!
@@ -4070,22 +4075,39 @@ async function handleSettlementCheck(userId: string, req: VercelRequest, res: Ve
   // 쿠팡이 잡은 '정산대상액'(수수료 차감 후)으로 견준다. 통장에 들어온
   // 돈으로 견주면 안 된다 — 주정산은 70%만 먼저 주고 나머지 30%(최종액)를
   // 익익월 1일에 주기 때문에, 매달 30%씩 어긋난 것처럼 보인다.
+  //
+  // RESERVE 행은 더하지 않는다. 그 달 WEEKLY 행들을 통째로 다시 적은 요약이라
+  // settlementTargetAmount가 WEEKLY 합과 정확히 같다. 함께 더하면 정산대상액이
+  // 딱 두 배가 된다 — 실제로 8월이 993,446이 아니라 1,986,892로 나오고 있었다.
   const targetByMonth = new Map<string, number>();
   const pendingLastByMonth = new Map<string, number>();
+  // 쿠팡이 그 달을 어디까지 인식했나. 말일까지 닿아야 견줄 수 있는 달이다.
+  const recognizedToByMonth = new Map<string, string>();
   for (const r of setRes.rows) {
     const m = String(r.recognition_month ?? '').slice(0, 7) || String(r.settlement_date).slice(0, 7);
+    const reserve = isReserveSettlement(r.settlement_type);
+
+    const recTo = r.recognition_to ? String(r.recognition_to).slice(0, 10) : null;
+    if (recTo && recTo > (recognizedToByMonth.get(m) ?? '')) recognizedToByMonth.set(m, recTo);
+
+    if (reserve) {
+      // 최종액(30%)은 RESERVE 행이 그 달 전체를 한 줄로 적어 준다. WEEKLY의
+      // last_amount를 같이 더하면 같은 돈을 두 번 세게 된다.
+      if (String(r.settlement_date) > today) {
+        pendingLastByMonth.set(m, (pendingLastByMonth.get(m) ?? 0) + (Number(r.last_amount) || 0));
+      }
+      continue;
+    }
     // 옛 행은 target_amount가 없다. 그때는 지급액이라도 쓴다.
     const target = Number(r.target_amount) || Number(r.amount) || 0;
     targetByMonth.set(m, (targetByMonth.get(m) ?? 0) + target);
-    // 지급일이 아직 안 온 최종액 = 아직 안 들어온 30%
-    if (String(r.settlement_date) > today) {
-      pendingLastByMonth.set(m, (pendingLastByMonth.get(m) ?? 0) + (Number(r.last_amount) || 0));
-    }
   }
 
-  // 매출 자료가 언제부터 있나. 그 전 달은 우리 계산이 0이라 견줄 수 없다.
+  // 윙 매출 자료가 언제부터 있나. 자동 기준(쿠팡 지급내역)에는 로켓그로스가
+  // 한 건도 없어 윙끼리만 견주므로, 여기서 보는 것도 윙 자료의 시작일이다.
   const { rows: firstSale } = await selectAll<{ sale_date: string }>((f, t) => supabase!
     .from('coupang_sales_daily').select('sale_date').eq('user_id', userId)
+    .neq('channel', 'growth')
     .order('sale_date').range(f, Math.min(t, 0)));
   const salesFrom = firstSale[0]?.sale_date ? String(firstSale[0].sale_date).slice(0, 10) : null;
 
@@ -4115,10 +4137,12 @@ async function handleSettlementCheck(userId: string, req: VercelRequest, res: Ve
         coupangPaid: targetByMonth.get(month) ? Math.round(targetByMonth.get(month)!) : null,
         actual: manual && manual.amount > 0 ? manual.amount : null,
         returnQuantity: returnsByMonth.get(month) ?? 0,
-        // 그 달 1일부터 매출이 있어야 온전한 달이다
+        // 그 달 1일부터 윙 매출이 있어야 온전한 달이다
         salesCovered: Boolean(salesFrom && salesFrom <= `${month}-01`),
-        // 주정산 최종액은 익익월 1일에 들어온다. 그 날이 지나야 완결이다.
-        cycleComplete: `${month}-01` < addDays(today, -62),
+        // 쿠팡이 그 달 말일까지 인식했으면 견줄 수 있다. 달력으로 어림하지
+        // 않는다 — 8월 31일에 팔린 것이 9월에 구매확정되면 9월 매출이라,
+        // 달이 지났다고 그 달 인식이 끝난 것이 아니다.
+        recognitionComplete: (recognizedToByMonth.get(month) ?? '') >= monthEnd(month),
         pendingLast: Math.round(pendingLastByMonth.get(month) ?? 0),
       }),
       note: manual?.note ?? null,
@@ -4163,11 +4187,14 @@ async function handleSettlement(userId: string, res: VercelResponse) {
       .gte('settlement_date', from)
       .lte('settlement_date', to)
       .order('settlement_date').range(f, t)),
-    // 최근 90일 정산예정액 — 지급 일정이 아직 안 잡힌 몫을 가늠한다
+    // 최근 90일 윙 정산예정액 — 지급 일정이 아직 안 잡힌 몫을 가늠한다.
+    // 쿠팡 지급내역에 로켓그로스가 한 건도 없으므로 그로스 매출을 여기 넣으면
+    // 그로스 전액이 매달 '일정 미배정'으로 잡힌다. 윙끼리만 견준다.
     selectAll((f, t) => supabase!
       .from('coupang_sales_daily')
       .select('sale_date, settlement_amount')
       .eq('user_id', userId)
+      .neq('channel', 'growth')
       .gte('sale_date', from)
       .order('sale_date').range(f, t)),
   ]);
@@ -4210,6 +4237,9 @@ async function handleSettlement(userId: string, res: VercelResponse) {
   for (const s of setRes.rows) {
     const m = String(s.recognition_month ?? '').slice(0, 7);
     if (!m) continue;
+    // RESERVE 행은 그 달 WEEKLY를 다시 적은 요약이라 정산대상액을 두 번 세게
+    // 된다. 두 배로 잡히면 '일정 미배정'이 늘 0으로 눌린다.
+    if (isReserveSettlement(s.settlement_type)) continue;
     // 지급 일정이 '잡혔는지'를 보는 것이므로 정산대상액을 쓴다. 통장에 들어온
     // 돈(70%)으로 세면 아직 안 들어온 최종액 30%가 매달 '미배정'으로 잡힌다 —
     // 일정은 이미 잡혀 있는데도.
