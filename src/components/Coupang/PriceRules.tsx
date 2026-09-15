@@ -176,18 +176,25 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
       {msg && <p className="text-[12.5px] text-ink-2">{msg}</p>}
 
       <div className="rounded-panel border border-line bg-paper">
+        {/* 이 표는 11칸이라 노트북 화면에서 가로로 넘친다. 넘치는 것 자체는
+            래퍼가 스크롤로 받아 주지만, 하필 맨 오른쪽이 [변경] 버튼이라
+            정작 눌러야 할 것이 화면 밖에 있었다. 두 가지로 해결한다.
+              · 수수료율·시장가를 옆 칸의 작은 줄로 접어 폭을 줄인다
+              · 제안 칸은 오른쪽에 붙박아 스크롤해도 늘 보이게 한다 */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1200px] text-[12.5px]">
+          <table className="w-full min-w-[1000px] text-[12.5px]">
             <thead>
               <tr className="border-b border-line text-[11.5px] text-ink-3">
                 <th className="px-4 py-2.5 text-left font-medium">상품</th>
                 <th className="px-3 py-2.5 text-right font-medium">현재가</th>
-                <th className="px-3 py-2.5 text-right font-medium">수수료율</th>
                 <th className="px-3 py-2.5 text-right font-medium">
                   목표 이익률
                   <span className="block text-[10px] font-normal">하한가 기준</span>
                 </th>
-                <th className="px-3 py-2.5 text-right font-medium">하한가</th>
+                <th className="px-3 py-2.5 text-right font-medium">
+                  하한가
+                  <span className="block text-[10px] font-normal">수수료율</span>
+                </th>
                 <th className="px-3 py-2.5 text-right font-medium">
                   절대 하한
                   <span className="block text-[10px] font-normal">선택</span>
@@ -196,10 +203,16 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                   절대 상한
                   <span className="block text-[10px] font-normal">선택</span>
                 </th>
-                <th className="px-3 py-2.5 text-left font-medium">비교 키워드</th>
-                <th className="px-3 py-2.5 text-right font-medium">시장가</th>
+                <th className="px-3 py-2.5 text-left font-medium">
+                  비교 키워드
+                  <span className="block text-[10px] font-normal">시장가</span>
+                </th>
                 <th className="px-3 py-2.5 text-center font-medium">자동</th>
-                <th className="px-4 py-2.5 text-right font-medium">제안</th>
+                {/* bg-paper를 반드시 준다. 붙박이 칸이 투명하면 밑으로 지나가는
+                    다른 칸이 글자 위에 겹쳐 보인다. */}
+                <th className="sticky right-0 z-20 w-[210px] border-l border-line bg-paper px-4 py-2.5 text-right font-medium">
+                  제안
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -210,7 +223,6 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                     {r.optionName && <p className="truncate text-[11px] text-ink-3">{r.optionName}</p>}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-ink-2">{r.currentPrice ? won(r.currentPrice) : '-'}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-ink-3">{pct(r.commissionRate)}</td>
                   <td className="px-3 py-2 text-right">
                     <input
                       type="number"
@@ -221,8 +233,11 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                       className="w-[64px] rounded-control border border-line bg-paper-2 px-2 py-1.5 text-right text-[12px] tabular-nums outline-none focus:ring-2 focus:ring-accent"
                     />
                   </td>
+                  {/* 수수료율은 하한가를 어떻게 뽑았는지 설명하는 값이라
+                      옆 칸을 따로 두지 않고 하한가 밑에 붙인다. */}
                   <td className={`px-3 py-2 text-right font-semibold tabular-nums ${r.belowFloor ? 'text-critical' : 'text-ink'}`}>
                     {r.floorPrice ? won(r.floorPrice) : '-'}
+                    <span className="block text-[10.5px] font-normal text-ink-3">{pct(r.commissionRate)}</span>
                   </td>
                   <td className="px-3 py-2 text-right">
                     <input
@@ -251,8 +266,11 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                       placeholder="예: 캠핑의자"
                       className="w-[110px] rounded-control border border-line bg-paper-2 px-2 py-1.5 text-[12px] outline-none focus:ring-2 focus:ring-accent"
                     />
+                    {/* 시장가는 이 키워드로 모은 값이라 키워드 바로 밑에 둔다 */}
+                    <span className="mt-0.5 block text-[10.5px] tabular-nums text-ink-3">
+                      {r.marketPrice ? won(r.marketPrice) : '시장가 —'}
+                    </span>
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums text-ink-3">{r.marketPrice ? won(r.marketPrice) : '-'}</td>
                   {/* 실제 판매가를 매일 자동으로 바꾸는 스위치다. 16px 네모는
                       손가락으로 잘못 누르기 쉽고 되돌릴 방법이 화면에 없다.
                       네모 자체는 그대로 두고 누를 수 있는 자리를 44px로 넓힌다. */}
@@ -269,22 +287,28 @@ export function PriceRules({ onEditCosts }: { onEditCosts: () => void }) {
                       />
                     </label>
                   </td>
-                  <td className="px-4 py-2 text-right">
-                    {r.suggestedPrice !== null ? (
-                      <div className="flex flex-col items-end gap-1">
-                        <button
-                          onClick={() => apply(r)}
-                          disabled={busy === r.vendorItemId}
-                          className="flex min-h-[36px] items-center gap-1 rounded-control border border-accent-line bg-accent-soft px-3 py-2 text-[11.5px] font-semibold text-ink transition-opacity hover:opacity-80 disabled:opacity-50"
-                        >
-                          {busy === r.vendorItemId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                          {won(r.suggestedPrice)}로 변경
-                        </button>
-                        <span className="max-w-[220px] text-right text-[10.5px] leading-tight text-ink-3">{r.reason}</span>
-                      </div>
-                    ) : (
-                      <span className="text-[11px] text-ink-3">{r.reason}</span>
-                    )}
+                  {/* 오른쪽에 붙박는다. bg-critical-soft는 반투명이라 칸에 직접
+                      주면 밑으로 지나가는 다른 칸이 비쳐 보인다. 칸은 불투명한
+                      bg-paper로 두고, 손해 표시는 안쪽 div에 얹는다. */}
+                  <td className="sticky right-0 z-10 w-[210px] border-l border-line bg-paper p-0 text-right">
+                    <div className={`px-4 py-2 ${r.belowFloor ? 'bg-critical-soft' : ''}`}>
+                      {r.suggestedPrice !== null ? (
+                        <div className="flex flex-col items-end gap-1">
+                          <button
+                            onClick={() => apply(r)}
+                            disabled={busy === r.vendorItemId}
+                            className="flex min-h-[36px] items-center gap-1 whitespace-nowrap rounded-control border border-accent-line bg-accent-soft px-3 py-2 text-[11.5px] font-semibold text-ink transition-opacity hover:opacity-80 disabled:opacity-50"
+                          >
+                            {busy === r.vendorItemId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                            {won(r.suggestedPrice)}로 변경
+                          </button>
+                          {/* span은 inline이라 max-w가 먹지 않는다. block으로 둬야 줄바꿈된다. */}
+                          <span className="block break-keep text-right text-[10.5px] leading-tight text-ink-3">{r.reason}</span>
+                        </div>
+                      ) : (
+                        <span className="block break-keep text-right text-[11px] leading-tight text-ink-3">{r.reason}</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
