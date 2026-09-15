@@ -442,7 +442,15 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
             { label: '유효 구독자', value: `${(stats.totalSubscribers ?? 0).toLocaleString()}명`, sub: `체험 ${stats.counts?.trial ?? 0} · 활성 ${stats.counts?.active ?? 0} · 재시도 ${stats.counts?.past_due ?? 0}` },
             { label: '월 반복 매출 (MRR)', value: `${(stats.mrr ?? 0).toLocaleString()}원`, sub: '활성·재시도 구독 기준 추정' },
             { label: '최근 30일 결제액', value: `${(stats.revenue30d ?? 0).toLocaleString()}원`, sub: `성공 ${stats.payments30d ?? 0}건 · 실패 ${stats.failed30d ?? 0}건` },
-            { label: '최근 30일 해지', value: `${(stats.canceled30d ?? 0).toLocaleString()}명`, sub: `누적 해지 ${stats.counts?.canceled ?? 0} · 정지 ${stats.counts?.paused ?? 0}` },
+            {
+              label: '최근 30일 해지',
+              value: `${(stats.canceled30d ?? 0).toLocaleString()}명`,
+              // 해지 예약을 함께 적는다. 해지 버튼을 누른 사람은 남은 기간이
+              // 끝나는 날에야 canceled로 바뀌어서, 그 전까지 이 카드가 0으로
+              // 보인다 — 위 [오늘] 카드는 1이라고 하는데 여기는 0이면
+              // 어느 쪽이 맞는지 알 수 없다.
+              sub: `${(stats.cancelScheduled ?? 0) > 0 ? `해지 예약 ${stats.cancelScheduled} · ` : ''}누적 해지 ${stats.counts?.canceled ?? 0} · 정지 ${stats.counts?.paused ?? 0}`,
+            },
           ].map(({ label, value, sub }) => (
             <div key={label} className="rounded-card border border-line bg-paper p-4">
               <p className="text-[11px] font-semibold uppercase tracking-widest text-ink-3">{label}</p>

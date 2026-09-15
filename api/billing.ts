@@ -1680,6 +1680,11 @@ async function adminStats(res: VercelResponse) {
     counts,
     totalSubscribers: counts.trial + counts.active + counts.past_due,
     mrr,
+    // 해지 예약 — 아직 status가 canceled로 넘어가지 않은 구독.
+    // 체험이나 남은 기간이 끝나는 날 크론이 canceled로 바꾼다. 그때까지
+    // '최근 30일 해지'에는 안 잡히므로, 오늘 해지한 사람이 0으로 보인다.
+    // 카드가 서로 어긋나 보이지 않게 여기서도 함께 내려준다.
+    cancelScheduled: today.cancelScheduled,
     revenue30d: paidList.reduce((s, p) => s + Number(p.amount || 0), 0),
     payments30d: paidList.length,
     failed30d: failedList.length,
