@@ -1330,3 +1330,20 @@ alter table cron_runs enable row level security;
 alter table subscriptions
   add constraint subscriptions_coupon_id_fkey
   foreign key (coupon_id) references coupons(id) on delete set null;
+
+-- 코칭AI 에스컬레이션 — 답 못 한 질문에 운영자가 직접 답을 단다
+-- matched = false 가 이미 '답을 못 한 질문'을 표시하고 있었다. 지금까지는
+-- 그 자리에서 끝났고 질문은 로그에만 남아 아무도 다시 보지 않았다.
+alter table qa_logs
+  add column if not exists admin_answer text,
+  add column if not exists answered_at timestamptz,
+  add column if not exists answered_by uuid references users(id) on delete set null,
+  add column if not exists seen_at timestamptz,      -- 질문자가 앱에서 확인한 시각
+  add column if not exists mail_sent_at timestamptz; -- 메일이 실제로 나갔나
+
+create index if not exists idx_qa_pending
+  on qa_logs (created_at desc)
+  where matched = false and admin_answer is null;
+create index if not exists idx_qa_answered_user
+  on qa_logs (user_id, answered_at desc)
+  where admin_answer is not null;
