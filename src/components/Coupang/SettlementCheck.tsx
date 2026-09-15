@@ -1,14 +1,18 @@
 /**
- * 정산서 대조 — 우리가 계산한 정산예정액이 실제로 들어온 돈과 맞는지 본다.
+ * 정산서 대조 — 우리가 계산한 정산예정액이 쿠팡이 잡은 금액과 맞는지 본다.
  *
- * 윙은 쿠팡이 준 정산예정액을 그대로 쓰니 맞는 게 정상이고, 로켓그로스는
- * 쿠팡이 수수료도 정산액도 주지 않아 우리가 만든다. 만드는 쪽이 틀리면
- * 순이익이 조용히 부풀고 몇 달 뒤 통장을 보고서야 안다 — 즉시할인쿠폰을
- * 빼지 않아 실제로 그랬던 적이 있다. 매달 여기서 한 번 확인한다.
+ * 자료를 파 보고 전제가 하나 바뀌었다. 쿠팡 지급내역 API에는 판매자배송(윙)만
+ * 들어온다 — 로켓그로스는 한 건도 없다. 그로스 매출이 477만 원인 달의 지급내역
+ * 총매출이 112만 원이고, 그 112만은 같은 달 윙 매출과 맞는다.
+ *
+ * 그래서 화면이 하는 일이 둘로 갈린다.
+ *   - 자동: 윙끼리 견준다. 어긋나면 매출 수집이 빠진 것이다.
+ *   - 수동: 판매자가 쿠팡 정산서 금액을 적어 넣으면 윙+그로스 전체로 견준다.
+ *     그로스 수수료율이 맞는지 확인할 수 있는 길은 지금 이것뿐이라,
+ *     그로스 매출이 있는 달에는 적어 달라고 화면에서 먼저 청한다.
  *
  * 차이를 곧바로 '오류'라고 부르지 않는다. 반품 차감·판매장려금·지급 지연이
- * 섞여 있어서다. 대신 어긋났을 때 그로스 수수료율을 몇 %로 봐야 맞는지
- * 역산해 보여 준다 — 원인을 찾는 실마리는 대개 거기다.
+ * 섞여 있어서다.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Loader2, Pencil, Scale, TriangleAlert } from 'lucide-react';
@@ -78,6 +82,9 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
 
   const off = rows.filter(r => r.verdict === 'off');
   const pending = rows.filter(r => r.verdict === 'pending');
+  // 그로스 매출이 있는데 정산서 금액을 안 적은 달 — 그로스가 대조 밖에 있다.
+  const growthUnchecked = rows.filter(r => r.growthSettlement > 0 && r.scope !== 'all');
+  const offWithRate = off.find(r => r.impliedGrowthFeeRate !== null);
 
   return (
     <div className="rounded-panel border border-line bg-paper p-5">
@@ -87,14 +94,26 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
       </div>
       <p className="text-[12.5px] leading-relaxed text-ink-2">
         우리가 계산한 정산예정액과 쿠팡이 잡은 <b>정산대상액</b>(수수료 뺀 금액)을 매출인식월끼리 맞춰 봅니다.
-        윙은 쿠팡이 준 금액이라 맞는 게 정상이고, <b>로켓그로스는 우리가 만든 값</b>이라 여기서 확인해야 합니다.
+        쿠팡 지급내역 API에는 <b>판매자배송(윙)만</b> 들어오므로 자동 대조는 윙끼리 합니다.
+        <b> 로켓그로스</b>는 정산서 금액을 적어 주셔야 견줄 수 있습니다.
       </p>
       {error && <p className="mt-2 text-[12px] text-critical">{error}</p>}
+
+      {growthUnchecked.length > 0 && (
+        <p className="mt-3 rounded-card border border-accent-line bg-accent-soft px-3 py-2 text-[12.5px] leading-relaxed text-ink-2">
+          <b>로켓그로스는 아직 대조되지 않았습니다.</b> 쿠팡이 그로스 정산액을 API로 주지 않아
+          우리가 계산해 쓰고 있습니다 — 이 계산이 틀리면 순이익이 조용히 부풀고 몇 달 뒤 통장을 보고서야 압니다.
+          {' '}쿠팡 정산서의 <b>윙+그로스 합계</b>를 [정산서 입력]에 적어 주시면 그 달은 전체로 견주고,
+          어긋나면 그로스 수수료율을 몇 %로 봐야 맞는지 역산해 드립니다.
+          {' '}(해당 달: {growthUnchecked.map(r => monthLabel(r.month)).join(', ')})
+        </p>
+      )}
 
       {off.length === 0 && pending.length > 0 && (
         <p className="mt-3 rounded-card border border-line bg-paper-2 px-3 py-2 text-[12.5px] leading-relaxed text-ink-2">
           {pending.map(r => monthLabel(r.month)).join(', ')}은 아직 집계 중입니다 —
-          최종액(30%)이 안 들어왔거나 그 달 매출 자료가 온전하지 않습니다. 어긋난 것이 아닙니다.
+          쿠팡이 그 달 매출 인식을 안 끝냈거나, 그 달 윙 매출 자료를 우리가 온전히 갖고 있지 않습니다.
+          어긋난 것이 아닙니다.
         </p>
       )}
 
@@ -103,9 +122,9 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
           <TriangleAlert className="mt-[2px] h-3.5 w-3.5 shrink-0" />
           <span>
             {off.map(r => monthLabel(r.month)).join(', ')}이 5% 넘게 어긋났습니다.
-            {off[0].impliedGrowthFeeRate !== null && (
-              <> 그로스 수수료율을 {feeRate}% 대신 <b>{off[0].impliedGrowthFeeRate}%</b>로 봐야 맞는 금액입니다.</>
-            )}
+            {offWithRate
+              ? <> 그로스 수수료율을 {feeRate}% 대신 <b>{offWithRate.impliedGrowthFeeRate}%</b>로 봐야 맞는 금액입니다.</>
+              : <> 윙끼리 견준 값이라 그로스 수수료와는 무관합니다 — 그 달 윙 매출 수집이 빠졌는지 보세요.</>}
           </span>
         </p>
       )}
@@ -135,8 +154,13 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
                   </td>
                   <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
                     <span className="text-[13px] text-ink">{won(r.ours)}</span>
+                    {/* 무엇이 들어간 금액인지 반드시 밝힌다. 윙만 견준 달에
+                        윙+그로스 합계를 적어 두면 표를 읽는 사람이 차이를
+                        그로스 탓으로 잘못 돌린다. */}
                     <span className="mt-0.5 block text-[11px] text-ink-3">
-                      윙 {won(r.marketSettlement)} · 그로스 {won(r.growthSettlement)}
+                      {r.scope === 'all'
+                        ? <>윙 {won(r.marketSettlement)} · 그로스 {won(r.growthSettlement)}</>
+                        : <>윙만{r.growthSettlement > 0 && <> · 그로스 {won(r.growthSettlement)}은 대조 밖</>}</>}
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-3 py-3 text-right tabular-nums">
@@ -147,8 +171,8 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
                           value={draft}
                           onChange={e => setDraft(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') void save(r.month); if (e.key === 'Escape') setEditing(null); }}
-                          placeholder="정산서 금액"
-                          className="w-28 rounded-control border border-accent-line bg-paper px-2 py-1 text-right text-[12.5px] text-ink outline-none"
+                          placeholder="윙+그로스 합계"
+                          className="w-32 rounded-control border border-accent-line bg-paper px-2 py-1 text-right text-[12.5px] text-ink outline-none"
                         />
                         <button onClick={() => void save(r.month)} disabled={saving}
                           className="rounded-control border border-line p-1 text-ink-2 hover:text-accent disabled:opacity-50">
@@ -161,7 +185,7 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
                       <>
                         <span className="text-[13px] text-ink">{won(r.reference)}</span>
                         <span className="mt-0.5 block text-[11px] text-ink-3">
-                          {r.referenceSource === 'actual' ? '정산서 입력값' : '쿠팡 지급내역'}
+                          {r.referenceSource === 'actual' ? '정산서 입력값 (윙+그로스)' : '쿠팡 지급내역 (윙)'}
                           {r.pendingLast > 0 && (
                             <span className="mt-0.5 block text-[10.5px] text-caution">
                               최종액 {won(r.pendingLast)} 미도래
@@ -179,7 +203,9 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
                         <span className={`text-[13px] font-semibold ${r.verdict === 'ok' ? 'text-ink' : r.verdict === 'off' ? 'text-critical' : 'text-caution'}`}>
                           {r.diff > 0 ? '+' : ''}{won(r.diff)}
                         </span>
-                        <span className="mt-0.5 block text-[11px] text-ink-3">{r.diffRate}%</span>
+                        <span className="mt-0.5 block text-[11px] text-ink-3">
+                          {r.diffRate === null ? '판정 보류' : `${r.diffRate}%`}
+                        </span>
                       </>
                     )}
                   </td>
@@ -213,8 +239,10 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
 
       <div className="mt-3 space-y-1 text-[11.5px] leading-relaxed text-ink-3">
         <p>
-          <b>실제 지급액</b>은 쿠팡 지급내역을 자동으로 씁니다. 정산서에만 있는 차감이나 장려금이 있으면
-          [정산서 입력]으로 실제 받은 금액을 적어 주세요 — 적어 둔 값이 우선합니다. 0을 넣으면 지워집니다.
+          <b>쿠팡 지급내역에는 로켓그로스가 없습니다.</b> 판매자배송(윙) 정산만 내려옵니다.
+          그래서 자동 대조는 윙끼리만 하고, 그로스 금액은 '대조 밖'으로 적어 둡니다.
+          [정산서 입력]에 쿠팡 정산서의 <b>윙+그로스 합계</b>를 적으시면 그 달은 전체로 견줍니다 —
+          적어 둔 값이 지급내역보다 우선합니다. 0을 넣으면 지워집니다.
         </p>
         <p>
           <b>쿠팡 주정산은 두 번에 나눠 들어옵니다.</b> 한 주(월~일) 구매확정 매출에서 판매수수료를 뺀 것이
@@ -225,13 +253,15 @@ export function SettlementCheck({ feeRateHint }: { feeRateHint?: number }) {
           어긋난 것처럼 보입니다.
         </p>
         <p>
-          <b>집계 중</b>은 아직 견줄 때가 아니라는 뜻입니다. 최종액이 안 들어왔거나, 그 달 매출 자료를 우리가
-          온전히 갖고 있지 않은 경우입니다. 그런 달까지 '어긋났습니다'로 칠하면 진짜 어긋난 달이 묻힙니다.
+          <b>집계 중</b>은 아직 견줄 때가 아니라는 뜻입니다. 쿠팡이 그 달 매출 인식을 안 끝냈거나,
+          그 달 윙 매출 자료를 우리가 온전히 갖고 있지 않은 경우입니다. 말일에 팔린 것이 다음 달에
+          구매확정되면 다음 달 매출로 잡히므로, 달이 지났다고 바로 끝나는 것이 아닙니다.
           정산서 금액을 직접 적어 넣으시면 그 달은 바로 판정합니다.
         </p>
         <p>
           <b>역산 수수료율</b>은 차이를 전부 로켓그로스 수수료 탓으로 돌렸을 때 나오는 값입니다.
-          지금 쓰는 값은 {feeRate}%(부가세 포함)입니다. 반품 차감이나 지급 지연이 섞이면 이 값이 부풀어
+          지금 쓰는 값은 {feeRate}%(부가세 포함)입니다. 그로스가 대조에 들어간 달 —
+          즉 정산서 금액을 적어 넣은 달에만 나옵니다. 반품 차감이나 지급 지연이 섞이면 이 값이 부풀어
           보이므로, 여러 달이 같은 방향으로 어긋날 때만 요율을 의심하세요.
         </p>
         <p>이번 달은 지급이 끝나지 않아 늘 어긋나 보이므로 지난달까지만 보여 줍니다.</p>

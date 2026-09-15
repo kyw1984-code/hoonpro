@@ -254,8 +254,10 @@ export interface SettlementCheckRow {
   diffRate: number | null;
   impliedGrowthFeeRate: number | null;
   verdict: 'ok' | 'watch' | 'off' | 'pending' | 'unknown';
+  /** 무엇끼리 견줬나 — market(윙만) / all(윙+그로스) */
+  scope: 'market' | 'all';
   salesCovered: boolean;
-  cycleComplete: boolean;
+  recognitionComplete: boolean;
   /** 아직 안 들어온 최종액(30%) */
   pendingLast: number;
   note: string | null;
