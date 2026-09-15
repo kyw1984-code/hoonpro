@@ -45,8 +45,17 @@ export function SettlementCalendar() {
           value={won(data.totals.weeklyAverage)}
           sub={data.totals.weeksObserved > 0 ? `최근 ${data.totals.weeksObserved}주 기준` : '기록 없음'}
         />
-        <Stat label="일정 미배정" value={won(data.totals.unscheduled)} sub="지급일이 아직 안 잡힌 정산예정액" />
+        <Stat label="일정 미배정" value={won(data.totals.unscheduled)} sub="지급일이 아직 안 잡힌 정산예정액 (어림)" />
       </div>
+
+      {/* 이 숫자가 왜 어림인지 밝힌다. 모르면 '천만원이 비었다'로 읽힌다 */}
+      {data.totals.unscheduled > 0 && (
+        <p className="rounded-card border border-line bg-paper-2 px-3 py-2 text-[11.5px] leading-relaxed text-ink-3">
+          <b className="text-ink-2">'일정 미배정'은 어림입니다.</b> 우리는 <b>판매일</b> 기준으로 세고 쿠팡은 <b>구매확정일</b> 기준으로
+          매출을 인식합니다. 8월에 판 것이 9월에 구매확정되면 쿠팡 장부에서는 9월 매출이라, 최근 달일수록 이 숫자가 크게 나옵니다.
+          실제로 못 받는 돈이라는 뜻이 아닙니다 — 확정된 입금 일정은 아래 달력에서 보세요.
+        </p>
+      )}
 
       {!hasAny ? (
         <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">

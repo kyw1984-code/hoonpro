@@ -4158,7 +4158,7 @@ async function handleSettlement(userId: string, res: VercelResponse) {
   const [setRes, salesRes] = await Promise.all([
     selectAll((f, t) => supabase!
       .from('coupang_settlements')
-      .select('settlement_date, settlement_type, recognition_month, amount, status')
+      .select('settlement_date, settlement_type, recognition_month, amount, target_amount, status')
       .eq('user_id', userId)
       .gte('settlement_date', from)
       .lte('settlement_date', to)
@@ -4196,6 +4196,11 @@ async function handleSettlement(userId: string, res: VercelResponse) {
   // '일정 미배정' = 매출은 인식됐는데 그 인식월에 대한 지급 일정이 아직 없는 몫.
   // 예전에는 90일 매출 총액에서 ±90일 지급 총액을 뺐는데, 두 구간이 서로 다른
   // 매출을 가리켜 거의 항상 0으로 눌렸다. 인식월끼리 맞춰 비교한다.
+  //
+  // ⚠ 이 숫자는 어림이다. 우리는 '판매일' 기준으로 세고 쿠팡은 '구매확정일'
+  //   기준으로 인식한다. 8월에 팔린 것이 9월에 구매확정되면 쿠팡 장부에서는
+  //   9월 매출이라, 최근 달일수록 우리 쪽이 크게 나온다. 화면에 그 뜻을
+  //   적어 두고, 여기서는 정확한 척하지 않는다.
   const salesByMonth = new Map<string, number>();
   for (const s of salesRes.rows) {
     const m = String(s.sale_date).slice(0, 7);
@@ -4205,7 +4210,11 @@ async function handleSettlement(userId: string, res: VercelResponse) {
   for (const s of setRes.rows) {
     const m = String(s.recognition_month ?? '').slice(0, 7);
     if (!m) continue;
-    plannedByMonth.set(m, (plannedByMonth.get(m) ?? 0) + (Number(s.amount) || 0));
+    // 지급 일정이 '잡혔는지'를 보는 것이므로 정산대상액을 쓴다. 통장에 들어온
+    // 돈(70%)으로 세면 아직 안 들어온 최종액 30%가 매달 '미배정'으로 잡힌다 —
+    // 일정은 이미 잡혀 있는데도.
+    const planned = Number(s.target_amount) || Number(s.amount) || 0;
+    plannedByMonth.set(m, (plannedByMonth.get(m) ?? 0) + planned);
   }
   let unscheduled = 0;
   for (const [m, expected] of salesByMonth) {
