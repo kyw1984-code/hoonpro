@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CreditCard, Ticket, Plus, RefreshCw, Power, Loader2, AlertTriangle } from 'lucide-react';
+import { CreditCard, Ticket, Plus, RefreshCw, Power, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
 import { couponBenefitLabel } from '../../lib/coupon';
 import { getToken } from '../../lib/auth';
 import { won } from '../../lib/coupang';
@@ -32,6 +32,8 @@ interface CouponRow {
   expires_at: string | null;
   active: boolean;
   note: string | null;
+  /** 지금 이 쿠폰으로 할인받고 있는 구독 수 — 서버가 세어서 내려준다 */
+  inUse?: number;
 }
 
 const SUB_STATUS: Record<string, { text: string; cls: string }> = {
@@ -166,6 +168,35 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
       await reload();
     } catch (e: any) {
       showToast(e?.message ?? '쿠폰 생성에 실패했습니다.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * 쿠폰 삭제.
+   *
+   * 쓰고 있는 사람이 있으면 서버가 409로 막는다. 여기서도 코드를 직접 치게
+   * 해서 손이 미끄러지는 것을 한 번 더 거른다 — 되돌릴 수 없는 일이다.
+   */
+  const deleteCoupon = async (c: CouponRow) => {
+    const typed = window.prompt(
+      `'${c.code}' 쿠폰을 영구 삭제합니다. 되돌릴 수 없습니다.\n` +
+      `사용 기록 ${c.redeemed_count}건도 함께 지워집니다.\n\n` +
+      `확인하려면 쿠폰 코드를 그대로 입력해주세요.`,
+    );
+    if (typed === null) return;
+    if (typed.trim() !== c.code) {
+      showToast('코드가 다릅니다. 삭제하지 않았습니다.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await callBilling('admin-coupon-delete', { id: c.id });
+      showToast(`'${c.code}' 쿠폰을 삭제했습니다.`);
+      await reload();
+    } catch (e: any) {
+      showToast(e?.message ?? '쿠폰을 삭제하지 못했습니다.');
     } finally {
       setBusy(false);
     }
@@ -588,6 +619,10 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 tabular-nums text-ink-2">
                         {c.redeemed_count}{c.max_redemptions !== null && ` / ${c.max_redemptions}`}
+                        {/* 지금 할인받고 있는 사람 수. 이게 0이어야 지울 수 있다 */}
+                        {(c.inUse ?? 0) > 0 && (
+                          <span className="mt-0.5 block text-[11px] font-semibold text-accent">할인 중 {c.inUse}명</span>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-ink-2">{c.expires_at ? c.expires_at.slice(0, 10) : '무기한'}</td>
                       <td className="max-w-[180px] truncate px-4 py-3 text-[12px] text-ink-3">{c.note ?? ''}</td>
@@ -597,13 +632,27 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => toggleCoupon(c)}
-                          disabled={busy}
-                          className="rounded-control bg-paper-2 px-2.5 py-1 text-xs text-ink transition-colors hover:bg-line disabled:opacity-40"
-                        >
-                          {c.active ? '중지' : '재개'}
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => toggleCoupon(c)}
+                            disabled={busy}
+                            className="rounded-control bg-paper-2 px-2.5 py-1 text-xs text-ink transition-colors hover:bg-line disabled:opacity-40"
+                          >
+                            {c.active ? '중지' : '재개'}
+                          </button>
+                          {/* 할인받는 사람이 있으면 아예 누를 수 없게 한다.
+                              눌러서 오류를 보는 것보다 못 누르는 편이 낫다. */}
+                          <button
+                            onClick={() => deleteCoupon(c)}
+                            disabled={busy || (c.inUse ?? 0) > 0}
+                            title={(c.inUse ?? 0) > 0
+                              ? `${c.inUse}명이 이 쿠폰으로 할인받는 중이라 삭제할 수 없습니다. [중지]를 쓰세요.`
+                              : '쿠폰 영구 삭제'}
+                            className="rounded-control border border-line px-2 py-1 text-xs text-ink-3 transition-colors hover:border-critical/40 hover:bg-critical-soft hover:text-critical disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-line disabled:hover:bg-transparent disabled:hover:text-ink-3"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -612,6 +661,11 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
             </div>
           </div>
         )}
+
+        <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">
+          <b>중지</b>는 새로 쓰는 것만 막습니다 — 이미 이 쿠폰으로 구독 중인 분들의 할인은 그대로 유지됩니다.
+          <b className="ml-1">삭제</b>는 되돌릴 수 없고 사용 기록까지 지웁니다. 할인받는 분이 한 명이라도 있으면 누를 수 없습니다.
+        </p>
       </div>
 
       {/* 구독 현황 */}

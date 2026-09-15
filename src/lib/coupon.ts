@@ -104,3 +104,28 @@ export function couponBenefitLabel(coupon: CouponLike): string {
   else if (coupon.type === 'amount_monthly') parts.push(`월 ${coupon.value.toLocaleString('ko-KR')}원 할인`);
   return parts.join(' + ') || '-';
 }
+
+/**
+ * 이 구독이 아직 쿠폰 할인을 받고 있는가.
+ *
+ * 쿠폰을 지워도 되는지 판단하는 기준이다. subscriptions.coupon_id에는 외래키가
+ * 없어서 쿠폰을 지워도 DB는 말없이 받아 준다. 그러면 다음 갱신 때 쿠폰 조회가
+ * 빈 값이 되어 조용히 정가로 청구된다 — "해지할 때까지 할인"이라고 약속하고
+ * 받은 사람이 어느 달 갑자기 더 내게 된다.
+ *
+ * 회차를 다 쓴 구독(remaining이 0)은 이미 정가를 내고 있으므로 지워도 달라질
+ * 게 없다. null은 무제한이라 영원히 할인 중이다.
+ */
+export function stillDiscounted(sub: {
+  coupon_id?: string | null;
+  coupon_remaining_cycles?: number | null;
+  status?: string | null;
+}): boolean {
+  if (!sub.coupon_id) return false;
+  if (!LIVE_COUPON_STATUSES.includes(String(sub.status ?? ''))) return false;
+  const remaining = sub.coupon_remaining_cycles;
+  return remaining === null || remaining === undefined || remaining > 0;
+}
+
+/** 아직 할인이 살아 있을 수 있는 구독 상태. 해지·만료된 구독은 지워도 영향이 없다 */
+export const LIVE_COUPON_STATUSES = ['trial', 'active', 'past_due', 'paused'];

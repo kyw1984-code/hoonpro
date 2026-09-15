@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import { isOwnReferral, referralNote, referrerIdFromNote } from '../src/lib/referral.js';
-import { applyDiscounts, trialDaysOf, referralRewardAmount } from '../src/lib/coupon.js';
+import { applyDiscounts, trialDaysOf, referralRewardAmount, stillDiscounted, LIVE_COUPON_STATUSES } from '../src/lib/coupon.js';
 import { parseLimits } from '../src/lib/featureLimits.js';
 import { withVat } from '../src/lib/vat.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
@@ -645,6 +645,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (action === 'admin-coupons') return await adminCoupons(res);
       if (action === 'admin-coupon-create') return await adminCouponCreate(req, res);
       if (action === 'admin-coupon-update') return await adminCouponUpdate(req, res);
+      if (action === 'admin-coupon-delete') return await adminCouponDelete(req, res);
       if (action === 'admin-subscriptions') return await adminSubscriptions(res);
       if (action === 'admin-config') return await adminBillingConfig(req, res);
     }
@@ -1698,7 +1699,73 @@ async function adminStats(res: VercelResponse) {
 
 async function adminCoupons(res: VercelResponse) {
   const { data } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
-  return res.status(200).json({ coupons: data ?? [] });
+
+  // 쿠폰마다 '지금 이 할인을 받고 있는 구독'이 몇 건인지 함께 센다.
+  // 이 숫자가 없으면 관리자는 지워도 되는 쿠폰인지 알 수 없다.
+  const { data: live } = await supabase
+    .from('subscriptions')
+    .select('coupon_id, coupon_remaining_cycles')
+    .in('status', LIVE_COUPON_STATUSES)
+    .not('coupon_id', 'is', null);
+
+  const inUse: Record<string, number> = {};
+  for (const sub of live ?? []) {
+    // 판정은 src/lib/coupon.ts 한 곳에 둔다. 목록의 '할인 중 N명'과 삭제를
+    // 막는 기준이 갈라지면, 눌러도 안 되는 버튼이 멀쩡히 활성화된다.
+    if (!stillDiscounted({ ...sub, status: 'active' })) continue;
+    const id = String(sub.coupon_id);
+    inUse[id] = (inUse[id] ?? 0) + 1;
+  }
+
+  return res.status(200).json({
+    coupons: (data ?? []).map(c => ({ ...c, inUse: inUse[String(c.id)] ?? 0 })),
+  });
+}
+
+
+/**
+ * 쿠폰 삭제.
+ *
+ * subscriptions.coupon_id에는 외래키가 걸려 있지 않다. 그래서 쿠폰을 지워도
+ * DB는 아무 말 없이 받아 주고, 그 쿠폰으로 구독 중인 사람은 다음 갱신 때
+ * 쿠폰 조회가 빈 값이 되어 조용히 정가로 청구된다. "해지할 때까지 할인"이라고
+ * 약속하고 받은 사람이 어느 달 갑자기 11,000원을 더 내는 것이다.
+ *
+ * 그래서 쓰고 있는 사람이 있으면 지우지 않는다. 대신 '중지'를 안내한다 —
+ * 중지는 새 사용만 막고 이미 받은 할인은 건드리지 않는다.
+ */
+async function adminCouponDelete(req: VercelRequest, res: VercelResponse) {
+  const id = String(req.body?.id ?? '').trim();
+  if (!id) return res.status(400).json({ error: '쿠폰을 지정해주세요.' });
+
+  const { data: coupon } = await supabase
+    .from('coupons').select('id, code').eq('id', id).maybeSingle();
+  if (!coupon) return res.status(404).json({ error: '이미 삭제된 쿠폰입니다.' });
+
+  const { data: live } = await supabase
+    .from('subscriptions')
+    .select('id, status, coupon_remaining_cycles')
+    .eq('coupon_id', id)
+    .in('status', LIVE_COUPON_STATUSES);
+
+  const discountedCount = (live ?? []).filter(
+    s => stillDiscounted({ ...s, coupon_id: id, status: s.status }),
+  ).length;
+
+  if (discountedCount > 0) {
+    return res.status(409).json({
+      error:
+        `이 쿠폰으로 할인받는 구독이 ${discountedCount}건 있어 삭제할 수 없습니다. ` +
+        `지우면 그분들이 다음 결제부터 말없이 정가로 청구됩니다. ` +
+        `새로 쓰는 것만 막으려면 [중지]를 눌러주세요 — 이미 받은 할인은 그대로 유지됩니다.`,
+      inUse: discountedCount,
+    });
+  }
+
+  // 사용 기록(coupon_redemptions)은 외래키가 CASCADE라 함께 지워진다.
+  const { error } = await supabase.from('coupons').delete().eq('id', id);
+  if (error) return res.status(500).json({ error: '쿠폰을 삭제하지 못했습니다.' });
+  return res.status(200).json({ ok: true, code: coupon.code });
 }
 
 async function adminCouponCreate(req: VercelRequest, res: VercelResponse) {
