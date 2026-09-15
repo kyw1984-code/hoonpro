@@ -1,5 +1,5 @@
-import React, { useRef, useState } from 'react';
-import { MessageCircleQuestion, Send, Loader2, ThumbsUp, ThumbsDown, Sparkles, AlertCircle } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { MessageCircleQuestion, Send, Loader2, ThumbsUp, ThumbsDown, Sparkles, AlertCircle, MailCheck, X } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 
 interface QAItem {
@@ -26,6 +26,35 @@ export const AskHoonpro: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const nextId = useRef(1);
   const listTopRef = useRef<HTMLDivElement>(null);
+  /**
+   * 훈프로가 직접 단 답변.
+   *
+   * AI가 모르는 질문은 관리자 화면으로 넘어가고, 답이 달리면 메일이 간다.
+   * 메일을 안 보는 사람도 있어서 여기서도 보여준다 — 둘 중 하나는 닿는다.
+   */
+  const [direct, setDirect] = useState<any[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/qa?action=my-answers', { headers: { Authorization: `Bearer ${getToken()}` } });
+        const data = await res.json();
+        // 안 본 것만 띄운다. 이미 확인한 답까지 매번 뜨면 곧 무시하게 된다.
+        setDirect((data.answers ?? []).filter((a: any) => !a.seen_at));
+      } catch { /* 답변 알림 실패가 질문을 막지 않는다 */ }
+    })();
+  }, []);
+
+  const dismissDirect = async (id: string) => {
+    setDirect(d => d.filter(a => a.id !== id));
+    try {
+      await fetch('/api/qa?action=mark-seen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ id }),
+      });
+    } catch { /* 확인 표시 실패는 다음에 다시 뜨는 것뿐이다 */ }
+  };
 
   const ask = async (q: string) => {
     const trimmed = q.trim();
@@ -92,7 +121,30 @@ export const AskHoonpro: React.FC = () => {
         </div>
         <p className="mb-6 text-[13px] text-ink-2">
           쿠팡 판매, 막히는 지점을 물어보세요. <span className="font-semibold text-ink">훈프로의 노하우를 학습한 AI</span>가 답합니다.
+          AI가 모르는 질문은 훈프로에게 전달되고, 답이 준비되면 메일과 이 화면으로 알려드립니다.
         </p>
+
+        {/* 훈프로가 직접 단 답변 — AI가 못 답한 질문에 사람이 답한 것이라
+            일반 답변과 섞지 않고 맨 위에 따로 둔다 */}
+        {direct.map(a => (
+          <div key={a.id} className="mb-4 rounded-card border border-accent-line bg-accent-soft p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <MailCheck className="h-4 w-4 text-accent" />
+              <span className="text-[13px] font-semibold text-accent">훈프로가 직접 답변드립니다</span>
+              <span className="text-[11.5px] text-ink-3">
+                {a.answered_at ? new Date(a.answered_at).toLocaleDateString('ko-KR') : ''}
+              </span>
+              <button onClick={() => void dismissDirect(a.id)} title="확인했습니다"
+                className="ml-auto rounded-control p-1 text-ink-3 transition-colors hover:bg-paper hover:text-ink">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <p className="mb-2 whitespace-pre-wrap border-l-2 border-line pl-3 text-[12.5px] leading-relaxed text-ink-3">
+              {a.question}
+            </p>
+            <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-ink">{a.admin_answer}</p>
+          </div>
+        ))}
 
         {/* 질문 입력 */}
         <form

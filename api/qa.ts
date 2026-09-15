@@ -6,6 +6,8 @@ import jwt from 'jsonwebtoken';
 import { buildSellerContext } from '../lib/coupang-context.js';
 import { calcCostUsd } from '../src/lib/pricing.js';
 import { checkAccess } from '../src/lib/accessGate.js';
+import { emailFrom } from '../src/lib/emailFrom.js';
+import { wrapEmail, emailButton, emailQuote, toHtmlParagraphs } from '../src/lib/emailTemplate.js';
 
 // "훈프로 코칭AI" RAG 챗봇 통합 API
 // Vercel Hobby 함수 개수 제한(12개) 때문에 action 파라미터로 통합
@@ -221,7 +223,8 @@ async function embedTexts(texts: string[]): Promise<number[][]> {
 
 const NOT_COVERED_ANSWER =
   '음, 이 부분은 아직 강의 자료에서 다루지 않은 내용이라 함부로 답변드리기 어렵네요. 🙏\n\n' +
-  '괜히 부정확한 답변으로 혼란을 드리는 것보다, 커뮤니티(단톡방)에 질문 남겨주시면 제가 직접 확인하고 답변드릴게요. ' +
+  '괜히 부정확한 답변으로 혼란을 드리는 것보다, **이 질문을 훈프로에게 그대로 전달해 두었습니다.** ' +
+  '확인 후 직접 답변드리고, 답이 준비되면 메일로 알려드릴게요. 이 화면에서도 다시 보실 수 있습니다.\n\n' +
   '좋은 질문은 강의 자료에도 반영하겠습니다!';
 
 function sensitiveAnswer(topic: string): string {
@@ -291,6 +294,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         qaConfigExpiresAt = Date.now() + QA_CONFIG_TTL_MS;
         return res.status(200).json({ enabled, message: enabled ? '수강생에게 공개됐습니다.' : '수강생 사용이 중지됐습니다. (관리자는 계속 사용 가능)' });
       }
+      case 'pending':
+        if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+        return await handlePending(res);
+      case 'answer':
+        if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+        if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+        return await handleAnswer(req, res, decoded);
+      case 'my-answers':
+        return await handleMyAnswers(res, decoded);
+      case 'mark-seen':
+        if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+        return await handleMarkSeen(req, res, decoded);
       case 'ingest':
         if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
         return await handleIngest(req, res, decoded);
@@ -691,6 +706,127 @@ async function handleDelete(req: VercelRequest, res: VercelResponse) {
   const { error } = await supabase.from('knowledge_docs').delete().eq('id', docId);
   if (error) return res.status(500).json({ error: '삭제에 실패했습니다.' });
   return res.status(200).json({ ok: true, message: '자료가 삭제됐습니다.' });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 답 못 한 질문 → 운영자가 직접 답 → 질문자에게 전달
+//
+// 코칭AI가 모르는 질문은 지금까지 "단톡방에 물어보세요"로 끝났다. 질문은
+// 로그에만 남고 아무도 다시 보지 않았다. 정작 단톡방에서 질문을 어려워하는
+// 분들 때문에 만든 기능인데, 막히면 결국 같은 자리로 돌려보낸 셈이다.
+//
+// 이제 그 질문이 관리자 화면에 쌓이고, 운영자가 답을 달면 질문자에게 메일과
+// 앱 알림으로 간다.
+// ═══════════════════════════════════════════════════════════════
+
+/** 관리자: 아직 답이 안 달린 질문들 */
+async function handlePending(res: VercelResponse) {
+  const { data, error } = await supabase
+    .from('qa_logs')
+    .select('id, question, answer, model, created_at, users(name, email)')
+    .eq('matched', false)
+    .is('admin_answer', null)
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) {
+    console.error('qa pending error:', error);
+    return res.status(500).json({ error: '미답변 목록을 불러오지 못했습니다.' });
+  }
+  return res.status(200).json({ pending: data ?? [], count: (data ?? []).length });
+}
+
+/**
+ * 관리자가 답을 단다. 저장이 먼저, 메일은 그 다음이다.
+ *
+ * 메일이 실패해도 답변은 남아야 한다 — 질문자가 앱에 들어오면 볼 수 있고,
+ * 관리자도 '보냈는데 안 갔다'를 알 수 있다. 반대로 하면 메일 한 번 실패에
+ * 애써 쓴 답이 사라진다.
+ */
+async function handleAnswer(req: VercelRequest, res: VercelResponse, decoded: any) {
+  const id = String(req.body?.id ?? '').trim();
+  const answer = String(req.body?.answer ?? '').trim();
+  if (!id) return res.status(400).json({ error: '어느 질문인지 지정해주세요.' });
+  if (answer.length < 2) return res.status(400).json({ error: '답변 내용을 입력해주세요.' });
+  if (answer.length > 5000) return res.status(400).json({ error: '답변이 너무 깁니다. (5,000자 이하)' });
+
+  const { data: log } = await supabase
+    .from('qa_logs')
+    .select('id, question, user_id, admin_answer, users(name, email)')
+    .eq('id', id)
+    .maybeSingle();
+  if (!log) return res.status(404).json({ error: '질문을 찾을 수 없습니다.' });
+
+  const { error } = await supabase.from('qa_logs').update({
+    admin_answer: answer,
+    answered_at: new Date().toISOString(),
+    answered_by: decoded.userId,
+    // 고쳐 쓴 답이면 질문자가 다시 보도록 확인 표시를 지운다
+    seen_at: null,
+  }).eq('id', id);
+  if (error) return res.status(500).json({ error: '답변을 저장하지 못했습니다.' });
+
+  // 메일. 회원이 탈퇴했거나 주소가 없으면 앱 알림만 남는다.
+  const to = (log as any).users?.email ?? '';
+  const name = (log as any).users?.name ?? '';
+  let mailed = false;
+  if (to && process.env.RESEND_API_KEY) {
+    try {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: emailFrom(),
+          to: [to],
+          subject: '[훈프로] 문의하신 내용에 답변드립니다',
+          html: wrapEmail(
+            '훈프로가 직접 답변드립니다',
+            `<p>${name ? name + '님, ' : ''}코칭AI가 답을 드리지 못했던 질문에 직접 답변드립니다.</p>` +
+            `<p style="color:#8a92a6;font-size:12.5px;margin-bottom:2px;">보내주신 질문</p>` +
+            emailQuote(log.question) +
+            `<p style="color:#8a92a6;font-size:12.5px;margin-bottom:2px;">답변</p>` +
+            `<div style="color:#e8ecf5;">${toHtmlParagraphs(answer)}</div>` +
+            emailButton('훈프로 코칭AI 열기'),
+            '이 답변은 훈프로 코칭AI에서도 다시 보실 수 있습니다.',
+          ),
+        }),
+      });
+      mailed = r.ok;
+      if (r.ok) await supabase.from('qa_logs').update({ mail_sent_at: new Date().toISOString() }).eq('id', id);
+    } catch { /* 메일 실패가 답변 저장을 되돌리지 않는다 */ }
+  }
+
+  return res.status(200).json({ ok: true, mailed, to: to ? true : false });
+}
+
+/** 질문자: 내 질문에 달린 운영자 답변 중 아직 안 본 것 */
+async function handleMyAnswers(res: VercelResponse, decoded: any) {
+  const { data, error } = await supabase
+    .from('qa_logs')
+    .select('id, question, admin_answer, answered_at, seen_at')
+    .eq('user_id', decoded.userId)
+    .not('admin_answer', 'is', null)
+    .order('answered_at', { ascending: false })
+    .limit(20);
+  if (error) return res.status(200).json({ answers: [], unseen: 0 });
+
+  const answers = data ?? [];
+  return res.status(200).json({
+    answers,
+    unseen: answers.filter((a: any) => !a.seen_at).length,
+  });
+}
+
+/** 질문자가 확인했다. 확인한 뒤로는 알림을 띄우지 않는다 */
+async function handleMarkSeen(req: VercelRequest, res: VercelResponse, decoded: any) {
+  const id = String(req.body?.id ?? '').trim();
+  let q = supabase.from('qa_logs').update({ seen_at: new Date().toISOString() })
+    .eq('user_id', decoded.userId)
+    .not('admin_answer', 'is', null)
+    .is('seen_at', null);
+  // id를 주면 그것만, 안 주면 전부 (화면에서 한 번에 닫을 때)
+  if (id) q = q.eq('id', id);
+  await q;
+  return res.status(200).json({ ok: true });
 }
 
 // ── 관리자: 질문/답변 로그 ──

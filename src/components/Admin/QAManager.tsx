@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { BookOpen, Upload, Trash2, Loader2, RefreshCw, MessageSquareText, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp, Pencil, X, Save } from 'lucide-react';
+import { BookOpen, Upload, Trash2, Loader2, RefreshCw, MessageSquareText, ThumbsUp, ThumbsDown, ChevronDown, ChevronUp, Pencil, X, Save, Send, HelpCircle } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 
 interface DocRow {
@@ -24,7 +24,9 @@ interface LogRow {
 }
 
 export function QAManager({ showToast }: { showToast: (msg: string) => void }) {
-  const [section, setSection] = useState<'docs' | 'logs'>('docs');
+  const [section, setSection] = useState<'docs' | 'pending' | 'logs'>('docs');
+  // 미답변 건수 — 탭에 숫자를 붙여야 들어가 볼 이유가 생긴다
+  const [pendingCount, setPendingCount] = useState(0);
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [toggling, setToggling] = useState(false);
 
@@ -102,20 +104,27 @@ export function QAManager({ showToast }: { showToast: (msg: string) => void }) {
       )}
 
       <div className="mb-5 flex gap-2">
-        {(['docs', 'logs'] as const).map(s => (
+        {(['docs', 'pending', 'logs'] as const).map(sec => (
           <button
-            key={s}
-            onClick={() => setSection(s)}
+            key={sec}
+            onClick={() => setSection(sec)}
             className={`rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors ${
-              section === s ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-line/60'
+              section === sec ? 'bg-ink text-paper' : 'bg-paper-2 text-ink-2 hover:bg-line/60'
             }`}
           >
-            {s === 'docs' ? '자료 관리' : '질문 로그'}
+            {sec === 'docs' ? '자료 관리' : sec === 'pending' ? '미답변' : '질문 로그'}
+            {sec === 'pending' && pendingCount > 0 && (
+              <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-[11px] font-bold ${
+                section === sec ? 'bg-paper text-ink' : 'bg-critical text-white'
+              }`}>{pendingCount}</span>
+            )}
           </button>
         ))}
       </div>
 
-      {section === 'docs' ? <DocsSection showToast={showToast} /> : <LogsSection />}
+      {section === 'docs' ? <DocsSection showToast={showToast} />
+        : section === 'pending' ? <PendingSection showToast={showToast} onCount={setPendingCount} />
+        : <LogsSection />}
     </div>
   );
 }
@@ -472,6 +481,122 @@ function LogsSection() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * 답 못 한 질문에 직접 답을 단다.
+ *
+ * 코칭AI가 모르면 예전에는 "단톡방에 물어보세요"로 끝났다. 정작 단톡방에서
+ * 질문을 어려워하는 분들 때문에 만든 기능인데 같은 자리로 돌려보낸 셈이었다.
+ * 여기 쌓인 질문에 답을 달면 질문자에게 메일과 앱 알림으로 간다.
+ */
+function PendingSection({ showToast, onCount }: { showToast: (m: string) => void; onCount: (n: number) => void }) {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [sending, setSending] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const res = await fetch('/api/qa?action=pending', { headers: { Authorization: `Bearer ${getToken()}` } });
+      const data = await res.json();
+      const list = Array.isArray(data.pending) ? data.pending : [];
+      setRows(list);
+      onCount(list.length);
+    } catch {
+      setRows([]);
+    }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const send = async (id: string) => {
+    const answer = (drafts[id] ?? '').trim();
+    if (answer.length < 2) { showToast('답변 내용을 입력해주세요.'); return; }
+    setSending(id);
+    try {
+      const res = await fetch('/api/qa?action=answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ id, answer }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) { showToast(data.error ?? '전달하지 못했습니다.'); return; }
+      // 메일이 안 갔어도 답변은 저장됐다. 그 차이를 그대로 알린다 —
+      // '보냈습니다'로 뭉뚱그리면 안 간 걸 모른다.
+      showToast(data.mailed
+        ? '답변을 메일로 보냈습니다. 앱에서도 볼 수 있습니다.'
+        : '답변을 저장했습니다. 메일은 나가지 않았지만 질문자가 앱에서 볼 수 있습니다.');
+      setDrafts(d => { const n = { ...d }; delete n[id]; return n; });
+      await load();
+    } catch (e: any) {
+      showToast(e?.message ?? '전달하지 못했습니다.');
+    } finally {
+      setSending(null);
+    }
+  };
+
+  if (rows === null) {
+    return <div className="flex items-center gap-2 py-12 text-ink-3"><Loader2 className="h-5 w-5 animate-spin" /><span className="text-[13px]">불러오는 중...</span></div>;
+  }
+
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2">
+        <HelpCircle className="h-4 w-4 text-accent" />
+        <h3 className="text-[15px] font-semibold text-ink">답변 대기 {rows.length}건</h3>
+        <button onClick={() => void load()} className="ml-auto flex items-center gap-1 text-[12px] text-ink-2 hover:text-ink">
+          <RefreshCw className="h-3.5 w-3.5" />새로고침
+        </button>
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="rounded-card border border-line bg-paper px-4 py-10 text-center text-[13px] text-ink-3">
+          답변을 기다리는 질문이 없습니다. 코칭AI가 모르는 질문이 들어오면 여기에 쌓입니다.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {rows.map(r => (
+            <div key={r.id} className="rounded-card border border-line bg-paper p-4">
+              <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <span className="text-[13px] font-semibold text-ink">{r.users?.name ?? '(탈퇴한 회원)'}</span>
+                <span className="text-[11.5px] text-ink-3">{r.users?.email ?? ''}</span>
+                <span className="ml-auto text-[11.5px] tabular-nums text-ink-3">
+                  {new Date(r.created_at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}
+                </span>
+              </div>
+              <p className="mb-3 whitespace-pre-wrap rounded-control border-l-2 border-accent-line bg-paper-2 px-3 py-2 text-[13.5px] leading-relaxed text-ink">
+                {r.question}
+              </p>
+              <textarea
+                value={drafts[r.id] ?? ''}
+                onChange={e => setDrafts(d => ({ ...d, [r.id]: e.target.value }))}
+                rows={4}
+                placeholder="여기에 답변을 쓰면 질문자에게 메일과 앱 알림으로 전달됩니다."
+                className="w-full rounded-control border border-line bg-paper-2 px-3 py-2 text-[13px] leading-relaxed text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
+              />
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  onClick={() => void send(r.id)}
+                  disabled={sending === r.id}
+                  className="inline-flex items-center gap-1.5 rounded-control bg-accent px-3 py-1.5 text-[12.5px] font-semibold text-paper disabled:opacity-50"
+                >
+                  {sending === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  답변 전달
+                </button>
+                {!r.users?.email && (
+                  <span className="text-[11.5px] text-caution">메일 주소가 없어 앱 알림으로만 전달됩니다.</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="mt-3 text-[11.5px] leading-relaxed text-ink-3">
+        코칭AI가 자료에서 근거를 못 찾은 질문만 모입니다. 답을 달면 질문자에게 메일이 가고, 앱 코칭AI 화면 위에도 뜹니다.
+        같은 질문이 반복되면 [자료 관리]에 그 내용을 넣어두세요 — 다음부터는 AI가 바로 답합니다.
+      </p>
     </div>
   );
 }
