@@ -1320,3 +1320,13 @@ create table if not exists cron_runs (
 );
 create index if not exists idx_cron_runs_job on cron_runs(job, run_at desc);
 alter table cron_runs enable row level security;
+
+-- subscriptions.coupon_id 외래키
+-- 없을 때 두 가지가 동시에 깨져 있었다.
+--  1) PostgREST가 coupons(code) 조인을 못 만들어 관리자 구독 목록 쿼리가
+--     통째로 실패했다. 부르는 쪽이 error를 버려서 "아직 구독이 없습니다"로만
+--     보였고, 칩의 숫자는 조인 없는 별도 쿼리라 멀쩡히 떴다.
+--  2) 쿠폰을 지우면 구독이 존재하지 않는 id를 가리킨 채 남았다.
+alter table subscriptions
+  add constraint subscriptions_coupon_id_fkey
+  foreign key (coupon_id) references coupons(id) on delete set null;
