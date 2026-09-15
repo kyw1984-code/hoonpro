@@ -2593,6 +2593,78 @@ async function handleCron(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, totalFavorites: keywords.length, crawled, results, alertMails, weeklyMails });
 }
 
+/**
+ * 저장해 둔 소싱 결과와 견줄 '지금' 값.
+ *
+ * Bright Data를 다시 부르지 않는다. 매일 도는 소싱 크론이 쌓아 둔 관측치를
+ * 그대로 읽는다. 저장본을 열 때마다 새로 긁으면 사용자당 월 비용이 붙고
+ * 그 사람의 하루 한도까지 깎인다 — 보기만 했는데 한도가 줄면 안 된다.
+ *
+ * 대신 자동 수집 대상이 아닌 키워드는 견줄 것이 없다. 그때는 없는 값을
+ * 지어내지 않고 '수집 대상이 아니다'라고 돌려준다.
+ */
+async function handleSavedCompare(req: VercelRequest, res: VercelResponse) {
+  if (!supabase) return res.status(500).json({ error: "서버 저장소가 설정되지 않았습니다." });
+
+  const keyword = String(req.query.keyword ?? "").trim().slice(0, 100);
+  if (!keyword) return res.status(400).json({ error: "키워드가 필요합니다." });
+
+  // 가장 최근 수집분만 본다. 한 번에 60개까지 들어오므로 넉넉히 200줄을 읽고
+  // 가장 최근 시각과 같은 날의 것만 남긴다.
+  const { data: rankRows } = await supabase
+    .from("sourcing_rank_obs")
+    .select("product_id, rank, price, captured_at")
+    .eq("keyword", keyword)
+    .order("captured_at", { ascending: false })
+    .limit(200);
+
+  const rows = rankRows ?? [];
+  if (rows.length === 0) {
+    return res.status(200).json({ keyword, tracked: false, capturedAt: null, products: [] });
+  }
+
+  const latestDay = String(rows[0].captured_at).slice(0, 10);
+  const latest = rows.filter((r: any) => String(r.captured_at).slice(0, 10) === latestDay);
+
+  // 리뷰 수는 순위 관측에 없어 상품 관측에서 가져온다. 상품마다 가장 최근 것만.
+  const { data: prodRows } = await supabase
+    .from("sourcing_product_obs")
+    .select("product_id, review_count, price, captured_at")
+    .eq("keyword", keyword)
+    .order("captured_at", { ascending: false })
+    .limit(300);
+
+  const reviewOf = new Map<string, number>();
+  const priceOf = new Map<string, number>();
+  for (const p of prodRows ?? []) {
+    const id = String(p.product_id);
+    if (!reviewOf.has(id) && p.review_count !== null) reviewOf.set(id, Number(p.review_count));
+    if (!priceOf.has(id) && p.price !== null) priceOf.set(id, Number(p.price));
+  }
+
+  const seen = new Set<string>();
+  const products = latest
+    .filter((r: any) => {
+      const id = String(r.product_id);
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .map((r: any) => ({
+      productId: String(r.product_id),
+      rank: r.rank === null || r.rank === undefined ? null : Number(r.rank),
+      price: r.price !== null && r.price !== undefined ? Number(r.price) : priceOf.get(String(r.product_id)) ?? null,
+      reviewCount: reviewOf.get(String(r.product_id)) ?? null,
+    }));
+
+  return res.status(200).json({
+    keyword,
+    tracked: true,
+    capturedAt: rows[0].captured_at,
+    products,
+  });
+}
+
 // ─── 메인 핸들러 ──────────────────────────────────────────────────────────────
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -2629,7 +2701,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 막는다 — 감추기만 하면 열려 있던 브라우저 탭이 계속 호출한다.
   const TAB_OF_TYPE: Record<string, "sourcing" | "ranktracker" | "review"> = {
     keywords: "sourcing", trend: "sourcing", briefing: "sourcing",
-    products: "sourcing", favorites: "sourcing",
+    products: "sourcing", favorites: "sourcing", "saved-compare": "sourcing",
     reviews: "review",
     rankwatch: "ranktracker",
   };
@@ -2646,5 +2718,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (type === "reviews") return handleReviews(req, res, decoded);
   if (type === "favorites") return handleFavorites(req, res, decoded);
   if (type === "rankwatch") return handleRankWatch(req, res, decoded);
+  if (type === "saved-compare") return handleSavedCompare(req, res);
   return res.status(400).json({ error: "type=keywords | trend | briefing | products | reviews | favorites | rankwatch 가 필요합니다." });
 }

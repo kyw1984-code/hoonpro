@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { FolderOpen, FileText, Image as ImageIcon, Loader2, RefreshCw, X, Copy, Download, MessageSquareText, TrendingUp, ExternalLink, BarChart3, ArrowRight } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import { ReviewSummaryView } from '../ReviewAnalyzer';
+import { diffSourcing, rankMoveLabel } from '../../lib/sourcingDiff';
 
 /** 종류마다 이름·아이콘이 다르다. 한 곳에 둬야 카드와 모달이 어긋나지 않는다 */
 const KIND_META: Record<string, { label: string; badge: string; Icon: typeof FileText }> = {
@@ -35,6 +36,12 @@ const SECTIONS: { key: string; label: string; kinds: string[] }[] = [
 ];
 const metaOf = (kind: string) => KIND_META[kind] ?? KIND_META['detail-plan'];
 
+/** 날짜 한 줄. 컴포넌트 안에만 두면 밖에서 쓸 수 없어 모듈 위로 올렸다 */
+const fmtDate = (s: string) => {
+  const d = new Date(s);
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+};
+
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -51,6 +58,7 @@ function SourcingSavedView({ payload }: { payload: any }) {
   const m = payload?.market;
   const products: any[] = Array.isArray(payload?.products) ? payload.products : [];
   const won = (n: any) => (typeof n === 'number' ? `${n.toLocaleString()}원` : '—');
+  const keyword = String(payload?.keyword ?? '').trim();
 
   return (
     <div className="flex flex-col gap-4">
@@ -110,8 +118,181 @@ function SourcingSavedView({ payload }: { payload: any }) {
         <p className="text-[13px] text-ink-3">저장된 상품 목록이 없습니다.</p>
       )}
 
+      {keyword && <SourcingCompare keyword={keyword} saved={products} savedAt={payload?.searchedAt ?? null} />}
+
       <p className="text-[11px] text-ink-3">
-        저장 시점의 결과입니다. 같은 키워드도 다시 조회하면 순위와 상품이 달라집니다.
+        위 표는 저장 시점의 결과입니다. 같은 키워드도 다시 조회하면 순위와 상품이 달라집니다.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * 저장 시점과 지금을 견준다.
+ *
+ * 열 때마다 새로 긁지 않는다 — Bright Data 비용이 붙고 그 사람의 하루 한도까지
+ * 깎인다. 매일 도는 소싱 크론이 쌓아 둔 관측치를 읽는다. 그래서 자동 수집
+ * 대상(관심 키워드·순위 추적)인 키워드만 견줄 수 있고, 아닌 키워드는 그렇다고
+ * 말한다. 없는 값을 지어내는 것보다 낫다.
+ *
+ * 여기서 제일 쓸모 있는 칸은 순위가 아니라 '리뷰 +N'이다. 저장 이후 붙은
+ * 리뷰가 그동안 그 상품이 얼마나 팔렸는지를 알려 준다.
+ */
+function SourcingCompare({ keyword, saved, savedAt }: { keyword: string; saved: any[]; savedAt: string | null }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'done' | 'untracked' | 'error'>('idle');
+  const [data, setData] = useState<ReturnType<typeof diffSourcing> | null>(null);
+  const [capturedAt, setCapturedAt] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const run = async () => {
+    setState('loading');
+    setErr(null);
+    try {
+      const res = await fetch(`/api/sourcing?type=saved-compare&keyword=${encodeURIComponent(keyword)}`, { headers: authHeaders() });
+      const d = await res.json();
+      if (!res.ok || d.error) { setErr(d.error || '불러오지 못했습니다.'); setState('error'); return; }
+      if (!d.tracked) { setState('untracked'); return; }
+      setCapturedAt(d.capturedAt ?? null);
+      setData(diffSourcing(saved, d.products ?? []));
+      setState('done');
+    } catch (e: any) {
+      setErr(e?.message ?? '불러오지 못했습니다.');
+      setState('error');
+    }
+  };
+
+  const days = savedAt && capturedAt
+    ? Math.max(0, Math.round((Date.parse(capturedAt) - Date.parse(savedAt)) / 86400000))
+    : null;
+
+  if (state === 'idle') {
+    return (
+      <button onClick={() => void run()}
+        className="inline-flex w-fit items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12.5px] font-semibold text-ink-2 transition-colors hover:border-accent-line hover:text-accent">
+        <TrendingUp className="h-3.5 w-3.5" />그 뒤로 어떻게 됐는지 보기
+      </button>
+    );
+  }
+
+  if (state === 'loading') {
+    return (
+      <p className="flex items-center gap-2 text-[12.5px] text-ink-3">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />견주는 중...
+      </p>
+    );
+  }
+
+  if (state === 'untracked') {
+    return (
+      <div className="rounded-card border border-line bg-paper-2 px-3 py-2.5 text-[12px] leading-relaxed text-ink-2">
+        <b>{keyword}</b>는 자동 수집 대상이 아니라 견줄 기록이 없습니다.
+        소싱AI에서 <b>관심 키워드</b>로 등록하면 매일 순위와 리뷰가 쌓이고, 다음부터 여기서 변화를 볼 수 있습니다.
+      </div>
+    );
+  }
+
+  if (state === 'error' || !data) {
+    return <p className="text-[12px] text-critical">{err ?? '견주지 못했습니다.'}</p>;
+  }
+
+  const { rows, summary } = data;
+  const moved = rows.filter(r => r.status !== 'unknown');
+
+  return (
+    <div className="rounded-card border border-line bg-paper-2 p-3">
+      <p className="mb-2 text-[12px] font-semibold text-ink">
+        저장 시점 대비 지금
+        <span className="ml-1.5 font-normal text-ink-3">
+          {days !== null ? `${days}일 경과 · ` : ''}{capturedAt ? `${fmtDate(capturedAt)} 수집분 기준` : ''}
+        </span>
+      </p>
+
+      {moved.length === 0 ? (
+        <p className="text-[12px] text-ink-2">
+          저장해 둔 상품이 최근 수집분에 하나도 없습니다. 상위권이 통째로 바뀐 키워드입니다.
+        </p>
+      ) : (
+        <>
+          <div className="mb-2.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {[
+              { k: '순위 상승', v: `${summary.up}개`, tone: 'text-positive' },
+              { k: '순위 하락', v: `${summary.down}개`, tone: 'text-critical' },
+              { k: '1페이지 밖', v: `${summary.gone}개`, tone: 'text-ink-2' },
+              { k: '리뷰 증가 합', v: `+${summary.totalReviewGain.toLocaleString()}`, tone: 'text-accent' },
+            ].map(c => (
+              <div key={c.k} className="rounded-card border border-line bg-paper px-2.5 py-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-3">{c.k}</p>
+                <p className={`text-[14px] font-semibold tabular-nums ${c.tone}`}>{c.v}</p>
+              </div>
+            ))}
+          </div>
+
+          {summary.topMover && (summary.topMover.reviewDelta ?? 0) > 0 && (
+            <p className="mb-2.5 rounded-card border border-accent-line bg-accent-soft px-2.5 py-2 text-[12px] leading-relaxed text-ink-2">
+              그동안 가장 많이 팔린 상품은 <b>{summary.topMover.productName.slice(0, 40) || summary.topMover.productId}</b>입니다 —
+              리뷰가 <b>{summary.topMover.reviewDelta!.toLocaleString()}개</b> 붙었습니다.
+              {days ? ` (${days}일 동안)` : ''}
+            </p>
+          )}
+
+          <div className="overflow-x-auto rounded-card border border-line bg-paper">
+            <table className="w-full min-w-[460px] text-[12px]">
+              <thead className="bg-paper-2 text-[10px] font-semibold uppercase tracking-wider text-ink-3">
+                <tr>
+                  <th className="px-2.5 py-2 text-left">상품</th>
+                  <th className="px-2.5 py-2 text-right">순위</th>
+                  <th className="px-2.5 py-2 text-right">리뷰</th>
+                  <th className="px-2.5 py-2 text-right">가격</th>
+                </tr>
+              </thead>
+              <tbody>
+                {moved.map(d => (
+                  <tr key={d.productId} className="border-t border-line">
+                    <td className="max-w-[260px] px-2.5 py-2">
+                      <span className="line-clamp-1 text-ink">{d.productName || d.productId}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-2.5 py-2 text-right tabular-nums">
+                      <span className="text-ink-3">{d.savedRank}위</span>
+                      <span className="mx-1 text-ink-3">→</span>
+                      <span className={d.status === 'up' ? 'font-semibold text-positive' : d.status === 'down' || d.status === 'gone' ? 'font-semibold text-critical' : 'text-ink'}>
+                        {d.status === 'gone' ? '밖' : `${d.currentRank}위`}
+                      </span>
+                      <span className="mt-0.5 block text-[10px] text-ink-3">{rankMoveLabel(d)}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-2.5 py-2 text-right tabular-nums">
+                      {d.reviewDelta === null ? (
+                        <span className="text-ink-3">—</span>
+                      ) : (
+                        <>
+                          <span className={d.reviewDelta > 0 ? 'font-semibold text-accent' : 'text-ink-3'}>
+                            {d.reviewDelta > 0 ? `+${d.reviewDelta.toLocaleString()}` : '변화 없음'}
+                          </span>
+                          {d.currentReviews !== null && <span className="mt-0.5 block text-[10px] text-ink-3">현재 {d.currentReviews.toLocaleString()}</span>}
+                        </>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2.5 py-2 text-right tabular-nums">
+                      {d.priceDelta === null ? (
+                        <span className="text-ink-3">—</span>
+                      ) : d.priceDelta === 0 ? (
+                        <span className="text-ink-3">그대로</span>
+                      ) : (
+                        <span className={d.priceDelta < 0 ? 'text-critical' : 'text-ink-2'}>
+                          {d.priceDelta > 0 ? '+' : ''}{d.priceDelta.toLocaleString()}원
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      <p className="mt-2 text-[10.5px] leading-relaxed text-ink-3">
+        매일 자동으로 모아 둔 기록과 견줍니다 — 여기서 새로 조회하지 않으니 하루 한도가 줄지 않습니다.
+        리뷰 증가는 그 기간 팔린 양의 대리 지표입니다(구매자 일부만 리뷰를 씁니다).
       </p>
     </div>
   );
@@ -203,11 +384,6 @@ export function WorksLibrary({ onNavigate }: { onNavigate?: (tab: string) => voi
 
   const kinds = SECTIONS.find(x => x.key === section)?.kinds ?? [];
   const shown = (works ?? []).filter((w: any) => section === 'all' || kinds.includes(w.kind));
-
-  const fmtDate = (s: string) => {
-    const d = new Date(s);
-    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
-  };
 
   return (
     <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-5 px-6">
