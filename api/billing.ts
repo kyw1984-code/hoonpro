@@ -646,7 +646,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (action === 'admin-coupon-create') return await adminCouponCreate(req, res);
       if (action === 'admin-coupon-update') return await adminCouponUpdate(req, res);
       if (action === 'admin-coupon-delete') return await adminCouponDelete(req, res);
-      if (action === 'admin-subscriptions') return await adminSubscriptions(res);
+      if (action === 'admin-subscriptions') return await adminSubscriptions(req, res);
+      if (action === 'admin-payments') return await adminPayments(req, res);
       if (action === 'admin-config') return await adminBillingConfig(req, res);
     }
 
@@ -1829,14 +1830,87 @@ async function adminBillingConfig(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ billingEnforced: data?.value === 'true' });
 }
 
-async function adminSubscriptions(res: VercelResponse) {
-  const { data } = await supabase
-    .from('subscriptions')
-    .select('id, status, card_summary, next_billing_at, current_period_end, cancel_at_period_end, fail_count, created_at, users(name, email), coupons(code), plans(name)')
+/**
+ * 결제 내역 — 누가 언제 얼마를 냈나.
+ *
+ * '결제 성공 0건' 같은 숫자만으로는 무엇을 확인할 수가 없다. 고객이 "돈이
+ * 나갔는데요" 하고 물어올 때 답할 수 있어야 한다.
+ *
+ * payments.user_id는 회원 삭제 시 SET NULL이다(결제 기록은 법정 5년 보존).
+ * 그래서 회원이 사라진 결제도 남아 있고, 그때는 이름 없이 주문번호로만
+ * 보여준다 — 기록이 있는데 목록에서 사라지는 것보다 낫다.
+ */
+async function adminPayments(req: VercelRequest, res: VercelResponse) {
+  const from = String(req.body?.from ?? req.query.from ?? '').trim();
+  const to = String(req.body?.to ?? req.query.to ?? '').trim();
+  const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+  let q = supabase
+    .from('payments')
+    .select('id, order_id, order_name, amount, discount, status, fail_reason, receipt_url, approved_at, created_at, refunded_amount, refunded_at, supply_amount, vat_amount, users(name, email)')
     .order('created_at', { ascending: false })
     .limit(200);
+  if (isDate(from)) q = q.gte('created_at', `${from}T00:00:00+09:00`);
+  if (isDate(to)) q = q.lte('created_at', `${to}T23:59:59+09:00`);
+
+  const { data, error } = await q;
+  if (error) {
+    await logSystemError('결제 내역', `결제 내역을 불러오지 못했습니다: ${error.message}`, { severity: 'error' });
+    return res.status(500).json({ error: `결제 내역 조회 실패: ${error.message}` });
+  }
+
+  const rows = data ?? [];
+  // 합계는 이 기간의 것이다. 환불은 결제액에서 빼지 않고 따로 센다 —
+  // 섞으면 '얼마 들어왔나'와 '얼마 돌려줬나'를 둘 다 잃는다.
+  const paid = rows.filter((r: any) => r.status === 'paid');
+  const refunded = rows.filter((r: any) => (Number(r.refunded_amount) || 0) > 0);
+  return res.status(200).json({
+    payments: rows,
+    totals: {
+      paidCount: paid.length,
+      paidAmount: paid.reduce((n: number, r: any) => n + (Number(r.amount) || 0), 0),
+      failedCount: rows.filter((r: any) => r.status === 'failed').length,
+      refundedCount: refunded.length,
+      refundedAmount: refunded.reduce((n: number, r: any) => n + (Number(r.refunded_amount) || 0), 0),
+    },
+    range: { from: isDate(from) ? from : null, to: isDate(to) ? to : null },
+  });
+}
+
+async function adminSubscriptions(req: VercelRequest, res: VercelResponse) {
+  // 기간. 안 주면 전체(누적)다 — '오늘'만 보이던 화면에서 되짚어 보려면
+  // 기간을 고를 수 있어야 한다.
+  const from = String(req.body?.from ?? req.query.from ?? '').trim();
+  const to = String(req.body?.to ?? req.query.to ?? '').trim();
+  const isDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+
+  let q = supabase
+    .from('subscriptions')
+    .select('id, status, card_summary, next_billing_at, current_period_end, cancel_at_period_end, canceled_at, cancel_reason, fail_count, created_at, users(name, email), coupons(code), plans(name)')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  // 시작일 기준으로 거른다. 해지 시점은 표에서 따로 보여준다.
+  if (isDate(from)) q = q.gte('created_at', `${from}T00:00:00+09:00`);
+  if (isDate(to)) q = q.lte('created_at', `${to}T23:59:59+09:00`);
+
+  const { data, error } = await q;
+  // error를 버리면 안 된다. 예전에는 조인 하나가 깨졌을 때 빈 배열이 나가서
+  // 화면이 "아직 구독이 없습니다"로만 보였다 — 칩의 숫자는 조인 없는 별도
+  // 쿼리라 멀쩡히 4가 뜨고. 어디가 고장 났는지 알 방법이 없었다.
+  if (error) {
+    await logSystemError('구독 목록', `구독 목록을 불러오지 못했습니다: ${error.message}`, { severity: 'error' });
+    return res.status(500).json({ error: `구독 목록 조회 실패: ${error.message}` });
+  }
+
+  // 칩의 숫자는 늘 전체 기준이다. 기간을 좁혔다고 '해지 0'이 되면
+  // 이 사람이 해지를 한 적이 없는 건지 그 기간에만 없는 건지 알 수 없다.
   const { data: counts } = await supabase.from('subscriptions').select('status');
   const byStatus: Record<string, number> = {};
   for (const row of counts ?? []) byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
-  return res.status(200).json({ subscriptions: data ?? [], byStatus });
+
+  return res.status(200).json({
+    subscriptions: data ?? [],
+    byStatus,
+    range: { from: isDate(from) ? from : null, to: isDate(to) ? to : null },
+  });
 }

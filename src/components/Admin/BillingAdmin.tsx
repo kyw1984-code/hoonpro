@@ -13,6 +13,9 @@ interface SubRow {
   next_billing_at: string | null;
   current_period_end: string | null;
   cancel_at_period_end: boolean;
+  /** 해지 신청 시각 — status가 canceled로 넘어가기 전에도 찍힌다 */
+  canceled_at: string | null;
+  cancel_reason: string | null;
   fail_count: number;
   created_at: string;
   users: { name: string; email: string } | null;
@@ -35,6 +38,20 @@ interface CouponRow {
   /** 지금 이 쿠폰으로 할인받고 있는 구독 수 — 서버가 세어서 내려준다 */
   inUse?: number;
 }
+
+/**
+ * 자주 쓰는 기간. 날짜 두 칸을 직접 채우는 건 매번 번거롭다.
+ * 오늘을 KST로 잡는다 — 서버가 한국 시각 경계로 거르기 때문이다.
+ */
+const kstToday = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
+const kstDaysAgo = (n: number) =>
+  new Date(Date.now() + 9 * 3600_000 - n * 86400_000).toISOString().slice(0, 10);
+
+const QUICK_RANGES: { label: string; range: () => [string, string] }[] = [
+  { label: '오늘', range: () => [kstToday(), kstToday()] },
+  { label: '7일', range: () => [kstDaysAgo(6), kstToday()] },
+  { label: '30일', range: () => [kstDaysAgo(29), kstToday()] },
+];
 
 const SUB_STATUS: Record<string, { text: string; cls: string }> = {
   trial: { text: '무료 이용', cls: 'bg-positive-soft text-positive' },
@@ -94,6 +111,17 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
    * 보려고 칩을 누를 수 있게 했다. 'all'이 기본이다.
    */
   const [subFilter, setSubFilter] = useState<string>('all');
+  /**
+   * 조회 기간. 비우면 누적(전체)이다.
+   *
+   * [오늘] 카드만 있던 시절에는 어제 누가 해지했는지 되짚을 방법이 없었다.
+   * 기본을 누적으로 두는 이유는, 기간을 좁힌 화면을 열어 두고 '해지 0'을
+   * 보면 진짜 없는 건지 그 기간에만 없는 건지 알 수 없어서다.
+   */
+  const [rangeFrom, setRangeFrom] = useState('');
+  const [rangeTo, setRangeTo] = useState('');
+  const [payments, setPayments] = useState<any[] | null>(null);
+  const [payTotals, setPayTotals] = useState<any>(null);
   const [coupons, setCoupons] = useState<CouponRow[]>([]);
   const [enforced, setEnforced] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -108,15 +136,19 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
   const reload = async () => {
     setLoading(true);
     try {
-      const [subData, couponData, cfg, statData, revData] = await Promise.all([
-        callBilling('admin-subscriptions'),
+      const range = { from: rangeFrom || undefined, to: rangeTo || undefined };
+      const [subData, couponData, cfg, statData, revData, payData] = await Promise.all([
+        callBilling('admin-subscriptions', range),
         callBilling('admin-coupons'),
         callBilling('admin-config'),
         callBilling('admin-stats').catch(() => null),
         callBilling('admin-revenue').catch(() => null),
+        callBilling('admin-payments', range).catch(() => null),
       ]);
       setSubs(subData.subscriptions ?? []);
       setByStatus(subData.byStatus ?? {});
+      setPayments(payData?.payments ?? []);
+      setPayTotals(payData?.totals ?? null);
       setCoupons(couponData.coupons ?? []);
       setEnforced(Boolean(cfg.billingEnforced));
       setStats(statData);
@@ -688,6 +720,38 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
           </button>
         </div>
 
+        {/* 조회 기간 — 비우면 누적. 구독 목록과 아래 결제 내역에 함께 걸린다 */}
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-card border border-line bg-paper-2 px-3 py-2">
+          <span className="text-[12px] font-semibold text-ink-2">조회 기간</span>
+          <input type="date" value={rangeFrom} max={rangeTo || undefined}
+            onChange={e => setRangeFrom(e.target.value)}
+            className="rounded-control border border-line bg-paper px-2 py-1 text-[12.5px] text-ink" />
+          <span className="text-ink-3">~</span>
+          <input type="date" value={rangeTo} min={rangeFrom || undefined}
+            onChange={e => setRangeTo(e.target.value)}
+            className="rounded-control border border-line bg-paper px-2 py-1 text-[12.5px] text-ink" />
+          <button onClick={reload} disabled={loading}
+            className="rounded-control border border-accent-line bg-accent-soft px-2.5 py-1 text-[12px] font-semibold text-accent disabled:opacity-50">
+            조회
+          </button>
+          {(rangeFrom || rangeTo) && (
+            <button onClick={() => { setRangeFrom(''); setRangeTo(''); setTimeout(reload, 0); }}
+              className="rounded-control border border-line px-2.5 py-1 text-[12px] text-ink-2 hover:text-ink">
+              누적 전체
+            </button>
+          )}
+          {QUICK_RANGES.map(r => (
+            <button key={r.label}
+              onClick={() => { const [f, t] = r.range(); setRangeFrom(f); setRangeTo(t); setTimeout(reload, 0); }}
+              className="rounded-control border border-line px-2.5 py-1 text-[12px] text-ink-2 hover:border-accent-line hover:text-accent">
+              {r.label}
+            </button>
+          ))}
+          <span className="ml-auto text-[11.5px] text-ink-3">
+            {rangeFrom || rangeTo ? `${rangeFrom || '처음'} ~ ${rangeTo || '오늘'} 가입분` : '누적 전체'}
+          </span>
+        </div>
+
         <div className="mb-4 flex flex-wrap gap-2">
           {/* 전체가 맨 앞이다. 걸러 놓은 것을 되돌릴 자리가 눈에 안 보이면
               사용자는 새로고침을 누른다. */}
@@ -733,7 +797,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
               <table className="w-full text-sm">
                 <thead className="border-b border-line bg-paper-2">
                   <tr>
-                    {['회원', '플랜', '상태', '카드', '다음 결제일', '이용 기간', '쿠폰', '실패', '시작일'].map(h => (
+                    {['회원', '플랜', '상태', '카드', '다음 결제일', '이용 기간', '쿠폰', '해지', '실패', '시작일'].map(h => (
                       <th key={h} className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-2">{h}</th>
                     ))}
                   </tr>
@@ -756,6 +820,15 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
                       <td className="whitespace-nowrap px-4 py-3 tabular-nums text-ink-2">{s.next_billing_at ?? '-'}</td>
                       <td className="whitespace-nowrap px-4 py-3 tabular-nums text-ink-2">{s.current_period_end?.slice(0, 10) ?? '-'} 까지</td>
                       <td className="whitespace-nowrap px-4 py-3 font-mono text-[12px] text-ink-2">{s.coupons?.code ?? '-'}</td>
+                      {/* 해지 신청 시점과 사유. 숫자만 보고 '누가?'를 되묻지 않게 */}
+                      <td className="whitespace-nowrap px-4 py-3 text-[12px]">
+                        {s.canceled_at ? (
+                          <>
+                            <span className="text-ink-2">{new Date(s.canceled_at).toLocaleDateString('ko-KR')}</span>
+                            <span className="mt-0.5 block text-[11px] text-ink-3">{s.cancel_reason ?? '사유 미입력'}</span>
+                          </>
+                        ) : <span className="text-ink-3">-</span>}
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 tabular-nums text-ink-2">{s.fail_count > 0 ? `${s.fail_count}회` : '-'}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-[12px] text-ink-2">{new Date(s.created_at).toLocaleDateString('ko-KR')}</td>
                     </tr>
@@ -771,6 +844,102 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
             최근 200건까지만 보여줍니다 — 위 숫자는 전체 기준입니다.
           </p>
         )}
+      </div>
+
+      {/* 결제 내역 — '결제 성공 3건'만으로는 고객이 "돈이 나갔는데요" 할 때
+          답할 수가 없다. 누가 언제 얼마를 냈는지 그대로 보여준다. */}
+      <div>
+        <div className="mb-4 flex items-center gap-2">
+          <CreditCard className="h-5 w-5 text-accent" />
+          <h3 className="text-lg font-semibold text-ink">결제 내역</h3>
+          <span className="text-[12px] text-ink-3">
+            {rangeFrom || rangeTo ? `${rangeFrom || '처음'} ~ ${rangeTo || '오늘'}` : '누적 전체'}
+          </span>
+        </div>
+
+        {payTotals && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            <span className="rounded-full bg-positive-soft px-3 py-1 text-[12px] font-medium text-positive">
+              성공 {payTotals.paidCount}건 · {won(payTotals.paidAmount)}
+            </span>
+            {payTotals.failedCount > 0 && (
+              <span className="rounded-full bg-critical-soft px-3 py-1 text-[12px] font-medium text-critical">
+                실패 {payTotals.failedCount}건
+              </span>
+            )}
+            {payTotals.refundedCount > 0 && (
+              <span className="rounded-full bg-paper-2 px-3 py-1 text-[12px] font-medium text-ink-2">
+                환불 {payTotals.refundedCount}건 · {won(payTotals.refundedAmount)}
+              </span>
+            )}
+          </div>
+        )}
+
+        {!payments || payments.length === 0 ? (
+          <p className="rounded-card border border-line bg-paper px-4 py-8 text-center text-[13px] text-ink-3">
+            이 기간에 결제 내역이 없습니다.
+          </p>
+        ) : (
+          <div className="overflow-hidden rounded-card border border-line bg-paper">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="border-b border-line bg-paper-2">
+                  <tr>
+                    {['결제 시각', '회원', '내용', '금액', '상태', '영수증'].map(h => (
+                      <th key={h} className="whitespace-nowrap px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-ink-2">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {payments.map((p: any) => (
+                    <tr key={p.id} className="transition-colors hover:bg-paper-2">
+                      <td className="whitespace-nowrap px-4 py-3 text-[12.5px] tabular-nums text-ink-2">
+                        {new Date(p.created_at).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' })}
+                      </td>
+                      <td className="px-4 py-3">
+                        {/* 회원이 삭제돼도 결제 기록은 남는다(법정 5년 보존).
+                            그때는 주문번호로만 짚을 수 있게 한다. */}
+                        <div className="text-[13px] text-ink">{p.users?.name ?? '(삭제된 회원)'}</div>
+                        <div className="text-[11.5px] text-ink-3">{p.users?.email ?? p.order_id}</div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-[12.5px] text-ink-2">{p.order_name ?? '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">
+                        <span className="text-[13px] font-semibold text-ink">{won(p.amount)}</span>
+                        {(Number(p.discount) || 0) > 0 && (
+                          <span className="mt-0.5 block text-[11px] text-accent">할인 {won(p.discount)}</span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        {p.status === 'paid' ? (
+                          <span className="rounded-full bg-positive-soft px-2 py-0.5 text-[11px] font-semibold text-positive">결제됨</span>
+                        ) : p.status === 'refunded' ? (
+                          <>
+                            <span className="rounded-full bg-paper-2 px-2 py-0.5 text-[11px] font-semibold text-ink-2">환불됨</span>
+                            <span className="mt-0.5 block text-[11px] text-ink-3">{won(p.refunded_amount)}</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="rounded-full bg-critical-soft px-2 py-0.5 text-[11px] font-semibold text-critical">실패</span>
+                            {p.fail_reason && <span className="mt-0.5 block max-w-[160px] text-[11px] text-ink-3">{p.fail_reason}</span>}
+                          </>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        {p.receipt_url
+                          ? <a href={p.receipt_url} target="_blank" rel="noopener noreferrer"
+                              className="text-[12px] font-semibold text-accent hover:underline">영수증</a>
+                          : <span className="text-[12px] text-ink-3">-</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        <p className="mt-2 text-[11.5px] text-ink-3">
+          기간을 비우면 누적 전체입니다. 환불은 결제액에서 빼지 않고 따로 셉니다 — 섞으면 얼마 들어왔는지와 얼마 돌려줬는지를 둘 다 잃습니다.
+        </p>
       </div>
     </div>
   );
