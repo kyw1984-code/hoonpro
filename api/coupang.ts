@@ -483,6 +483,8 @@ export interface SyncSummary {
   inquiries: number;
   /** 쿠폰 관리에서 받아 온 쿠폰-옵션 조합 수 */
   couponDefs: number;
+  /** 시간에 잘렸을 때 멈춘 단계(SYNC_STEPS 인덱스). 안 잘렸으면 null */
+  stoppedAt: number | null;
   errors: string[];
   authFailed: boolean;
   /** 시간 예산에 걸려 중간에 멈췄다. 남은 몫은 다음 회차가 이어받는다. */
@@ -492,7 +494,7 @@ export interface SyncSummary {
 function emptySummary(): SyncSummary {
   return {
     items: 0, orders: 0, sales: 0, growth: 0, growthCancelled: 0, growthInventory: 0, settlements: 0, returns: 0, inquiries: 0, couponDefs: 0,
-    errors: [], authFailed: false, truncated: false,
+    errors: [], authFailed: false, truncated: false, stoppedAt: null,
   };
 }
 
@@ -1451,6 +1453,7 @@ async function syncOrderCoupons(
   let lastCallAt = 0;
   let typesSeen = new Set<string>();
   let multiTypeLogged = false;
+  let failedInARow = 0;
   for (const orderId of todo) {
     if (outOfTime(deadline, sum)) break;
     const wait = LIMITS.couponGapMs - (Date.now() - lastCallAt);
@@ -1463,10 +1466,18 @@ async function syncOrderCoupons(
         sum.authFailed = true;
         return;
       }
-      // 권한이 없거나 API가 닫혀 있으면 그로스 쿠폰은 알 수 없다. 오류 한 번만 남기고 멈춘다.
-      sum.errors.push(`${channel === 'growth' ? '그로스' : '윙'} 쿠폰: ${r.error}`);
-      break;
+      // 주문 하나가 쿠팡 쪽 500으로 막혔다고 나머지를 다 건너뛰면 안 된다.
+      // 예전에는 첫 오류에서 멈췄는데, 같은 주문이 매번 500을 내면 그 뒤 주문의
+      // 쿠폰은 영영 못 묻는다 — 실제로 '윙 쿠폰: Internal Server Error' 한 건이
+      // 회차마다 같은 자리에서 걸렸다. 그 주문은 건너뛰고(저장하지 않으므로
+      // 다음 회차에 다시 묻는다) 다음으로 간다. 다만 연속으로 계속 실패하면
+      // API 자체가 닫힌 것이라 더 두드리지 않는다.
+      failedInARow++;
+      if (failedInARow === 1) sum.errors.push(`${channel === 'growth' ? '그로스' : '윙'} 쿠폰: ${r.error}`);
+      if (failedInARow >= 3) break;
+      continue;
     }
+    failedInARow = 0;
     const list = listOf(r.data);
     // 쿠팡 부담으로 표시된 것은 뺀다. 나머지는 판매자 부담으로 본다 — 실매출을
     // 크게 보는 쪽이 작게 보는 쪽보다 나쁘다.
@@ -2146,62 +2157,84 @@ async function syncInquiries(userId: string, creds: CoupangCreds, sum: SyncSumma
  * 다시 시작하면서 다른 사용자의 수집까지 굶긴다. 예산이 끝나면 지금까지 받은
  * 것을 저장하고 truncated로 표시해 다음 회차가 이어받게 한다.
  */
+/**
+ * 첫 수집(백필)이 시간 상한에 잘렸을 때 어느 단계에서 멈췄는지를 남기고,
+ * 다음 회차는 거기서부터 이어받는다.
+ *
+ * 예전에는 매 회차 처음부터 다시 돌았다. 60일치 그로스 주문이 1인당 100초를
+ * 다 먹으면 그 뒤 단계(그로스 재고·정산·반품·문의)는 회차마다 같은 자리에서
+ * 잘려 영영 못 갔다 — 실제로 한 계정이 세 번을 돌고도 그로스 재고가 0이었다.
+ *
+ * 앞 단계는 그 전 회차에서 이미 끝났으므로 건너뛴다. 잘린 단계 자체는 다시
+ * 돈다 (저장은 덮어쓰기라 두 번 돌아도 해가 없다). 백필이 끝나면(startStep과
+ * 무관하게 끝까지 잘리지 않고 돌면) 0으로 되돌아가 평소처럼 전부 돈다.
+ */
+const SYNC_STEPS = ['couponDefs', 'items', 'orders', 'sales', 'rocketGrowth', 'growthInventory', 'observedItems', 'settlements', 'returns', 'inquiries'] as const;
+
 async function syncUser(
   userId: string,
   creds: CoupangCreds,
   full: boolean,
   deadline: number = Date.now() + 240_000,
+  startStep = 0,
 ): Promise<SyncSummary> {
   const sum = emptySummary();
   const today = kstToday();
+  // 백필 중일 때만 이어받는다. 평소 수집은 늘 처음부터다.
+  const from = full ? Math.max(0, Math.min(startStep, SYNC_STEPS.length - 1)) : 0;
+
+  // 단계 하나를 돌리고, 시간에 잘렸으면 그 단계를 기록한다. 이미 잘린 뒤의
+  // 단계들은 outOfTime이 바로 true라 사실상 빈손으로 지나간다 — 그래서 첫
+  // 잘린 단계만 남긴다.
+  const step = async (i: number, run: () => Promise<void>) => {
+    if (i < from) return;
+    if (sum.authFailed) return;
+    if (sum.truncated) {
+      if (sum.stoppedAt === null) sum.stoppedAt = i;
+      return;
+    }
+    await run();
+    if (sum.truncated && sum.stoppedAt === null) sum.stoppedAt = i;
+  };
 
   // 쿠폰 설정을 맨 앞에 둔다. 호출이 몇 건뿐인데 순이익의 쿠폰 금액이 여기에
   // 달려 있다. 상품 상세는 회차당 120건까지 부르므로 중계 서버가 느린 날에는
   // 그 하나가 수동 수집의 90초를 다 쓴다 — 실제로 그렇게 되어 쿠폰 설정이 한 번도
   // 돌지 못했다. 주문·매출·상품은 매시 크론(240초)이 어차피 다시 채운다.
-  await syncCouponDefinitions(userId, creds, sum, deadline);
-  if (sum.authFailed) return sum;
-
-  await syncItems(userId, creds, sum, deadline);
-  if (sum.authFailed) return sum;
-
-  await syncOrders(userId, creds, addDays(today, -(full ? LIMITS.ordersDaysFull : LIMITS.ordersDaysIncr)), today, sum, deadline);
-  if (sum.authFailed) return sum;
-
+  await step(0, () => syncCouponDefinitions(userId, creds, sum, deadline));
+  await step(1, () => syncItems(userId, creds, sum, deadline));
+  await step(2, () => syncOrders(userId, creds, addDays(today, -(full ? LIMITS.ordersDaysFull : LIMITS.ordersDaysIncr)), today, sum, deadline));
   // 매출내역은 종료일이 '어제 이하'여야 한다. 오늘을 넣으면 쿠팡이
   // 'To date must be before or equal to yesterday'로 구간 전체를 거절해
   // 그 회차 매출이 통째로 비어 버린다.
-  await syncSales(
+  await step(3, () => syncSales(
     userId, creds,
     addDays(today, -(full ? LIMITS.salesDaysFull : LIMITS.salesDaysIncr)),
     addDays(today, -1),
     sum, deadline,
-  );
+  ));
   // 로켓그로스는 별도 창구다. 이걸 안 부르면 그로스 매출이 통째로 빠진다.
-  await syncRocketGrowth(
+  await step(4, () => syncRocketGrowth(
     userId, creds,
     addDays(today, -(full ? LIMITS.rgDaysFull : LIMITS.rgDaysIncr)),
     today,
     sum, deadline,
-  );
-  if (sum.authFailed) return sum;
-
-  await syncGrowthInventory(userId, creds, sum, deadline);
-  if (sum.authFailed) return sum;
-
+  ));
+  await step(5, () => syncGrowthInventory(userId, creds, sum, deadline));
   // 상품 상세에 옵션ID가 안 오는 계정이 있다(로켓그로스 전용 상품). 그래도 재고·매출·
   // 주문에는 옵션ID가 다 실려 오므로, 거기서 본 옵션을 상품 목록에 채운다.
   // 원가 입력·가격 관리·재고 예측이 상세 API 하나에 볼모로 잡히지 않게 한다.
-  await backfillItemsFromObservations(userId, sum);
-
-  await syncSettlements(userId, creds, sum, deadline);
-  if (sum.authFailed) return sum;
-
-  await syncReturns(userId, creds, addDays(today, -(full ? LIMITS.returnsDaysFull : LIMITS.returnsDaysIncr)), today, sum, deadline);
-  if (sum.authFailed) return sum;
-
-  await syncInquiries(userId, creds, sum, deadline);
+  await step(6, () => backfillItemsFromObservations(userId, sum));
+  await step(7, () => syncSettlements(userId, creds, sum, deadline));
+  await step(8, () => syncReturns(userId, creds, addDays(today, -(full ? LIMITS.returnsDaysFull : LIMITS.returnsDaysIncr)), today, sum, deadline));
+  await step(9, () => syncInquiries(userId, creds, sum, deadline));
   return sum;
+}
+
+/** 다음 회차가 이어받을 단계. 잘리지 않았으면 처음(0)으로 되돌린다 */
+export function nextBackfillStep(sum: { truncated: boolean; stoppedAt: number | null }): number {
+  if (!sum.truncated) return 0;
+  return Math.max(0, sum.stoppedAt ?? 0);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -2219,6 +2252,8 @@ interface AccountRow {
   last_sync_at: string | null;
   last_sync_error: string | null;
   backfill_done: boolean;
+  /** 백필이 잘렸을 때 다음 회차가 이어받을 단계. 0이면 처음부터 */
+  backfill_step?: number | null;
 }
 
 async function loadAccount(userId: string): Promise<AccountRow | null> {
@@ -2579,6 +2614,8 @@ async function cronSync(res: VercelResponse) {
         credsOf(acc),
         needsBackfill,
         Date.now() + Math.min(perUserMs, remaining - 5_000),
+        // 지난 회차에 잘린 단계부터 이어받는다. 매번 처음부터면 같은 자리에서 또 잘린다.
+        needsBackfill ? Number(acc.backfill_step) || 0 : 0,
       );
       if (sum.authFailed) {
         await setAccountStatus(acc.user_id, 'invalid', '쿠팡이 키를 거부했습니다. 키 또는 등록 IP를 확인해주세요.');
@@ -2593,6 +2630,7 @@ async function cronSync(res: VercelResponse) {
           last_sync_at: new Date().toISOString(),
           last_sync_error: sum.errors.length ? sum.errors.slice(0, 3).join(' / ') : null,
           backfill_done: acc.backfill_done || (needsBackfill && !sum.truncated),
+          backfill_step: needsBackfill ? nextBackfillStep(sum) : 0,
           updated_at: new Date().toISOString(),
         })
         .eq('user_id', acc.user_id);
@@ -2824,7 +2862,9 @@ async function handleAdminSync(decoded: any, req: VercelRequest, res: VercelResp
   if (!target) return res.status(400).json({ error: '어느 회원인지 지정해주세요.' });
   // 누가 언제 남의 계정 수집을 눌렀는지는 남긴다. 키 값은 찍지 않는다.
   console.info('[coupang] 관리자 수동 수집', { by: decoded.userId, target });
-  return await handleSync(target, req, res);
+  // 판매자 본인 버튼은 90초로 끊는다 — 화면 앞에서 기다리는 사람이 있다.
+  // 관리자는 백필을 끝내려고 누르는 것이라 함수 상한(300초) 안에서 넉넉히 준다.
+  return await handleSync(target, req, res, 240_000);
 }
 
 // ── 주문수집 업체 IP 목록 ─────────────────────────────────────
@@ -2982,7 +3022,7 @@ async function handleKeyDelete(userId: string, res: VercelResponse) {
 }
 
 // ── 수동 동기화 ───────────────────────────────────────────────
-async function handleSync(userId: string, req: VercelRequest, res: VercelResponse) {
+async function handleSync(userId: string, req: VercelRequest, res: VercelResponse, budgetMs = 90_000) {
   const acc = await loadAccount(userId);
   if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
 
@@ -3005,9 +3045,13 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
     });
   }
 
-  // 화면이 기다리는 요청이다. 4분 동안 스피너만 보여주지 않도록 90초에서 끊고,
-  // 못 받은 몫은 truncated로 표시해 크론이 이어받게 한다.
-  const sum = await syncUser(userId, credsOf(acc), full, Date.now() + 90_000);
+  // 화면이 기다리는 요청이다. 4분 동안 스피너만 보여주지 않도록 90초에서 끊고
+  // (관리자의 [지금 수집]은 240초), 못 받은 몫은 truncated로 표시해 다음 회차가
+  // 잘린 단계부터 이어받게 한다.
+  const sum = await syncUser(
+    userId, credsOf(acc), full, Date.now() + budgetMs,
+    full ? Number(acc.backfill_step) || 0 : 0,
+  );
 
   if (sum.authFailed) {
     await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다. 키 또는 등록 IP를 확인해주세요.');
@@ -3022,12 +3066,18 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
       last_sync_at: new Date().toISOString(),
       last_sync_error: sum.errors.length ? sum.errors.slice(0, 3).join(' / ') : null,
       backfill_done: acc.backfill_done || (full && !sum.truncated),
+      backfill_step: full && !acc.backfill_done ? nextBackfillStep(sum) : 0,
       status: 'active',
       updated_at: new Date().toISOString(),
     })
     .eq('user_id', userId);
 
-  return res.status(200).json({ ok: true, summary: sum });
+  return res.status(200).json({
+    ok: true,
+    summary: sum,
+    // 화면이 "어디까지 갔고 다음에 어디서 이어받는지"를 말할 수 있게
+    stoppedAt: sum.stoppedAt === null ? null : SYNC_STEPS[sum.stoppedAt] ?? null,
+  });
 }
 
 
