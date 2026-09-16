@@ -1976,6 +1976,20 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
   // 접수번호로 합친다 — 같은 접수가 상태를 옮겨 가며 두 번 잡히면 안 된다.
   const seenReceipt = new Set<string>();
   let returnErrorLogged = false;
+  // 상태 4가지 × 14일 구간을 쉬지 않고 연달아 부르면 429가 난다 (60일이면 20번
+  // 연속). 한 번 걸리면 그 상태·구간의 반품이 통째로 빠지므로 호출 사이를 띄우고,
+  // 429는 잠깐 쉬었다 한 번 더 묻는다. 교환요청 조회와 같은 처방이다.
+  let lastReturnCallAt = 0;
+  const callReturns = async (query: string) => {
+    const gap = LIMITS.rgGapMs - (Date.now() - lastReturnCallAt);
+    if (gap > 0) await sleep(gap);
+    lastReturnCallAt = Date.now();
+    return coupangCallVersioned(
+      creds, 'GET',
+      v => EP.returnRequests(v, creds.vendorId),
+      query, ['v5', 'v4'], 'returnRequests',
+    );
+  };
   for (const status of RETURN_STATUSES) {
   // 60일을 한 번에 물으면 'Request timed out'이 난다. 14일씩 나눈다.
   for (const [cFrom, cTo] of dateChunks(from, to, 14)) {
@@ -1985,11 +1999,11 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
       const query =
         `createdAtFrom=${cFrom}&createdAtTo=${cTo}&status=${status}&maxPerPage=50` +
         (nextToken ? `&nextToken=${nextToken}` : '');
-      const r = await coupangCallVersioned(
-        creds, 'GET',
-        v => EP.returnRequests(v, creds.vendorId),
-        query, ['v5', 'v4'], 'returnRequests',
-      );
+      let r = await callReturns(query);
+      if (!r.ok && r.status === 429 && !outOfTime(deadline, sum)) {
+        await sleep(3_000);
+        r = await callReturns(query);
+      }
       if (!r.ok) {
         if (r.authFailed) {
           sum.authFailed = true;
