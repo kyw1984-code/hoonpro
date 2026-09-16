@@ -1495,6 +1495,10 @@ async function syncOrderCoupons(
       const key = type || 'UNKNOWN';
       byType[key] = (byType[key] ?? 0) + amount;
       if (/COUPANG|쿠팡/i.test(type)) continue;
+      // 금액을 안 알려주는 쿠폰은 -1로 온다 ("오늘만 쿠폰 할인" 같은 PRICE형).
+      // 그대로 더하면 5,100원 쿠폰이 5,099원이 되고, 그런 옵션이 쌓여 2원 단위
+      // 합계가 나온다 — 실제로 그렇게 됐다. 모르는 금액은 0으로 본다.
+      if (amount < 0) continue;
       discount += amount;
     }
     // 유형이 둘 이상 겹친 주문은 회차마다 한 번 원문을 남긴다. PRICE가 무엇인지는
@@ -1740,9 +1744,18 @@ async function syncGrowthInventory(userId: string, creds: CoupangCreds, sum: Syn
         return;
       }
       // 그로스를 안 쓰는 판매자는 권한이 없다. 고장이 아니라 해당 없음이다.
-      if (r.status === 403 || r.status === 404) return;
+      // 다만 그로스 매출이 있는 계정이 여기서 빈손이면 그건 해당 없음이 아니라
+      // 고장이므로, 조용히 넘기지 않고 상태를 남긴다.
+      if (r.status === 403 || r.status === 404) {
+        console.info('coupang rg inventory skipped —', { userId, status: r.status });
+        return;
+      }
       sum.errors.push(`그로스 재고: ${r.error}`);
       return;
+    }
+    if (page === 0) {
+      const first = listOf(r.data)[0];
+      console.info('coupang rg inventory shape —', `${listOf(r.data).length}건 / 키=${first ? Object.keys(first).join(',') : '없음'}`);
     }
     for (const inv of listOf(r.data)) {
       const vendorItemId = pickStr(inv, ['vendorItemId', 'vendorItemID']);
@@ -2254,6 +2267,16 @@ interface AccountRow {
   backfill_done: boolean;
   /** 백필이 잘렸을 때 다음 회차가 이어받을 단계. 0이면 처음부터 */
   backfill_step?: number | null;
+  /** 지금 돌고 있는 수집이 시작된 시각. 같은 계정을 겹쳐 돌리지 않기 위한 잠금 */
+  sync_started_at?: string | null;
+}
+
+/** 수집이 이 시간보다 오래 '진행 중'이면 죽은 잠금으로 보고 무시한다 (함수 상한 300초) */
+const SYNC_LOCK_MS = 5 * 60_000;
+
+function syncInProgress(acc: { sync_started_at?: string | null }): boolean {
+  const t = acc.sync_started_at ? Date.parse(acc.sync_started_at) : NaN;
+  return Number.isFinite(t) && Date.now() - t < SYNC_LOCK_MS;
 }
 
 async function loadAccount(userId: string): Promise<AccountRow | null> {
@@ -2390,7 +2413,7 @@ async function setAccountStatus(userId: string, status: string, error: string | 
 
   await supabase
     .from('coupang_accounts')
-    .update({ status, last_sync_error: error, updated_at: new Date().toISOString() })
+    .update({ status, last_sync_error: error, sync_started_at: null, updated_at: new Date().toISOString() })
     .eq('user_id', userId);
 
   // 수집이 멈춘 걸 사용자가 탭을 열어야 안다면 그동안 데이터가 비고 이유도 모른다.
@@ -2605,6 +2628,13 @@ async function cronSync(res: VercelResponse) {
       result.skipped++;
       continue;
     }
+    // 수동 수집이 돌고 있는 계정은 건너뛴다. 같은 키로 두 번 돌면 쿠팡 한도(429)에
+    // 걸려 두 쪽 다 빈손이 된다.
+    if (syncInProgress(acc)) {
+      result.skipped++;
+      continue;
+    }
+    await supabase.from('coupang_accounts').update({ sync_started_at: new Date().toISOString() }).eq('user_id', acc.user_id);
     try {
       // 백필이 끝나지 않았으면 계속 넓은 구간으로 받는다. '한 번이라도 돌았는지'가
       // 아니라 '전부 받았는지'를 기준으로 삼아야, 중간에 끊긴 첫 수집이 완성된다.
@@ -2631,6 +2661,7 @@ async function cronSync(res: VercelResponse) {
           last_sync_error: sum.errors.length ? sum.errors.slice(0, 3).join(' / ') : null,
           backfill_done: acc.backfill_done || (needsBackfill && !sum.truncated),
           backfill_step: needsBackfill ? nextBackfillStep(sum) : 0,
+          sync_started_at: null,
           updated_at: new Date().toISOString(),
         })
         .eq('user_id', acc.user_id);
@@ -2648,7 +2679,7 @@ async function cronSync(res: VercelResponse) {
       // 으로만 보였다. 왜 안 되는지는 그 화면에서 바로 보여야 한다.
       await supabase
         .from('coupang_accounts')
-        .update({ last_sync_error: detail.slice(0, 300), updated_at: new Date().toISOString() })
+        .update({ last_sync_error: detail.slice(0, 300), sync_started_at: null, updated_at: new Date().toISOString() })
         .eq('user_id', acc.user_id);
     }
   }
@@ -3028,6 +3059,16 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
 
   const full = req.body?.full === true || String(req.query.full) === 'true' || !acc.backfill_done;
 
+  // 같은 계정이 이미 돌고 있으면 겹쳐 돌리지 않는다. 화면을 새로고침하고 다시
+  // 누르면 두 회차가 같은 키로 쿠팡을 두드려 429가 나고, 두 쪽 다 그로스
+  // 매출·쿠폰을 빈손으로 끝낸다 — 실제로 그렇게 됐다.
+  if (syncInProgress(acc)) {
+    const since = Math.round((Date.now() - Date.parse(acc.sync_started_at!)) / 1000);
+    return res.status(409).json({
+      error: `이 계정의 수집이 이미 진행 중입니다 (${since}초 전 시작). 끝날 때까지 기다렸다가 새로고침해주세요.`,
+    });
+  }
+
   // 중계 서버부터 확인한다. 죽어 있으면 모든 호출이 연결 대기에 걸려, 판매자는
   // 90초를 기다린 끝에 '상품 목록: fetch failed' 같은 속뜻 없는 문구를 본다.
   // 원인이 훈프로도 쿠팡 키도 아니라는 것을 그 자리에서 알려준다.
@@ -3048,10 +3089,23 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
   // 화면이 기다리는 요청이다. 4분 동안 스피너만 보여주지 않도록 90초에서 끊고
   // (관리자의 [지금 수집]은 240초), 못 받은 몫은 truncated로 표시해 다음 회차가
   // 잘린 단계부터 이어받게 한다.
-  const sum = await syncUser(
-    userId, credsOf(acc), full, Date.now() + budgetMs,
-    full ? Number(acc.backfill_step) || 0 : 0,
-  );
+  await supabase!.from('coupang_accounts').update({ sync_started_at: new Date().toISOString() }).eq('user_id', userId);
+  let sum: SyncSummary;
+  try {
+    sum = await syncUser(
+      userId, credsOf(acc), full, Date.now() + budgetMs,
+      full ? Number(acc.backfill_step) || 0 : 0,
+    );
+  } catch (e) {
+    await supabase!.from('coupang_accounts').update({ sync_started_at: null }).eq('user_id', userId);
+    throw e;
+  }
+  // 계정 행의 last_sync_error는 세 건까지만 남는다. 네 번째부터는 여기에만 있다.
+  console.info('[coupang] 수집 결과', {
+    userId, full, truncated: sum.truncated,
+    stoppedAt: sum.stoppedAt === null ? null : SYNC_STEPS[sum.stoppedAt],
+    errors: sum.errors,
+  });
 
   if (sum.authFailed) {
     await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다. 키 또는 등록 IP를 확인해주세요.');
@@ -3067,6 +3121,7 @@ async function handleSync(userId: string, req: VercelRequest, res: VercelRespons
       last_sync_error: sum.errors.length ? sum.errors.slice(0, 3).join(' / ') : null,
       backfill_done: acc.backfill_done || (full && !sum.truncated),
       backfill_step: full && !acc.backfill_done ? nextBackfillStep(sum) : 0,
+      sync_started_at: null,
       status: 'active',
       updated_at: new Date().toISOString(),
     })
