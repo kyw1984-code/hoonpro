@@ -1261,12 +1261,28 @@ create table if not exists feedback (
     check (status in ('open', 'planned', 'done', 'wontfix')),
   note text,                             -- 운영자 메모
   created_at timestamptz default now(),
-  updated_at timestamptz default now()
+  updated_at timestamptz default now(),
+
+  -- 운영자가 건의한 사람에게 직접 보낸 답.
+  -- 상태만 바꿀 때는 아무것도 안 보낸다 — '처리함'이 '확인했고 안 고치기로
+  -- 함'일 때도 있어서, 자동 문구를 보내면 오해가 생긴다. 답을 적어 보낼 때만
+  -- 메일과 앱 알림이 나간다.
+  admin_reply text,
+  replied_at timestamptz,
+  replied_by uuid references users(id) on delete set null,
+  -- 건의한 사람이 앱에서 확인했나. 확인한 뒤로는 안 띄운다.
+  reply_seen_at timestamptz,
+  -- 메일이 실제로 나갔나. '보냈습니다'로 뭉뚱그리면 안 간 걸 모른다.
+  reply_mail_sent_at timestamptz
 );
 
 create index if not exists idx_fb_status on feedback(status, created_at desc);
 create index if not exists idx_fb_kind on feedback(kind, created_at desc);
 create index if not exists idx_fb_user on feedback(user_id, created_at desc);
+-- 앱은 '내 건의 중 답이 달렸는데 아직 안 본 것'만 묻는다.
+create index if not exists idx_feedback_user_reply
+  on feedback (user_id, replied_at desc)
+  where admin_reply is not null;
 alter table feedback enable row level security;
 revoke all on feedback from anon, authenticated;
 

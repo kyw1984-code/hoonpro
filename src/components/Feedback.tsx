@@ -9,7 +9,7 @@
  * 없는 기능을 있다고 답하면 찾아 헤매다 신뢰를 잃으므로, 확실할 때만 답한다.
  */
 import { useEffect, useState } from 'react';
-import { Check, Loader2, MessageSquarePlus, X } from 'lucide-react';
+import { Check, Loader2, MailCheck, MessageSquarePlus, X } from 'lucide-react';
 import { getToken } from '../lib/auth';
 import { HOWTO } from '../lib/howto';
 import { ModalPortal } from './ModalPortal';
@@ -19,16 +19,60 @@ type Phase =
   | { kind: 'sending' }
   | { kind: 'done'; reply: string | null };
 
+interface Reply {
+  id: number;
+  body: string;
+  area: string | null;
+  admin_reply: string;
+  replied_at: string | null;
+  reply_seen_at: string | null;
+}
+
 export function Feedback({ area }: { area: string }) {
   const [open, setOpen] = useState(false);
   const [body, setBody] = useState('');
   const [phase, setPhase] = useState<Phase>({ kind: 'form' });
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 내 건의에 달린 답변.
+   *
+   * 예전에는 건의를 보내고 나면 그걸로 끝이었다. 운영자가 [처리함]으로 바꿔도
+   * 적은 사람은 아무것도 못 받았고, 자기 건의가 어떻게 됐는지 볼 곳도 없었다.
+   * 메일도 함께 가지만 메일을 안 보는 분도 있어 여기서도 보여준다 — 둘 중
+   * 하나는 닿는다.
+   */
+  const [replies, setReplies] = useState<Reply[]>([]);
+  const unseen = replies.filter(r => !r.reply_seen_at).length;
+
+  // 답변이 왔는지는 창을 열지 않아도 알아야 한다. 버튼에 점을 찍으려면
+  // 먼저 물어봐야 하므로 화면에 뜰 때 한 번 확인한다.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/qa?action=my-suggestions', {
+          headers: { Authorization: `Bearer ${getToken()}` },
+        });
+        const d = await res.json();
+        setReplies(d.replies ?? []);
+      } catch { /* 답변 확인 실패가 건의 쓰는 것을 막지 않는다 */ }
+    })();
+  }, []);
 
   // 닫았다 열면 처음부터. 지난번 답이 남아 있으면 지금 쓴 것에 대한 답으로 읽힌다.
   useEffect(() => {
     if (open) { setPhase({ kind: 'form' }); setError(null); }
   }, [open]);
+
+  // 창을 열면 읽은 것으로 본다. 화면에 띄워 놓고도 계속 점이 남으면 곧 무시한다.
+  useEffect(() => {
+    if (!open || unseen === 0) return;
+    setReplies(rs => rs.map(r => ({ ...r, reply_seen_at: r.reply_seen_at ?? new Date().toISOString() })));
+    void fetch('/api/qa?action=suggest-mark-seen', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    }).catch(() => { /* 확인 표시 실패는 다음에 다시 뜨는 것뿐이다 */ });
+  }, [open, unseen]);
 
   useEffect(() => {
     if (!open) return;
@@ -65,10 +109,21 @@ export function Feedback({ area }: { area: string }) {
         onClick={() => setOpen(true)}
         title="불편한 점이나 있었으면 하는 기능을 알려주세요"
         aria-label="건의하기"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-control border border-line text-ink-3 transition-colors hover:border-line-strong hover:text-ink sm:h-auto sm:w-auto sm:gap-1.5 sm:px-3 sm:py-1.5"
+        className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-control border border-line text-ink-3 transition-colors hover:border-line-strong hover:text-ink sm:h-auto sm:w-auto sm:gap-1.5 sm:px-3 sm:py-1.5"
       >
         <MessageSquarePlus className="h-3.5 w-3.5" />
         <span className="hidden text-[12px] font-medium sm:inline">건의하기</span>
+        {/* 답변이 왔다는 것은 창을 열지 않아도 보여야 한다.
+            모바일에서 이 버튼은 28px 정사각형이라 안쪽에 넣으면 넘친다.
+            모서리에 띄워 붙인다. */}
+        {unseen > 0 && (
+          <span
+            aria-label={`새 답변 ${unseen}건`}
+            className="absolute -right-1 -top-1 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-accent px-[3px] text-[9.5px] font-bold leading-none text-ground"
+          >
+            {unseen}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -90,7 +145,9 @@ export function Feedback({ area }: { area: string }) {
                 <p className="mt-1 text-[12.5px] leading-relaxed text-ink-2">
                   {phase.kind === 'done'
                     ? '보내주셔서 감사합니다.'
-                    : '불편한 점, 있었으면 하는 기능, 잘못 나오는 숫자 — 무엇이든 적어주세요.'}
+                    : replies.length > 0
+                      ? '지난 건의에 달린 답변이 아래에 있습니다. 새로 적으실 것이 있으면 이어서 적어주세요.'
+                      : '불편한 점, 있었으면 하는 기능, 잘못 나오는 숫자 — 무엇이든 적어주세요.'}
                 </p>
               </div>
               <button
@@ -102,6 +159,29 @@ export function Feedback({ area }: { area: string }) {
                 <X className="h-5 w-5" />
               </button>
             </div>
+
+            {/* 훈프로가 직접 단 답변 — 새로 쓰는 칸보다 위에 둔다. 아래에 두면
+                긴 건의를 쓰는 동안 화면 밖으로 밀려 못 본 채 닫는다. */}
+            {replies.length > 0 && phase.kind !== 'done' && (
+              <div className="flex max-h-[38vh] flex-col gap-2 overflow-y-auto px-6 pb-1 pt-2">
+                {replies.map(r => (
+                  <div key={r.id} className="rounded-card border border-accent-line bg-accent-soft p-3.5">
+                    <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                      <MailCheck className="h-3.5 w-3.5 text-accent" />
+                      <span className="text-[12px] font-semibold text-accent">훈프로 답변</span>
+                      <span className="text-[11px] text-ink-3">
+                        {r.replied_at ? new Date(r.replied_at).toLocaleDateString('ko-KR') : ''}
+                        {r.area ? ` · ${r.area}` : ''}
+                      </span>
+                    </div>
+                    <p className="mb-1.5 whitespace-pre-wrap border-l-2 border-line pl-2.5 text-[12px] leading-relaxed text-ink-3">
+                      {r.body}
+                    </p>
+                    <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-ink">{r.admin_reply}</p>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {phase.kind === 'done' ? (
               <div className="flex flex-col gap-3 px-6 pb-4 pt-2">
