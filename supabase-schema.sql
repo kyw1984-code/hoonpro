@@ -622,6 +622,7 @@ create table if not exists coupang_accounts (
   -- 시작하며 다른 사용자의 수집을 굶기는 일을 막을 수 있다.
   backfill_done boolean not null default false,
   backfill_step integer not null default 0,
+  sync_started_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
@@ -630,6 +631,8 @@ create table if not exists coupang_accounts (
 alter table coupang_accounts add column if not exists backfill_done boolean not null default false;
 -- 백필이 시간 상한에 잘렸을 때 다음 회차가 이어받을 단계 (0 = 처음부터)
 alter table coupang_accounts add column if not exists backfill_step integer not null default 0;
+-- 지금 돌고 있는 수집의 시작 시각. 같은 계정을 겹쳐 돌리지 않기 위한 잠금 (5분 지나면 무시)
+alter table coupang_accounts add column if not exists sync_started_at timestamptz;
 -- 키 거부·만료를 이메일로 알린 시각. 같은 사고로 매일 보내지 않기 위해 기록한다.
 alter table coupang_accounts add column if not exists status_notified_at timestamptz;
 -- 크론 분산 슬롯은 쓰지 않는다. 수집은 마지막 수집 시각 기준으로 오래된 계정부터 돈다.
