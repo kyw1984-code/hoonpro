@@ -40,12 +40,27 @@ interface Delta { text: string; good: boolean; bad: boolean }
  * 쿠폰 단가를 어디서 가져왔는지 한 줄로. 설정값으로 계산된 옵션은 판매자가 아는
  * 숫자(1건당 11,500원 × 2건)와 정확히 맞고, 나머지는 주문에서 역산한 근사다.
  */
-function couponBasisText(src?: { setting: number; order: number; sheet: number; definedOptions: number }): string {
+function couponBasisText(src?: {
+  setting: number; order: number; sheet: number; definedOptions: number; exact?: number; adjusted?: number;
+}): string {
   if (!src) return '쿠폰 단가 × 판매수량';
   const parts: string[] = [];
-  if (src.setting > 0) parts.push(`쿠폰 설정값 ${src.setting}개 옵션`);
-  if (src.order + src.sheet > 0) parts.push(`주문 역산 ${src.order + src.sheet}개 옵션`);
-  return parts.length ? `${parts.join(' · ')} × 판매수량` : '쿠폰 단가 × 판매수량';
+  if (src.setting > 0) parts.push(`쿠폰 설정값 ${src.setting}개 옵션 × 판매수량`);
+  // 주문에서 확인한 쿠폰은 합계를 그대로 쓴다. 주문수량과 판매수량이 어긋난
+  // 옵션만 개당 값(100원 단위)으로 보정하므로 '추정'이라고 따로 센다 —
+  // 추정이 섞여 있으면 그렇다고 밝혀야 끝자리로 계산 오류를 의심하지 않는다.
+  const exact = src.exact ?? 0;
+  const adjusted = src.adjusted ?? 0;
+  if (exact + adjusted > 0) {
+    parts.push(
+      adjusted > 0
+        ? `주문 확인 ${exact}개 옵션 · 수량 보정 ${adjusted}개 옵션`
+        : `주문 확인 ${exact}개 옵션 (쿠팡 할인 합계 그대로)`,
+    );
+  } else if (src.order + src.sheet > 0) {
+    parts.push(`주문 역산 ${src.order + src.sheet}개 옵션 × 판매수량`);
+  }
+  return parts.length ? parts.join(' · ') : '쿠폰 단가 × 판매수량';
 }
 
 /**

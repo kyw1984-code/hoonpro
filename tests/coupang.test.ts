@@ -11,6 +11,7 @@ import {
   addDays,
   authorization,
   couponForRow,
+  couponFromCoverage,
   dateChunks,
   definitionUnit,
   floorPriceFor,
@@ -252,6 +253,33 @@ test('쿠폰 행 계산: 채널별 단가 × 수량, 매출을 넘지 않는다'
   // 매출 상한
   assert.equal(couponForRow(10, 0, 50000, 0, 120000), 120000);
   assert.equal(couponForRow(0, 0, 100, 100, 1000), 0);
+});
+
+// ── 주문에서 확인한 쿠폰은 합계를 그대로 쓴다 ──────────────────────
+// 실제 계정: 그로스 옵션 하나가 30일 동안 주문 41건 656,998원, 판매수량 40.
+// 예전에는 656,998 ÷ 41 = 16,024.34원을 40에 곱해 640,974원이 나왔다. 쿠폰은
+// 100원 단위로 발행되므로 4원 단위 총액은 계산이 틀린 것처럼 읽힌다.
+test('쿠폰 합계: 주문수량 = 판매수량이면 합계 그대로, 정확', () => {
+  assert.deepEqual(couponFromCoverage(882999, 55, 55), { amount: 882999, exact: true });
+  // 쿠폰을 안 쓴 옵션
+  assert.deepEqual(couponFromCoverage(0, 3, 3), { amount: 0, exact: true });
+});
+
+test('쿠폰 합계: 수량이 어긋나면 그 몫만 100원 단위 개당 값으로 보정한다', () => {
+  // 주문 41 > 판매 40 — 매출인식이 안 된 주문 한 건 몫을 뺀다. 개당 16,024 → 16,000
+  assert.deepEqual(couponFromCoverage(656998, 41, 40), { amount: 656998 - 16000, exact: false });
+  // 주문 40 < 판매 41 — 아직 안 물어본 주문 한 건 몫을 더한다. 개당 18,135 → 18,100
+  assert.deepEqual(couponFromCoverage(725400, 40, 41), { amount: 725400 + 18100, exact: false });
+  // 윙: 주문 41건 590,000원인데 매출인식은 13개뿐 — 28개 몫을 뺀다 (14,390 → 14,400)
+  assert.deepEqual(couponFromCoverage(590000, 41, 13), { amount: 590000 - 14400 * 28, exact: false });
+});
+
+test('쿠폰 합계: 물어본 주문이 하나도 없으면 0이고 추정도 아니다', () => {
+  assert.deepEqual(couponFromCoverage(0, 0, 25), { amount: 0, exact: false });
+  // 팔린 게 없으면 쿠폰도 없다
+  assert.deepEqual(couponFromCoverage(20000, 1, 0), { amount: 0, exact: true });
+  // 보정으로 음수가 되면 0에서 멈춘다
+  assert.deepEqual(couponFromCoverage(1000, 1, 0.5).amount >= 0, true);
 });
 
 // ── 쿠폰 설정값 → 개당 할인 ─────────────────────────────────────
