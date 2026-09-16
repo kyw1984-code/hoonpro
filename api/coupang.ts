@@ -2799,6 +2799,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'price-apply': return await handlePriceApply(userId, req, res);
       case 'admin-overview': return await handleAdminOverview(decoded, res);
       case 'admin-vendors': return await handleAdminVendors(decoded, req, res);
+      case 'admin-sync': return await handleAdminSync(decoded, req, res);
       default:
         return res.status(400).json({ error: `알 수 없는 요청입니다: ${action || '(없음)'}` });
     }
@@ -2806,6 +2807,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('coupang api error:', e);
     return res.status(500).json({ error: e?.message || '처리 중 오류가 발생했습니다.' });
   }
+}
+
+/**
+ * 관리자: 특정 회원의 계정을 지금 수집한다.
+ *
+ * [지금 수집]은 판매자 본인 화면에만 있었다. 관리자는 문의가 왔을 때 "다음
+ * 정시 크론까지 기다리세요"밖에 할 말이 없었고, 고친 코드가 실제로 도는지
+ * 확인하려면 한 시간을 기다려야 했다. 크론이 도는 것과 같은 경로(handleSync)를
+ * 그 회원 id로 부른다 — 별도 로직이 아니라 같은 코드라 결과도 같다.
+ */
+async function handleAdminSync(decoded: any, req: VercelRequest, res: VercelResponse) {
+  if (!decoded?.isAdmin) return res.status(403).json({ error: '관리자만 쓸 수 있습니다.' });
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const target = String(req.body?.userId ?? '').trim();
+  if (!target) return res.status(400).json({ error: '어느 회원인지 지정해주세요.' });
+  // 누가 언제 남의 계정 수집을 눌렀는지는 남긴다. 키 값은 찍지 않는다.
+  console.info('[coupang] 관리자 수동 수집', { by: decoded.userId, target });
+  return await handleSync(target, req, res);
 }
 
 // ── 주문수집 업체 IP 목록 ─────────────────────────────────────
