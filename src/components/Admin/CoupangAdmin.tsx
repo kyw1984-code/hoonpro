@@ -44,6 +44,43 @@ export function CoupangAdmin() {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /**
+   * 지금 수집 중인 회원. 크론과 같은 코드가 돌고, 회원 한 명에 최대 100초쯤
+   * 걸린다. 그동안 다른 줄의 버튼도 잠근다 — 두 계정을 동시에 돌리면 쿠팡
+   * 호출 한도(429)에 더 빨리 닿는다.
+   */
+  const [syncing, setSyncing] = useState<string | null>(null);
+  const [syncNote, setSyncNote] = useState<{ userId: string; text: string; ok: boolean } | null>(null);
+
+  const syncNow = async (a: AccountRow) => {
+    if (syncing) return;
+    if (!confirm(`${a.name || a.email} 계정을 지금 수집합니다. 1~2분 걸릴 수 있습니다. 진행할까요?`)) return;
+    setSyncing(a.userId);
+    setSyncNote(null);
+    try {
+      const res = await fetch('/api/coupang?action=admin-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ userId: a.userId }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error || '수집에 실패했습니다.');
+      const sum = d.summary ?? {};
+      const errs: string[] = Array.isArray(sum.errors) ? sum.errors : [];
+      // '끝났습니다'로 뭉뚱그리지 않는다. 시간 상한에 잘렸는지, 오류가 몇 건인지가
+      // 다음에 무엇을 해야 하는지를 정한다.
+      const parts = [
+        sum.truncated ? '시간 상한에 잘려 다음 회차가 이어받습니다' : '끝까지 받았습니다',
+        errs.length ? `오류 ${errs.length}건: ${errs.slice(0, 2).join(' / ')}` : '오류 없음',
+      ];
+      setSyncNote({ userId: a.userId, text: parts.join(' · '), ok: errs.length === 0 });
+      await load();
+    } catch (e: any) {
+      setSyncNote({ userId: a.userId, text: e?.message ?? '수집에 실패했습니다.', ok: false });
+    } finally {
+      setSyncing(null);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -113,7 +150,7 @@ export function CoupangAdmin() {
           </button>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-[12.5px]">
+          <table className="w-full min-w-[960px] text-[12.5px]">
             <thead>
               <tr className="border-b border-line text-[11.5px] text-ink-3">
                 <th className="px-4 py-2.5 text-left font-medium">회원</th>
@@ -122,6 +159,7 @@ export function CoupangAdmin() {
                 <th className="px-3 py-2.5 text-left font-medium">마지막 수집</th>
                 <th className="px-3 py-2.5 text-right font-medium">키 만료</th>
                 <th className="px-4 py-2.5 text-left font-medium">최근 오류</th>
+                <th className="px-3 py-2.5 text-right font-medium">수집</th>
               </tr>
             </thead>
             <tbody>
@@ -143,8 +181,24 @@ export function CoupangAdmin() {
                     <td className="px-3 py-2.5 text-right tabular-nums text-ink-2">
                       {a.daysToExpiry === null ? '-' : a.daysToExpiry <= 0 ? '만료' : `${a.daysToExpiry}일`}
                     </td>
-                    <td className="max-w-[320px] truncate px-4 py-2.5 text-[11.5px] text-ink-3" title={a.lastSyncError ?? ''}>
-                      {a.lastSyncError ?? '-'}
+                    <td className="max-w-[320px] px-4 py-2.5 text-[11.5px] text-ink-3">
+                      <p className="truncate" title={a.lastSyncError ?? ''}>{a.lastSyncError ?? '-'}</p>
+                      {syncNote?.userId === a.userId && (
+                        <p className={`mt-0.5 whitespace-normal ${syncNote.ok ? 'text-positive' : 'text-caution'}`}>{syncNote.text}</p>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-right">
+                      {/* 크론과 같은 코드를 이 회원 id로 바로 돌린다. 정시까지 기다리지
+                          않고 고친 것이 실제로 도는지 확인할 수 있다. */}
+                      <button
+                        onClick={() => void syncNow(a)}
+                        disabled={syncing !== null || a.status !== 'active'}
+                        title={a.status !== 'active' ? '키가 거부되거나 만료된 계정은 수집할 수 없습니다' : '지금 수집'}
+                        className="inline-flex items-center gap-1 whitespace-nowrap rounded-control border border-line px-2 py-1 text-[11px] text-ink-2 hover:border-accent-line hover:text-accent disabled:opacity-40"
+                      >
+                        {syncing === a.userId ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                        {syncing === a.userId ? '수집 중' : '지금 수집'}
+                      </button>
                     </td>
                   </tr>
                 );
