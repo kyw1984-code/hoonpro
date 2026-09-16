@@ -29,6 +29,18 @@ export function isOwnReferral(note: string | null | undefined, userId: string): 
 }
 
 /**
+ * 회원이 자동으로 받은 개인 추천 코드인가 (운영자가 만든 프로모션 쿠폰이 아니라).
+ *
+ * 추천 코드는 회원 한 명당 하나씩 자동으로 생기므로 회원이 늘면 그만큼 쌓인다.
+ * 관리자 쿠폰 목록에 섞어 두면 회원 100명일 때 HOON-xxxxxx가 100줄 깔려
+ * 정작 봐야 할 프로모션 쿠폰이 묻힌다. 그래서 목록에서 갈라 놓는데, 그
+ * 판정을 화면마다 따로 적으면 한쪽만 고쳐졌을 때 조용히 어긋난다.
+ */
+export function isReferralNote(note: string | null | undefined): boolean {
+  return referrerIdFromNote(note) !== null;
+}
+
+/**
  * 이 note를 쓴 추천 코드의 주인 userId. 추천 코드가 아니면 null.
  *
  * 친구가 결제를 마치면 추천인에게도 보상을 줘야 하는데, 그 추천인이
