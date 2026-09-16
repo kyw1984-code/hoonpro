@@ -17,6 +17,7 @@ import {
   floorPriceFor,
   isActiveReturn,
   isAllowedReportHost,
+  isResaleOption,
   isTransient,
   lastWeekRange,
   median,
@@ -405,4 +406,25 @@ test('selectAll: 고칠 수 없는 오류는 다시 부르지 않는다', async 
   };
   await assert.rejects(() => selectAll(build, 1000));
   assert.equal(calls, 1, '문법 오류는 다시 불러도 같다');
+});
+
+// ── 반품 재판매 옵션 판정 ────────────────────────────────────────
+// 로켓그로스는 반품된 물건을 새 옵션ID로 다시 판다. 상품 목록에 없어 observed로
+// 채워지고, 옵션명 자리에는 쿠팡 내부 번호(8자리 숫자)만 온다. 실제 계정 자료.
+test('재판매 옵션: 목록에 없는 그로스 옵션에 숫자 옵션명이면 재판매', () => {
+  assert.equal(isResaleOption({ status: 'observed', business_type: 'growth', option_name: '73074131' }), true);
+  assert.equal(isResaleOption({ status: 'observed', business_type: 'growth', option_name: ' 74518563 ' }), true);
+});
+
+test('재판매 옵션: 판매자배송에는 재판매가 없고, 정식 옵션·글자 옵션명은 아니다', () => {
+  // 판매자배송은 목록에 없어도 재판매가 아니다 (옵션명이 비어 온다)
+  assert.equal(isResaleOption({ status: 'observed', business_type: 'marketplace', option_name: '' }), false);
+  // 정식 등록 옵션
+  assert.equal(isResaleOption({ status: '승인완료', business_type: 'growth', option_name: '아이보리+블랙 2종 세트 FREE' }), false);
+  // 목록에는 없지만 옵션명이 글자면 재판매로 보지 않는다
+  assert.equal(isResaleOption({ status: 'observed', business_type: 'growth', option_name: 'FREE' }), false);
+  // 숫자가 너무 짧으면 판매자 SKU일 수 있다
+  assert.equal(isResaleOption({ status: 'observed', business_type: 'growth', option_name: '123' }), false);
+  assert.equal(isResaleOption(null), false);
+  assert.equal(isResaleOption(undefined), false);
 });
