@@ -2030,6 +2030,10 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
 
   // 교환 — 판매자 귀책이면 반품과 마찬가지로 왕복 배송비가 나간다.
   // 이 API는 한 번에 7일까지, 날짜는 시각까지 붙인 형식만 받는다.
+  // 7일 구간을 쉬지 않고 연달아 부르면 429가 난다 (60일이면 9번 연속). 한 번
+  // 걸리면 그 구간의 교환이 통째로 빠지므로 호출 사이를 띄우고, 429는 잠깐 쉬었다
+  // 한 번 더 묻는다.
+  let lastExchangeCallAt = 0;
   for (const [cFrom, cTo] of dateChunks(from, to, 7)) {
     if (outOfTime(deadline, sum)) break;
     let nextToken = '';
@@ -2038,13 +2042,22 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
       const query =
         `createdAtFrom=${cFrom}T00:00:00&createdAtTo=${cTo}T23:59:59&maxPerPage=50` +
         (nextToken ? `&nextToken=${nextToken}` : '');
-      const r = await coupangCall(creds, 'GET', EP.exchangeRequests(creds.vendorId), query);
+      const gap = LIMITS.rgGapMs - (Date.now() - lastExchangeCallAt);
+      if (gap > 0) await sleep(gap);
+      lastExchangeCallAt = Date.now();
+      let r = await coupangCall(creds, 'GET', EP.exchangeRequests(creds.vendorId), query);
+      if (!r.ok && r.status === 429 && !outOfTime(deadline, sum)) {
+        await sleep(3_000);
+        lastExchangeCallAt = Date.now();
+        r = await coupangCall(creds, 'GET', EP.exchangeRequests(creds.vendorId), query);
+      }
       if (!r.ok) {
         if (r.authFailed) {
           sum.authFailed = true;
           return;
         }
-        sum.errors.push(`교환요청: ${r.error}`);
+        const msg = `교환요청: ${r.error}`;
+        if (!sum.errors.includes(msg)) sum.errors.push(msg);
         break;
       }
       for (const ex of listOf(r.data)) {
