@@ -625,7 +625,22 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                           </span>
                           {r.productName}
                         </p>
-                        {r.optionName && <p className="truncate text-[11px] text-ink-3">{r.optionName}</p>}
+                        {r.optionName && (
+                          <p className="truncate text-[11px] text-ink-3">
+                            {/* 재판매는 쿠팡이 반품된 물건을 새 옵션ID로 반값에 다시 파는 것이다.
+                                표시가 없으면 "나시원피스 / 73074131"로 떠서 왜 이 줄만 단가가
+                                반값인지 알 수 없다. */}
+                            {r.resale && (
+                              <span
+                                title="반품된 물건을 쿠팡이 새 옵션으로 다시 판 것입니다. 상품 목록에는 없고 가격은 정가보다 낮습니다."
+                                className="mr-1.5 rounded-control border border-caution/50 px-1 py-0.5 align-middle text-[9.5px] text-caution"
+                              >
+                                재판매
+                              </span>
+                            )}
+                            {r.optionName}
+                          </p>
+                        )}
                         {!r.costEntered && r.quantity > 0 && (
                           <span className="mt-0.5 inline-flex items-center gap-1 rounded-control border border-line px-1.5 py-0.5 text-[10px] text-ink-3">
                             <AlertTriangle className="h-2.5 w-2.5" />

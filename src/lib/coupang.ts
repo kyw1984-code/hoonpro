@@ -74,6 +74,8 @@ export interface ProfitRow {
   couponSource?: 'setting' | 'order' | 'sheet' | null;
   /** setting=설정값 × 수량 · exact=주문 할인 합계 그대로 · adjusted=수량 보정이 들어간 추정 */
   couponBasis?: 'setting' | 'exact' | 'adjusted' | null;
+  /** 반품 재판매 옵션 — 쿠팡이 새 옵션ID로 반값에 다시 파는 것 */
+  resale?: boolean;
   /** 이 옵션에 붙은 광고비. 순이익(profit)에서 이미 뺀 값이다 */
   adCost: number;
   /** 이 행의 판매가 난 채널. 둘 다면 'both' */

@@ -657,6 +657,24 @@ export function couponForRow(
  *
  * @returns amount 이 채널의 쿠폰 할인, exact 보정 없이 합계를 그대로 썼는지
  */
+/**
+ * 반품 재판매 옵션인가.
+ *
+ * 로켓그로스는 반품된 물건을 새 옵션ID로 다시 판다. 판매자 상품 목록에는 없고
+ * (그래서 status가 observed다), 옵션명 자리에는 쿠팡 내부 재판매 번호
+ * (73074131 같은 8자리 숫자)만 오며, 값은 정가의 반 정도다. 판매자배송에는
+ * 재판매가 없으므로 그로스만 본다.
+ *
+ * 화면에 '재판매'라고 적어 주지 않으면 "나시원피스 3종세트 / 73074131"로 떠서
+ * 왜 이 줄만 단가가 반값인지 알 수 없다.
+ */
+export function isResaleOption(item: { status?: string | null; business_type?: string | null; option_name?: string | null } | null | undefined): boolean {
+  if (!item) return false;
+  if (item.status !== 'observed') return false;
+  if (item.business_type !== 'growth') return false;
+  return /^\d{6,}$/.test(String(item.option_name ?? '').trim());
+}
+
 export function couponFromCoverage(
   coveredDiscount: number,
   coveredQty: number,
@@ -1432,6 +1450,7 @@ async function syncOrderCoupons(
   const rows: any[] = [];
   let lastCallAt = 0;
   let typesSeen = new Set<string>();
+  let multiTypeLogged = false;
   for (const orderId of todo) {
     if (outOfTime(deadline, sum)) break;
     const wait = LIMITS.couponGapMs - (Date.now() - lastCallAt);
@@ -1453,12 +1472,25 @@ async function syncOrderCoupons(
     // 크게 보는 쪽이 작게 보는 쪽보다 나쁘다.
     let discount = 0;
     const types: string[] = [];
+    // 유형별 원금액. 한 주문에 PRICE와 FIXED_WITH_QUANTITY가 겹쳐 13,999원이
+    // 됐을 때, 합계만 있으면 무엇이 얼마인지 영영 모른다. 주문 단위 그대로
+    // 남긴다 (옵션별로 나누지 않는다 — 나누면 또 합계가 된다).
+    const byType: Record<string, number> = {};
     for (const c of list) {
       const type = pickStr(c, ['type', 'couponType', 'discountType']);
       types.push(type);
       typesSeen.add(type);
+      const amount = pickNum(c, ['discount', 'discountAmount', 'amount'], 0);
+      const key = type || 'UNKNOWN';
+      byType[key] = (byType[key] ?? 0) + amount;
       if (/COUPANG|쿠팡/i.test(type)) continue;
-      discount += pickNum(c, ['discount', 'discountAmount', 'amount'], 0);
+      discount += amount;
+    }
+    // 유형이 둘 이상 겹친 주문은 회차마다 한 번 원문을 남긴다. PRICE가 무엇인지는
+    // 문서가 아니라 이 응답에만 적혀 있다. 키 값은 없는 응답이다.
+    if (list.length > 1 && !multiTypeLogged) {
+      multiTypeLogged = true;
+      console.info('coupang order coupon multi-type sample —', JSON.stringify(list).slice(0, 800));
     }
     const meta = orderMeta.get(orderId)!;
     const totalAmount = meta.items.reduce((n, it) => n + it.amount, 0);
@@ -1474,6 +1506,7 @@ async function syncOrderCoupons(
         user_id: userId, order_id: orderId, vendor_item_id: it.vendorItemId, channel,
         sale_date: meta.date, discount: Math.max(0, share), quantity: Math.max(0, it.qty || 0),
         coupon_types: types.join(',') || null,
+        discount_by_type: Object.keys(byType).length ? byType : null,
         fetched_at: new Date().toISOString(),
       });
     });
@@ -3006,6 +3039,8 @@ interface ProfitRow {
    *   adjusted — 합계에 어긋나는 수량만큼 개당(100원 단위) 보정을 더한 추정
    */
   couponBasis?: 'setting' | 'exact' | 'adjusted' | null;
+  /** 반품 재판매 옵션 — 쿠팡이 새 옵션ID로 반값에 다시 파는 것. isResaleOption 참고 */
+  resale?: boolean;
   /** 이 옵션에 붙은 광고비 (보고서의 광고집행 옵션ID 기준) */
   adCost: number;
   /** 이 행의 판매가 어느 채널에서 났는지. 둘 다면 'both' */
@@ -3061,7 +3096,9 @@ export async function computeProfit(
     selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
     lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_items')
-      .select('vendor_item_id, product_name, option_name, sale_price, stock').eq('user_id', userId)
+      // status·business_type은 재판매 판정(isResaleOption)에 쓴다. 빼먹으면
+      // 판정이 조용히 전부 false가 된다.
+      .select('vendor_item_id, product_name, option_name, sale_price, stock, status, business_type').eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
     // 저장된 시각은 한국 시각을 UTC로 옮긴 값이다. 경계도 한국 시각으로 잡아야
     // 새벽에 접수된 반품이 앞뒤 날짜로 밀리지 않는다.
@@ -3222,6 +3259,7 @@ export async function computeProfit(
         costEntered: false,
         stock: item?.stock ?? null,
         salePrice: item?.sale_price ?? null,
+        resale: isResaleOption(item),
       } as ProfitRow);
     cur.quantity += Number(s.quantity) || 0;
     cur.salesAmount += Number(s.sales_amount) || 0;
@@ -3241,6 +3279,7 @@ export async function computeProfit(
       quantity: 0, salesAmount: 0, commission: 0, settlementAmount: 0, couponDiscount: 0, couponSource: null, adCost: 0, channel: 'marketplace', returnAmount: 0,
       unitCostTotal: 0, returnCount: ret.count, returnQuantity: ret.quantity, returnCost: 0, profit: 0, marginRate: 0,
       costEntered: false, stock: item?.stock ?? null, salePrice: item?.sale_price ?? null,
+      resale: isResaleOption(item),
     });
   }
 
