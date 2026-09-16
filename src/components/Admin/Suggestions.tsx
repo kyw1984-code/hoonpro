@@ -9,7 +9,7 @@
  * 뜻이라 그 자체가 개선할 거리다.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { Check, Loader2, MessageSquare, RefreshCw } from 'lucide-react';
+import { Check, Loader2, MailCheck, MessageSquare, RefreshCw, Send } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 
 interface Item {
@@ -27,6 +27,11 @@ interface Item {
   userId: string | null;
   userEmail: string | null;
   userName: string | null;
+  /** 이미 보낸 답. 있으면 다시 보내는 것이므로 화면에 그렇게 밝힌다 */
+  adminReply: string | null;
+  repliedAt: string | null;
+  /** 메일이 실제로 나갔나. 안 나갔으면 앱 알림으로만 갔다는 뜻이다 */
+  replyMailed: boolean;
 }
 
 interface Group {
@@ -67,6 +72,14 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
   const [data, setData] = useState<Data | null>(null);
   const [status, setStatus] = useState<'open' | 'all' | 'planned' | 'done'>('open');
   const [busy, setBusy] = useState(false);
+  /**
+   * 답을 쓰고 있는 대상. 건의 한 건이면 그 id 하나, 묶음이면 그 묶음의 id 전부.
+   *
+   * 상태만 바꾸는 버튼과 따로 둔다 — [처리함]에 자동 문구를 붙이면, 같은 얘기를
+   * 열 명이 했을 때 내용 없는 '처리됐습니다'가 한꺼번에 날아간다.
+   */
+  const [replyTo, setReplyTo] = useState<{ key: string; ids: string[] } | null>(null);
+  const [reply, setReply] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -99,6 +112,75 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
       setBusy(false);
     }
   };
+
+  const sendReply = async () => {
+    if (busy || !replyTo) return;
+    const text = reply.trim();
+    if (text.length < 2) { showToast('답변 내용을 입력해주세요.'); return; }
+    setBusy(true);
+    try {
+      const res = await fetch('/api/qa?action=suggest-reply', {
+        method: 'POST', headers: auth(),
+        body: JSON.stringify({ id: replyTo.ids[0], ids: replyTo.ids, reply: text }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d?.error || '보내지 못했습니다.');
+      // 몇 건이 메일로 갔고 몇 건이 못 갔는지 그대로 말한다. '보냈습니다'로
+      // 뭉뚱그리면 안 간 것을 모른 채 지나간다.
+      showToast(
+        d.noEmail > 0
+          ? `${d.updated}건에 답변했습니다. 메일 ${d.mailed}건 발송, ${d.noEmail}건은 앱 알림으로만 갑니다.`
+          : `${d.updated}건에 답변했습니다. 메일도 발송했습니다.`,
+      );
+      setReplyTo(null);
+      setReply('');
+      await load();
+    } catch (e: any) {
+      showToast(e?.message ?? '보내지 못했습니다.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 답변 칸 — 건의 한 건에도, 묶음에도 같은 것을 쓴다 */
+  const replyBox = (key: string, ids: string[], already: boolean) =>
+    replyTo?.key === key ? (
+      <div className="mt-2 rounded-card border border-accent-line bg-accent-soft/40 p-3">
+        <textarea
+          autoFocus
+          value={reply}
+          onChange={e => setReply(e.target.value)}
+          rows={4}
+          maxLength={5000}
+          placeholder={ids.length > 1
+            ? `이 묶음에 든 ${ids.length}건 모두에게 같은 답이 갑니다. 메일에는 각자가 적은 원문이 함께 실립니다.`
+            : '건의해 주신 분께 그대로 전달됩니다.'}
+          className="w-full resize-none rounded-control border border-line bg-paper px-3 py-2 text-[12.5px] leading-relaxed text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
+        />
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-ink-3">
+            메일과 앱 알림으로 함께 갑니다. 보내면 <b className="text-ink-2">처리함</b>으로 바뀝니다.
+            {already && <span className="ml-1 text-caution">이미 한 번 답을 보낸 건입니다 — 다시 보냅니다.</span>}
+          </span>
+          <div className="ml-auto flex gap-1">
+            <button
+              onClick={() => { setReplyTo(null); setReply(''); }}
+              className="rounded-control border border-line px-2.5 py-1 text-[11.5px] text-ink-3 hover:text-ink-2"
+            >
+              취소
+            </button>
+            <button
+              onClick={() => void sendReply()}
+              disabled={busy || reply.trim().length < 2}
+              className="flex items-center gap-1 rounded-control bg-accent px-3 py-1 text-[11.5px] font-semibold text-ground disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+              보내기
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null;
 
   if (!data) {
     return (
@@ -149,7 +231,8 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
           </p>
           <div className="mt-3 flex flex-col gap-1.5">
             {data.groups.slice(0, 12).map(g => (
-              <div key={g.summary} className="flex flex-wrap items-center gap-2 rounded-card border border-line bg-paper-2 px-3.5 py-2.5">
+              <div key={g.summary} className="rounded-card border border-line bg-paper-2 px-3.5 py-2.5">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[13px] font-medium text-ink">{g.summary}</span>
                 <span className="rounded-control border border-line px-1.5 py-0.5 text-[10.5px] text-ink-3">
                   {KIND_LABEL[g.kind] ?? g.kind}
@@ -176,6 +259,13 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
                 )}
                 <div className="ml-auto flex gap-1">
                   <button
+                    onClick={() => { setReplyTo({ key: `g:${g.summary}`, ids: g.ids }); setReply(''); }}
+                    disabled={busy}
+                    className="flex items-center gap-1 rounded-control border border-accent-line px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40"
+                  >
+                    <Send className="h-3 w-3" /> 답변
+                  </button>
+                  <button
                     onClick={() => update(g.ids, 'planned')}
                     disabled={busy}
                     className="rounded-control border border-line px-2 py-1 text-[11px] text-ink-2 hover:text-ink disabled:opacity-40"
@@ -190,6 +280,8 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
                     처리함
                   </button>
                 </div>
+              </div>
+              {replyBox(`g:${g.summary}`, g.ids, false)}
               </div>
             ))}
           </div>
@@ -234,6 +326,25 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
 
               <p className="mt-2 whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-2">{i.body}</p>
 
+              {/* 이미 보낸 답은 반드시 보여야 한다. 안 보이면 같은 사람에게
+                  두 번 보내고, 보낸 줄 모르고 또 쓴다. */}
+              {i.adminReply && (
+                <div className="mt-2 rounded-card border border-line bg-paper-2 p-3">
+                  <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                    <MailCheck className="h-3.5 w-3.5 text-positive" />
+                    <span className="text-[11.5px] font-semibold text-ink-2">보낸 답변</span>
+                    <span className="text-[11px] text-ink-3">
+                      {i.repliedAt ? ago(i.repliedAt) : ''}
+                      {' · '}
+                      {i.replyMailed ? '메일 발송됨' : '앱 알림만'}
+                    </span>
+                  </div>
+                  <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-2">{i.adminReply}</p>
+                </div>
+              )}
+
+              {replyBox(`i:${i.id}`, [i.id], Boolean(i.adminReply))}
+
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {i.status !== 'open' && (
                   <span className="rounded-control border border-line px-1.5 py-0.5 text-[10.5px] text-ink-3">
@@ -241,6 +352,13 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
                   </span>
                 )}
                 <div className="ml-auto flex gap-1">
+                  <button
+                    onClick={() => { setReplyTo({ key: `i:${i.id}`, ids: [i.id] }); setReply(i.adminReply ?? ''); }}
+                    disabled={busy}
+                    className="flex items-center gap-1 rounded-control border border-accent-line px-2 py-1 text-[11px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-40"
+                  >
+                    <Send className="h-3 w-3" /> {i.adminReply ? '답변 수정' : '답변'}
+                  </button>
                   {i.status !== 'planned' && (
                     <button
                       onClick={() => update([i.id], 'planned')}

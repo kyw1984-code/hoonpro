@@ -277,6 +277,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'suggest-update':
         if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
         return await handleSuggestUpdate(req, res);
+      case 'suggest-reply':
+        if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+        return await handleSuggestReply(req, res, decoded);
+      case 'my-suggestions':
+        return await handleMySuggestions(res, decoded);
+      case 'suggest-mark-seen':
+        return await handleSuggestMarkSeen(req, res, decoded);
       case 'status': {
         const enabled = await getQaEnabled();
         return res.status(200).json({ enabled, canUse: isAdmin || enabled });
@@ -829,6 +836,140 @@ async function handleMarkSeen(req: VercelRequest, res: VercelResponse, decoded: 
   return res.status(200).json({ ok: true });
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 건의에 직접 답하기
+//
+// 건의를 [처리함]으로 바꿔도 적은 사람은 아무것도 못 받았다. 자기 건의가
+// 어떻게 됐는지 알 방법이 아예 없었다 — 앱에 '내 건의' 목록도 없다.
+//
+// 그렇다고 [처리함]에 자동 문구를 붙이지는 않는다. 두 가지 이유다.
+//   · 같은 얘기를 여러 명이 하면 묶어서 한 번에 처리하는데, 그때 내용 없는
+//     '처리됐습니다'가 열 명에게 한꺼번에 날아간다.
+//   · '처리함'이 실제로는 '확인했고 안 고치기로 함'일 때가 있다. 그걸 그대로
+//     보내면 오해가 생긴다.
+//
+// 그래서 운영자가 한 줄 적어 보낼 때만 나간다. 묶음으로 보내면 그 묶음에 든
+// 사람 전부에게 같은 답이 가되, 메일에는 각자가 적은 원문을 실어 준다 —
+// 무엇에 대한 답인지 모르면 답이 아니다.
+// ═══════════════════════════════════════════════════════════════
+
+/** 한 번에 답할 수 있는 건의 수. 메일을 그만큼 보내므로 함수 시간 안에 둔다 */
+const REPLY_BATCH_MAX = 30;
+
+async function handleSuggestReply(req: VercelRequest, res: VercelResponse, decoded: any) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const reply = String(req.body?.reply ?? '').trim();
+  if (reply.length < 2) return res.status(400).json({ error: '답변 내용을 입력해주세요.' });
+  if (reply.length > 5000) return res.status(400).json({ error: '답변이 너무 깁니다. (5,000자 이하)' });
+
+  const raw = Array.isArray(req.body?.ids) ? req.body.ids : [req.body?.id];
+  const ids = [...new Set(raw.map((v: unknown) => String(v ?? '').trim()).filter(Boolean))];
+  if (ids.length === 0) return res.status(400).json({ error: '어느 건의인지 지정해주세요.' });
+  if (ids.length > REPLY_BATCH_MAX) {
+    return res.status(400).json({ error: `한 번에 ${REPLY_BATCH_MAX}건까지 보낼 수 있습니다.` });
+  }
+
+  const { data: rows, error: readErr } = await supabase
+    .from('feedback')
+    .select('id, body, user_id, users(name, email)')
+    .in('id', ids);
+  if (readErr) return res.status(500).json({ error: '건의를 불러오지 못했습니다.' });
+  if (!rows || rows.length === 0) return res.status(404).json({ error: '건의를 찾을 수 없습니다.' });
+
+  // 저장이 먼저, 메일이 나중이다. 메일 한 번 실패에 애써 쓴 답이 사라지면 안 된다.
+  const patch: Record<string, any> = {
+    admin_reply: reply,
+    replied_at: new Date().toISOString(),
+    replied_by: decoded.userId,
+    // 고쳐 쓴 답이면 확인 표시를 지워 다시 보게 한다
+    reply_seen_at: null,
+    updated_at: new Date().toISOString(),
+  };
+  // 답을 보내면 그 건의는 처리된 것으로 본다. 상태를 따로 또 누르게 하면
+  // 답은 갔는데 목록에는 미처리로 남는 일이 생긴다.
+  if (req.body?.markDone !== false) patch.status = 'done';
+
+  const { error: upErr } = await supabase.from('feedback').update(patch).in('id', ids);
+  if (upErr) return res.status(500).json({ error: '답변을 저장하지 못했습니다.' });
+
+  // 메일. 탈퇴했거나 주소가 없는 분은 앱 알림으로만 간다 — 화면에 그렇게 밝힌다.
+  let mailed = 0;
+  let noEmail = 0;
+  for (const row of rows as any[]) {
+    const to = row.users?.email ?? '';
+    const name = row.users?.name ?? '';
+    if (!to) { noEmail++; continue; }
+    if (!process.env.RESEND_API_KEY) { noEmail++; continue; }
+    try {
+      const r = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: emailFrom(),
+          to: [to],
+          subject: '[훈프로] 보내주신 건의에 답변드립니다',
+          html: wrapEmail(
+            '보내주신 건의에 답변드립니다',
+            `<p>${name ? name + '님, ' : ''}건의해 주셔서 감사합니다.</p>` +
+            `<p style="color:#8a92a6;font-size:12.5px;margin-bottom:2px;">보내주신 내용</p>` +
+            emailQuote(row.body ?? '') +
+            `<p style="color:#8a92a6;font-size:12.5px;margin-bottom:2px;">답변</p>` +
+            `<div style="color:#e8ecf5;">${toHtmlParagraphs(reply)}</div>` +
+            emailButton('훈프로 열기'),
+            '이 답변은 훈프로 [건의하기]에서도 다시 보실 수 있습니다.',
+          ),
+        }),
+      });
+      if (r.ok) {
+        mailed++;
+        await supabase.from('feedback')
+          .update({ reply_mail_sent_at: new Date().toISOString() }).eq('id', row.id);
+      } else {
+        noEmail++;
+      }
+    } catch {
+      // 메일 실패가 답변 저장을 되돌리지 않는다. 대신 몇 건이 못 갔는지 알린다.
+      noEmail++;
+    }
+  }
+
+  return res.status(200).json({ ok: true, updated: rows.length, mailed, noEmail });
+}
+
+/** 건의한 사람: 내 건의에 달린 답변 */
+async function handleMySuggestions(res: VercelResponse, decoded: any) {
+  const { data, error } = await supabase
+    .from('feedback')
+    .select('id, body, area, admin_reply, replied_at, reply_seen_at')
+    .eq('user_id', decoded.userId)
+    .not('admin_reply', 'is', null)
+    .order('replied_at', { ascending: false })
+    .limit(20);
+  // 답변 조회가 실패해도 건의 자체는 계속 쓸 수 있어야 한다
+  if (error) return res.status(200).json({ replies: [], unseen: 0 });
+
+  const replies = data ?? [];
+  return res.status(200).json({
+    replies,
+    unseen: replies.filter((r: any) => !r.reply_seen_at).length,
+  });
+}
+
+/** 건의한 사람이 확인했다. 확인한 뒤로는 알림을 띄우지 않는다 */
+async function handleSuggestMarkSeen(req: VercelRequest, res: VercelResponse, decoded: any) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = String(req.body?.id ?? '').trim();
+  let q = supabase.from('feedback').update({ reply_seen_at: new Date().toISOString() })
+    .eq('user_id', decoded.userId)
+    .not('admin_reply', 'is', null)
+    .is('reply_seen_at', null);
+  // id를 주면 그것만, 안 주면 전부 (창을 열어 다 읽었을 때)
+  if (id) q = q.eq('id', id);
+  await q;
+  return res.status(200).json({ ok: true });
+}
+
 // ── 관리자: 질문/답변 로그 ──
 async function handleLogs(req: VercelRequest, res: VercelResponse) {
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
@@ -1014,7 +1155,7 @@ async function handleSuggestList(req: VercelRequest, res: VercelResponse) {
   const status = String(req.query.status ?? 'open');
   let q = supabase
     .from('feedback')
-    .select('id, user_id, area, body, kind, summary, severity, auto_reply, answered, status, note, created_at, users(email, name)')
+    .select('id, user_id, area, body, kind, summary, severity, auto_reply, answered, status, note, created_at, admin_reply, replied_at, reply_mail_sent_at, users(email, name)')
     .order('created_at', { ascending: false })
     .limit(300);
   if (status !== 'all') q = q.eq('status', status);
@@ -1037,6 +1178,12 @@ async function handleSuggestList(req: VercelRequest, res: VercelResponse) {
     userId: r.user_id ? String(r.user_id) : null,
     userEmail: r.users?.email ?? null,
     userName: r.users?.name ?? null,
+    // 이미 답을 보낸 건의는 화면에서 그렇게 보여야 한다. 안 그러면 같은 사람에게
+    // 두 번 보내고, 보낸 줄 모르고 또 쓴다.
+    adminReply: r.admin_reply ?? null,
+    repliedAt: r.replied_at ?? null,
+    // 메일이 실제로 나갔나. 안 나갔으면 앱 알림으로만 갔다는 뜻이다.
+    replyMailed: Boolean(r.reply_mail_sent_at),
   }));
 
   // 같은 요약끼리 묶는다. 한 사람이 한 말과 열 사람이 한 말은 무게가 다르다.
