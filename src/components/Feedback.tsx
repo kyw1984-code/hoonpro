@@ -43,6 +43,17 @@ export function Feedback({ area }: { area: string }) {
    */
   const [replies, setReplies] = useState<Reply[]>([]);
   const unseen = replies.filter(r => !r.reply_seen_at).length;
+  /**
+   * 접속 직후 한 번 띄우는 알림.
+   *
+   * 버튼 모서리의 숫자 배지만으로는 놓친다 — 가만히 있는 표시인 데다, 모바일에서
+   * 그 버튼은 아이콘만 있는 28px 정사각형이다. 메일을 안 보는 분은 답변이 온 줄
+   * 모르고 지나간다. 그래서 접속하면 한 번 떴다 사라지는 알림을 둔다.
+   *
+   * 창을 자동으로 열지는 않는다. 일하러 들어왔는데 창이 막고 있으면 성가시다.
+   * 대신 눌러서 바로 열 수 있게 한다. 확인하지 않고 닫으면 다음 접속 때 또 뜬다.
+   */
+  const [notice, setNotice] = useState(false);
 
   // 답변이 왔는지는 창을 열지 않아도 알아야 한다. 버튼에 점을 찍으려면
   // 먼저 물어봐야 하므로 화면에 뜰 때 한 번 확인한다.
@@ -54,9 +65,17 @@ export function Feedback({ area }: { area: string }) {
         });
         const d = await res.json();
         setReplies(d.replies ?? []);
+        if ((d.unseen ?? 0) > 0) setNotice(true);
       } catch { /* 답변 확인 실패가 건의 쓰는 것을 막지 않는다 */ }
     })();
   }, []);
+
+  // 읽고 누를 시간은 준다. 3초짜리 토스트는 눈에 들어오기 전에 사라진다.
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(false), 12000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   // 닫았다 열면 처음부터. 지난번 답이 남아 있으면 지금 쓴 것에 대한 답으로 읽힌다.
   useEffect(() => {
@@ -125,6 +144,40 @@ export function Feedback({ area }: { area: string }) {
           </span>
         )}
       </button>
+
+      {/* 접속 직후 한 번. 창이 열려 있으면 띄우지 않는다 — 이미 보고 있다 */}
+      {notice && !open && (
+        <ModalPortal>
+          {/* 버튼 안에 버튼을 넣을 수 없다. 바깥은 상자로 두고 '보기'와 '닫기'를
+              나란한 버튼 둘로 나눈다. */}
+          <div className="pointer-events-none fixed inset-x-0 bottom-5 z-[80] flex justify-center px-4">
+            <div className="pointer-events-auto flex w-full max-w-[420px] items-center gap-1 rounded-panel border border-accent-line bg-paper py-2 pl-4 pr-2 shadow-overlay">
+              <button
+                type="button"
+                onClick={() => { setNotice(false); setOpen(true); }}
+                className="flex min-w-0 flex-1 items-center gap-2.5 py-1 text-left"
+              >
+                <MailCheck className="h-4 w-4 shrink-0 text-accent" />
+                <span className="min-w-0 text-[13px] leading-snug text-ink">
+                  건의하신 내용에 <b className="text-accent">훈프로 답변</b>이 도착했습니다
+                  {unseen > 1 && <span className="text-ink-2"> ({unseen}건)</span>}
+                  <span className="ml-1 whitespace-nowrap text-[11.5px] text-ink-3">눌러서 보기</span>
+                </span>
+              </button>
+              {/* 아이콘은 작게 두고 누를 자리만 44px로 넓힌다 — 이 앱의 다른
+                  작은 버튼들과 같은 기준이다 */}
+              <button
+                type="button"
+                aria-label="알림 닫기"
+                onClick={() => setNotice(false)}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-3 transition-colors hover:bg-paper-2 hover:text-ink-2"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
 
       {open && (
         <ModalPortal>
