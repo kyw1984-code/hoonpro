@@ -638,6 +638,40 @@ export function couponForRow(
   return Math.max(0, Math.min(raw, Math.max(0, cap)));
 }
 
+/**
+ * 주문에서 확인한 쿠폰으로 한 채널의 쿠폰 할인을 낸다.
+ *
+ * 예전에는 개당 평균(할인 합 ÷ 주문수량)을 내서 판매수량에 곱했다. 쿠폰을
+ * 며칠마다 바꾸는 판매자는 평균이 16,024.34원 같은 소수가 되고, 거기에
+ * 판매수량을 곱하니 총액이 921,002원처럼 2원 단위로 떨어졌다. 쿠폰은 10,000원·
+ * 14,000원처럼 100원 단위로 발행되므로 그런 숫자는 나올 수 없고, 보는 사람은
+ * 계산이 틀렸다고 읽는다.
+ *
+ * 확인한 주문의 할인 합은 쿠팡이 알려준 그대로라 정확하다. 그것을 그대로 쓰고,
+ * 판매수량과 주문수량이 어긋나는 몫만 개당 값으로 보정한다. 보정에 쓰는 개당
+ * 값은 100원 단위로 반올림한다 — 발행 단위가 그렇다.
+ *
+ *   주문수량 = 판매수량 → 합계 그대로 (정확)
+ *   주문수량 < 판매수량 → 합계 + 개당 × 모자란 수량 (아직 안 물어본 주문 몫)
+ *   주문수량 > 판매수량 → 합계 − 개당 × 남는 수량 (매출인식이 아직 안 된 주문 몫)
+ *
+ * @returns amount 이 채널의 쿠폰 할인, exact 보정 없이 합계를 그대로 썼는지
+ */
+export function couponFromCoverage(
+  coveredDiscount: number,
+  coveredQty: number,
+  salesQty: number,
+): { amount: number; exact: boolean } {
+  const disc = Math.max(0, coveredDiscount);
+  const cq = Math.max(0, coveredQty);
+  const sq = Math.max(0, salesQty);
+  if (sq === 0) return { amount: 0, exact: true };
+  if (cq === 0) return { amount: 0, exact: false };
+  if (cq === sq) return { amount: Math.round(disc), exact: true };
+  const unit = Math.round(disc / cq / 100) * 100;
+  return { amount: Math.max(0, Math.round(disc + unit * (sq - cq))), exact: false };
+}
+
 /** 쿠폰 관리에서 받아 둔 쿠폰-옵션 한 줄 */
 export interface CouponDef {
   coupon_type: string | null;
@@ -2965,6 +2999,13 @@ interface ProfitRow {
   couponDiscount: number;
   /** 쿠폰 단가의 출처. setting=쿠폰 관리 설정값, order=주문별 쿠폰 조회, sheet=발주서 할인 항목 */
   couponSource?: 'setting' | 'order' | 'sheet' | null;
+  /**
+   * 이 행의 쿠폰이 얼마나 믿을 만한가.
+   *   setting  — 쿠폰 관리 설정값 × 판매수량
+   *   exact    — 확인한 주문의 할인 합계 그대로 (주문수량 = 판매수량)
+   *   adjusted — 합계에 어긋나는 수량만큼 개당(100원 단위) 보정을 더한 추정
+   */
+  couponBasis?: 'setting' | 'exact' | 'adjusted' | null;
   /** 이 옵션에 붙은 광고비 (보고서의 광고집행 옵션ID 기준) */
   adCost: number;
   /** 이 행의 판매가 어느 채널에서 났는지. 둘 다면 'both' */
@@ -3222,31 +3263,51 @@ export async function computeProfit(
     //  3) 발주서 할인 항목 ÷ 주문수량
     const unitPrice = row.quantity > 0 ? row.salesAmount / row.quantity : row.salePrice ?? 0;
     const defUnit = definitionUnit(couponDefs.get(row.vendorItemId) ?? [], unitPrice, from, to);
+    // 반품액 계산(아래)에 쓰는 개당 쿠폰. 설정값이면 그 값, 아니면 주문에서 본
+    // 개당 값을 100원 단위로 반올림한 것이다.
     let wingUnit = 0;
     let growthUnit = 0;
     if (defUnit > 0) {
-      wingUnit = defUnit;
-      growthUnit = defUnit;
+      wingUnit = Math.min(defUnit, unitPrice > 0 ? unitPrice : defUnit);
+      growthUnit = wingUnit;
       row.couponSource = 'setting';
+      row.couponBasis = 'setting';
+      row.couponDiscount = couponForRow(rq.market, rq.growth, wingUnit, growthUnit, row.salesAmount);
     } else {
+      // 주문에서 확인한 할인 합계와 그 주문수량. 윙은 주문별 쿠폰 조회가 있으면
+      // 그것을, 없으면 발주서 할인 항목을 쓴다. 그로스는 주문별 쿠폰 조회뿐이다.
+      let wingDisc = 0;
+      let wingQty = 0;
       if (wingApiOrders.has(row.vendorItemId)) {
-        const q = wingApiQty.get(row.vendorItemId) ?? 0;
-        wingUnit = q > 0 ? (wingApiAgg.get(row.vendorItemId) ?? 0) / q : 0;
+        wingDisc = wingApiAgg.get(row.vendorItemId) ?? 0;
+        wingQty = wingApiQty.get(row.vendorItemId) ?? 0;
       } else if (wing && wing.qty > 0) {
-        wingUnit = wing.sd / wing.qty;
+        wingDisc = wing.sd;
+        wingQty = wing.qty;
       }
-      const gQty = growthCouponQty.get(row.vendorItemId) ?? 0;
-      growthUnit = gQty > 0 ? (growthCouponAgg.get(row.vendorItemId) ?? 0) / gQty : 0;
-      row.couponSource = wingApiOrders.has(row.vendorItemId) || growthCouponAgg.has(row.vendorItemId) ? 'order' : wingUnit > 0 ? 'sheet' : null;
+      const growthDisc = growthCouponAgg.get(row.vendorItemId) ?? 0;
+      const growthQty = growthCouponQty.get(row.vendorItemId) ?? 0;
+
+      // 개당 평균을 판매수량에 곱하지 않는다. 확인한 합계를 그대로 쓰고 어긋나는
+      // 수량만 보정한다 — 평균을 곱하면 2원 단위 숫자가 나온다. couponFromCoverage 참고.
+      const w = couponFromCoverage(wingDisc, wingQty, rq.market);
+      const g = couponFromCoverage(growthDisc, growthQty, rq.growth);
+      // 쿠폰은 판매가 이하로만 설정된다. 채널 몫이 그 채널 판매가 합을 넘으면
+      // 계산이 틀린 것이므로 거기서 자른다. 행 합계만 매출로 자르면 "쿠폰 = 매출"
+      // 이라 실매출이 0으로 보이는 행이 생기는데, 그건 값이 아니라 증상이다.
+      const wAmt = unitPrice > 0 ? Math.min(w.amount, Math.round(unitPrice * rq.market)) : w.amount;
+      const gAmt = unitPrice > 0 ? Math.min(g.amount, Math.round(unitPrice * rq.growth)) : g.amount;
+      row.couponDiscount = Math.max(0, Math.min(wAmt + gAmt, Math.max(0, row.salesAmount)));
+
+      wingUnit = wingQty > 0 ? Math.round(wingDisc / wingQty / 100) * 100 : 0;
+      growthUnit = growthQty > 0 ? Math.round(growthDisc / growthQty / 100) * 100 : 0;
+      const hasOrder = wingApiOrders.has(row.vendorItemId) || growthCouponAgg.has(row.vendorItemId);
+      row.couponSource = hasOrder ? 'order' : wingQty > 0 ? 'sheet' : null;
+      // 어느 채널이든 보정이 들어갔으면 이 행은 추정이다. 둘 다 합계 그대로면 정확.
+      const covered = wingQty > 0 || growthQty > 0;
+      row.couponBasis = !covered ? null
+        : (rq.market > 0 && !w.exact) || (rq.growth > 0 && !g.exact) ? 'adjusted' : 'exact';
     }
-    // 쿠폰은 판매가 이하로만 설정된다. 개당 쿠폰이 개당 판매가를 넘으면 계산이
-    // 틀린 것이므로 거기서 자른다. 행 합계만 매출로 자르면 "쿠폰 = 매출"이라
-    // 실매출이 0으로 보이는 행이 생기는데, 그건 값이 아니라 증상이다.
-    if (unitPrice > 0) {
-      wingUnit = Math.min(wingUnit, unitPrice);
-      growthUnit = Math.min(growthUnit, unitPrice);
-    }
-    row.couponDiscount = couponForRow(rq.market, rq.growth, wingUnit, growthUnit, row.salesAmount);
     row.channel = rq.growth > 0 && rq.market > 0 ? 'both' : rq.growth > 0 ? 'growth' : 'marketplace';
 
     // 반품액 = 실판매가 × 반품수량. 이 기간 판매가 없으면 등록 판매가에서 쿠폰 단가를 뺀다.
@@ -3294,6 +3355,10 @@ export async function computeProfit(
     order: rows.filter(r => r.couponSource === 'order').length,
     sheet: rows.filter(r => r.couponSource === 'sheet').length,
     definedOptions: couponDefs.size,
+    // 화면은 이 둘로 "정확 N · 추정 M"을 적는다. 추정이 섞여 있으면 그렇다고
+    // 밝혀야 끝자리가 안 맞을 때 계산 오류로 읽히지 않는다.
+    exact: rows.filter(r => r.couponBasis === 'exact').length,
+    adjusted: rows.filter(r => r.couponBasis === 'adjusted').length,
   };
 
   const missingCost = rows.filter(r => r.quantity > 0 && !r.costEntered).length;
