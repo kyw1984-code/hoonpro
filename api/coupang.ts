@@ -2550,11 +2550,15 @@ async function cronSync(res: VercelResponse) {
   const startedAt = Date.now();
   const staleBefore = new Date(Date.now() - 20 * 3600_000).toISOString();
 
+  // 첫 수집(백필)이 시간 상한에 잘린 계정은 매 회차 이어받는다. 20시간을
+  // 기다리게 하면 새로 연동한 판매자가 60일치를 다 받는 데 며칠이 걸린다 —
+  // 실제로 한 계정이 첫 회차에 100초를 다 쓰고 그로스 재고·정산은 손도 못 댔다.
+  // 1인당 100초·회차당 240초 상한은 그대로라 다른 계정을 굶기지는 않는다.
   const { data: accounts } = await supabase
     .from('coupang_accounts')
     .select('*')
     .eq('status', 'active')
-    .or(`last_sync_at.is.null,last_sync_at.lt.${staleBefore}`)
+    .or(`last_sync_at.is.null,backfill_done.eq.false,last_sync_at.lt.${staleBefore}`)
     .order('last_sync_at', { ascending: true, nullsFirst: true })
     .limit(50);
 
