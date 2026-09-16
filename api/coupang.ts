@@ -1364,9 +1364,30 @@ async function syncOrderCoupons(
   if (!supabase || orderMeta.size === 0) return;
 
   const ids = [...orderMeta.keys()];
-  const { rows: done } = await selectAll<{ order_id: string }>((f, t) =>
-    supabase!.from('coupang_order_coupons').select('order_id').eq('user_id', userId).in('order_id', ids).range(f, t));
-  const seen = new Set(done.map(d => String(d.order_id)));
+
+  // 주문번호를 나눠서 묻는다.
+  //
+  // PostgREST의 .in()은 값을 전부 주소(질의 문자열)에 이어 붙인다. 첫 수집은
+  // 그로스 60일치를 한꺼번에 들고 오므로 주문번호가 수천 개가 되고, 주소가
+  // 게이트웨이 상한을 넘어 요청이 통째로 거부된다. PostgREST까지 닿지도
+  // 못하므로 오류 코드 없이 'Bad Request' 한 마디만 온다 — 실제로 새로
+  // 연동한 계정 하나가 이것 때문에 매시 수집이 죽어 last_sync_at이 영영
+  // null이었다. 아래 아래쪽 상한(couponPerRun)은 쿠팡에 물을 건수만 줄일 뿐
+  // 이 조회에는 적용되지 않아 아무 도움이 안 됐다.
+  //
+  // 한 주문에 옵션 수만큼 행이 있으므로 조각마다 페이지네이션은 그대로 둔다.
+  // 조각만 나누고 끝내면 옵션이 많은 판매자는 한도에 잘려 이미 물어본 주문을
+  // 다시 묻게 된다.
+  const seen = new Set<string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const slice = ids.slice(i, i + 200);
+    const { rows } = await selectAll<{ order_id: string }>((f, t) =>
+      supabase!.from('coupang_order_coupons').select('order_id')
+        .eq('user_id', userId).in('order_id', slice)
+        // 정렬이 없으면 페이지 사이에 순서가 보장되지 않아 몇 줄이 빠진다.
+        .order('order_id').range(f, t));
+    for (const r of rows) seen.add(String(r.order_id));
+  }
   // 최근 주문부터 묻는다. 회차 상한에 걸려 일부만 물어도 지금 쓰는 쿠폰이 먼저 잡힌다.
   const todo = ids
     .filter(id => !seen.has(id))
@@ -2507,10 +2528,19 @@ async function cronSync(res: VercelResponse) {
       if (sum.truncated) result.truncated++;
       else result.processed++;
     } catch (e: any) {
-      result.errors.push(`${acc.user_id}: ${e?.message ?? 'sync failed'}`);
+      const detail = e?.message ?? String(e);
+      result.errors.push(`${acc.user_id}: ${detail}`);
       await logSystemError('쿠팡 수집', '수집 중 예외가 발생했습니다', {
-        detail: e?.message ?? String(e), userId: acc.user_id,
+        detail, userId: acc.user_id,
       });
+      // 계정 행에도 남긴다. 예외로 빠지면 last_sync_at을 안 건드리므로 이
+      // 계정은 대기열 맨 앞에 머물며 매시 같은 자리에서 죽는다. 그런데 사유가
+      // 시스템 오류 목록에만 있어서, [쿠팡 현황]에서는 '아직 한 번도 수집 안 됨'
+      // 으로만 보였다. 왜 안 되는지는 그 화면에서 바로 보여야 한다.
+      await supabase
+        .from('coupang_accounts')
+        .update({ last_sync_error: detail.slice(0, 300), updated_at: new Date().toISOString() })
+        .eq('user_id', acc.user_id);
     }
   }
 
