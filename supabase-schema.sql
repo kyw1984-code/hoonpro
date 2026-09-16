@@ -1269,6 +1269,12 @@ create table if not exists feedback (
   -- 메일과 앱 알림이 나간다.
   admin_reply text,
   replied_at timestamptz,
+  -- ⚠ 이 외래키 때문에 feedback → users 경로가 둘이 된다(user_id, replied_by).
+  --   그러면 PostgREST가 users(...) 임베드를 못 고르고 PGRST201로 거절한다.
+  --   실제로 이 컬럼을 더한 직후 건의 화면이 통째로 죽었다.
+  --   feedback에서 users를 조인할 때는 반드시 어느 쪽인지 밝혀야 한다:
+  --     users!feedback_user_id_fkey(...)     ← 건의를 적은 사람
+  --     users!feedback_replied_by_fkey(...)  ← 답을 단 운영자
   replied_by uuid references users(id) on delete set null,
   -- 건의한 사람이 앱에서 확인했나. 확인한 뒤로는 안 띄운다.
   reply_seen_at timestamptz,
