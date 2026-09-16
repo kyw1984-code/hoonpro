@@ -872,7 +872,10 @@ async function handleSuggestReply(req: VercelRequest, res: VercelResponse, decod
 
   const { data: rows, error: readErr } = await supabase
     .from('feedback')
-    .select('id, body, user_id, users(name, email)')
+    // feedback → users 경로가 둘이다(user_id, replied_by). 어느 쪽인지 안
+    // 밝히면 PostgREST가 PGRST201로 거절하고 이 화면이 통째로 죽는다.
+    // 여기서 필요한 것은 '건의를 적은 사람'이므로 user_id 쪽이다.
+    .select('id, body, user_id, users!feedback_user_id_fkey(name, email)')
     .in('id', ids);
   if (readErr) return res.status(500).json({ error: '건의를 불러오지 못했습니다.' });
   if (!rows || rows.length === 0) return res.status(404).json({ error: '건의를 찾을 수 없습니다.' });
@@ -946,8 +949,12 @@ async function handleMySuggestions(res: VercelResponse, decoded: any) {
     .not('admin_reply', 'is', null)
     .order('replied_at', { ascending: false })
     .limit(20);
-  // 답변 조회가 실패해도 건의 자체는 계속 쓸 수 있어야 한다
-  if (error) return res.status(200).json({ replies: [], unseen: 0 });
+  // 답변 조회가 실패해도 건의 자체는 계속 쓸 수 있어야 한다. 다만 조용히
+  // 넘기지는 않는다 — 답변이 안 뜨는 것과 답변이 없는 것을 구분해야 한다.
+  if (error) {
+    console.error('my-suggestions error:', { code: error.code, message: error.message });
+    return res.status(200).json({ replies: [], unseen: 0 });
+  }
 
   const replies = data ?? [];
   return res.status(200).json({
@@ -1155,13 +1162,23 @@ async function handleSuggestList(req: VercelRequest, res: VercelResponse) {
   const status = String(req.query.status ?? 'open');
   let q = supabase
     .from('feedback')
-    .select('id, user_id, area, body, kind, summary, severity, auto_reply, answered, status, note, created_at, admin_reply, replied_at, reply_mail_sent_at, users(email, name)')
+    // feedback → users 경로가 둘이다(user_id, replied_by). 어느 쪽인지 안
+    // 밝히면 PostgREST가 PGRST201로 거절하고 이 화면이 통째로 죽는다.
+    // 여기서 필요한 것은 '건의를 적은 사람'이므로 user_id 쪽이다.
+    .select('id, user_id, area, body, kind, summary, severity, auto_reply, answered, status, note, created_at, admin_reply, replied_at, reply_mail_sent_at, users!feedback_user_id_fkey(email, name)')
     .order('created_at', { ascending: false })
     .limit(300);
   if (status !== 'all') q = q.eq('status', status);
 
   const { data, error } = await q;
-  if (error) return res.status(500).json({ error: '불러오지 못했습니다.' });
+  // 사유를 남긴다. '불러오지 못했습니다' 한 마디만 던지고 끝내면 무엇이
+  // 고장 났는지 알 방법이 없다 — 실제로 컬럼을 더한 뒤 PostgREST 스키마
+  // 캐시가 안 돌아 이 화면이 통째로 죽었는데, 로그에 아무것도 없어
+  // 짐작으로 찾아야 했다.
+  if (error) {
+    console.error('suggest-list error:', { code: error.code, message: error.message });
+    return res.status(500).json({ error: `불러오지 못했습니다. (${error.code ?? 'unknown'})` });
+  }
 
   const rows = (data ?? []).map((r: any) => ({
     id: String(r.id),
