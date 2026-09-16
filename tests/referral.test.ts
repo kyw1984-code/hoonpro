@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isOwnReferral, referralNote } from '../src/lib/referral.ts';
+import { isOwnReferral, isReferralNote, referralNote } from '../src/lib/referral.ts';
 
 const ME = 'dfa8f57c-5854-4ea5-a1bb-3202826ed207';
 const OTHER = 'f6d4ed71-1a11-4c8b-82e1-cc04934d580c';
@@ -47,4 +47,32 @@ test('부분만 같은 값은 통과하지 않는다', () => {
   assert.equal(isOwnReferral(`referral:${ME}x`, ME), false);
   assert.equal(isOwnReferral(`xreferral:${ME}`, ME), false);
   assert.equal(isOwnReferral(ME, ME), false);
+});
+
+// ── 개인 추천 코드와 프로모션 쿠폰 가르기 ──
+// 관리자 쿠폰 목록은 이 판정으로 둘을 나눈다. 여기가 틀리면 회원이 늘수록
+// HOON-xxxxxx가 목록을 덮어 정작 봐야 할 쿠폰이 묻힌다. 반대로 프로모션
+// 쿠폰이 추천 코드로 잘못 분류되면 아예 화면에서 사라진다.
+
+test('회원 개인 추천 코드만 가려낸다', () => {
+  assert.equal(isReferralNote(referralNote('dfa8f57c-5854-4ea5-a1bb-3202826ed207')), true);
+  // 운영자가 손으로 적은 메모는 프로모션 쿠폰이다
+  assert.equal(isReferralNote('수강생 전용 쿠폰-7일 무료 및 월 10,000원 할인'), false);
+  assert.equal(isReferralNote('Jstore'), false);
+  assert.equal(isReferralNote(null), false);
+  assert.equal(isReferralNote(undefined), false);
+  assert.equal(isReferralNote(''), false);
+  // 접두사만 있고 주인이 없으면 추천 코드로 보지 않는다 — 주인을 못 찾으면
+  // 보상을 줄 곳도 본인 사용을 막을 근거도 없다
+  assert.equal(isReferralNote('referral:'), false);
+  assert.equal(isReferralNote('referral:   '), false);
+});
+
+test('가르고 나면 둘을 합쳐 원래 목록이 된다', () => {
+  const notes = [referralNote('a'), 'Jstore', referralNote('b'), null, '수강생 전용'];
+  const referral = notes.filter(isReferralNote);
+  const promo = notes.filter(n => !isReferralNote(n));
+  assert.equal(referral.length, 2);
+  assert.equal(promo.length, 3);
+  assert.equal(referral.length + promo.length, notes.length);
 });

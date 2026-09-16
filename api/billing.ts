@@ -1466,7 +1466,22 @@ async function emailPref(user: { userId: string }, req: VercelRequest, res: Verc
 // 사용 횟수는 coupons.redeemed_count로 확인한다 (추천 보상은 관리자가 쿠폰으로 지급).
 async function getReferralCode(user: { userId: string }, res: VercelResponse) {
   const note = referralNote(user.userId);
-  let { data: existing } = await supabase.from('coupons').select('*').eq('note', note).maybeSingle();
+
+  // 이 화면은 열 때마다 들어온다. '없으면 만든다'가 조용히 어긋나면 열 때마다
+  // 새 코드가 생긴다.
+  //
+  // maybeSingle()은 행이 둘 이상이면 오류(PGRST116)를 내고 data를 null로 준다.
+  // 예전에는 error를 버리고 data만 봐서, 어쩌다 둘이 생긴 사용자는 그 뒤로
+  // 화면을 열 때마다 코드가 하나씩 더 쌓이게 돼 있었다. 그래서 오류는 오류로
+  // 다루고, 둘이 생기는 것 자체를 DB 유니크 인덱스로 막았다
+  // (coupons_referral_note_uniq — note가 'referral:%'인 행에만 걸린다).
+  const first = await supabase.from('coupons').select('*').eq('note', note).maybeSingle();
+  if (first.error) {
+    console.error('[billing] 추천 코드 조회 실패', { userId: user.userId, code: first.error.code });
+    return res.status(500).json({ error: '추천 코드를 불러오지 못했습니다.' });
+  }
+  let existing = first.data;
+
   if (!existing) {
     for (let attempt = 0; attempt < 3 && !existing; attempt++) {
       const code = 'HOON-' + Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -1479,8 +1494,19 @@ async function getReferralCode(user: { userId: string }, res: VercelResponse) {
         expires_at: null,
         note,
       }).select('*').single();
-      if (!error) existing = data;
-      else if (error.code !== '23505') return res.status(500).json({ error: '추천 코드 생성에 실패했습니다.' });
+      if (!error) {
+        existing = data;
+        break;
+      }
+      if (error.code !== '23505') return res.status(500).json({ error: '추천 코드 생성에 실패했습니다.' });
+      // 23505는 두 가지다. 코드가 겹쳤으면 다시 뽑으면 되고, note가 겹쳤으면
+      // 다른 요청이 방금 만든 것이므로 그것을 읽어 쓴다. 다시 뽑아 봐야 같은
+      // 벽에 부딪힌다.
+      const again = await supabase.from('coupons').select('*').eq('note', note).maybeSingle();
+      if (again.data) {
+        existing = again.data;
+        break;
+      }
     }
     if (!existing) return res.status(500).json({ error: '추천 코드 생성에 실패했습니다.' });
   }

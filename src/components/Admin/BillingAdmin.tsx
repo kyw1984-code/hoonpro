@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { CreditCard, Ticket, Plus, RefreshCw, Power, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
 import { couponBenefitLabel } from '../../lib/coupon';
+import { isReferralNote } from '../../lib/referral';
 import { getToken } from '../../lib/auth';
 import { won } from '../../lib/coupang';
 
@@ -127,6 +128,14 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  /**
+   * 회원 개인 추천 코드를 목록에 펼칠지.
+   *
+   * 추천 코드는 회원 한 명당 하나씩 자동으로 생긴다. 프로모션 쿠폰과 섞어
+   * 두면 회원이 늘수록 HOON-xxxxxx가 목록을 덮어, 정작 봐야 할 쿠폰이
+   * 묻히고 '쿠폰이 계속 자동발급된다'로 읽힌다. 기본은 접어 둔다.
+   */
+  const [showReferrals, setShowReferrals] = useState(false);
 
   const [form, setForm] = useState({
     code: '', type: 'free_period' as CouponRow['type'], value: '30',
@@ -161,6 +170,13 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
   };
 
   useEffect(() => { reload(); }, []);
+
+  // 운영자가 만든 프로모션 쿠폰과, 회원마다 자동으로 생기는 개인 추천 코드를
+  // 가른다. 둘은 성격이 다르다 — 앞의 것은 관리 대상이고, 뒤의 것은 회원 수만큼
+  // 늘어나는 부산물이다. 섞어 놓으면 회원이 늘수록 앞의 것이 묻힌다.
+  const referralCoupons = coupons.filter(c => isReferralNote(c.note));
+  const promoCoupons = coupons.filter(c => !isReferralNote(c.note));
+  const shownCoupons = showReferrals ? coupons : promoCoupons;
 
   const toggleEnforce = async () => {
     const next = !enforced;
@@ -545,9 +561,17 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
       {/* 쿠폰 관리 */}
       <div>
         <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Ticket className="h-5 w-5 text-accent" />
-            <h3 className="text-lg font-semibold text-ink">쿠폰 ({coupons.length})</h3>
+            <h3 className="text-lg font-semibold text-ink">쿠폰 ({promoCoupons.length})</h3>
+            {referralCoupons.length > 0 && (
+              <button
+                onClick={() => setShowReferrals(v => !v)}
+                className="rounded-control border border-line px-2.5 py-1 text-[12px] text-ink-2 transition-colors hover:border-accent-line hover:text-accent"
+              >
+                회원 추천 코드 {referralCoupons.length}개 {showReferrals ? '접기' : '보기'}
+              </button>
+            )}
           </div>
           <button
             onClick={() => setShowCreate(v => !v)}
@@ -634,7 +658,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
           </div>
         )}
 
-        {coupons.length === 0 ? (
+        {shownCoupons.length === 0 ? (
           <p className="rounded-card border border-line bg-paper px-4 py-8 text-center text-[13px] text-ink-3">
             쿠폰이 없습니다. '쿠폰 만들기'로 첫 쿠폰을 생성하세요. (예: 수강생 무료 1개월 — 무료 기간 30일)
           </p>
@@ -650,7 +674,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
-                  {coupons.map(c => (
+                  {shownCoupons.map(c => (
                     <tr key={c.id} className="transition-colors hover:bg-paper-2">
                       <td className="px-4 py-3 font-mono text-[13px] font-semibold text-ink">{c.code}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-ink">{couponBenefitLabel(c)}</td>
@@ -705,6 +729,11 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
         <p className="mt-2 text-[11.5px] leading-relaxed text-ink-3">
           <b>중지</b>는 새로 쓰는 것만 막습니다 — 이미 이 쿠폰으로 구독 중인 분들의 할인은 그대로 유지됩니다.
           <b className="ml-1">삭제</b>는 되돌릴 수 없고 사용 기록까지 지웁니다. 할인받는 분이 한 명이라도 있으면 누를 수 없습니다.
+        </p>
+        <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3">
+          <b>HOON-</b>으로 시작하는 코드는 <b>회원 개인 추천 코드</b>입니다. 회원이 [친구 추천] 화면을 처음 열 때
+          한 명당 하나씩 자동으로 생기고, 그 친구의 첫 결제 10%를 할인합니다. 회원 수만큼 늘어나는 것이 정상이라
+          위 목록에서는 접어 두었습니다 — 지우지 마세요. 지우면 그 회원의 추천 링크가 끊깁니다.
         </p>
       </div>
 
