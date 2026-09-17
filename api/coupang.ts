@@ -1020,7 +1020,7 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
   let failedThisRun = false;
   // 발주서의 할인 항목은 의미가 애매하다(같은 상품인데 주문마다 개당 9천~1만9천원).
   // 쿠팡이 "이 주문에 적용된 쿠폰"을 직접 알려주는 주문별 쿠폰 조회를 윙에도 쓴다.
-  const orderMeta = new Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>();
+  const orderMeta = new Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number; sheetDiscount?: number }> }>();
   let sampleLogged = false;
 
   for (const [cFrom, cTo] of dateChunks(from, to)) {
@@ -1079,7 +1079,8 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
               // 발주서 상태(결제완료·상품준비중…)를 같이 둔다. 쿠폰 조회가 500으로
               // 막힐 때 어느 상태의 주문이 그러는지 로그에서 보기 위해서다.
               const meta = orderMeta.get(orderId) ?? { date: orderDate, status, items: [] };
-              meta.items.push({ vendorItemId, amount, qty });
+              // 발주서가 말한 판매자 쿠폰. 주문별 쿠폰 조회가 500으로 막힐 때 이 값으로 대신한다.
+              meta.items.push({ vendorItemId, amount, qty, sheetDiscount: discount.seller });
               orderMeta.set(orderId, meta);
             }
             // 발주서 할인 항목의 실제 모양을 한 번만 남긴다 (금액만, 개인정보 없음)
@@ -1302,7 +1303,7 @@ async function syncRocketGrowth(
   let cancelled = 0;
   let firstOrderShape = '';
   // 주문별 쿠폰을 물으려면 주문번호와 옵션별 금액이 필요하다
-  const orderMeta = new Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>();
+  const orderMeta = new Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number; sheetDiscount?: number }> }>();
 
   const call = async (cFrom: string, cTo: string, token: string) => {
     // 분당 50회 한도를 지킨다. 몰아 치면 429가 나고, 그 회차 그로스 매출이 빈다.
@@ -1459,7 +1460,7 @@ async function syncRocketGrowth(
 async function syncOrderCoupons(
   userId: string,
   creds: CoupangCreds,
-  orderMeta: Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>,
+  orderMeta: Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number; sheetDiscount?: number }> }>,
   channel: 'growth' | 'marketplace',
   sum: SyncSummary,
   deadline: number,
@@ -1504,6 +1505,7 @@ async function syncOrderCoupons(
   let multiTypeLogged = false;
   let failedInARow = 0;
   let failedTotal = 0;
+  let settledByFallback = 0;
   let firstErrorIdx = -1;
   for (const orderId of todo) {
     if (outOfTime(deadline, sum)) break;
@@ -1523,7 +1525,6 @@ async function syncOrderCoupons(
       // 회차마다 같은 자리에서 걸렸다. 그 주문은 건너뛰고(저장하지 않으므로
       // 다음 회차에 다시 묻는다) 다음으로 간다. 다만 연속으로 계속 실패하면
       // API 자체가 닫힌 것이라 더 두드리지 않는다.
-      failedInARow++;
       failedTotal++;
       // 어느 주문이 왜 막히는지 남긴다. 문구('Internal Server Error')만으로는
       // 쿠팡 쪽 장애인지, 특정 주문(취소·구주문·분할)만 그런 건지 알 수 없다.
@@ -1533,10 +1534,31 @@ async function syncOrderCoupons(
         orderDate: meta?.date, orderStatus: meta?.status ?? null,
         items: meta?.items.length, qty: meta?.items.reduce((n, it) => n + (it.qty || 0), 0),
       });
-      if (failedInARow === 1 && firstErrorIdx < 0) {
+      if (firstErrorIdx < 0) {
         firstErrorIdx = sum.errors.length;
         sum.errors.push(`${channel === 'growth' ? '그로스' : '윙'} 쿠폰: ${r.error}`);
       }
+      // 쿠팡이 특정 주문에만 500을 낸다. 배송완료된 나흘 전 주문도 그랬으니 '아직
+      // 확정 전'이라서가 아니다. 저장하지 않으면 매 회차 같은 주문을 다시 묻고,
+      // 그 주문들이 맨 앞(최신순)에 몰려 있으면 연속 실패로 끊겨 그 뒤 주문은 영영
+      // 못 묻는다. 이틀 지난 주문은 발주서가 말한 판매자 쿠폰(윙) 또는 0(그로스)으로
+      // 적어 두고 넘어간다. 갓 들어온 주문은 다음 회차에 한 번 더 묻는다.
+      if (r.status === 500 && meta) {
+        if (daysBetween(meta.date, kstToday()) >= 2) {
+          for (const it of meta.items) {
+            rows.push({
+              user_id: userId, order_id: orderId, vendor_item_id: it.vendorItemId, channel,
+              sale_date: meta.date, discount: Math.max(0, Math.round(it.sheetDiscount ?? 0)),
+              quantity: Math.max(0, it.qty || 0),
+              coupon_types: 'ERR500', discount_by_type: null,
+              fetched_at: new Date().toISOString(),
+            });
+          }
+          settledByFallback++;
+        }
+        continue;
+      }
+      failedInARow++;
       if (failedInARow >= 3) break;
       continue;
     }
@@ -1591,8 +1613,13 @@ async function syncOrderCoupons(
   }
   // 몇 건이 막혔는지 문구에 붙인다. 한 건이면 그 주문 하나의 문제고, 수십 건이면
   // 쿠팡 쪽 장애다 — 다음 회차에 다시 묻는다는 사실도 함께 적는다.
-  if (firstErrorIdx >= 0 && failedTotal > 1) {
-    sum.errors[firstErrorIdx] = `${sum.errors[firstErrorIdx]} (${failedTotal}건, 다음 회차 재시도)`;
+  if (firstErrorIdx >= 0) {
+    const retry = failedTotal - settledByFallback;
+    const parts = [
+      settledByFallback > 0 ? `${settledByFallback}건은 발주서 할인으로 기록` : '',
+      retry > 0 ? `${retry}건 다음 회차 재시도` : '',
+    ].filter(Boolean).join(', ');
+    sum.errors[firstErrorIdx] = `${sum.errors[firstErrorIdx]} (${failedTotal}건 — ${parts})`;
   }
   if (rows.length === 0) return;
   const err = await upsertChunked('coupang_order_coupons', rows, 'user_id,order_id,vendor_item_id');
