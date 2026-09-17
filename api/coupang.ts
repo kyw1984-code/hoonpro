@@ -981,7 +981,7 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
   let failedThisRun = false;
   // 발주서의 할인 항목은 의미가 애매하다(같은 상품인데 주문마다 개당 9천~1만9천원).
   // 쿠팡이 "이 주문에 적용된 쿠폰"을 직접 알려주는 주문별 쿠폰 조회를 윙에도 쓴다.
-  const orderMeta = new Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>();
+  const orderMeta = new Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>();
   let sampleLogged = false;
 
   for (const [cFrom, cTo] of dateChunks(from, to)) {
@@ -1037,7 +1037,9 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
             cur.coupang_discount += discount.coupang;
 
             if (orderId) {
-              const meta = orderMeta.get(orderId) ?? { date: orderDate, items: [] };
+              // 발주서 상태(결제완료·상품준비중…)를 같이 둔다. 쿠폰 조회가 500으로
+              // 막힐 때 어느 상태의 주문이 그러는지 로그에서 보기 위해서다.
+              const meta = orderMeta.get(orderId) ?? { date: orderDate, status, items: [] };
               meta.items.push({ vendorItemId, amount, qty });
               orderMeta.set(orderId, meta);
             }
@@ -1261,7 +1263,7 @@ async function syncRocketGrowth(
   let cancelled = 0;
   let firstOrderShape = '';
   // 주문별 쿠폰을 물으려면 주문번호와 옵션별 금액이 필요하다
-  const orderMeta = new Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>();
+  const orderMeta = new Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>();
 
   const call = async (cFrom: string, cTo: string, token: string) => {
     // 분당 50회 한도를 지킨다. 몰아 치면 429가 나고, 그 회차 그로스 매출이 빈다.
@@ -1418,7 +1420,7 @@ async function syncRocketGrowth(
 async function syncOrderCoupons(
   userId: string,
   creds: CoupangCreds,
-  orderMeta: Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>,
+  orderMeta: Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>,
   channel: 'growth' | 'marketplace',
   sum: SyncSummary,
   deadline: number,
@@ -1489,7 +1491,8 @@ async function syncOrderCoupons(
       const meta = orderMeta.get(orderId);
       console.warn('coupang order coupon failed —', {
         channel, orderId, status: r.status, error: String(r.error).slice(0, 200),
-        orderDate: meta?.date, items: meta?.items.length, qty: meta?.items.reduce((n, it) => n + (it.qty || 0), 0),
+        orderDate: meta?.date, orderStatus: meta?.status ?? null,
+        items: meta?.items.length, qty: meta?.items.reduce((n, it) => n + (it.qty || 0), 0),
       });
       if (failedInARow === 1 && firstErrorIdx < 0) {
         firstErrorIdx = sum.errors.length;
