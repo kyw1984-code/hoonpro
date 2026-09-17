@@ -274,6 +274,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'suggest-list':
         if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
         return await handleSuggestList(req, res);
+      case 'suggest-count':
+        if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+        return await handleSuggestCount(res);
       case 'suggest-update':
         if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
         return await handleSuggestUpdate(req, res);
@@ -1155,6 +1158,24 @@ async function handleSuggest(req: VercelRequest, res: VercelResponse, decoded: a
     reply: triage.reply,
     kind: triage.kind,
   });
+}
+
+/**
+ * 관리자 탭 라벨용 — 손대야 할 미처리 건의 수. 사용법 문의는 AI가 그 자리에서
+ * 답해 목록에서도 빼므로 여기서도 뺀다. 목록 화면과 같은 기준이어야 라벨이
+ * 빨간데 열어 보니 비어 있는 일이 없다.
+ */
+async function handleSuggestCount(res: VercelResponse) {
+  const { count, error } = await supabase
+    .from('feedback')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'open')
+    .neq('kind', 'howto');
+  if (error) {
+    console.error('suggest-count error:', { code: error.code, message: error.message });
+    return res.status(500).json({ error: '불러오지 못했습니다.' });
+  }
+  return res.status(200).json({ open: count ?? 0 });
 }
 
 /** 관리자 — 같은 얘기끼리 묶어 무엇을 고칠지 보여준다 */

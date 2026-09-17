@@ -68,7 +68,11 @@ function ago(iso: string): string {
   return h < 24 ? `${h}시간 전` : `${Math.floor(h / 24)}일 전`;
 }
 
-export function Suggestions({ showToast }: { showToast: (msg: string) => void }) {
+export function Suggestions({ showToast, onOpenCount }: {
+  showToast: (msg: string) => void;
+  /** 손대야 할 미처리 건의 수가 바뀔 때 — 탭 라벨 색이 이걸 본다 */
+  onOpenCount?: (n: number) => void;
+}) {
   const [data, setData] = useState<Data | null>(null);
   const [status, setStatus] = useState<'open' | 'all' | 'planned' | 'done'>('open');
   const [busy, setBusy] = useState(false);
@@ -87,10 +91,17 @@ export function Suggestions({ showToast }: { showToast: (msg: string) => void })
       const d = await res.json();
       if (!res.ok) throw new Error(d?.error || '불러오지 못했습니다.');
       setData(d);
+      // 처리함·예정으로 바꾸면 그 자리에서 탭 색이 돌아와야 한다. 목록 기준과
+      // 같게 — 사용법 문의는 빼고 센다.
+      // '예정'·'완료' 필터로 보고 있을 때는 미처리 건이 응답에 없으므로 세지 않는다.
+      if (status === 'open' || status === 'all') {
+        const items: Item[] = Array.isArray(d?.items) ? d.items : [];
+        onOpenCount?.(items.filter(i => i.status === 'open' && i.kind !== 'howto').length);
+      }
     } catch (e: any) {
       showToast(e?.message ?? '불러오지 못했습니다.');
     }
-  }, [status, showToast]);
+  }, [status, showToast, onOpenCount]);
 
   useEffect(() => { void load(); }, [load]);
 

@@ -54,6 +54,8 @@ const STATUS_COLOR: Record<string, string> = {
 export function AdminPanel() {
   // 다른 탭을 보고 있어도 오류가 났다는 걸 알아야 한다. 탭 라벨에 건수를 띄운다.
   const [openErrors, setOpenErrors] = useState(0);
+  // 손대야 할 미처리 건의 수. 있으면 [건의] 탭이 오류 탭처럼 빨갛게 된다.
+  const [openSuggestions, setOpenSuggestions] = useState(0);
   const [tab, setTab] = useState<'users' | 'billing' | 'costs' | 'limits' | 'stats' | 'config' | 'taborder' | 'company' | 'qa' | 'coupang' | 'errors' | 'suggestions' | 'email'>('users');
   const [users, setUsers] = useState<UserRow[]>([]);
   // 화면에 40이라고 박혀 있었는데 그런 한도는 어디에도 없었다. 실제 한도는
@@ -153,6 +155,10 @@ export function AdminPanel() {
       .then(r => (r.ok ? r.json() : null))
       .then(d => setOpenErrors(d?.openCount ?? 0))
       .catch(() => setOpenErrors(0));
+    fetch('/api/qa?action=suggest-count', { headers: { Authorization: `Bearer ${getToken()}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => setOpenSuggestions(d?.open ?? 0))
+      .catch(() => setOpenSuggestions(0));
   }, [tab]);
 
   return (
@@ -242,14 +248,15 @@ export function AdminPanel() {
         >
           <ShoppingBag className="w-4 h-4" /> 쿠팡 연동
         </button>
-        {/* 건의는 오류 바로 앞에 — 둘 다 "지금 뭘 고쳐야 하나"에 답하는 자리다 */}
+        {/* 건의는 오류 바로 앞에 — 둘 다 "지금 뭘 고쳐야 하나"에 답하는 자리다.
+            미처리 건의가 있으면 오류 탭처럼 빨갛게, 처리하면 원래 색으로 */}
         <button
           onClick={() => setTab('suggestions')}
           className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            tab === 'suggestions' ? 'border-accent text-accent' : 'border-transparent text-ink-2 hover:text-ink'
+            tab === 'suggestions' ? 'border-accent text-accent' : openSuggestions > 0 ? 'border-transparent text-critical' : 'border-transparent text-ink-2 hover:text-ink'
           }`}
         >
-          <MessageSquare className="w-4 h-4" /> 건의
+          <MessageSquare className="w-4 h-4" /> 건의{openSuggestions > 0 ? ` ${openSuggestions}` : ''}
         </button>
         {/* 메일 기록 — "고지 못 받았다"는 문의에 답하는 자리라 오류 바로 앞에 둔다 */}
         <button
@@ -271,7 +278,7 @@ export function AdminPanel() {
         </button>
       </div>
 
-      {tab === 'suggestions' ? <Suggestions showToast={showToast} /> : tab === 'email' ? <EmailLog /> : tab === 'errors' ? <div className="flex flex-col gap-5"><CronHealth /><ErrorLog showToast={showToast} /></div> : tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
+      {tab === 'suggestions' ? <Suggestions showToast={showToast} onOpenCount={setOpenSuggestions} /> : tab === 'email' ? <EmailLog /> : tab === 'errors' ? <div className="flex flex-col gap-5"><CronHealth /><ErrorLog showToast={showToast} /></div> : tab === 'coupang' ? <CoupangAdmin /> : tab === 'costs' ? <CostsAdmin showToast={showToast} /> : tab === 'limits' ? <LimitsAdmin showToast={showToast} /> : tab === 'stats' ? <UsageStats /> : tab === 'billing' ? <BillingAdmin showToast={showToast} /> : tab === 'company' ? <CompanyInfoConfig showToast={showToast} /> : tab === 'qa' ? <QAManager showToast={showToast} /> : tab === 'config' ? (
         <ImageConfigTab showToast={showToast} />
       ) : tab === 'taborder' ? (
         <TabOrderConfig showToast={showToast} />
