@@ -192,6 +192,10 @@ export interface CostRow {
   productName: string;
   optionName: string;
   salePrice: number | null;
+  /** 판매가 출처 — 'detail' 상품 상세, 'sales' 최근 매출의 개당 금액(상세가 0을 준 로켓그로스 옵션) */
+  priceSource?: 'detail' | 'sales' | null;
+  /** 최근 주문에 실제로 붙은 개당 쿠폰. 판매가에서 이만큼 빼면 손님이 내는 값이다 */
+  couponUnit?: number | null;
   stock: number | null;
   status: string;
   /** 'growth'면 로켓그로스 상품이다 — 입출고비 칸이 이 상품에만 뜬다 */

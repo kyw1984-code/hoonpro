@@ -307,7 +307,10 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
             <thead>
               <tr className="border-b border-line text-[11.5px] text-ink-3">
                 <th className="px-4 py-2.5 text-left font-medium">상품</th>
-                <th className="px-3 py-2.5 text-right font-medium">판매가</th>
+                <th className="px-3 py-2.5 text-right font-medium">
+                  판매가
+                  <span className="block text-[10px] font-normal text-ink-3">쿠폰이 붙으면 쿠폰가도</span>
+                </th>
                 <th className="px-3 py-2.5 text-right font-medium">30일 판매</th>
                 {shownFields.map(f => (
                   <th key={String(f.key)} className="px-3 py-2.5 text-right font-medium">
@@ -315,7 +318,10 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
                     <span className="block text-[10px] font-normal text-ink-3">{f.hint}</span>
                   </th>
                 ))}
-                <th className="px-4 py-2.5 text-right font-medium">개당 남는 돈</th>
+                <th className="px-4 py-2.5 text-right font-medium">
+                  개당 남는 돈
+                  <span className="block text-[10px] font-normal text-ink-3">쿠폰가 − 원가</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -324,8 +330,10 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
                 const totalCost = shownFields
                   .filter(f => f.key !== 'returnShippingCost' && (!f.growthOnly || growth))
                   .reduce((n, f) => n + valueOf(r, f.key), 0);
-                // 수수료율은 상품마다 달라 여기서는 원가만 뺀 값을 보여준다.
-                const gross = (r.salePrice ?? 0) - totalCost;
+                // 손님이 내는 값은 판매가가 아니라 쿠폰을 뺀 값이다. 쿠폰이 붙은
+                // 옵션은 그걸로 계산한다. 수수료율은 상품마다 달라 원가만 뺀다.
+                const couponPrice = r.salePrice && r.couponUnit ? Math.max(0, r.salePrice - r.couponUnit) : null;
+                const gross = (couponPrice ?? r.salePrice ?? 0) - totalCost;
                 return (
                   <tr key={r.vendorItemId} className="border-b border-line/60 last:border-0">
                     <td className="max-w-[280px] px-4 py-2">
@@ -339,7 +347,15 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
                       </p>
                       {optionOf(r) && <p className="truncate text-[11px] text-ink-3">{optionOf(r)}</p>}
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-ink-2">{r.salePrice ? won(r.salePrice) : '-'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-ink-2">
+                      {r.salePrice ? won(r.salePrice) : '-'}
+                      {couponPrice !== null && (
+                        <span className="block text-[10.5px] text-accent">쿠폰가 {won(couponPrice)}</span>
+                      )}
+                      {r.salePrice && couponPrice === null && r.priceSource === 'sales' && (
+                        <span className="block text-[10.5px] text-ink-3">최근 판매 기준</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink-3">{r.soldLast30.toLocaleString('ko-KR')}</td>
                     {shownFields.map(f => (
                       <td key={String(f.key)} className="px-3 py-2 text-right">

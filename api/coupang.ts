@@ -350,6 +350,23 @@ function pickNum(obj: any, keys: string[], fallback = 0): number {
   const n = Number(String(v).replace(/[^0-9.-]/g, ''));
   return Number.isFinite(n) ? n : fallback;
 }
+/**
+ * 중첩 객체 안에서 처음 만나는 양수 값 (깊이 3까지). 로켓그로스 상품 상세는
+ * items[].salePrice를 0으로 주고 값은 안쪽 객체에 둘 수 있어, 위에서 못 찾으면
+ * 한 겹씩 들어가 본다.
+ */
+function deepPickNum(obj: any, keys: string[], depth = 3): number {
+  if (!obj || typeof obj !== 'object' || depth < 0) return 0;
+  const direct = pickNum(obj, keys, 0);
+  if (direct > 0) return direct;
+  for (const v of Object.values(obj)) {
+    if (v && typeof v === 'object') {
+      const n = deepPickNum(v, keys, depth - 1);
+      if (n > 0) return n;
+    }
+  }
+  return 0;
+}
 function pickDate(obj: any, keys: string[]): string | null {
   const v = pickRaw(obj, keys);
   if (!v) return null;
@@ -884,6 +901,7 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
   let detailFailed = 0;
   let detailError = '';
   let firstDetailShape = '';
+  let growthNoPriceLogged = false;
   for (const sp of ordered.slice(0, LIMITS.itemDetailPerRun)) {
     // 상세는 건당 1호출이라 여기서 시간이 가장 많이 든다. 예산이 끝나면
     // 지금까지 받은 것만 저장하고 나머지는 다음 회차가 이어받는다.
@@ -917,6 +935,21 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
     for (const it of Array.isArray(detail?.items) ? detail.items : []) {
       const vendorItemId = findVendorItemId(it);
       if (!vendorItemId) continue;
+      // 로켓그로스 상품은 여기 salePrice가 0으로 온다 (한 계정의 그로스 옵션 40개가
+      // 전부 0이었다). 안쪽 객체에 있으면 거기서 찾고, 그래도 없으면 나중에
+      // 최근 매출의 개당 금액으로 채운다 (backfillItemsFromObservations).
+      let salePrice = pickNum(it, ['salePrice', 'originalPrice']);
+      if (!(salePrice > 0) && sp.businessType === 'growth') {
+        salePrice = deepPickNum(it, ['salePrice', 'originalPrice', 'rocketGrowthSalePrice']);
+        if (!(salePrice > 0) && !growthNoPriceLogged) {
+          growthNoPriceLogged = true;
+          const nested = Object.entries(it ?? {})
+            .filter(([, v]) => v && typeof v === 'object')
+            .map(([k, v]) => `${k}{${Object.keys(v as object).join(',')}}`)
+            .join(' ');
+          console.info('coupang growth item without price —', `키=${Object.keys(it ?? {}).join(',')} / 안쪽=${nested || '없음'}`);
+        }
+      }
       rows.push({
         user_id: userId,
         vendor_item_id: vendorItemId,
@@ -924,7 +957,7 @@ async function syncItems(userId: string, creds: CoupangCreds, sum: SyncSummary, 
         product_id: productId || null,
         product_name: sp.name || pickStr(detail, ['sellerProductName', 'displayProductName']),
         option_name: pickStr(it, ['itemName', 'vendorItemName', 'optionName']),
-        sale_price: pickNum(it, ['salePrice', 'originalPrice']),
+        sale_price: salePrice,
         stock: pickNum(it, ['maximumBuyCount', 'stockQuantity', 'quantity']),
         status: pickStr(it, ['saleStatus', 'itemStatus'], sp.status),
         business_type: sp.businessType,
@@ -1832,9 +1865,11 @@ async function syncGrowthInventory(userId: string, creds: CoupangCreds, sum: Syn
 // '목록에서 사라진 상품 정리'에 걸리지 않는다.
 async function backfillItemsFromObservations(userId: string, sum: SyncSummary): Promise<void> {
   if (!supabase) return;
-  const { rows: existing } = await selectAll<{ vendor_item_id: string }>((f, t) =>
-    supabase!.from('coupang_items').select('vendor_item_id').eq('user_id', userId).order('vendor_item_id').range(f, t));
+  const { rows: existing } = await selectAll<{ vendor_item_id: string; sale_price: number | null }>((f, t) =>
+    supabase!.from('coupang_items').select('vendor_item_id, sale_price').eq('user_id', userId).order('vendor_item_id').range(f, t));
   const have = new Set(existing.map(e => String(e.vendor_item_id)));
+  // 상세가 판매가를 0으로 준 옵션 — 로켓그로스 상품이 그렇다
+  const priceless = existing.filter(e => !(Number(e.sale_price) > 0)).map(e => String(e.vendor_item_id));
 
   const today = kstToday();
   const [invRes, salesRes] = await Promise.all([
@@ -1858,6 +1893,17 @@ async function backfillItemsFromObservations(userId: string, sum: SyncSummary): 
       price: qty > 0 ? Math.round(amt / qty) : null,
       channel: String(s.channel ?? 'marketplace'),
     });
+  }
+
+  // 판매가가 비어 있는 옵션은 최근 매출의 개당 금액으로 채운다. 원가 입력 화면의
+  // '개당 남는 돈'과 순이익 표의 판매가가 이 값을 본다. 상세에서 값이 오면 다음
+  // 상품 수집이 덮어쓴다.
+  let filled = 0;
+  for (const id of priceless) {
+    const s = seen.get(id);
+    if (!s?.price) continue;
+    await supabase.from('coupang_items').update({ sale_price: s.price }).eq('user_id', userId).eq('vendor_item_id', id);
+    if (++filled >= 150) break;
   }
 
   const rows: any[] = [];
@@ -3811,7 +3857,7 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
 
 // ── 원가 조회·입력 ────────────────────────────────────────────
 async function handleCosts(userId: string, res: VercelResponse) {
-  const [itemRes, costRes, soldRes] = await Promise.all([
+  const [itemRes, costRes, soldRes, unitRes, couponRes] = await Promise.all([
     selectAll((f, t) => supabase!.from('coupang_items').select('*').eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
     selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
@@ -3823,10 +3869,53 @@ async function handleCosts(userId: string, res: VercelResponse) {
       .eq('user_id', userId)
       .gte('sale_date', addDays(kstToday(), -30))
       .order('sale_date').range(f, t)),
+    // 최근 90일 매출의 개당 금액 — 상세가 판매가를 0으로 주는 로켓그로스 옵션의 판매가
+    selectAll((f, t) => supabase!
+      .from('coupang_sales_daily')
+      .select('vendor_item_id, quantity, sales_amount, sale_date')
+      .eq('user_id', userId)
+      .gte('sale_date', addDays(kstToday(), -90))
+      .gt('quantity', 0)
+      .order('sale_date', { ascending: false }).range(f, t)),
+    // 최근 30일 주문에 실제로 붙은 쿠폰 — 판매가에서 이걸 빼야 손님이 내는 값이다
+    selectAll((f, t) => supabase!
+      .from('coupang_order_coupons')
+      .select('vendor_item_id, sale_date, discount, quantity')
+      .eq('user_id', userId)
+      .gte('sale_date', addDays(kstToday(), -30))
+      .gt('quantity', 0)
+      .order('sale_date', { ascending: false }).range(f, t)),
   ]);
 
   const costs = new Map<string, any>();
   for (const c of costRes.rows) costs.set(String(c.vendor_item_id), c);
+
+  // 옵션별 최근 판매일의 개당 금액 (가장 최근 날짜 하나만 본다)
+  const unitPrice = new Map<string, number>();
+  for (const s of unitRes.rows as any[]) {
+    const id = String(s.vendor_item_id);
+    if (unitPrice.has(id)) continue;
+    const q = Number(s.quantity) || 0;
+    const amt = Number(s.sales_amount) || 0;
+    if (q > 0 && amt > 0) unitPrice.set(id, Math.round(amt / q));
+  }
+  // 옵션별 최근 주문일의 개당 쿠폰. 쿠폰은 며칠마다 바뀌므로 평균이 아니라
+  // 마지막 날 것만 쓴다 — 그날 여러 주문이면 합쳐서 나눈다.
+  const couponAgg = new Map<string, { date: string; discount: number; qty: number }>();
+  for (const c of couponRes.rows as any[]) {
+    const id = String(c.vendor_item_id);
+    const cur = couponAgg.get(id);
+    const date = String(c.sale_date);
+    if (cur && cur.date !== date) continue;
+    const next = cur ?? { date, discount: 0, qty: 0 };
+    next.discount += Number(c.discount) || 0;
+    next.qty += Number(c.quantity) || 0;
+    couponAgg.set(id, next);
+  }
+  const couponUnit = new Map<string, number>();
+  for (const [id, c] of couponAgg) {
+    if (c.qty > 0 && c.discount > 0) couponUnit.set(id, Math.round(c.discount / c.qty));
+  }
 
   const sold = new Map<string, number>();
   for (const s of soldRes.rows) {
@@ -3856,7 +3945,7 @@ async function handleCosts(userId: string, res: VercelResponse) {
         vendor_item_id: id,
         product_name: sale.product_name ?? `옵션 ${id}`,
         option_name: '',
-        sale_price: null,
+        sale_price: unitPrice.get(id) ?? null,
         stock: null,
         status: '',
         business_type: sale.channel === 'growth' ? 'growth' : 'marketplace',
@@ -3865,12 +3954,19 @@ async function handleCosts(userId: string, res: VercelResponse) {
   }
 
   const rows = [...itemRes.rows, ...fallbackRows].map((it: any) => {
-    const c = costs.get(String(it.vendor_item_id));
+    const id = String(it.vendor_item_id);
+    const c = costs.get(id);
+    const detailPrice = Number(it.sale_price) > 0 ? Number(it.sale_price) : null;
+    const salePrice = detailPrice ?? unitPrice.get(id) ?? null;
     return {
-      vendorItemId: String(it.vendor_item_id),
+      vendorItemId: id,
       productName: it.product_name ?? '',
       optionName: it.option_name ?? '',
-      salePrice: it.sale_price ?? null,
+      salePrice,
+      // 어디서 온 판매가인지. 'sales'면 상세엔 없어 최근 매출의 개당 금액을 쓴 것이다
+      priceSource: detailPrice !== null ? 'detail' : salePrice !== null ? 'sales' : null,
+      // 최근 주문에 붙은 개당 쿠폰. 판매가 − 이 값이 손님이 내는 값이다
+      couponUnit: couponUnit.get(id) ?? null,
       stock: it.stock ?? null,
       status: it.status ?? '',
       // 로켓그로스 상품에만 입출고비 칸을 띄운다 — 판매자배송 상품에 0을
