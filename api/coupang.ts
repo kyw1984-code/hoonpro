@@ -1454,6 +1454,8 @@ async function syncOrderCoupons(
   let typesSeen = new Set<string>();
   let multiTypeLogged = false;
   let failedInARow = 0;
+  let failedTotal = 0;
+  let firstErrorIdx = -1;
   for (const orderId of todo) {
     if (outOfTime(deadline, sum)) break;
     const wait = LIMITS.couponGapMs - (Date.now() - lastCallAt);
@@ -1473,7 +1475,18 @@ async function syncOrderCoupons(
       // 다음 회차에 다시 묻는다) 다음으로 간다. 다만 연속으로 계속 실패하면
       // API 자체가 닫힌 것이라 더 두드리지 않는다.
       failedInARow++;
-      if (failedInARow === 1) sum.errors.push(`${channel === 'growth' ? '그로스' : '윙'} 쿠폰: ${r.error}`);
+      failedTotal++;
+      // 어느 주문이 왜 막히는지 남긴다. 문구('Internal Server Error')만으로는
+      // 쿠팡 쪽 장애인지, 특정 주문(취소·구주문·분할)만 그런 건지 알 수 없다.
+      const meta = orderMeta.get(orderId);
+      console.warn('coupang order coupon failed —', {
+        channel, orderId, status: r.status, error: String(r.error).slice(0, 200),
+        orderDate: meta?.date, items: meta?.items.length, qty: meta?.items.reduce((n, it) => n + (it.qty || 0), 0),
+      });
+      if (failedInARow === 1 && firstErrorIdx < 0) {
+        firstErrorIdx = sum.errors.length;
+        sum.errors.push(`${channel === 'growth' ? '그로스' : '윙'} 쿠폰: ${r.error}`);
+      }
       if (failedInARow >= 3) break;
       continue;
     }
@@ -1525,6 +1538,11 @@ async function syncOrderCoupons(
         fetched_at: new Date().toISOString(),
       });
     });
+  }
+  // 몇 건이 막혔는지 문구에 붙인다. 한 건이면 그 주문 하나의 문제고, 수십 건이면
+  // 쿠팡 쪽 장애다 — 다음 회차에 다시 묻는다는 사실도 함께 적는다.
+  if (firstErrorIdx >= 0 && failedTotal > 1) {
+    sum.errors[firstErrorIdx] = `${sum.errors[firstErrorIdx]} (${failedTotal}건, 다음 회차 재시도)`;
   }
   if (rows.length === 0) return;
   const err = await upsertChunked('coupang_order_coupons', rows, 'user_id,order_id,vendor_item_id');
