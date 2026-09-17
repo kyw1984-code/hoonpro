@@ -176,15 +176,23 @@ async function coupangCall<T = any>(
   //
   // 단, 시간 상한에 걸려 끊은 호출은 다시 부르지 않는다. 이미 20초를 썼는데 세 번
   // 시도하면 1분이고, 수동 수집의 90초 예산이 첫 단계 하나에 다 들어간다.
+  //
+  // 429(호출 한도)도 조회라면 한 번 쉬었다 다시 부른다. 지급내역·매출내역·반품·
+  // 교환 조회가 저마다 구간을 쪼개 연달아 부르다 걸렸고, 한 번 걸리면 그 구간이
+  // 통째로 빠졌다. 단계마다 따로 손보는 대신 여기서 받는다 — 쿠팡은 'Try after
+  // 3 seconds'라고 하므로 3초를 두 번까지 기다린다.
   let last: CoupangResult<T> | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) await sleep(600 * attempt);
+    if (attempt > 0) await sleep(last?.status === 429 ? RATE_LIMIT_WAIT_MS : 600 * attempt);
     const r = await coupangCallOnce<T>(creds, method, path, query, body);
-    if (r.ok || method !== 'GET' || !isTransient(r)) return r;
+    if (r.ok || method !== 'GET' || !(isTransient(r) || r.status === 429)) return r;
     last = r;
   }
   return last!;
 }
+
+/** 429를 받았을 때 쉬는 시간. 쿠팡 응답 문구('Try after 3 seconds')에 맞춘다 */
+const RATE_LIMIT_WAIT_MS = 3_000;
 
 /**
  * 다시 불러 볼 만한 실패인가.
