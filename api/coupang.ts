@@ -258,6 +258,12 @@ async function coupangCallOnce<T = any>(
       // 계정이 무더기로 무효화된다. 401·403은 쿠팡이 직접 보낸 것일 때만 키 문제다.
       const fromRelay = res.headers.get('x-relay-error') === '1';
       const authFailed = !fromRelay && (res.status === 401 || res.status === 403);
+      // 키 거부는 계정을 invalid로 내리고 판매자에게 메일까지 가는 일이다. 무엇이
+      // 어떻게 거부됐는지 남기지 않으면 오판이었는지 확인할 길이 없다. 키 값은
+      // 헤더에만 있고 여기엔 안 찍힌다.
+      if (authFailed) {
+        console.warn('coupang auth rejected —', { path, status: res.status, body: text.slice(0, 200) });
+      }
       return {
         ok: false,
         status: res.status,
@@ -2255,6 +2261,7 @@ async function syncUser(
   // 단계 하나를 돌리고, 시간에 잘렸으면 그 단계를 기록한다. 이미 잘린 뒤의
   // 단계들은 outOfTime이 바로 true라 사실상 빈손으로 지나간다 — 그래서 첫
   // 잘린 단계만 남긴다.
+  let stepsDone = 0;
   const step = async (i: number, run: () => Promise<void>) => {
     if (i < from) return;
     if (sum.authFailed) return;
@@ -2263,7 +2270,18 @@ async function syncUser(
       return;
     }
     await run();
+    // 앞 단계들이 같은 키로 멀쩡히 통과한 뒤에 401·403이 오면 키 문제가 아니다.
+    // 실제로 쿠폰 설정을 받은 직후 상품 목록에서 403이 와서 계정이 invalid로
+    // 내려가고 판매자에게 '수집이 멈췄습니다' 메일까지 갔다 — 10분 전 회차는
+    // 정상이었다. 키 거부는 첫 단계부터 거부될 때만 그렇게 본다. 그 밖에는
+    // 이 회차를 여기서 멈추고(잘린 것으로 기록) 다음 회차에 다시 간다.
+    if (sum.authFailed && stepsDone > 0) {
+      sum.authFailed = false;
+      sum.truncated = true;
+      sum.errors.push(`${SYNC_STEPS[i]}: 쿠팡이 호출을 거부했습니다(401/403). 앞 단계는 정상이라 키 문제로 보지 않습니다 — 다음 회차 재시도`);
+    }
     if (sum.truncated && sum.stoppedAt === null) sum.stoppedAt = i;
+    if (!sum.authFailed && !sum.truncated) stepsDone++;
   };
 
   // 쿠폰 설정을 맨 앞에 둔다. 호출이 몇 건뿐인데 순이익의 쿠폰 금액이 여기에
