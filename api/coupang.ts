@@ -3884,7 +3884,7 @@ async function handleProfit(userId: string, req: VercelRequest, res: VercelRespo
 
 // ── 원가 조회·입력 ────────────────────────────────────────────
 async function handleCosts(userId: string, res: VercelResponse) {
-  const [itemRes, costRes, soldRes, unitRes, couponRes] = await Promise.all([
+  const [itemRes, costRes, soldRes, unitRes, couponRes, couponDefRes] = await Promise.all([
     selectAll((f, t) => supabase!.from('coupang_items').select('*').eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
     selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
@@ -3912,6 +3912,16 @@ async function handleCosts(userId: string, res: VercelResponse) {
       .gte('sale_date', addDays(kstToday(), -30))
       .gt('quantity', 0)
       .order('sale_date', { ascending: false }).range(f, t)),
+    // 지금 적용 중인 쿠폰의 금액들. 옵션에 어느 쿠폰이 붙었는지는 쿠팡이 안
+    // 알려주므로(쿠폰-옵션 목록 API가 빈 배열), 주문에서 본 금액이 이 중 하나와
+    // 같으면 그 쿠폰이 아직 그 옵션에 붙어 있다고 본다.
+    selectAll((f, t) => supabase!
+      .from('coupang_coupons')
+      .select('discount, end_at')
+      .eq('user_id', userId)
+      .eq('status', 'APPLIED')
+      .gt('discount', 0)
+      .order('coupon_id').range(f, t)),
   ]);
 
   const costs = new Map<string, any>();
@@ -3926,22 +3936,42 @@ async function handleCosts(userId: string, res: VercelResponse) {
     const amt = Number(s.sales_amount) || 0;
     if (q > 0 && amt > 0) unitPrice.set(id, Math.round(amt / q));
   }
-  // 옵션별 최근 주문일의 개당 쿠폰. 쿠폰은 며칠마다 바뀌므로 평균이 아니라
-  // 마지막 날 것만 쓴다 — 그날 여러 주문이면 합쳐서 나눈다.
-  const couponAgg = new Map<string, { date: string; discount: number; qty: number }>();
+  const nowIso = new Date().toISOString();
+  const activeAmounts = new Set<number>();
+  for (const d of couponDefRes.rows as any[]) {
+    if (d.end_at && String(d.end_at) < nowIso) continue;
+    activeAmounts.add(Math.round(Number(d.discount) || 0));
+  }
+
+  // 옵션별 개당 쿠폰. 쿠폰은 며칠마다 바뀌므로 평균이 아니라 최근 것을 쓴다.
+  //   1) 마지막 주문일에 쿠폰이 붙었으면 그 값
+  //   2) 마지막 주문에 쿠폰이 없었어도(손님이 안 썼거나 조회가 비었거나), 30일 안
+  //      주문에서 본 개당 금액이 지금 적용 중인 쿠폰 금액과 같으면 그 값 — 쿠폰은
+  //      그대로 붙어 있는데 그 주문만 비었던 것이다. 실제로 6,100원 쿠폰이 붙은
+  //      옵션의 마지막 주문 하나가 0으로 와서 쿠폰가가 사라진 일이 있었다.
+  const byDate = new Map<string, Map<string, { discount: number; qty: number }>>();
   for (const c of couponRes.rows as any[]) {
     const id = String(c.vendor_item_id);
-    const cur = couponAgg.get(id);
     const date = String(c.sale_date);
-    if (cur && cur.date !== date) continue;
-    const next = cur ?? { date, discount: 0, qty: 0 };
-    next.discount += Number(c.discount) || 0;
-    next.qty += Number(c.quantity) || 0;
-    couponAgg.set(id, next);
+    const days = byDate.get(id) ?? new Map<string, { discount: number; qty: number }>();
+    const cur = days.get(date) ?? { discount: 0, qty: 0 };
+    cur.discount += Number(c.discount) || 0;
+    cur.qty += Number(c.quantity) || 0;
+    days.set(date, cur);
+    byDate.set(id, days);
   }
   const couponUnit = new Map<string, number>();
-  for (const [id, c] of couponAgg) {
-    if (c.qty > 0 && c.discount > 0) couponUnit.set(id, Math.round(c.discount / c.qty));
+  for (const [id, days] of byDate) {
+    // 조회가 최근 날짜순이라 Map 삽입 순서가 곧 최근순이다
+    let first = true;
+    for (const d of days.values()) {
+      const unit = d.qty > 0 ? Math.round(d.discount / d.qty) : 0;
+      if (unit > 0 && (first || activeAmounts.has(unit))) {
+        couponUnit.set(id, unit);
+        break;
+      }
+      first = false;
+    }
   }
 
   const sold = new Map<string, number>();
