@@ -1850,7 +1850,10 @@ async function syncGrowthInventory(userId: string, creds: CoupangCreds, sum: Syn
     }
     if (page === 0) {
       const first = listOf(r.data)[0];
-      console.info('coupang rg inventory shape —', `${listOf(r.data).length}건 / 키=${first ? Object.keys(first).join(',') : '없음'}`);
+      // inventoryDetails 안에 판매가능 말고도 입고중·불량 같은 수량이 있는지 보려고
+      // 안쪽 키까지 남긴다. 값은 안 남긴다.
+      const details = first?.inventoryDetails && typeof first.inventoryDetails === 'object' ? Object.keys(first.inventoryDetails).join(',') : '없음';
+      console.info('coupang rg inventory shape —', `${listOf(r.data).length}건 / 키=${first ? Object.keys(first).join(',') : '없음'} / details=${details}`);
     }
     for (const inv of listOf(r.data)) {
       const vendorItemId = pickStr(inv, ['vendorItemId', 'vendorItemID']);
@@ -1880,6 +1883,18 @@ async function syncGrowthInventory(userId: string, creds: CoupangCreds, sum: Syn
   const err = await upsertChunked('coupang_growth_inventory', rows, 'user_id,vendor_item_id');
   if (err) sum.errors.push(err);
   sum.growthInventory = rows.length;
+
+  // 오늘 자 스냅샷. 하루에 여러 번 돌면 마지막 값이 남는다. 재고 대조 화면이
+  // "언제부터 어긋났는지"를 이걸로 본다.
+  if (rows.length > 0) {
+    const snapDate = kstToday();
+    const snaps = rows.map(r => ({
+      user_id: userId, vendor_item_id: r.vendor_item_id, snap_date: snapDate,
+      orderable_qty: r.orderable_qty, sales_30d: r.sales_30d,
+    }));
+    const snapErr = await upsertChunked('coupang_growth_inventory_daily', snaps, 'user_id,vendor_item_id,snap_date');
+    if (snapErr) console.warn('growth inventory snapshot failed —', snapErr);
+  }
 }
 
 
@@ -3001,6 +3016,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'brief-settings': return await handleBriefSettings(userId, req, res);
       case 'reorder-rule': return await handleReorderRule(userId, req, res);
       case 'inventory': return await handleInventory(userId, req, res);
+      case 'growth-reconcile': return await handleGrowthReconcile(userId, res);
+      case 'growth-inbound-save': return await handleGrowthInboundSave(userId, req, res);
+      case 'growth-inbound-delete': return await handleGrowthInboundDelete(userId, req, res);
       case 'returns': return await handleReturns(userId, req, res);
       case 'return-reasons': return await handleReturnReasons(userId, req, res);
       case 'coupon-effect': return await handleCouponEffect(userId, req, res);
@@ -5638,6 +5656,199 @@ async function handleInventory(userId: string, req: VercelRequest, res: VercelRe
   const coverDays = Math.min(180, Math.max(1, Number(req.query.cover ?? 30) || 30));
   const { rows, counts } = await computeInventory(userId, leadTimeDays, coverDays);
   return res.status(200).json({ rows, counts, leadTimeDays, coverDays });
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// [4-2] 그로스 재고 대조
+//
+// 로켓창고 재고는 쿠팡이 주지만, 그 재고가 "내가 보낸 만큼"인지는 아무도 말해
+// 주지 않는다. 사입 주문·입고는 쿠팡에 없는 정보라 판매자가 적고, 판매는
+// 그로스 주문에서 자동으로 센다.
+//
+//   예상 재고 = 기준 재고 + (기준일 뒤 입고) − (기준일 뒤 판매)
+//   차이      = 쿠팡 재고 − 예상 재고
+//
+// 차이가 음수면 보낸 것보다 적다(미입고·분실·불량 반출), 양수면 더 많다(반품
+// 재입고 등). 기준 재고가 없으면 첫 입고 기록 날짜부터 0에서 시작한다 — 그
+// 전부터 있던 재고는 셈에 안 들어가므로, 화면은 "지금 재고를 기준으로 시작"을
+// 먼저 권한다.
+// ═══════════════════════════════════════════════════════════════
+
+const INBOUND_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function inboundDateOf(r: any): string {
+  // 기록의 대표 날짜 — 입고일이 있으면 입고일, 없으면 주문일
+  return String(r.received_at ?? r.ordered_at ?? String(r.created_at ?? '').slice(0, 10));
+}
+
+async function handleGrowthReconcile(userId: string, res: VercelResponse) {
+  const today = kstToday();
+  const [invRes, itemRes, inboundRes, salesRes, snapRes] = await Promise.all([
+    selectAll<any>((f, t) => supabase!.from('coupang_growth_inventory')
+      .select('vendor_item_id, product_name, external_sku, orderable_qty, sales_30d, synced_at')
+      .eq('user_id', userId).order('vendor_item_id').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_items')
+      .select('vendor_item_id, product_name, option_name')
+      .eq('user_id', userId).eq('business_type', 'growth').order('vendor_item_id').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_growth_inbound')
+      .select('*').eq('user_id', userId).order('created_at').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_sales_daily')
+      .select('vendor_item_id, sale_date, quantity')
+      .eq('user_id', userId).eq('channel', 'growth')
+      .gte('sale_date', addDays(today, -365)).order('sale_date').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_growth_inventory_daily')
+      .select('vendor_item_id, snap_date, orderable_qty')
+      .eq('user_id', userId).gte('snap_date', addDays(today, -30)).order('snap_date').range(f, t)),
+  ]);
+
+  const items = new Map<string, { product_name: string; option_name: string }>();
+  for (const it of itemRes.rows) items.set(String(it.vendor_item_id), it);
+  const inv = new Map<string, any>();
+  for (const r of invRes.rows) inv.set(String(r.vendor_item_id), r);
+
+  const recordsBy = new Map<string, any[]>();
+  for (const r of inboundRes.rows) {
+    const id = String(r.vendor_item_id);
+    const list = recordsBy.get(id) ?? [];
+    list.push(r);
+    recordsBy.set(id, list);
+  }
+  const salesBy = new Map<string, Array<{ date: string; qty: number }>>();
+  for (const s of salesRes.rows) {
+    const id = String(s.vendor_item_id);
+    const list = salesBy.get(id) ?? [];
+    list.push({ date: String(s.sale_date), qty: Number(s.quantity) || 0 });
+    salesBy.set(id, list);
+  }
+  const snapsBy = new Map<string, Array<{ date: string; qty: number }>>();
+  for (const s of snapRes.rows) {
+    const id = String(s.vendor_item_id);
+    const list = snapsBy.get(id) ?? [];
+    list.push({ date: String(s.snap_date), qty: Number(s.orderable_qty) || 0 });
+    snapsBy.set(id, list);
+  }
+
+  const ids = new Set<string>([...inv.keys(), ...recordsBy.keys()]);
+  const rows: any[] = [];
+  for (const id of ids) {
+    const it = items.get(id);
+    const stockRow = inv.get(id);
+    const records = (recordsBy.get(id) ?? [])
+      .slice()
+      .sort((a, b) => inboundDateOf(a).localeCompare(inboundDateOf(b)) || String(a.created_at).localeCompare(String(b.created_at)));
+
+    // 기준 재고 — 여러 개면 가장 최근 것. 그 이전 기록은 셈에서 뺀다.
+    const baselines = records.filter(r => r.kind === 'baseline' && r.received_at);
+    const baseline = baselines.length ? baselines[baselines.length - 1] : null;
+    const inbound = records.filter(r => r.kind === 'inbound');
+    const startDate: string | null = baseline
+      ? String(baseline.received_at)
+      : inbound.length ? inboundDateOf(inbound[0]) : null;
+
+    const orderedTotal = inbound.reduce((n, r) => n + (Number(r.ordered_qty) || 0), 0);
+    const receivedTotal = inbound.reduce((n, r) => n + (Number(r.received_qty) || 0), 0);
+    // 주문했는데 아직 입고 기록이 없는 수량 — 배 위에 있거나 누락된 것
+    const pendingQty = inbound
+      .filter(r => r.received_at === null || r.received_at === undefined)
+      .reduce((n, r) => n + (Number(r.ordered_qty) || 0), 0);
+
+    // 기준일 뒤의 입고·판매만 센다. 기준 재고는 그날 재고를 통째로 담고 있다.
+    const afterStart = (d: string) => (baseline ? d > startDate! : d >= startDate!);
+    const receivedAfter = startDate
+      ? inbound.filter(r => r.received_at && afterStart(String(r.received_at))).reduce((n, r) => n + (Number(r.received_qty) || 0), 0)
+      : 0;
+    const soldAfter = startDate
+      ? (salesBy.get(id) ?? []).filter(s => afterStart(s.date)).reduce((n, s) => n + s.qty, 0)
+      : 0;
+    const expected = startDate ? (baseline ? Number(baseline.received_qty) || 0 : 0) + receivedAfter - soldAfter : null;
+    const stock = stockRow ? Number(stockRow.orderable_qty) || 0 : null;
+    const diff = expected !== null && stock !== null ? stock - expected : null;
+
+    rows.push({
+      vendorItemId: id,
+      productName: it?.product_name || stockRow?.product_name || `옵션 ${id}`,
+      optionName: it?.option_name || stockRow?.external_sku || '',
+      stock,
+      stockSyncedAt: stockRow?.synced_at ?? null,
+      coupangSold30: stockRow?.sales_30d ?? null,
+      hasBaseline: Boolean(baseline),
+      baselineQty: baseline ? Number(baseline.received_qty) || 0 : null,
+      startDate,
+      orderedTotal,
+      receivedTotal,
+      pendingQty,
+      receivedAfter,
+      soldAfter,
+      expected,
+      diff,
+      status: diff === null ? 'nobase' : diff === 0 ? 'match' : diff < 0 ? 'short' : 'over',
+      records: records.map(r => ({
+        id: String(r.id), kind: r.kind,
+        orderedAt: r.ordered_at ?? null, orderedQty: Number(r.ordered_qty) || 0,
+        receivedAt: r.received_at ?? null, receivedQty: r.received_qty === null || r.received_qty === undefined ? null : Number(r.received_qty),
+        memo: r.memo ?? '',
+      })),
+      snapshots: snapsBy.get(id) ?? [],
+    });
+  }
+
+  // 어긋난 것부터, 같은 상태면 차이가 큰 순. 대조를 시작 안 한 옵션은 뒤로.
+  const order = { short: 0, over: 1, match: 2, nobase: 3 } as Record<string, number>;
+  rows.sort((a, b) => order[a.status] - order[b.status] || Math.abs(b.diff ?? 0) - Math.abs(a.diff ?? 0) || (b.stock ?? 0) - (a.stock ?? 0));
+
+  return res.status(200).json({
+    rows,
+    counts: {
+      tracked: rows.filter(r => r.status !== 'nobase').length,
+      short: rows.filter(r => r.status === 'short').length,
+      over: rows.filter(r => r.status === 'over').length,
+      pendingQty: rows.reduce((n, r) => n + r.pendingQty, 0),
+    },
+  });
+}
+
+async function handleGrowthInboundSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const b = req.body ?? {};
+  const vendorItemId = String(b.vendorItemId ?? '').trim();
+  if (!vendorItemId) return res.status(400).json({ error: '옵션을 지정해주세요.' });
+  const kind = b.kind === 'baseline' ? 'baseline' : 'inbound';
+  const dateOrNull = (v: any) => (typeof v === 'string' && INBOUND_DATE_RE.test(v) ? v : null);
+  const qty = (v: any) => Math.max(0, Math.min(10_000_000, Math.round(Number(v) || 0)));
+  const orderedAt = dateOrNull(b.orderedAt);
+  const receivedAt = dateOrNull(b.receivedAt);
+  const receivedQty = b.receivedQty === null || b.receivedQty === undefined || b.receivedQty === '' ? null : qty(b.receivedQty);
+
+  if (kind === 'baseline') {
+    if (!receivedAt || receivedQty === null) return res.status(400).json({ error: '기준일과 그날의 재고 수량이 필요합니다.' });
+  } else if (!orderedAt && !receivedAt) {
+    return res.status(400).json({ error: '주문일 또는 입고일이 필요합니다.' });
+  }
+
+  const row: any = {
+    user_id: userId, vendor_item_id: vendorItemId, kind,
+    ordered_at: orderedAt, ordered_qty: kind === 'baseline' ? 0 : qty(b.orderedQty),
+    received_at: receivedAt, received_qty: receivedQty,
+    memo: typeof b.memo === 'string' ? b.memo.slice(0, 200) : null,
+    updated_at: new Date().toISOString(),
+  };
+  const id = typeof b.id === 'string' && b.id ? b.id : null;
+  const q = id
+    ? supabase!.from('coupang_growth_inbound').update(row).eq('id', id).eq('user_id', userId).select('id').maybeSingle()
+    : supabase!.from('coupang_growth_inbound').insert(row).select('id').maybeSingle();
+  const { data, error } = await q;
+  if (error || !data) return res.status(500).json({ error: '저장하지 못했습니다.' });
+  return res.status(200).json({ ok: true, id: String(data.id) });
+}
+
+async function handleGrowthInboundDelete(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = String(req.body?.id ?? '').trim();
+  if (!id) return res.status(400).json({ error: 'id가 필요합니다.' });
+  const { error } = await supabase!.from('coupang_growth_inbound').delete().eq('id', id).eq('user_id', userId);
+  if (error) return res.status(500).json({ error: '지우지 못했습니다.' });
+  return res.status(200).json({ ok: true });
 }
 
 /** 주간 리포트에 붙일 품절 임박 목록 */

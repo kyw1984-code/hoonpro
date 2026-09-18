@@ -985,6 +985,40 @@ create table if not exists coupang_growth_inventory (
 alter table coupang_growth_inventory enable row level security;
 revoke all on coupang_growth_inventory from anon, authenticated;
 
+-- 그로스 재고 대조 — 사입 주문·입고는 쿠팡에 없는 정보라 판매자가 적는다.
+--   kind='baseline': 대조를 시작하는 시점의 재고(그날의 로켓창고 재고를 그대로 적는다)
+--   kind='inbound' : 사입 주문(ordered_at·ordered_qty) → 로켓창고 입고(received_at·received_qty)
+-- 예상 재고 = 기준 재고 + 그 뒤 입고 − 그 뒤 판매. 쿠팡 재고와의 차이가 곧 미입고·분실·불량이다.
+create table if not exists coupang_growth_inbound (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  vendor_item_id text not null,
+  kind text not null default 'inbound' check (kind in ('inbound', 'baseline')),
+  ordered_at date,
+  ordered_qty int not null default 0,
+  received_at date,
+  received_qty int,
+  memo text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create index if not exists idx_cgi_user_item on coupang_growth_inbound(user_id, vendor_item_id);
+alter table coupang_growth_inbound enable row level security;
+revoke all on coupang_growth_inbound from anon, authenticated;
+
+-- 로켓창고 재고의 일별 스냅샷. 위 표는 매 수집마다 덮어써서 "언제부터 안 맞았는지"를
+-- 볼 수 없다. 하루 한 줄씩 남겨 재고 감소와 판매량이 어긋난 날을 짚는다.
+create table if not exists coupang_growth_inventory_daily (
+  user_id uuid not null references users(id) on delete cascade,
+  vendor_item_id text not null,
+  snap_date date not null,
+  orderable_qty int not null default 0,
+  sales_30d int,
+  primary key (user_id, vendor_item_id, snap_date)
+);
+alter table coupang_growth_inventory_daily enable row level security;
+revoke all on coupang_growth_inventory_daily from anon, authenticated;
+
 -- ─────────────────────────────────────────────────────────────
 -- 34. 주문의 쿠폰 할인 — 판매가와 실제 판매가는 다르다
 -- ─────────────────────────────────────────────────────────────

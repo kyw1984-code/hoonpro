@@ -13,6 +13,7 @@ import { SettlementCheck } from './SettlementCheck';
 import { MonthlyProfit } from './MonthlyProfit';
 import { WeeklyReports } from './WeeklyReports';
 import { InventoryForecast } from './InventoryForecast';
+import { GrowthReconcile } from './GrowthReconcile';
 import { ReturnAnalysis } from './ReturnAnalysis';
 import { InquiryAssistant } from './InquiryAssistant';
 import { RankRevenue } from './RankRevenue';
@@ -22,12 +23,13 @@ import { CouponEffect } from './CouponEffect';
 import { BriefSettings } from './BriefSettings';
 import { HowTo } from '../HowTo';
 
-type View = 'profit' | 'settlement' | 'inventory' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
+type View = 'profit' | 'settlement' | 'inventory' | 'reconcile' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
 
 const VIEWS: Array<{ id: View; label: string }> = [
   { id: 'profit', label: '순이익' },
   { id: 'settlement', label: '정산 캘린더' },
   { id: 'inventory', label: '재고 예측' },
+  { id: 'reconcile', label: '재고 대조' },
   { id: 'returns', label: '반품 분석' },
   { id: 'inquiries', label: '고객문의' },
   { id: 'rank', label: '순위·매출' },
@@ -84,7 +86,7 @@ export function CoupangDashboard() {
       // 원가·가격 화면에서 입력하던 값이 있으면 다시 만들지 않는다. 수집은 최대
       // 90초 걸리고 키 등록 직후 자동으로도 도는데, 그 사이 작성하던 내용이
       // 예고 없이 사라지면 안 된다. 그 화면들은 저장 후 스스로 다시 읽는다.
-      const editing = view === 'costs' || view === 'price';
+      const editing = view === 'costs' || view === 'price' || view === 'reconcile';
       if (!editing) setRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncMsg(e.message);
@@ -191,6 +193,7 @@ export function CoupangDashboard() {
         </div>
       )}
       {view === 'inventory' && <InventoryForecast />}
+      {view === 'reconcile' && <GrowthReconcile />}
       {view === 'returns' && (
         <div className="flex flex-col gap-5">
           <ReturnReasons days={90} />
