@@ -491,7 +491,10 @@ const LIMITS = {
   chunkDays: 30,           // 조회 구간 분할 단위
   rgDaysFull: 60,
   rgDaysIncr: 30,
-  rgChunkDays: 30,         // 로켓그로스는 한 번에 30일까지만 조회된다
+  // 로켓그로스는 한 번에 30일까지 조회되지만, 하루 100건 파는 계정은 30일치가
+  // 페이지 상한(40)을 넘겨 최근 며칠이 통째로 빠졌다. 7일씩 끊으면 구간당
+  // 페이지가 넉넉하고, 잘려도 그 주만 다음 회차가 이어받는다.
+  rgChunkDays: 7,
   rgGapMs: 1300,           // 분당 50회 한도. 1300ms면 약 46회/분으로 아래를 유지한다
   couponGapMs: 250,        // 주문별 쿠폰 조회 간격
   couponPerRun: 80,        // 회차당 쿠폰을 물을 주문 수. 나머지는 다음 회차가 이어받는다
@@ -1303,6 +1306,8 @@ async function syncRocketGrowth(
   let cancelled = 0;
   let firstOrderShape = '';
   const hourHist: Record<number, number> = {};
+  const orderKeyUnion = new Set<string>();
+  const itemKeyUnion = new Set<string>();
   // 주문별 쿠폰을 물으려면 주문번호와 옵션별 금액이 필요하다
   const orderMeta = new Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number; sheetDiscount?: number }> }>();
 
@@ -1350,6 +1355,8 @@ async function syncRocketGrowth(
         const items = Array.isArray(order?.orderItems)
           ? order.orderItems
           : Array.isArray(order?.items) ? order.items : [order];
+        for (const k of Object.keys(order ?? {})) orderKeyUnion.add(k);
+        for (const it of items) for (const k of Object.keys(it ?? {})) itemKeyUnion.add(k);
         if (!firstOrderShape) {
           // 키를 전부 남긴다 — 취소 여부를 담은 키가 있는지 봐야 한다. 한 계정의
           // 그로스 판매수가 쿠팡 자체 30일 집계보다 30% 많았는데, 주문 응답에
@@ -1411,10 +1418,21 @@ async function syncRocketGrowth(
       token = nextTokenOf(r.data);
       if (!token) break;
     }
+    // 페이지 상한에 걸려 이 구간을 다 못 받았다. 불완전한 결과로 덮어쓰고 지우면
+    // 멀쩡하던 최근 며칠 매출이 사라진다 — 실제로 한 계정의 그로스 매출이 특정
+    // 날짜 이후 통째로 비었다. 잘린 것으로 기록해 정리 단계를 건너뛰고, 다음
+    // 회차가 이어받게 한다.
+    if (token && !failedThisRun) {
+      failedThisRun = true;
+      const msg = '그로스 매출: 주문이 많아 이번 회차에 다 받지 못했습니다 (다음 회차 이어받음)';
+      if (!sum.errors.includes(msg)) sum.errors.push(msg);
+    }
     if (failedThisRun) break;
   }
 
   if (Object.keys(hourHist).length > 0) {
+    // 첫 주문의 키만 보면 취소 주문에만 붙는 키를 놓친다. 전체 합집합을 남긴다.
+    console.info('coupang rg order keys(all) —', `주문=${[...orderKeyUnion].join(',')} / 항목=${[...itemKeyUnion].join(',')}`);
     console.info('coupang rg order hours(KST) —', Object.entries(hourHist).sort((a, b) => Number(a[0]) - Number(b[0])).map(([h, n]) => `${h}시:${n}`).join(' '), `/ 취소로 뺀 주문 ${cancelled}건`);
   }
 
@@ -1505,14 +1523,27 @@ async function syncOrderCoupons(
   // 조각만 나누고 끝내면 옵션이 많은 판매자는 한도에 잘려 이미 물어본 주문을
   // 다시 묻게 된다.
   const seen = new Set<string>();
+  // 500으로 막혀 발주서 할인으로 적어 둔 주문은 사흘 지나면 다시 물어본다.
+  // 쿠팡이 나중에 답하기 시작하면 실제 쿠폰으로 덮인다. 회차당 20건까지만 —
+  // 새 주문을 굶기면 안 된다.
+  const retryBefore = new Date(Date.now() - 3 * 86400_000).toISOString();
+  const retry = new Set<string>();
   for (let i = 0; i < ids.length; i += 200) {
     const slice = ids.slice(i, i + 200);
-    const { rows } = await selectAll<{ order_id: string }>((f, t) =>
-      supabase!.from('coupang_order_coupons').select('order_id')
+    const { rows } = await selectAll<{ order_id: string; coupon_types: string | null; fetched_at: string | null }>((f, t) =>
+      supabase!.from('coupang_order_coupons').select('order_id, coupon_types, fetched_at')
         .eq('user_id', userId).in('order_id', slice)
         // 정렬이 없으면 페이지 사이에 순서가 보장되지 않아 몇 줄이 빠진다.
         .order('order_id').range(f, t));
-    for (const r of rows) seen.add(String(r.order_id));
+    for (const r of rows) {
+      const id = String(r.order_id);
+      if (r.coupon_types === 'ERR500' && String(r.fetched_at ?? '') < retryBefore && retry.size < 20 && !seen.has(id)) {
+        retry.add(id);
+        continue;
+      }
+      seen.add(id);
+      retry.delete(id);
+    }
   }
   // 최근 주문부터 묻는다. 회차 상한에 걸려 일부만 물어도 지금 쓰는 쿠폰이 먼저 잡힌다.
   const todo = ids
