@@ -2380,6 +2380,7 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     }
     return got.length;
   };
+  const t0 = Date.now();
   let used: Variant | null = null;
   let first = -1;
   for (const v of variants) {
@@ -2387,8 +2388,12 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     if (first > 0) { used = v; break; }
   }
   if (used && first >= used.size && REVIEW_MAX_PAGES > 1) {
+    // 빈 응답은 쪽 단위로도 무작위로 온다(1·3쪽은 오고 2쪽만 비는 식). 첫 쪽이
+    // 빨리 왔으면 남은 시간으로 한 번 더 부른다. 늦게 왔으면 함수 상한이 가까워
+    // 한 번으로 끝낸다.
+    const restRetries = Date.now() - t0 < 90_000 ? 1 : 0;
     const rest = await Promise.all(
-      Array.from({ length: REVIEW_MAX_PAGES - 1 }, (_, i) => fetchPage(used!, i + 2, 0)),
+      Array.from({ length: REVIEW_MAX_PAGES - 1 }, (_, i) => fetchPage(used!, i + 2, restRetries)),
     );
     rest.forEach((r, i) => takePage(used!.label, i + 2, r));
   }
