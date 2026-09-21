@@ -1436,6 +1436,11 @@ async function syncRocketGrowth(
     console.info('coupang rg order hours(KST) —', Object.entries(hourHist).sort((a, b) => Number(a[0]) - Number(b[0])).map(([h, n]) => `${h}시:${n}`).join(' '), `/ 취소로 뺀 주문 ${cancelled}건`);
   }
 
+  // [임시] 취소 정보를 주는 그로스 API를 찾는다. 문서가 이 망에서 막혀 있어
+  // 후보 경로를 직접 두드려 본다. app_config.rg_cancel_probe가 있을 때 한 번만
+  // 돌고 스스로 지운다. 값은 남기지 않고 상태·문구·키만 남긴다.
+  await rgCancelProbe(creds, orderMeta, to, deadline);
+
   // 쿠폰을 먼저 채운다. 수수료가 쿠폰을 뺀 실결제액에 붙기 때문이다.
   // 예전에는 매출을 먼저 쓰고 쿠폰을 나중에 채워서, 수수료를 계산할 때 이번
   // 회차의 쿠폰을 알 수 없었다.
@@ -2523,6 +2528,55 @@ async function syncUser(
   await step(8, () => syncReturns(userId, creds, addDays(today, -(full ? LIMITS.returnsDaysFull : LIMITS.returnsDaysIncr)), today, sum, deadline));
   await step(9, () => syncInquiries(userId, creds, sum, deadline));
   return sum;
+}
+
+/**
+ * [임시] 그로스 취소를 알려주는 API 후보를 두드려 본다.
+ * 쿠팡 개발자센터가 이 망에서 막혀 있어 명세를 못 읽는다. 결과는 로그에만
+ * 남기고(상태·문구·키·건수), 한 번 돌면 app_config 키를 지워 다시 돌지 않는다.
+ */
+async function rgCancelProbe(
+  creds: CoupangCreds,
+  orderMeta: Map<string, { date: string; items: Array<{ vendorItemId: string; amount: number; qty: number }> }>,
+  today: string,
+  deadline: number,
+): Promise<void> {
+  if (!supabase) return;
+  const { data: flag } = await supabase.from('app_config').select('value').eq('key', 'rg_cancel_probe').maybeSingle();
+  if (!flag?.value) return;
+  let orderIds: string[] = [];
+  try {
+    const parsed = JSON.parse(String(flag.value));
+    if (Array.isArray(parsed)) orderIds = parsed.map(String);
+  } catch { /* 'on' 같은 단순 값 */ }
+  if (orderIds.length === 0) orderIds = [...orderMeta.keys()].slice(-2);
+  const base = `/v2/providers/rg_open_api/apis/api/v1/vendors/${creds.vendorId}`;
+  const from = rgDate(addDays(today, -7));
+  const to = rgDate(addDays(today, 1));
+  const tries: Array<[string, string, string]> = [
+    ...orderIds.slice(0, 2).map(id => [`단건 rg/orders/{id}`, `${base}/rg/orders/${id}`, ''] as [string, string, string]),
+    ['목록+status', `${base}/rg/orders`, `paidDateFrom=${from}&paidDateTo=${to}&status=CANCELED`],
+    ['목록+orderStatus', `${base}/rg/orders`, `paidDateFrom=${from}&paidDateTo=${to}&orderStatus=CANCELED`],
+    ['rg/returns', `${base}/rg/returns`, `paidDateFrom=${from}&paidDateTo=${to}`],
+    ['rg/returns(빈질의)', `${base}/rg/returns`, ''],
+    ['rg/cancels', `${base}/rg/cancels`, `paidDateFrom=${from}&paidDateTo=${to}`],
+    ['rg/orders/cancels', `${base}/rg/orders/cancels`, `paidDateFrom=${from}&paidDateTo=${to}`],
+    ['rg/order-cancellations', `${base}/rg/order-cancellations`, `paidDateFrom=${from}&paidDateTo=${to}`],
+  ];
+  const describe = (v: any, depth = 0): string => {
+    if (v === null || v === undefined) return String(v);
+    if (Array.isArray(v)) return `배열(${v.length})${v[0] !== undefined && depth < 3 ? `[${describe(v[0], depth + 1)}]` : ''}`;
+    if (typeof v === 'object') return `{${Object.entries(v).map(([k, x]) => (x && typeof x === 'object' && depth < 3 ? `${k}:${describe(x, depth + 1)}` : k)).join(',')}}`;
+    return typeof v;
+  };
+  for (const [label, path, query] of tries) {
+    if (Date.now() >= deadline - 5_000) break;
+    await sleep(LIMITS.rgGapMs);
+    const r = await coupangCallOnce(creds, 'GET', path, query);
+    // 응답 값은 남기지 않는다. 상태·오류 문구·구조(키)만.
+    console.info('rg cancel probe —', label, `status=${r.status}`, r.ok ? `모양=${describe(r.data)}` : `error=${String(r.error).slice(0, 300)}`);
+  }
+  await supabase.from('app_config').delete().eq('key', 'rg_cancel_probe');
 }
 
 /** 다음 회차가 이어받을 단계. 잘리지 않았으면 처음(0)으로 되돌린다 */
