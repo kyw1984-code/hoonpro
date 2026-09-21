@@ -515,7 +515,18 @@ export interface GoalsResponse {
   actual: { salesAmount: number; profit: number; daysPassed: number; daysInMonth: number; projectedSales: number; projectedProfit: number; adCostCoveredDays: number };
 }
 
+export interface OrderHoursResponse {
+  from: string; to: string; days: number;
+  byHour: Array<{ hour: number; quantity: number; amount: number }>;
+  byWeekday: Array<{ weekday: number; quantity: number; amount: number }>;
+  /** [요일 0=일][시 0~23] 수량 */
+  grid: number[][];
+  peakHours: number[]; peakShare: number; peakWeekday: number;
+}
+
 export const coupangApi = {
+  /** 주문 시간대·요일 패턴 (한국 시간) */
+  orderHours: (days = 28) => request<OrderHoursResponse>(`order-hours&days=${days}`),
   /** 월 목표와 이달 진행 */
   goals: (month?: string) => request<GoalsResponse>(month ? `goals&month=${month}` : 'goals'),
   goalsSave: (body: { month: string; revenueGoal: number; profitGoal: number }) => request<{ ok: true; month: string }>('goals-save', { method: 'POST', body }),
