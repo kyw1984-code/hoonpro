@@ -501,7 +501,16 @@ export interface SalesMoverRow {
 }
 export interface SalesMoversResponse { from: string; to: string; prevFrom: string; prevTo: string; drops: SalesMoverRow[]; rises: SalesMoverRow[] }
 
+export type HealthKind = 'cost-missing' | 'thin-margin' | 'stock-low' | 'return-high' | 'idle' | 'stopped';
+export interface HealthItem {
+  kind: HealthKind; severity: 'high' | 'mid' | 'low';
+  vendorItemId: string; productName: string; optionName: string; channel: 'growth' | 'marketplace'; detail: string;
+}
+export interface HealthReport { checkedAt: string; optionsChecked: number; counts: Record<HealthKind, number>; items: HealthItem[] }
+
 export const coupangApi = {
+  /** 훈프로 상품 진단 카드 — 옵션별 손볼 것 */
+  healthCheck: () => request<HealthReport>('health-check'),
   /** 최근 7일 vs 그 전 7일 — 눈에 띄게 빠지거나 뛴 옵션 */
   salesMovers: () => request<SalesMoversResponse>('sales-movers'),
 

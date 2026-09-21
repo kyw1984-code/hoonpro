@@ -58,6 +58,8 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
   // 이번 주 매출 변화 — 쿠팡 연동이 없으면 서버가 빈 목록을 준다
   const [salesMovers, setSalesMovers] = useState<SalesMoversResponse | null | 'none'>(null);
   const userName = getUser()?.name || '';
+  // 베타 카드는 관리자만 본다 (서버도 같은 기준으로 막는다)
+  const isAdmin = Boolean(getUser()?.isAdmin);
 
   useEffect(() => {
     (async () => {
@@ -100,6 +102,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
       } catch { /* 무시 */ }
     })();
     (async () => {
+      if (!getUser()?.isAdmin) { setSalesMovers('none'); return; }
       try { setSalesMovers(await coupangApi.salesMovers()); } catch { setSalesMovers('none'); }
     })();
   }, []);
@@ -310,11 +313,11 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
       </div>
 
       {/* 이번 주 매출 변화 — 최근 7일 vs 그 전 7일. 빠진 것부터, 원인 후보 한 줄과 함께 */}
-      {shown('coupang') && salesMovers !== 'none' && salesMovers !== null && (salesMovers.drops.length > 0 || salesMovers.rises.length > 0) && (
+      {isAdmin && shown('coupang') && salesMovers !== 'none' && salesMovers !== null && (salesMovers.drops.length > 0 || salesMovers.rises.length > 0) && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="mb-3 flex items-center gap-2">
             <TrendingUp className="h-4 w-4" style={{ color: '#ffb454' }} />
-            <h3 className="text-sm font-semibold text-ink">이번 주 매출 변화</h3>
+            <h3 className="text-sm font-semibold text-ink">이번 주 매출 변화 <span className="ml-1 rounded-control border border-accent/40 bg-accent-soft px-1 py-0.5 text-[10.5px] font-semibold text-ink-2">베타</span></h3>
             <span className="text-[12px] text-ink-3">{salesMovers.from.slice(5).replace('-', '/')}~{salesMovers.to.slice(5).replace('-', '/')} vs 그 전 7일</span>
             <button onClick={() => onNavigate('coupang')} className="ml-auto flex items-center gap-0.5 text-[12px] font-medium text-ink-2 hover:text-accent">
               정산AI <ChevronRight className="h-3.5 w-3.5" />
