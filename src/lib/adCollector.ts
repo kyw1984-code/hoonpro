@@ -86,7 +86,7 @@ function collector(origin: string, days: number) {
     });
   };
 
-  var gql = function (body: any): Promise<any> {
+  var gqlOnce = function (body: any): Promise<any> {
     return fetch(GQL, {
       method: 'POST',
       credentials: 'include',
@@ -95,6 +95,27 @@ function collector(origin: string, days: number) {
     }).then(function (r) {
       if (r.status === 401 || r.status === 403) throw new Error('광고센터 로그인이 풀렸습니다. 다시 로그인한 뒤 눌러주세요.');
       return r.json();
+    });
+  };
+  // 'Failed to fetch'는 브라우저가 요청 자체를 보내지 못한 것이다. 광고 차단
+  // 확장이 "advertising"·"marketing" 주소를 막거나, 로그인이 풀려 로그인 페이지로
+  // 튕긴 경우가 대부분이다. 한 번 더 시도하고, 그래도 안 되면 무엇을 해야
+  // 하는지 문구로 알린다 — 실제로 한 판매자가 이 문구만 보고 막혔다.
+  var gql = function (body: any): Promise<any> {
+    return gqlOnce(body).catch(function (e) {
+      var msg = String((e && e.message) || e);
+      if (!/Failed to fetch|NetworkError|Load failed/i.test(msg)) throw e;
+      return sleep(1500).then(function () {
+        return gqlOnce(body).catch(function (e2) {
+          var m2 = String((e2 && e2.message) || e2);
+          if (!/Failed to fetch|NetworkError|Load failed/i.test(m2)) throw e2;
+          throw new Error(
+            '광고센터에 요청을 보내지 못했습니다(' + m2 + '). ' +
+              '광고 차단 확장(uBlock·AdGuard·Brave 방패 등)이 광고센터 주소를 막거나 로그인이 풀린 경우입니다. ' +
+              '확장을 끄거나 시크릿 창에서 광고센터에 다시 로그인한 뒤, 광고센터 첫 화면에서 눌러주세요.',
+          );
+        });
+      });
     });
   };
 

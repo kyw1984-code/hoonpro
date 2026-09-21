@@ -128,6 +128,10 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
           </li>
           <li>광고센터(advertising.coupang.com)에 로그인한 뒤, 그 즐겨찾기를 누릅니다.</li>
           <li>훈프로 창이 하나 열리고 10~40초 뒤 "광고비가 반영됐습니다"가 뜹니다. 끝입니다.</li>
+          <li className="text-ink-3">
+            "[캠페인 목록] Failed to fetch"가 뜨면 브라우저가 광고센터에 요청을 보내지 못한 것입니다 — 광고 차단 확장(uBlock·AdGuard·Brave 방패)이
+            광고센터 주소를 막거나 로그인이 풀린 경우입니다. 확장을 끄거나 시크릿 창에서 광고센터에 다시 로그인한 뒤 첫 화면에서 눌러주세요.
+          </li>
         </ol>
       )}
       <p className="mt-2 text-[11px] text-ink-3">PC 크롬·엣지에서 됩니다. 가져온 보고서는 광고분석AI 화면에도 그대로 들어갑니다 — 파일을 따로 올리지 않아도 됩니다. 휴대폰에서는 파일 올리기를 이용해주세요.</p>
