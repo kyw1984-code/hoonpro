@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { getToken, getUser } from '../../lib/auth';
 import { UsageLimits } from './UsageLimits';
-import { coupangApi, won, type SalesMoversResponse } from '../../lib/coupang';
+import { coupangApi, won, type GoalsResponse, type SalesMoversResponse } from '../../lib/coupang';
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -58,8 +58,21 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
   // 이번 주 매출 변화 — 쿠팡 연동이 없으면 서버가 빈 목록을 준다
   const [salesMovers, setSalesMovers] = useState<SalesMoversResponse | null | 'none'>(null);
   const userName = getUser()?.name || '';
-  // 베타 카드는 관리자만 본다 (서버도 같은 기준으로 막는다)
+  // 새 카드는 관리자 [탭 표시·순서]에서 켜기 전까지 수강생에게 숨긴다 (관리자는 hiddenTabs가 비어 온다)
   const isAdmin = Boolean(getUser()?.isAdmin);
+  // 이달 목표
+  const [goals, setGoals] = useState<GoalsResponse | null | 'none'>(null);
+  const [goalEdit, setGoalEdit] = useState<{ revenue: string; profit: string } | null>(null);
+  const [goalSaving, setGoalSaving] = useState(false);
+  const saveGoals = async () => {
+    if (!goalEdit || goals === null || goals === 'none' || goalSaving) return;
+    setGoalSaving(true);
+    try {
+      await coupangApi.goalsSave({ month: goals.month, revenueGoal: Number(goalEdit.revenue.replace(/[^0-9]/g, '')) || 0, profitGoal: Number(goalEdit.profit.replace(/[^0-9]/g, '')) || 0 });
+      setGoals(await coupangApi.goals());
+      setGoalEdit(null);
+    } catch { /* 화면에 남은 값으로 다시 시도할 수 있다 */ } finally { setGoalSaving(false); }
+  };
 
   useEffect(() => {
     (async () => {
@@ -102,8 +115,12 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
       } catch { /* 무시 */ }
     })();
     (async () => {
-      if (!getUser()?.isAdmin) { setSalesMovers('none'); return; }
+      if (hiddenTabs.includes('home.movers') || hiddenTabs.includes('coupang')) { setSalesMovers('none'); return; }
       try { setSalesMovers(await coupangApi.salesMovers()); } catch { setSalesMovers('none'); }
+    })();
+    (async () => {
+      if (hiddenTabs.includes('home.goals') || hiddenTabs.includes('coupang')) { setGoals('none'); return; }
+      try { setGoals(await coupangApi.goals()); } catch { setGoals('none'); }
     })();
   }, []);
 
@@ -312,12 +329,69 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
         )}
       </div>
 
+      {/* 이달 목표 — 매출·순이익 진행률과 이 속도로 가면 얼마가 될지 */}
+      {shown('coupang') && shown('home.goals') && goals !== 'none' && goals !== null && (
+        <div className="rounded-panel border border-line bg-paper p-5">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <BarChart3 className="h-4 w-4" style={{ color: '#7cf5ff' }} />
+            <h3 className="text-sm font-semibold text-ink">{Number(goals.month.slice(5))}월 목표</h3>
+            <span className="text-[12px] text-ink-3">{goals.actual.daysPassed}/{goals.actual.daysInMonth}일 지남 · 순이익은 광고비까지 뺀 값</span>
+            <button type="button" onClick={() => setGoalEdit(goalEdit ? null : { revenue: String(goals.revenueGoal || ''), profit: String(goals.profitGoal || '') })} className="ml-auto text-[12px] font-medium text-ink-2 hover:text-accent">
+              {goalEdit ? '닫기' : goals.revenueGoal || goals.profitGoal ? '목표 수정' : '목표 정하기'}
+            </button>
+          </div>
+          {goalEdit && (
+            <div className="mb-3 flex flex-wrap items-end gap-2 rounded-card border border-accent-line bg-accent-soft p-3">
+              <label className="flex flex-col gap-1 text-[11.5px] text-ink-2">목표 매출(원)
+                <input inputMode="numeric" value={goalEdit.revenue} onChange={e => setGoalEdit({ ...goalEdit, revenue: e.target.value })} className="w-40 rounded-control border border-line bg-paper px-2 py-1.5 text-[13px] text-ink outline-none focus:ring-2 focus:ring-accent" placeholder="예: 30000000" />
+              </label>
+              <label className="flex flex-col gap-1 text-[11.5px] text-ink-2">목표 순이익(원)
+                <input inputMode="numeric" value={goalEdit.profit} onChange={e => setGoalEdit({ ...goalEdit, profit: e.target.value })} className="w-40 rounded-control border border-line bg-paper px-2 py-1.5 text-[13px] text-ink outline-none focus:ring-2 focus:ring-accent" placeholder="예: 5000000" />
+              </label>
+              <button type="button" onClick={saveGoals} disabled={goalSaving} className="inline-flex min-h-[36px] items-center gap-1.5 rounded-control bg-accent px-4 text-[13px] font-bold text-ground hover:opacity-90 disabled:opacity-40">
+                {goalSaving && <Loader2 className="h-4 w-4 animate-spin" />}저장
+              </button>
+            </div>
+          )}
+          {!goals.revenueGoal && !goals.profitGoal && !goalEdit ? (
+            <p className="text-[13px] text-ink-2">이달 목표를 정하면 진행률과 이 속도로 갔을 때의 예상치가 여기 보입니다. 지금까지 매출 {won(goals.actual.salesAmount)} · 순이익 {won(goals.actual.profit)}.</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {[
+                { label: '매출', goal: goals.revenueGoal, now: goals.actual.salesAmount, proj: goals.actual.projectedSales, color: '#c47a2c' },
+                { label: '순이익', goal: goals.profitGoal, now: goals.actual.profit, proj: goals.actual.projectedProfit, color: '#2d9bb6' },
+              ].filter(g => g.goal > 0).map(g => {
+                const pct = Math.max(0, Math.min(100, Math.round((g.now / g.goal) * 100)));
+                const pace = Math.round((g.proj / g.goal) * 100);
+                return (
+                  <div key={g.label} className="rounded-card border border-line bg-paper-2 p-3">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[13px] font-semibold text-ink">{g.label}</span>
+                      <span className="text-[12px] tabular-nums text-ink-2">{won(g.now)} / {won(g.goal)}</span>
+                    </div>
+                    <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-paper">
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: g.color }} />
+                    </div>
+                    <p className="mt-1.5 text-[12px] text-ink-3">
+                      <b className="text-ink">{pct}%</b> 달성 · 이 속도면 월말 {won(g.proj)} (<span className={pace >= 100 ? 'text-positive' : 'text-caution'}>{pace}%</span>)
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {goals.actual.adCostCoveredDays === 0 && (goals.revenueGoal > 0 || goals.profitGoal > 0) && (
+            <p className="mt-2 text-[11.5px] text-ink-3">이달 광고비가 아직 없어 순이익이 실제보다 크게 보일 수 있습니다.</p>
+          )}
+        </div>
+      )}
+
       {/* 이번 주 매출 변화 — 최근 7일 vs 그 전 7일. 빠진 것부터, 원인 후보 한 줄과 함께 */}
-      {isAdmin && shown('coupang') && salesMovers !== 'none' && salesMovers !== null && (salesMovers.drops.length > 0 || salesMovers.rises.length > 0) && (
+      {shown('coupang') && shown('home.movers') && salesMovers !== 'none' && salesMovers !== null && (salesMovers.drops.length > 0 || salesMovers.rises.length > 0) && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="mb-3 flex items-center gap-2">
             <TrendingUp className="h-4 w-4" style={{ color: '#ffb454' }} />
-            <h3 className="text-sm font-semibold text-ink">이번 주 매출 변화 <span className="ml-1 rounded-control border border-accent/40 bg-accent-soft px-1 py-0.5 text-[10.5px] font-semibold text-ink-2">베타</span></h3>
+            <h3 className="text-sm font-semibold text-ink">이번 주 매출 변화</h3>
             <span className="text-[12px] text-ink-3">{salesMovers.from.slice(5).replace('-', '/')}~{salesMovers.to.slice(5).replace('-', '/')} vs 그 전 7일</span>
             <button onClick={() => onNavigate('coupang')} className="ml-auto flex items-center gap-0.5 text-[12px] font-medium text-ink-2 hover:text-accent">
               정산AI <ChevronRight className="h-3.5 w-3.5" />

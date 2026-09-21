@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowUpRight, Download, Loader2, TrendingDown, TrendingUp, Wallet } from 'lucide-react';
 import { coupangApi, pct, won, type ProfitResponse } from '../../lib/coupang';
 import { DailyTrendChart } from './DailyTrendChart';
+import { AdRoasChart } from './AdRoasChart';
 import { AdCenterConnect } from '../AdCenter/AdCenterConnect';
 import { GrowthCancelUpload } from './GrowthCancelUpload';
 
@@ -563,6 +564,16 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                 <span className="text-[11.5px] text-ink-3">그래프에 커서를 대면 그날 숫자가 보입니다</span>
               </div>
               <DailyTrendChart days={data.daily} />
+              {/* 광고비가 있는 기간에만 — 광고비 대비 순이익(ROAS) 추이 */}
+              {data.daily.some(d => (d.adCost ?? 0) > 0) && (
+                <div className="mt-4 border-t border-line pt-3">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <h4 className="text-[13px] font-semibold text-ink">광고비 대비 순이익 (ROAS)</h4>
+                    <span className="text-[11.5px] text-ink-3">광고를 늘린 날 매출이 따라왔는지 봅니다</span>
+                  </div>
+                  <AdRoasChart days={data.daily} />
+                </div>
+              )}
             </div>
           )}
 

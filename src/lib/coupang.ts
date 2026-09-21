@@ -123,6 +123,8 @@ export interface ProfitDay {
   commission: number;
   /** 광고비를 빼기 전 순이익 (광고비는 날짜별로 상품에 나눌 수 없다) */
   profit: number;
+  /** 그날 광고비 (보고서로 받은 값, 없으면 0) */
+  adCost?: number;
 }
 
 export interface ProfitResponse {
@@ -508,7 +510,15 @@ export interface HealthItem {
 }
 export interface HealthReport { checkedAt: string; optionsChecked: number; counts: Record<HealthKind, number>; items: HealthItem[] }
 
+export interface GoalsResponse {
+  month: string; revenueGoal: number; profitGoal: number;
+  actual: { salesAmount: number; profit: number; daysPassed: number; daysInMonth: number; projectedSales: number; projectedProfit: number; adCostCoveredDays: number };
+}
+
 export const coupangApi = {
+  /** 월 목표와 이달 진행 */
+  goals: (month?: string) => request<GoalsResponse>(month ? `goals&month=${month}` : 'goals'),
+  goalsSave: (body: { month: string; revenueGoal: number; profitGoal: number }) => request<{ ok: true; month: string }>('goals-save', { method: 'POST', body }),
   /** 훈프로 상품 진단 카드 — 옵션별 손볼 것 */
   healthCheck: () => request<HealthReport>('health-check'),
   /** 최근 7일 vs 그 전 7일 — 눈에 띄게 빠지거나 뛴 옵션 */

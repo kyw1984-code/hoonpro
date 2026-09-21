@@ -423,7 +423,7 @@ export default function App() {
               {shownTab === 'ranktracker' && <RankTracker />}
               {shownTab === 'review' && <ReviewAnalyzer />}
               {shownTab === 'analyzer' && <AdAnalyzer />}
-              {shownTab === 'coupang' && <CoupangDashboard />}
+              {shownTab === 'coupang' && <CoupangDashboard hiddenTabs={user.isAdmin ? [] : hiddenTabs} adminHidden={user.isAdmin ? hiddenTabs : []} />}
               {shownTab === 'works' && <WorksLibrary onNavigate={(t) => setActiveTab(t as Tab)} />}
               {shownTab === 'qa' && qaVisible && <AskHoonpro />}
               {activeTab === 'billing' && <SubscriptionPage />}

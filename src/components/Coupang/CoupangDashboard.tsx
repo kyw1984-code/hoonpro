@@ -5,7 +5,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Link2, Loader2, RefreshCw, ShoppingBag, Trash2 } from 'lucide-react';
 import { coupangApi, sinceText, type CoupangStatus, type SyncSummary } from '../../lib/coupang';
-import { getUser } from '../../lib/auth';
 import { KeySetup } from './KeySetup';
 import { ProfitDashboard } from './ProfitDashboard';
 import { CostEditor } from './CostEditor';
@@ -27,10 +26,10 @@ import { HowTo } from '../HowTo';
 
 type View = 'profit' | 'health' | 'settlement' | 'inventory' | 'reconcile' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
 
-// adminOnly: 베타 — 아직 관리자만 본다. 공개할 때 표시를 지운다.
-const VIEWS: Array<{ id: View; label: string; adminOnly?: boolean }> = [
+// feature: 관리자 [탭 표시·순서]에서 숨길 수 있는 기능 id. 숨기면 수강생에게 안 보인다.
+const VIEWS: Array<{ id: View; label: string; feature?: string }> = [
   { id: 'profit', label: '순이익' },
-  { id: 'health', label: '훈프로 상품 진단', adminOnly: true },
+  { id: 'health', label: '훈프로 상품 진단', feature: 'coupang.health' },
   { id: 'settlement', label: '정산 캘린더' },
   { id: 'inventory', label: '재고 예측' },
   { id: 'reconcile', label: '재고 대조' },
@@ -42,8 +41,9 @@ const VIEWS: Array<{ id: View; label: string; adminOnly?: boolean }> = [
   { id: 'settings', label: '연동 설정' },
 ];
 
-export function CoupangDashboard() {
-  const isAdmin = Boolean(getUser()?.isAdmin);
+export function CoupangDashboard({ hiddenTabs = [], adminHidden = [] }: { hiddenTabs?: string[]; adminHidden?: string[] }) {
+  // hiddenTabs: 이 사용자에게 숨길 기능(관리자는 빈 배열). adminHidden: 관리자에게 '숨김' 표시를 붙일 기능
+  const visible = (v: { feature?: string }) => !v.feature || !hiddenTabs.includes(v.feature);
   const [status, setStatus] = useState<CoupangStatus | null>(null);
   const [loading, setLoading] = useState(true);
   // 홈 카드에서 특정 화면으로 바로 오는 길 — 한 번 읽고 지운다
@@ -51,7 +51,7 @@ export function CoupangDashboard() {
     try {
       const want = sessionStorage.getItem('hoonpro-coupang-view');
       if (want) sessionStorage.removeItem('hoonpro-coupang-view');
-      return (VIEWS.some(v => v.id === want && (!v.adminOnly || getUser()?.isAdmin)) ? want : 'profit') as View;
+      return (VIEWS.some(v => v.id === want && visible(v)) ? want : 'profit') as View;
     } catch { return 'profit'; }
   });
   const [syncing, setSyncing] = useState(false);
@@ -169,7 +169,7 @@ export function CoupangDashboard() {
       {VIEWS.length > 1 && (
         <div className="flex items-end gap-2 border-b border-line">
           <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="쿠팡 분석 화면">
-            {VIEWS.filter(v => !v.adminOnly || isAdmin).map(v => (
+            {VIEWS.filter(visible).map(v => (
               <button
                 key={v.id}
                 onClick={() => setView(v.id)}
@@ -181,7 +181,7 @@ export function CoupangDashboard() {
                 }`}
               >
                 {v.label}
-                {v.adminOnly && <span className="ml-1.5 rounded-control border border-accent/40 bg-accent-soft px-1 py-0.5 text-[10.5px] font-semibold text-ink-2">베타</span>}
+                {v.feature && adminHidden.includes(v.feature) && <span className="ml-1.5 rounded-control border border-line px-1 py-0.5 text-[10.5px] font-semibold text-ink-3">숨김</span>}
               </button>
             ))}
           </nav>
