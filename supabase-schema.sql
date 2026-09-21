@@ -1489,10 +1489,13 @@ create table if not exists notices (
   body text not null,
   author text not null default '운영자',
   pinned boolean not null default false,
+  -- 접속할 때 팝업으로 띄울 공지인가. 닫으면 그 브라우저에서 하루 동안 다시 안 뜬다.
+  popup boolean not null default false,
   published_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   created_by uuid references users(id) on delete set null
 );
+alter table notices add column if not exists popup boolean not null default false;
 create index if not exists idx_notices_published on notices(published_at desc);
 alter table notices enable row level security;
 revoke all on notices from anon, authenticated;

@@ -41,7 +41,7 @@ function verifyToken(req: VercelRequest): { userId?: string; isAdmin?: boolean }
 async function handleNotices(res: VercelResponse) {
   const { data, error } = await supabase
     .from('notices')
-    .select('id, title, body, author, pinned, published_at, updated_at')
+    .select('id, title, body, author, pinned, popup, published_at, updated_at')
     .order('pinned', { ascending: false })
     .order('published_at', { ascending: false })
     .limit(50);
@@ -55,7 +55,7 @@ async function handleNoticeSave(req: VercelRequest, res: VercelResponse, userId:
   const title = String(body.title ?? '').trim().slice(0, 200);
   const text = String(body.body ?? '').trim().slice(0, 20000);
   if (!title || !text) return res.status(400).json({ error: '제목과 내용이 필요합니다.' });
-  const row: Record<string, unknown> = { title, body: text, pinned: body.pinned === true, updated_at: new Date().toISOString() };
+  const row: Record<string, unknown> = { title, body: text, pinned: body.pinned === true, popup: body.popup === true, updated_at: new Date().toISOString() };
   const id = typeof body.id === 'string' && body.id ? body.id : null;
   if (id) {
     const { error } = await supabase.from('notices').update(row).eq('id', id);
