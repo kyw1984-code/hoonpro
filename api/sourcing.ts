@@ -706,8 +706,16 @@ interface ParsedProduct {
 // 마크업을 로그에 남겨 다음 표시를 찾을 수 있게 한다.
 const AD_MARK_RE = /AdMark_|ad-badge|AdBadge|adBadge|sponsored|srp_product_ads|[?&]adId=|"adId"\s*:|isAd["']?\s*:\s*true|data-is-ad="true"/i;
 
-/** 광고를 뺀 자연 순위 목록. 광고 자리로 먼저 나왔어도 자연 자리가 있으면 들어간다 */
+/**
+ * 광고를 뺀 자연 순위 목록. 광고 자리로 먼저 나왔어도 자연 자리가 있으면 들어간다.
+ *
+ * organicRank가 생기기 전에 캐시된 결과(24시간)에는 그 값이 없다. 그걸 그대로
+ * 거르면 전부 빠져 화면이 텅 비고 순위도 전부 '없음'이 된다 — 실제로 그랬다.
+ * 값이 하나도 없으면 예전 규칙(광고가 아닌 순서)으로 돌아간다.
+ */
 function organicList<T extends { isAd: boolean; organicRank?: number | null }>(products: T[]): T[] {
+  const hasRank = products.some(p => p.organicRank !== undefined);
+  if (!hasRank) return products.filter(p => !p.isAd);
   return products
     .filter(p => p.organicRank !== null && p.organicRank !== undefined)
     .sort((a, b) => (a.organicRank as number) - (b.organicRank as number));
@@ -2005,6 +2013,9 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
         await recordObservations(keyword, p.products); // 리뷰속도 히스토리 축적
         await recordRankObservations(keyword, p.products); // 순위 추적 기록
       } else if (cached) {
+        // 이전 데이터를 보여주더라도 왜 새로 못 받았는지는 남긴다. 안 남기면
+        // "수집 실패로 이전 데이터 표시 중"만 보이고 원인을 알 길이 없다.
+        console.error("[소싱] 파싱 실패 → 이전 데이터 표시", { keyword, diagnostics: p.diagnostics.slice(0, 600) });
         parsed = cached.payload;
         servedFrom = "stale";
       } else {
@@ -2013,6 +2024,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
         return res.status(502).json({ error: `쿠팡 페이지 파싱 실패. ${p.diagnostics}` });
       }
     } else if (cached) {
+      console.error("[소싱] 수집 실패 → 이전 데이터 표시", { keyword, status: result.status, error: String(result.error ?? "").slice(0, 300) });
       parsed = cached.payload;
       servedFrom = "stale";
     } else {
