@@ -56,7 +56,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
   const [report, setReport] = useState<any[] | null>(null);
   const [briefing, setBriefing] = useState<any | null>(null);
   // 이번 주 매출 변화 — 쿠팡 연동이 없으면 서버가 빈 목록을 준다
-  const [movers, setMovers] = useState<SalesMoversResponse | null | 'none'>(null);
+  const [salesMovers, setSalesMovers] = useState<SalesMoversResponse | null | 'none'>(null);
   const userName = getUser()?.name || '';
 
   useEffect(() => {
@@ -100,7 +100,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
       } catch { /* 무시 */ }
     })();
     (async () => {
-      try { setMovers(await coupangApi.salesMovers()); } catch { setMovers('none'); }
+      try { setSalesMovers(await coupangApi.salesMovers()); } catch { setSalesMovers('none'); }
     })();
   }, []);
 
@@ -310,20 +310,20 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
       </div>
 
       {/* 이번 주 매출 변화 — 최근 7일 vs 그 전 7일. 빠진 것부터, 원인 후보 한 줄과 함께 */}
-      {shown('coupang') && movers !== 'none' && movers !== null && (movers.drops.length > 0 || movers.rises.length > 0) && (
+      {shown('coupang') && salesMovers !== 'none' && salesMovers !== null && (salesMovers.drops.length > 0 || salesMovers.rises.length > 0) && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="mb-3 flex items-center gap-2">
             <TrendingUp className="h-4 w-4" style={{ color: '#ffb454' }} />
             <h3 className="text-sm font-semibold text-ink">이번 주 매출 변화</h3>
-            <span className="text-[12px] text-ink-3">{movers.from.slice(5).replace('-', '/')}~{movers.to.slice(5).replace('-', '/')} vs 그 전 7일</span>
+            <span className="text-[12px] text-ink-3">{salesMovers.from.slice(5).replace('-', '/')}~{salesMovers.to.slice(5).replace('-', '/')} vs 그 전 7일</span>
             <button onClick={() => onNavigate('coupang')} className="ml-auto flex items-center gap-0.5 text-[12px] font-medium text-ink-2 hover:text-accent">
               정산AI <ChevronRight className="h-3.5 w-3.5" />
             </button>
           </div>
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {[
-              { key: 'drops', title: '빠진 옵션', rows: movers.drops, color: 'text-critical', badge: 'border-critical/35 bg-critical-soft text-critical' },
-              { key: 'rises', title: '뛴 옵션', rows: movers.rises, color: 'text-positive', badge: 'border-positive/35 bg-positive-soft text-positive' },
+              { key: 'drops', title: '빠진 옵션', rows: salesMovers.drops, color: 'text-critical', badge: 'border-critical/35 bg-critical-soft text-critical' },
+              { key: 'rises', title: '뛴 옵션', rows: salesMovers.rises, color: 'text-positive', badge: 'border-positive/35 bg-positive-soft text-positive' },
             ].map(g => (
               <div key={g.key}>
                 <p className={`mb-1.5 text-[12.5px] font-semibold ${g.color}`}>{g.title} {g.rows.length}개</p>
