@@ -76,6 +76,24 @@ body {
   font-weight: 500;
 }
 
+/* 9~10.5px 글씨는 어두운 배경에서 대비가 충분해도 읽히지 않는다. 배지·힌트·표
+   머리글에 흩어진 100여 곳을 여기서 한 번에 올린다. 유틸리티는 @layer 안에
+   있어서, 층 밖의 이 규칙이 항상 이긴다. */
+.text-\[9px\],
+.text-\[9\.5px\],
+.text-\[10px\] {
+  font-size: 11px;
+}
+.text-\[10\.5px\] {
+  font-size: 11.5px;
+}
+
+/* 입력칸 안내 문구 — 브라우저 기본 회색은 네이비 위에서 거의 안 보인다 */
+::placeholder {
+  color: var(--color-ink-3);
+  opacity: 1;
+}
+
 /* 숫자가 세로로 정렬되도록 */
 table,
 input[type="number"],
