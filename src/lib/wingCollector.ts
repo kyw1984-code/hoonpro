@@ -95,23 +95,52 @@ function collector(origin: string) {
 
   var sent = false;
   var timer: any = null;
+  // 훈프로 창이 "받을 준비 됐다"(hoonpro-wing-ready)고 알려오기 전에는 보내지
+  // 않는다. 창이 아직 뜨는 중이거나 로그인 화면이면 듣는 사람이 없어 파일이
+  // 허공에 사라지고, 판매자는 "보냈습니다"만 보게 된다. 그때는 들고 있다가
+  // 준비되면 보낸다.
+  var ready = false;
+  var pending: { buf: ArrayBuffer; url: string; ctype: string } | null = null;
   var finish = function (ok: boolean) {
     if (timer) clearTimeout(timer);
     send({ type: 'hoonpro-wing-capture', requests: captured, page: location.pathname, ok: ok });
     box.style.background = ok ? '#14532d' : '#7f1d1d';
-    say(ok ? '보냈습니다. 훈프로 창에서 결과를 확인하세요.' : '3분 안에 파일을 받지 못했습니다. 판매분석 화면에서 [다운로드]를 눌렀는지 확인하고 다시 눌러주세요.');
+    say(
+      ok
+        ? '보냈습니다. 훈프로 창에서 결과를 확인하세요.'
+        : pending
+          ? '파일은 받았지만 훈프로 창이 준비되지 않았습니다. 훈프로 창에 로그인한 뒤 이 즐겨찾기를 다시 눌러주세요.'
+          : '3분 안에 파일을 받지 못했습니다. 판매분석 화면에서 [다운로드]를 눌렀는지 확인하고 다시 눌러주세요.',
+    );
     setTimeout(function () {
       if (box.parentNode) box.parentNode.removeChild(box);
       (window as any).__hoonproWing = false;
     }, 8000);
   };
-  var forward = function (buf: ArrayBuffer, url: string, ctype: string) {
-    if (sent) return;
+  var deliver = function (buf: ArrayBuffer, url: string, ctype: string) {
     sent = true;
     say('파일을 훈프로로 보내는 중...');
     send({ type: 'hoonpro-wing-report', buffer: buf, url: mask(url), contentType: ctype, page: location.pathname }, [buf]);
     finish(true);
   };
+  var forward = function (buf: ArrayBuffer, url: string, ctype: string) {
+    if (sent || pending) return;
+    if (!ready) {
+      pending = { buf: buf, url: url, ctype: ctype };
+      say('파일을 받았습니다. 훈프로 창이 준비되면 보냅니다 — 훈프로 창에 로그인 화면이 떠 있으면 로그인해 주세요.');
+      return;
+    }
+    deliver(buf, url, ctype);
+  };
+  window.addEventListener('message', function (ev: MessageEvent) {
+    if (ev.origin !== origin || !ev.data || ev.data.type !== 'hoonpro-wing-ready') return;
+    ready = true;
+    if (pending && !sent) {
+      var p = pending;
+      pending = null;
+      deliver(p.buf, p.url, p.ctype);
+    }
+  });
 
   // ① fetch로 받는 파일
   var origFetch = window.fetch;

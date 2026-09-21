@@ -541,9 +541,11 @@ export const coupangApi = {
   adReportRawSave: async (body: { from: string; to: string; columns: string[]; rows: any[] }) => {
     const { rows, ...meta } = body;
     const chunks = chunkByBytes(rows, AD_RAW_CHUNK_BYTES);
-    let last: { ok: true; rowCount: number; truncated: boolean } = { ok: true, rowCount: 0, truncated: false };
+    let last: { ok: true; rowCount: number; truncated: boolean; complete?: boolean } = { ok: true, rowCount: 0, truncated: false };
     for (let part = 0; part < chunks.length; part++) {
-      last = await request<{ ok: true; rowCount: number; truncated: boolean }>('ad-report-raw-save', {
+      // 조각 하나라도 실패하면 여기서 던진다. 서버는 마지막 조각을 받기 전까지
+      // 보고서를 '미완성'으로 두므로 앞 조각만 남아 읽히는 일은 없다.
+      last = await request<{ ok: true; rowCount: number; truncated: boolean; complete?: boolean }>('ad-report-raw-save', {
         method: 'POST',
         body: { ...meta, rows: chunks[part], part, parts: chunks.length },
       });

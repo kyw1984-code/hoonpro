@@ -733,7 +733,7 @@ async function handleDelete(req: VercelRequest, res: VercelResponse) {
 async function handlePending(res: VercelResponse) {
   const { data, error } = await supabase
     .from('qa_logs')
-    .select('id, question, answer, model, created_at, users(name, email)')
+    .select('id, question, answer, model, created_at, users!qa_logs_user_id_fkey(name, email)')
     .eq('matched', false)
     .is('admin_answer', null)
     .order('created_at', { ascending: false })
@@ -761,7 +761,7 @@ async function handleAnswer(req: VercelRequest, res: VercelResponse, decoded: an
 
   const { data: log } = await supabase
     .from('qa_logs')
-    .select('id, question, user_id, admin_answer, users(name, email)')
+    .select('id, question, user_id, admin_answer, users!qa_logs_user_id_fkey(name, email)')
     .eq('id', id)
     .maybeSingle();
   if (!log) return res.status(404).json({ error: '질문을 찾을 수 없습니다.' });
@@ -985,7 +985,7 @@ async function handleLogs(req: VercelRequest, res: VercelResponse) {
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
   const { data, error } = await supabase
     .from('qa_logs')
-    .select('id, question, answer, sources, matched, feedback, model, created_at, users(name)')
+    .select('id, question, answer, sources, matched, feedback, model, created_at, users!qa_logs_user_id_fkey(name)')
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) {
