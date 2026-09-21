@@ -610,6 +610,9 @@ async function logCost(
   } catch { /* 원가 기록 실패는 무시 */ }
 }
 
+/** Bright Data 한 번 호출의 시간 상한. 정상이면 5~15초에 온다 */
+const UNLOCKER_TIMEOUT_MS = 25_000;
+
 async function fetchViaUnlocker(
   targetUrl: string,
   retries = 2,
@@ -630,6 +633,11 @@ async function fetchViaUnlocker(
   let lastSnippet: string | undefined;
   for (let attempt = 0; attempt <= retries; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, backoffMs * attempt));
+    // 응답이 안 오면 여기서 끊는다. 상한이 없으면 Bright Data가 매달릴 때 함수가
+    // 5분(maxDuration)까지 붙들려 화면이 그대로 멈춘다 — 리뷰 분석이 그랬다.
+    // 끊고 다시 부르는 편이 훨씬 빨리 온다.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), UNLOCKER_TIMEOUT_MS);
     try {
       const res = await fetch("https://api.brightdata.com/request", {
         method: "POST",
@@ -643,6 +651,7 @@ async function fetchViaUnlocker(
           format: "raw",
           ...(extraHeaders && Object.keys(extraHeaders).length ? { headers: extraHeaders } : {}),
         }),
+        signal: ctrl.signal,
       });
       // 응답을 받은 시점에 과금된다 — 재시도도 각각 1건으로 기록한다
       await logCost(cost.userId, cost.feature, "brightdata-unlocker");
@@ -667,7 +676,11 @@ async function fetchViaUnlocker(
       }
       return { ok: true, html };
     } catch (e: any) {
-      lastError = e?.message || "Bright Data 호출 실패";
+      lastError = e?.name === "AbortError"
+        ? `Bright Data가 ${Math.round(UNLOCKER_TIMEOUT_MS / 1000)}초 안에 응답하지 않았습니다.`
+        : e?.message || "Bright Data 호출 실패";
+    } finally {
+      clearTimeout(timer);
     }
   }
   return { ok: false, error: lastError, status: lastStatus, snippet: lastSnippet };
@@ -2207,6 +2220,10 @@ async function summarizeReviews(productName: string, reviews: { rating: number; 
 
 [리뷰]
 ${sample}`;
+  // 요약도 시간 상한을 둔다. 리뷰는 이미 받아 캐시돼 있으니, 요약이 늦으면
+  // 끊고 다시 누르는 편이 낫다.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 45_000);
   try {
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -2217,6 +2234,7 @@ ${sample}`;
         temperature: 0.3,
         response_format: { type: "json_object" },
       }),
+      signal: ctrl.signal,
     });
     if (!r.ok) return { error: `GPT 요약 실패 (HTTP ${r.status})` };
     const data = await r.json();
@@ -2226,7 +2244,9 @@ ${sample}`;
     });
     return JSON.parse(data?.choices?.[0]?.message?.content || "{}");
   } catch (e: any) {
-    return { error: e?.message || "GPT 요약 실패" };
+    return { error: e?.name === "AbortError" ? "AI 요약이 45초 안에 끝나지 않았습니다. 다시 눌러주세요 — 리뷰는 다시 긁지 않습니다." : e?.message || "GPT 요약 실패" };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
