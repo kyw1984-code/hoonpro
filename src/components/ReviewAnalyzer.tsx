@@ -62,21 +62,21 @@ export function ReviewSummaryView({ data }: { data: any }) {
   if (!data) return null;
   if (data.error) {
     return (
-      <div className="rounded-card border border-critical/30 bg-critical-soft p-4 text-[13px] text-critical">
+      <div className="rounded-card border border-critical/30 bg-critical-soft p-4 text-[14.5px] text-critical">
         {data.error}
         {data.diagnostics && (
-          <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px] opacity-80">{data.diagnostics}</pre>
+          <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[12px] opacity-80">{data.diagnostics}</pre>
         )}
       </div>
     );
   }
   if (!data.summary) return null;
-  if (data.summary.error) return <p className="text-[13px] text-critical">{data.summary.error}</p>;
+  if (data.summary.error) return <p className="text-[14.5px] text-critical">{data.summary.error}</p>;
 
   return (
     <div className="flex flex-col gap-3">
       {data.summary.oneLine && (
-        <p className="rounded-card border border-accent-line bg-accent-soft px-4 py-3 text-[13px] font-semibold text-ink">
+        <p className="rounded-card border border-accent-line bg-accent-soft px-4 py-3 text-[14.5px] font-semibold text-ink">
           {data.summary.oneLine}
         </p>
       )}
@@ -89,8 +89,8 @@ export function ReviewSummaryView({ data }: { data: any }) {
         ] as const).map(([title, items, cls]) => (
           Array.isArray(items) && items.length > 0 ? (
             <div key={title} className="rounded-card border border-line bg-paper-2 p-3.5">
-              <p className={`mb-1.5 text-[12px] font-semibold ${cls}`}>{title}</p>
-              <ul className="list-disc list-inside space-y-0.5 text-[12px] leading-relaxed text-ink-2">
+              <p className={`mb-1.5 text-[13.5px] font-semibold ${cls}`}>{title}</p>
+              <ul className="list-disc list-inside space-y-0.5 text-[13.5px] leading-relaxed text-ink-2">
                 {items.map((s: string, i: number) => <li key={i}>{s}</li>)}
               </ul>
             </div>
@@ -99,15 +99,15 @@ export function ReviewSummaryView({ data }: { data: any }) {
       </div>
       {Array.isArray(data.samples) && data.samples.length > 0 && (
         <div className="rounded-card border border-line p-3.5">
-          <p className="mb-1.5 text-[11px] font-semibold text-ink-3">실제 리뷰 샘플 (수집 {data.reviewCount}개 중)</p>
+          <p className="mb-1.5 text-[12.5px] font-semibold text-ink-3">실제 리뷰 샘플 (수집 {data.reviewCount}개 중)</p>
           {data.samples.slice(0, 3).map((s: any, i: number) => (
-            <p key={i} className="mt-1 text-[11px] leading-relaxed text-ink-3">
+            <p key={i} className="mt-1 text-[12.5px] leading-relaxed text-ink-3">
               {s.rating > 0 && <b>[{s.rating}점] </b>}{s.text.slice(0, 160)}{s.text.length > 160 ? '…' : ''}
             </p>
           ))}
         </div>
       )}
-      <p className="text-[11px] text-ink-3">
+      <p className="text-[12.5px] text-ink-3">
         공략 포인트는 상세페이지 제작 탭의 기획안에 그대로 활용하세요. 결과는 7일간 캐시됩니다.
       </p>
     </div>
@@ -146,9 +146,9 @@ export function ReviewAnalyzer() {
       <div className="rounded-panel border border-line bg-paper p-6">
         <div className="mb-1 flex items-center gap-2">
           <MessageSquareText className="h-4 w-4 text-accent" />
-          <h2 className="text-base font-semibold text-ink">상품 리뷰 분석</h2>
+          <h2 className="text-[17px] font-semibold text-ink">상품 리뷰 분석</h2>
         </div>
-        <p className="mb-4 text-[12px] leading-relaxed text-ink-2">
+        <p className="mb-4 text-[13.5px] leading-relaxed text-ink-2">
           쿠팡 상품 URL을 넣으면 실제 고객 리뷰를 수집해 <b>불만·숨은 니즈·공략 포인트</b>를 분석합니다.
           경쟁 상품의 불만은 내 상세페이지의 <b>핵심 차별점</b>이 되고, <b>내 상품</b>을 넣으면 개선할 점이 보입니다.
           소싱AI의 상품 카드 [리뷰 분석AI]에서도 바로 실행할 수 있습니다.
@@ -156,12 +156,12 @@ export function ReviewAnalyzer() {
         <div className="flex flex-col gap-2 sm:flex-row">
           <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyze()}
             placeholder="쿠팡 상품 URL 또는 상품번호 (coupang.com/vp/products/...)"
-            className="flex-[2] rounded-control border border-line bg-paper px-3 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-accent" />
+            className="flex-[2] rounded-control border border-line bg-paper px-3 py-2.5 text-[14.5px] outline-none focus:ring-2 focus:ring-accent" />
           <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyze()}
             placeholder="상품명 (선택 — 분석 정확도 향상)"
-            className="flex-1 rounded-control border border-line bg-paper px-3 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-accent" />
+            className="flex-1 rounded-control border border-line bg-paper px-3 py-2.5 text-[14.5px] outline-none focus:ring-2 focus:ring-accent" />
           <button onClick={analyze} disabled={!input.trim() || loading}
-            className="flex items-center justify-center gap-1.5 rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
+            className="flex items-center justify-center gap-1.5 rounded-control bg-ink px-5 py-2.5 text-[14.5px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}분석
           </button>
         </div>
@@ -170,14 +170,14 @@ export function ReviewAnalyzer() {
       {loading && (
         <div className="flex flex-col items-center gap-3 rounded-panel border border-line bg-paper py-12 text-ink-3">
           <Loader2 className="h-8 w-8 animate-spin text-accent" />
-          <p className="text-sm font-semibold">실제 리뷰를 수집해 훈프로AI가 분석하는 중... (10~30초)</p>
+          <p className="text-[16px] font-semibold">실제 리뷰를 수집해 훈프로AI가 분석하는 중... (10~30초)</p>
         </div>
       )}
 
       {!loading && data && (
         <div className="rounded-panel border border-line bg-paper p-6">
           {data.productName && data.productName !== '상품' && (
-            <h3 className="mb-3 truncate text-[15px] font-semibold text-ink">{data.productName}</h3>
+            <h3 className="mb-3 truncate text-[16px] font-semibold text-ink">{data.productName}</h3>
           )}
           <ReviewSummaryView data={data} />
           <div className="mt-4 border-t border-line pt-4">
@@ -189,8 +189,8 @@ export function ReviewAnalyzer() {
       {!loading && !data && (
         <div className="flex flex-col items-center justify-center rounded-panel border border-line bg-paper py-16 text-ink-3">
           <MessageSquareText className="mb-4 h-12 w-12 opacity-20" />
-          <p className="text-sm font-semibold">분석할 상품의 쿠팡 URL을 입력하세요</p>
-          <p className="mt-1.5 text-[12px]">소싱 전 경쟁 상품 2~3개, 판매 중이라면 내 상품 리뷰까지 분석해 보세요</p>
+          <p className="text-[16px] font-semibold">분석할 상품의 쿠팡 URL을 입력하세요</p>
+          <p className="mt-1.5 text-[13.5px]">소싱 전 경쟁 상품 2~3개, 판매 중이라면 내 상품 리뷰까지 분석해 보세요</p>
         </div>
       )}
     </div>

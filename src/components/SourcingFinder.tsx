@@ -49,6 +49,8 @@ interface Product {
   deliveryType: 'rocket' | 'jet' | 'general';
   rank: number;
   isAd: boolean;
+  /** 광고를 뺀 자연 순위. 광고 자리로만 나왔으면 null */
+  organicRank?: number | null;
   isBrand: boolean;
   reviewGrowthPerDay: number | null;
   obsDays: number | null;
@@ -192,8 +194,8 @@ export function SourcingFinder() {
   const [servedFrom, setServedFrom] = useState<string>('fresh');
   const [prodDebug, setProdDebug] = useState<string | null>(null);
   // 1688 소싱처(정다리) 추천인 안내 — 버튼을 누른 뒤 잠깐 뜬다
-  const [referralToast, setReferralToast] = useState<{ copied: boolean } | null>(null);
-  const referralTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 1688 소싱처(정다리) 팝업 — 추천인 코드 복사와 이동 버튼만 둔다
+  const [referralModal, setReferralModal] = useState<{ imageUrl: string; copied: boolean; blocked: boolean } | null>(null);
   const [rocketFilter, setRocketFilter] = useState<'all' | 'general' | 'jet' | 'rocket'>('all');
   const [prodSort, setProdSort] = useState<'opportunityScore' | 'reviewCount' | 'rank' | 'priceAsc'>('opportunityScore');
   const [excludeBrands, setExcludeBrands] = useState(true);
@@ -448,18 +450,27 @@ export function SourcingFinder() {
   };
 
   // ─── 1688 소싱 ─────────────────────────────────────────────────────────────
-  const submit1688ImageSearch = (imageUrl: string) => {
-    if (!imageUrl) { window.open('https://jungdari.com', '_blank', 'noopener'); return; }
+  // 새 창이 안 뜨면 대개 팝업 차단이다. 창을 먼저 열어 손에 쥐고(클릭 안에서만
+  // 허용된다) 거기로 폼을 보낸다. 창이 안 열리면 null이 오므로 그때는 안내에
+  // 직접 누를 링크를 남긴다 — 링크 클릭은 팝업 차단에 안 걸린다.
+  const submit1688ImageSearch = (imageUrl: string): boolean => {
+    const win = window.open('', 'hoonpro-1688');
+    if (!win) return false;
+    if (!imageUrl) { win.location.href = 'https://jungdari.com'; return true; }
+    try {
+      win.document.write('<p style="font:14px sans-serif;padding:24px">정다리(1688 소싱처)로 이동하는 중...</p>');
+    } catch { /* 이미 다른 문서가 있으면 그냥 넘어간다 */ }
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = 'https://jungdari.com/search1688/image/string';
-    form.target = '_blank';
+    form.target = 'hoonpro-1688';
     const sourceInput = document.createElement('input');
     sourceInput.type = 'hidden'; sourceInput.name = 'source'; sourceInput.value = imageUrl;
     const pageInput = document.createElement('input');
     pageInput.type = 'hidden'; pageInput.name = 'beginPage'; pageInput.value = '1';
     form.appendChild(sourceInput); form.appendChild(pageInput);
     document.body.appendChild(form); form.submit(); document.body.removeChild(form);
+    return true;
   };
 
   // 예전에는 여기서 추천인 이벤트 팝업으로 한 번 가로막았다. '오늘 그만보기'를
@@ -469,23 +480,24 @@ export function SourcingFinder() {
   // 정다리는 다른 사이트라 가입 칸을 우리가 대신 채울 수는 없다. 대신 누르는
   // 순간 코드를 클립보드에 넣고, 가로막지 않는 안내를 잠깐 띄운다. 가입 칸에
   // 붙여넣기만 하면 된다.
-  const showReferralToast = async () => {
-    let copied = false;
+  const copyReferralCode = async () => {
     try {
       await navigator.clipboard.writeText(JUNGDARI_REFERRAL_CODE);
-      copied = true;
+      setReferralModal(m => (m ? { ...m, copied: true } : m));
     } catch {
-      /* 클립보드가 막힌 브라우저 — 안내에 코드를 그대로 보여준다 */
+      /* 클립보드가 막힌 브라우저 — 코드는 화면에 그대로 있다 */
     }
-    setReferralToast({ copied });
-    if (referralTimer.current) clearTimeout(referralTimer.current);
-    referralTimer.current = setTimeout(() => setReferralToast(null), 12000);
   };
+  // 버튼을 누르면 먼저 팝업이 뜬다. 새 창은 팝업 안의 [이동] 클릭에서 연다 —
+  // 클릭 안에서 열어야 팝업 차단에 안 걸린다.
   const handle1688Click = (target: Product | 'generic') => {
-    // 새 창은 클릭 안에서 바로 열어야 팝업 차단에 안 걸린다. 복사는 그 뒤에.
-    if (target === 'generic') window.open('https://jungdari.com', '_blank', 'noopener');
-    else submit1688ImageSearch(target.productImage);
-    void showReferralToast();
+    setReferralModal({ imageUrl: target === 'generic' ? '' : target.productImage, copied: false, blocked: false });
+  };
+  const go1688 = () => {
+    if (!referralModal) return;
+    const opened = submit1688ImageSearch(referralModal.imageUrl);
+    if (opened) setReferralModal(null);
+    else setReferralModal(m => (m ? { ...m, blocked: true } : m));
   };
 
   // ─── 파생 목록 ──────────────────────────────────────────────────────────────
@@ -549,41 +561,53 @@ export function SourcingFinder() {
   // ─── 렌더 ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-paper text-ink">
-      {/* 정다리 추천인 안내 — 1688 소싱처를 누르면 잠깐 뜬다. 화면을 막지 않는다 */}
+      {/* 1688 소싱처(정다리) 팝업 — 추천인 코드 복사 + 이동 */}
       <AnimatePresence>
-        {referralToast && (
-          <motion.div
-            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}
-            className="fixed bottom-5 left-1/2 z-[90] w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2 rounded-panel border border-accent-line bg-paper px-5 py-4 shadow-overlay"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[13px] font-semibold text-ink">
-                  정다리 가입 시 추천인 코드{' '}
-                  <span className="inline-block rounded-control bg-accent px-2 py-0.5 text-[12px] font-bold tracking-wide text-ground">{JUNGDARI_REFERRAL_CODE}</span>
-                  {referralToast.copied
-                    ? <span className="ml-1.5 inline-flex items-center gap-1 text-[12px] font-medium text-positive"><Check className="h-3.5 w-3.5" />복사됨</span>
-                    : null}
-                </p>
-                <p className="mt-1 text-[12px] leading-relaxed text-ink-2">
-                  {referralToast.copied ? '가입 화면의 추천인 칸에 붙여넣으면' : '가입 화면의 추천인 칸에 입력하면'} ① LCL 중달이 사업자 통관수수료 면제(3만 원 상당) ② OEM 공장조사 1회 무료(5만 원 상당) 혜택이 붙습니다.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => showReferralToast()}
-                  title="추천인 코드 복사"
-                  className="rounded-control border border-line p-1.5 text-ink-2 hover:border-line-strong hover:text-ink"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-                <button type="button" onClick={() => setReferralToast(null)} className="rounded-control p-1.5 text-ink-3 hover:text-ink">
-                  <X className="h-4 w-4" />
+        {referralModal && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setReferralModal(null)}
+              className="fixed inset-0 z-[80] bg-ground/70 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.96, opacity: 0 }}
+              role="dialog" aria-modal="true"
+              className="fixed inset-0 z-[90] m-auto h-fit w-[92%] max-w-[440px] overflow-hidden rounded-panel border border-line bg-paper shadow-overlay">
+              <div className="flex items-start justify-between gap-4 px-7 pb-2 pt-7">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-widest text-accent">1688 소싱처</p>
+                  <h3 className="mt-1.5 text-[19px] font-semibold text-ink">정다리로 이동합니다</h3>
+                </div>
+                <button onClick={() => setReferralModal(null)} className="rounded-full p-1.5 text-ink-3 transition-all hover:bg-paper-2 hover:text-ink">
+                  <X className="h-5 w-5" />
                 </button>
               </div>
-            </div>
-          </motion.div>
+              <div className="flex flex-col gap-4 px-7 pb-6 pt-2">
+                <p className="text-[14px] leading-relaxed text-ink-2">정다리 회원가입 시 추천인 코드를 넣어주세요.</p>
+                <div className="flex items-center justify-between gap-3 rounded-card border border-accent-line bg-accent-soft px-5 py-4">
+                  <span className="text-[22px] font-bold tracking-wide text-ink">{JUNGDARI_REFERRAL_CODE}</span>
+                  <button
+                    type="button"
+                    onClick={copyReferralCode}
+                    className="inline-flex min-h-[40px] items-center gap-1.5 rounded-control bg-accent px-4 text-[13.5px] font-bold text-ground transition-opacity hover:opacity-90"
+                  >
+                    {referralModal.copied ? <><Check className="h-4 w-4" />복사됨</> : <><Copy className="h-4 w-4" />hoonpro05 복사</>}
+                  </button>
+                </div>
+                {referralModal.blocked && (
+                  <p className="rounded-control border border-caution/40 bg-caution-soft px-3 py-2 text-[13px] leading-relaxed text-ink">
+                    브라우저가 새 창을 막았습니다. 주소창 오른쪽의 팝업 차단 아이콘에서 hoonproai.com을 허용하거나, 여기서{' '}
+                    <a href="https://jungdari.com" target="_blank" rel="noreferrer" className="font-semibold text-accent underline underline-offset-2">정다리 열기</a>
+                    를 눌러주세요.
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2 border-t border-line px-7 pb-7 pt-4">
+                <button onClick={() => setReferralModal(null)} className="flex-1 rounded-card bg-paper-2 py-3 text-[13.5px] font-semibold text-ink transition-all hover:bg-line">닫기</button>
+                <button onClick={go1688} className="flex-1 rounded-card bg-accent py-3 text-[13.5px] font-bold text-ground transition-all hover:bg-accent-hover">
+                  정다리로 이동
+                </button>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
       <main className="mx-auto max-w-[1240px] px-6 py-8 flex flex-col gap-6 bg-paper">
@@ -1238,7 +1262,9 @@ export function SourcingFinder() {
                               )}
                             </div>
                             <div className="absolute top-3 left-3 px-2 py-1 bg-ink/70 text-paper text-[10px] font-semibold rounded-control backdrop-blur-sm">
-                              노출 {product.rank}위
+                              {product.isAd
+                                ? <>광고 {product.rank}위{product.organicRank ? <span className="ml-1 font-medium text-ink-2">· 자연 {product.organicRank}위</span> : null}</>
+                                : <>노출 {product.rank}위</>}
                             </div>
                           </a>
                           <div className="p-5 flex-1 flex flex-col">

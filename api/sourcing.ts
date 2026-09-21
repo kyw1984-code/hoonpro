@@ -692,8 +692,25 @@ interface ParsedProduct {
   rating: number;
   reviewCount: number;
   deliveryType: "rocket" | "jet" | "general";
+  /** 검색 화면에 보이는 자리 (광고 포함). 첫 번째로 나온 자리다 */
   rank: number;
+  /** 그 첫 자리가 광고 자리였는가 */
   isAd: boolean;
+  /** 광고를 뺀 자연 순위. 광고로만 나왔으면 null */
+  organicRank?: number | null;
+}
+
+// 광고 자리 표시. 쿠팡은 마크업을 자주 바꾼다 — 클래스 이름(AdMark_, ad-badge),
+// 링크의 광고 유입 표시(sourceType=srp_product_ads, adId=), 내장 JSON의 isAd.
+// 하나라도 걸리면 광고다. 잡히는 게 없으면 parseCoupangSearch가 첫 블록의
+// 마크업을 로그에 남겨 다음 표시를 찾을 수 있게 한다.
+const AD_MARK_RE = /AdMark_|ad-badge|AdBadge|adBadge|sponsored|srp_product_ads|[?&]adId=|"adId"\s*:|isAd["']?\s*:\s*true|data-is-ad="true"/i;
+
+/** 광고를 뺀 자연 순위 목록. 광고 자리로 먼저 나왔어도 자연 자리가 있으면 들어간다 */
+function organicList<T extends { isAd: boolean; organicRank?: number | null }>(products: T[]): T[] {
+  return products
+    .filter(p => p.organicRank !== null && p.organicRank !== undefined)
+    .sort((a, b) => (a.organicRank as number) - (b.organicRank as number));
 }
 
 function detectDelivery(s: string): ParsedProduct["deliveryType"] {
@@ -791,16 +808,20 @@ function parseJsonLd(html: string): ParsedProduct[] {
 // JSON에 없는 배송유형/광고 여부(+누락된 리뷰)를 상품 li 블록에서 productId 매칭으로 보강
 function enrichFromHtmlBlocks(products: ParsedProduct[], html: string): void {
   const blocks = html.split(/<li[^>]*class="[^"]*ProductUnit_productUnit__/).slice(1);
+  // 같은 상품이 광고 자리와 자연 자리에 둘 다 나올 수 있다. 광고 블록만 잡아 두면
+  // 자연 자리가 있는 상품까지 광고로 찍힌다 — 자연 블록이 있으면 그걸 쓴다.
   const byId = new Map<string, string>();
   for (const b of blocks) {
     const pid = pick(/\/vp\/products\/(\d+)/, b);
-    if (pid && !byId.has(pid)) byId.set(pid, b);
+    if (!pid) continue;
+    const prev = byId.get(pid);
+    if (!prev || (AD_MARK_RE.test(prev) && !AD_MARK_RE.test(b))) byId.set(pid, b);
   }
   for (const p of products) {
     const b = byId.get(p.productId);
     if (!b) continue;
     p.deliveryType = detectDelivery(b);
-    p.isAd = /AdMark_|ad-badge|sponsored/i.test(b);
+    p.isAd = AD_MARK_RE.test(b);
     if (p.reviewCount === 0 && /rating/i.test(b)) {
       const rc = parseInt((pick(/ProductRating_ratingCount__[^"]*"[^>]*>[\s\S]{0,30}?([\d,]+)/, b) || pick(/\(\s*([\d,]+)\s*\)/, b)).replace(/,/g, ""), 10) || 0;
       if (rc > 0) p.reviewCount = rc;
@@ -828,7 +849,7 @@ function parseProductUnits(html: string): ParsedProduct[] {
     const rating = starPct > 0 ? Math.round((starPct / 20) * 10) / 10 : 0;
     const reviewCount = parseInt(pick(/ProductRating_ratingCount__[^"]*"[^>]*>[\s\S]{0,30}?([\d,]+)/, block).replace(/,/g, ""), 10) || 0;
     const image = cleanImageUrl(pick(/<img[^>]+src="([^"]*coupangcdn[^"]+)"/, block) || pick(/<img[^>]+src="([^"]+)"/, block));
-    const isAd = /AdMark_|ad-badge|sponsored/i.test(block);
+    const isAd = AD_MARK_RE.test(block);
     rank += 1;
     products.push({
       productId,
@@ -861,7 +882,7 @@ function parseLegacyMarkup(html: string): ParsedProduct[] {
     const rating = parseFloat(pick(/class="rating"[^>]*>([\d.]+)/, block)) || 0;
     const reviewCount = parseInt(pick(/class="rating-total-count"[^>]*>\s*\(?\s*([\d,]+)/, block).replace(/,/g, ""), 10) || 0;
     const image = cleanImageUrl(pick(/<img[^>]+(?:data-img-src|src)="([^"]+thumbnail[^"]+)"/, block) || pick(/<img[^>]+src="([^"]+)"/, block));
-    const isAd = /search-product__ad-badge|AdMark|class="ad-badge/i.test(block);
+    const isAd = AD_MARK_RE.test(block) || /search-product__ad-badge/i.test(block);
     rank += 1;
     products.push({
       productId,
@@ -953,13 +974,51 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
     html.match(/"searchResultCount"\s*:\s*(\d+)/);
   if (tc) totalCount = parseInt(tc[1].replace(/,/g, ""), 10) || 0;
 
-  // schema.org JSON → 신형 마크업 → 구형 마크업 → 내장 JSON 순으로 시도
-  let strategy = "jsonld";
-  let products = parseJsonLd(html);
-  if (products.length > 0) enrichFromHtmlBlocks(products, html);
-  if (products.length === 0) { products = parseProductUnits(html); strategy = "productUnit"; }
+  // 상품 li 블록을 먼저 본다. 화면에 보이는 순서 그대로이고, 같은 상품이 광고
+  // 자리와 자연 자리에 두 번 나오면 둘 다 남는다. schema.org JSON은 상품을 하나로
+  // 합쳐 버려서, 광고로 먼저 나온 상품의 자연 순위가 사라졌다 — 순위추적이
+  // "광고 포함 순위"를 보여 주던 원인이다. 블록이 충분히 안 잡히면 JSON으로 간다.
+  let strategy = "productUnit";
+  let products = parseProductUnits(html);
+  if (products.length < 20) {
+    const ld = parseJsonLd(html);
+    if (ld.length > products.length) {
+      enrichFromHtmlBlocks(ld, html);
+      products = ld;
+      strategy = "jsonld";
+    }
+  }
   if (products.length === 0) { products = parseLegacyMarkup(html); strategy = "legacy"; }
   if (products.length === 0) { products = parseEmbeddedJson(html); strategy = "nextData"; }
+
+  // 자연 순위를 매기고, 같은 상품은 첫 자리 하나로 합친다. 첫 자리가 광고였고
+  // 뒤에 자연 자리가 있으면 그 자연 순위를 함께 남긴다.
+  let organicCounter = 0;
+  const merged = new Map<string, ParsedProduct>();
+  for (const p of products) {
+    const organicRank = p.isAd ? null : ++organicCounter;
+    const prev = merged.get(p.productId);
+    if (!prev) {
+      merged.set(p.productId, { ...p, organicRank });
+    } else if (prev.organicRank === null && organicRank !== null) {
+      prev.organicRank = organicRank;
+    }
+  }
+  products = [...merged.values()];
+
+  // 광고 표시가 하나도 안 잡히면 마크업이 바뀐 것일 수 있다. 첫 블록의 태그
+  // 구조만(글자·주소 값 없이) 남겨 다음 표시를 찾을 단서로 삼는다.
+  const adCount = products.filter(p => p.isAd).length;
+  if (products.length >= 20 && adCount === 0) {
+    const firstBlock = (html.split(/<li[^>]*class="[^"]*ProductUnit_productUnit__/)[1] || "").slice(0, 6000);
+    const skeleton = firstBlock
+      .replace(/>[^<]*</g, "><")
+      .replace(/(src|srcset|href|style|alt|title)="[^"]*"/g, '$1="…"')
+      .slice(0, 1500);
+    const census = ["광고", "AdMark", "ad-badge", "sponsored", "srp_product_ads", "adId", "isAd", "korePlacement"]
+      .map(t => `${t}=${(html.match(new RegExp(t, "g")) || []).length}`).join(" ");
+    console.log("coupang search markup — 광고 0건", { strategy, products: products.length, census, skeleton });
+  }
 
   const count = (re: RegExp) => (html.match(re) || []).length;
   let diagnostics = "";
@@ -1028,7 +1087,7 @@ async function recordRankObservations(keyword: string, parsed: ParsedProduct[]):
       .select("product_id")
       .eq("keyword", keyword);
     if (!watches || watches.length === 0) return;
-    const organic = parsed.filter(p => !p.isAd);
+    const organic = organicList(parsed);
     const pids = [...new Set(watches.map(w => String(w.product_id)))];
     const rows = pids.map(pid => {
       const organicIdx = organic.findIndex(p => p.productId === pid);
@@ -1196,7 +1255,7 @@ async function checkRankNow(keyword: string, productId: string, decoded: any, de
   if (!r.products) return { rankChecked: false, error: r.error, remaining: r.remaining };
 
   // 자연 순위는 광고를 뺀 목록에서의 자리다. 페이지를 이어 붙여도 같은 규칙으로 센다.
-  const organic = r.products.filter(p => !p.isAd);
+  const organic = organicList(r.products);
   let idx = organic.findIndex(p => p.productId === productId);
   if (idx >= 0) {
     return { rankChecked: true, currentRank: idx + 1, remaining: r.remaining, searchedTo: organic.length };
@@ -1214,7 +1273,7 @@ async function checkRankNow(keyword: string, productId: string, decoded: any, de
     if (typeof more.remaining === "number") remaining = more.remaining;
     if (more.stop) { stoppedBy = more.stop; break; }   // 한도에 걸렸거나 수집에 실패했다
     if (!more.products || more.products.length === 0) break;   // 결과가 거기서 끝났다
-    all.push(...more.products.filter(p => !p.isAd));
+    all.push(...organicList(more.products));
     idx = all.findIndex(p => p.productId === productId);
     if (idx >= 0) {
       return { rankChecked: true, currentRank: idx + 1, remaining, searchedTo: all.length };
@@ -1310,7 +1369,7 @@ async function handleRankWatch(req: VercelRequest, res: VercelResponse, decoded:
     for (const r of orderRows.data ?? []) link(r.product_id, r.vendor_item_id, r.product_name);
 
     // 검색 결과에서 내 상품만 골라낸다
-    const organic = found.products.filter(p => !p.isAd);
+    const organic = organicList(found.products);
     const mine = found.products.filter(p => vendorItemsByProduct.has(String(p.productId)));
 
     // 매출은 옵션 단위로 쌓이므로 상품 단위로 되접는다
@@ -1676,7 +1735,7 @@ function scoreProducts(
   parsed: ParsedProduct[], keywordVolume: number, totalCount: number, searchKeyword = "",
   sellerProfile: SellerProfile | null = null,
 ) {
-  const organic = parsed.filter(p => !p.isAd);
+  const organic = organicList(parsed);
   // 검색 키워드 자체가 브랜드면 브랜드 표시를 하지 않는다 (의도적 브랜드 조사)
   const searchTargetsBrand = isBrandKeyword(searchKeyword);
   const total = organic.length;
