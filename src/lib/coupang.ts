@@ -488,6 +488,9 @@ export const coupangApi = {
     orderedAt?: string | null; orderedQty?: number; receivedAt?: string | null; receivedQty?: number | null; memo?: string;
   }) => request<{ ok: true; id: string }>('growth-inbound-save', { method: 'POST', body }),
   growthInboundDelete: (id: string) => request<{ ok: true }>('growth-inbound-delete', { method: 'POST', body: { id } }),
+  /** 윙 즐겨찾기가 기록한 페이지 요청 경로(값 없음) — 서버 로그에만 남긴다 */
+  wingCapture: (body: { page: string; ok: boolean; requests: unknown[] }) =>
+    request<{ ok: true }>('wing-capture', { method: 'POST', body }),
   /** 쿠팡 판매분석 파일(옵션별)의 그로스 취소를 그 날짜 매출에 반영 */
   growthCancelUpload: (body: { date: string; rows: Array<{ vendorItemId: string; cancelQty: number; cancelAmount: number; grossQty?: number; grossAmount?: number }> }) =>
     request<{ ok: true; date: string; options: number; matched: number; cancelQty: number; cancelAmount: number; fileGross: number; ourGross: number }>('growth-cancel-upload', { method: 'POST', body }),

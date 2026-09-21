@@ -3354,6 +3354,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'inventory': return await handleInventory(userId, req, res);
       case 'growth-reconcile': return await handleGrowthReconcile(userId, res);
       case 'growth-cancel-upload': return await handleGrowthCancelUpload(userId, req, res);
+      case 'wing-capture': {
+        // 윙 즐겨찾기가 기록한 요청 경로·상태(값 없음). 판매분석 다운로드가 어느
+        // 주소로 가는지 알아내 다음 판에는 클릭 없이 바로 부르기 위한 단서다.
+        if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+        const list = Array.isArray(req.body?.requests) ? req.body.requests.slice(0, 80) : [];
+        console.info('wing capture —', JSON.stringify({ userId, page: String(req.body?.page ?? '').slice(0, 120), ok: Boolean(req.body?.ok), requests: list }).slice(0, 8000));
+        return res.status(200).json({ ok: true });
+      }
       case 'growth-inbound-save': return await handleGrowthInboundSave(userId, req, res);
       case 'growth-inbound-delete': return await handleGrowthInboundDelete(userId, req, res);
       case 'returns': return await handleReturns(userId, req, res);
