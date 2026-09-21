@@ -13,12 +13,15 @@ import { MarketChanges } from './Sourcing/MarketChanges';
 import {
   Search, ChevronRight, Loader2, ExternalLink, Sparkles,
   Download, X, ArrowUpDown, KeyRound, RefreshCw, Star, Calculator,
-  TrendingUp, Home, Rocket, Store, LayoutDashboard, Zap, BarChart3,
+  TrendingUp, Home, Rocket, Store, LayoutDashboard, Zap, BarChart3, Copy, Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getToken } from '../lib/auth';
 import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
 import { SaveToWorksButton } from './SaveToWorks';
+
+/** 정다리(1688 소싱처) 가입 시 넣는 훈프로 추천인 코드 */
+const JUNGDARI_REFERRAL_CODE = 'hoonpro05';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface KeywordStat {
@@ -188,6 +191,9 @@ export function SourcingFinder() {
   const [myProducts, setMyProducts] = useState<MyProductHit[]>([]);
   const [servedFrom, setServedFrom] = useState<string>('fresh');
   const [prodDebug, setProdDebug] = useState<string | null>(null);
+  // 1688 소싱처(정다리) 추천인 안내 — 버튼을 누른 뒤 잠깐 뜬다
+  const [referralToast, setReferralToast] = useState<{ copied: boolean } | null>(null);
+  const referralTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [rocketFilter, setRocketFilter] = useState<'all' | 'general' | 'jet' | 'rocket'>('all');
   const [prodSort, setProdSort] = useState<'opportunityScore' | 'reviewCount' | 'rank' | 'priceAsc'>('opportunityScore');
   const [excludeBrands, setExcludeBrands] = useState(true);
@@ -457,11 +463,29 @@ export function SourcingFinder() {
   };
 
   // 예전에는 여기서 추천인 이벤트 팝업으로 한 번 가로막았다. '오늘 그만보기'를
-  // 눌러도 다음 날 또 떠서, 기억에 남는 건 혜택이 아니라 팝업이었다.
-  // 혜택 안내는 버튼 아래 한 줄로 옮기고 누르는 사람만 보게 한다.
+  // 눌러도 다음 날 또 떠서, 기억에 남는 건 혜택이 아니라 팝업이었다. 그런데
+  // 팝업을 걷어내면서 안내 자체가 사라져 코드를 아는 사람이 없어졌다.
+  //
+  // 정다리는 다른 사이트라 가입 칸을 우리가 대신 채울 수는 없다. 대신 누르는
+  // 순간 코드를 클립보드에 넣고, 가로막지 않는 안내를 잠깐 띄운다. 가입 칸에
+  // 붙여넣기만 하면 된다.
+  const showReferralToast = async () => {
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(JUNGDARI_REFERRAL_CODE);
+      copied = true;
+    } catch {
+      /* 클립보드가 막힌 브라우저 — 안내에 코드를 그대로 보여준다 */
+    }
+    setReferralToast({ copied });
+    if (referralTimer.current) clearTimeout(referralTimer.current);
+    referralTimer.current = setTimeout(() => setReferralToast(null), 12000);
+  };
   const handle1688Click = (target: Product | 'generic') => {
+    // 새 창은 클릭 안에서 바로 열어야 팝업 차단에 안 걸린다. 복사는 그 뒤에.
     if (target === 'generic') window.open('https://jungdari.com', '_blank', 'noopener');
     else submit1688ImageSearch(target.productImage);
+    void showReferralToast();
   };
 
   // ─── 파생 목록 ──────────────────────────────────────────────────────────────
@@ -525,6 +549,43 @@ export function SourcingFinder() {
   // ─── 렌더 ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-paper text-ink">
+      {/* 정다리 추천인 안내 — 1688 소싱처를 누르면 잠깐 뜬다. 화면을 막지 않는다 */}
+      <AnimatePresence>
+        {referralToast && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}
+            className="fixed bottom-5 left-1/2 z-[90] w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2 rounded-panel border border-accent-line bg-paper px-5 py-4 shadow-overlay"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[13px] font-semibold text-ink">
+                  정다리 가입 시 추천인 코드{' '}
+                  <span className="inline-block rounded-control bg-accent px-2 py-0.5 text-[12px] font-bold tracking-wide text-ground">{JUNGDARI_REFERRAL_CODE}</span>
+                  {referralToast.copied
+                    ? <span className="ml-1.5 inline-flex items-center gap-1 text-[12px] font-medium text-positive"><Check className="h-3.5 w-3.5" />복사됨</span>
+                    : null}
+                </p>
+                <p className="mt-1 text-[12px] leading-relaxed text-ink-2">
+                  {referralToast.copied ? '가입 화면의 추천인 칸에 붙여넣으면' : '가입 화면의 추천인 칸에 입력하면'} ① LCL 중달이 사업자 통관수수료 면제(3만 원 상당) ② OEM 공장조사 1회 무료(5만 원 상당) 혜택이 붙습니다.
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => showReferralToast()}
+                  title="추천인 코드 복사"
+                  className="rounded-control border border-line p-1.5 text-ink-2 hover:border-line-strong hover:text-ink"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+                <button type="button" onClick={() => setReferralToast(null)} className="rounded-control p-1.5 text-ink-3 hover:text-ink">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <main className="mx-auto max-w-[1240px] px-6 py-8 flex flex-col gap-6 bg-paper">
 
         {/* 헤더 라인 */}
@@ -1267,7 +1328,7 @@ export function SourcingFinder() {
                               </div>
                               <div className="flex gap-2">
                                 <button onClick={() => handle1688Click(product)}
-                                  title="상품 이미지로 1688 소싱처 검색"
+                                  title={`상품 이미지로 1688 소싱처(정다리) 검색 — 가입 시 추천인 코드 ${JUNGDARI_REFERRAL_CODE}`}
                                   className="flex-1 py-3 bg-accent-soft rounded-card text-[11px] font-semibold text-accent flex items-center justify-center gap-2 hover:bg-accent-soft transition-colors">
                                   1688 소싱처
                                 </button>
