@@ -13,7 +13,7 @@ import { tabDisabledMessage } from "../lib/feature-gate.js";
 import { checkAccess } from "../src/lib/accessGate.js";
 import { runIn, selectIn } from "../src/lib/chunkedIn.js";
 import { parseProductRef, productPageUrl } from "../src/lib/coupangUrl.js";
-import { REVIEW_MAX_PAGES, REVIEW_PAGE_SIZE, describeJson, parseReviewJson, reviewApiUrl } from "../src/lib/coupangReview.js";
+import { REVIEW_MAX_PAGES, REVIEW_PAGE_SIZE, describeJson, parseReviewJson, reviewApiUrl, type ReviewQueryOpts } from "../src/lib/coupangReview.js";
 
 export const config = { maxDuration: 60 };
 
@@ -2340,26 +2340,37 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
   // (같은 시각 다른 상품은 정상), 3초·6초·9초 뒤 다시 부르면 대개 온다.
   // 첫 쪽이 꽉 찼으면 나머지 쪽은 한꺼번에 부른다 — 한 쪽씩 기다리면 쪽 수만큼
   // 느리다. 첫 쪽이 덜 찼으면 뒤 쪽은 비어 있으니 부르지 않는다(유료 호출).
-  const fetchPage = (page: number, retries: number) => fetchViaUnlocker(
-    reviewApiUrl(productId, page),
+  // 첫 쪽은 세 가지 방식으로 차례로 부른다. 리뷰가 수백 건인 상품은 인기순
+  // 정렬이 느려 쿠팡이 빈 응답(200, 본문 없음)이나 502를 돌려주는 일이 잦았고,
+  // 같은 방식으로 다시 불러도 같은 결과였다. 최신순은 가볍고, 옵션 번호를
+  // 붙이면 빈 조각이 오는 경우가 줄어든다. 한 방식이 되면 나머지 쪽도 그
+  // 방식으로 받는다. (각 60초 상한 — 셋 다 실패해도 180초, 함수 상한 안)
+  type Variant = { label: string; size: number; opts: ReviewQueryOpts };
+  const variants: Variant[] = [
+    { label: "인기순", size: REVIEW_PAGE_SIZE, opts: { sortBy: "ORDER_SCORE_ASC" } },
+    { label: "최신순+옵션", size: REVIEW_PAGE_SIZE, opts: { sortBy: "DATE_DESC", itemId: ref.itemId, vendorItemId: ref.vendorItemId } },
+    { label: "최신순 5건", size: 5, opts: { sortBy: "DATE_DESC" } },
+  ];
+  const fetchPage = (v: Variant, page: number, retries: number) => fetchViaUnlocker(
+    reviewApiUrl(productId, page, v.size, v.opts),
     retries,
     100,
     { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
     headers,
     3000,
   );
-  const takePage = (page: number, r: Awaited<ReturnType<typeof fetchViaUnlocker>>): number => {
+  const takePage = (label: string, page: number, r: Awaited<ReturnType<typeof fetchViaUnlocker>>): number => {
     if (!r.ok) {
-      diagParts.push(`${page}쪽 실패: ${r.error}`);
-      failLog.push({ label: `${page}쪽`, status: r.status, snippet: r.snippet });
+      diagParts.push(`${label} ${page}쪽 실패: ${r.error}`);
+      failLog.push({ label: `${label} ${page}쪽`, status: r.status, snippet: r.snippet });
       return -1;
     }
     const got = parseReviewJson(r.html!);
-    diagParts.push(`${page}쪽: len=${r.html!.length}, 파싱=${got.length}개`);
+    diagParts.push(`${label} ${page}쪽: len=${r.html!.length}, 파싱=${got.length}개`);
     if (got.length === 0 && page === 1) {
       // 응답은 제대로 받았는데 한 건도 못 뽑았다면 생김새가 바뀐 것이다.
       // 키 이름과 타입만 남긴다 — 리뷰 본문은 로그에 남기지 않는다.
-      failLog.push({ label: "1쪽(파싱0)", status: 200, snippet: describeJson(r.html!) });
+      failLog.push({ label: `${label} 1쪽(파싱0)`, status: 200, snippet: describeJson(r.html!) });
     }
     // 쪽이 겹치는 경우가 있다. 같은 글을 두 번 세면 불만 빈도가 부풀려진다.
     for (const rv of got) {
@@ -2369,14 +2380,19 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     }
     return got.length;
   };
-  // 첫 쪽 3회(≤189초) + 나머지 쪽 동시 1회(≤60초) + 요약 45초 = 함수 상한 300초 안
-  const first = takePage(1, await fetchPage(1, 2));
-  if (first >= REVIEW_PAGE_SIZE && REVIEW_MAX_PAGES > 1) {
-    const rest = await Promise.all(
-      Array.from({ length: REVIEW_MAX_PAGES - 1 }, (_, i) => fetchPage(i + 2, 0)),
-    );
-    rest.forEach((r, i) => takePage(i + 2, r));
+  let used: Variant | null = null;
+  let first = -1;
+  for (const v of variants) {
+    first = takePage(v.label, 1, await fetchPage(v, 1, 0));
+    if (first > 0) { used = v; break; }
   }
+  if (used && first >= used.size && REVIEW_MAX_PAGES > 1) {
+    const rest = await Promise.all(
+      Array.from({ length: REVIEW_MAX_PAGES - 1 }, (_, i) => fetchPage(used!, i + 2, 0)),
+    );
+    rest.forEach((r, i) => takePage(used!.label, i + 2, r));
+  }
+  if (used && used.label !== "인기순") console.log("[리뷰] 대체 방식으로 수집", { productId, variant: used.label, reviews: reviews.length });
   if (reviews.length > 0) await cacheSet(rawKey, { reviews, diag: diagParts.join(" | ") });
   } // rawFresh else
 
