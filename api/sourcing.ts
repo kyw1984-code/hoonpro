@@ -610,8 +610,14 @@ async function logCost(
   } catch { /* 원가 기록 실패는 무시 */ }
 }
 
-/** Bright Data 한 번 호출의 시간 상한. 정상이면 5~15초에 온다 */
-const UNLOCKER_TIMEOUT_MS = 25_000;
+/**
+ * Bright Data 한 번 호출의 시간 상한.
+ *
+ * 처음엔 25초로 뒀는데, 리뷰가 많은 상품은 응답이 25~80초 걸려(과금 기록의
+ * 간격으로 확인) 전부 끊겼다. 리뷰가 적은 상품만 되던 이유다. 함수 상한이
+ * 300초라 재시도 횟수와 곱해 그 안에 들도록 각 호출의 횟수를 맞춘다.
+ */
+const UNLOCKER_TIMEOUT_MS = 60_000;
 
 async function fetchViaUnlocker(
   targetUrl: string,
@@ -1203,7 +1209,8 @@ async function fetchSearchProducts(keyword: string, decoded: any): Promise<{
       }
     }
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
-    const result = await fetchViaUnlocker(url, 2, 20000, { userId: decoded?.userId ?? null, feature: "rank-check" });
+    // 1쪽 2회(≤120초) + 뒤 쪽 두 묶음 1회씩(≤120초) = 300초 안
+    const result = await fetchViaUnlocker(url, 1, 20000, { userId: decoded?.userId ?? null, feature: "rank-check" });
     if (result.ok) {
       const p = parseCoupangSearch(result.html!);
       if (p.products.length > 0) {
@@ -1270,7 +1277,7 @@ async function fetchSearchPage(keyword: string, page: number, decoded: any): Pro
   }
 
   const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60&page=${page}`;
-  const result = await fetchViaUnlocker(url, 1, 20000, { userId: decoded?.userId ?? null, feature: "rank-check-deep" });
+  const result = await fetchViaUnlocker(url, 0, 20000, { userId: decoded?.userId ?? null, feature: "rank-check-deep" });
   if (!result.ok) {
     // 이 페이지를 세고 돈까지 썼는데 결과가 없다. 세 것을 되돌린다.
     await refundQuota(decoded?.userId, "rank");
@@ -2362,10 +2369,11 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     }
     return got.length;
   };
-  const first = takePage(1, await fetchPage(1, 3));
+  // 첫 쪽 3회(≤189초) + 나머지 쪽 동시 1회(≤60초) + 요약 45초 = 함수 상한 300초 안
+  const first = takePage(1, await fetchPage(1, 2));
   if (first >= REVIEW_PAGE_SIZE && REVIEW_MAX_PAGES > 1) {
     const rest = await Promise.all(
-      Array.from({ length: REVIEW_MAX_PAGES - 1 }, (_, i) => fetchPage(i + 2, 1)),
+      Array.from({ length: REVIEW_MAX_PAGES - 1 }, (_, i) => fetchPage(i + 2, 0)),
     );
     rest.forEach((r, i) => takePage(i + 2, r));
   }
