@@ -3329,7 +3329,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'sync': return await handleSync(userId, req, res);
       case 'profit': return await handleProfit(userId, req, res);
       case 'profit-monthly': return await handleProfitMonthly(userId, req, res);
-      case 'sales-movers': return await handleSalesMovers(userId, res);
+      // 베타 — 아직 관리자만 본다. 공개할 때 이 두 줄의 조건만 지우면 된다.
+      case 'sales-movers':
+        if (!decoded.isAdmin) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        return await handleSalesMovers(userId, res);
+      case 'health-check':
+        if (!decoded.isAdmin) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        return await handleHealthCheck(userId, res);
       case 'costs': return await handleCosts(userId, res);
       case 'cost-save': return await handleCostSave(userId, req, res);
       case 'ad-costs': return await handleAdCosts(userId, req, res);
@@ -5512,6 +5518,8 @@ async function collectAdGap(userId: string, day: string): Promise<AdGap> {
 
 async function collectBrief(
   userId: string, day: string, leadTimeDays: number, minSales14: number,
+  /** 베타 항목(매출 변화)을 넣을 것인가 — 지금은 관리자에게만 */
+  beta = false,
 ): Promise<BriefData> {
   const prevDay = addDays(day, -7);   // 요일 효과가 크므로 어제가 아니라 지난주 같은 요일과 견준다
 
@@ -5582,7 +5590,7 @@ async function collectBrief(
   // 광고비는 쿠팡이 API로 주지 않아 판매자가 직접 가져온다. 그 한 번을 잊으면
   // 그날부터 순이익이 광고비만큼 크게 나온다. 며칠째 비었는지 세어 둔다.
   const adGap = await collectAdGap(userId, day);
-  const movers = await computeSalesMovers(userId, day);
+  const movers = beta ? await computeSalesMovers(userId, day) : undefined;
 
   const reorder = needsReorder(inventory.rows, leadTimeDays, minSales14);
   // 시즌 판단으로 빠진 개수 — 기준을 끄고 세어 차이를 본다
@@ -5609,6 +5617,147 @@ async function collectBrief(
 export function briefWorthSending(d: BriefData): boolean {
   return d.quantity > 0 || d.reorder.length > 0 || d.newInquiries > 0 || d.newReturns > 0
     || d.adGap.shouldWarn || Boolean(d.movers && (d.movers.drops.length > 0 || d.movers.rises.length > 0));
+}
+
+// ── 훈프로 상품 진단 카드 ────────────────────────────────────
+//
+// 옵션마다 "손볼 것"을 점검해 한 화면에 모은다. 원가가 비었는지, 마진이 얇은지,
+// 재고가 곧 비는지, 반품이 잦은지, 두 달째 안 팔리는지. 각각은 이미 다른
+// 화면에 흩어져 있지만, 판매자는 매일 그 다섯 화면을 돌지 않는다. 여기서
+// 한 번 보고 필요한 화면으로 간다. 외부 호출은 없다 — 전부 우리 표다.
+export type HealthKind = 'cost-missing' | 'thin-margin' | 'stock-low' | 'return-high' | 'idle' | 'stopped';
+export interface HealthItem {
+  kind: HealthKind;
+  severity: 'high' | 'mid' | 'low';
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  channel: 'growth' | 'marketplace';
+  /** 한 줄 근거 — "30일 27개 판매, 원가 없음" */
+  detail: string;
+}
+export interface HealthReport {
+  checkedAt: string;
+  optionsChecked: number;
+  counts: Record<HealthKind, number>;
+  items: HealthItem[];
+}
+
+/** 마진이 얇다고 볼 선. 5% 아래면 쿠폰 한 번, 반품 하나에 적자다 */
+const THIN_MARGIN_RATE = 0.05;
+/** 반품률 경고 선과 최소 건수 */
+const RETURN_RATE_WARN = 0.15;
+const RETURN_MIN_COUNT = 3;
+
+export function buildHealthReport(input: {
+  today: string;
+  items: Array<{ vendor_item_id: string; product_name: string | null; option_name: string | null; sale_price: number | null; stock: number | null; status: string | null; business_type: string | null }>;
+  costs: Array<{ vendor_item_id: string; unit_cost: number | null; packaging_cost: number | null; shipping_cost: number | null; fulfillment_cost: number | null }>;
+  sales: Array<{ vendor_item_id: string; sale_date: string; quantity: number; sales_amount: number; commission: number }>;
+  returns: Array<{ vendor_item_id: string | null; quantity: number | null; status: string | null }>;
+  inventory: InventoryRow[];
+  growthStock: Map<string, number>;
+}): HealthReport {
+  const { today } = input;
+  const d30 = addDays(today, -30);
+  const costs = new Map(input.costs.map(c => [String(c.vendor_item_id), c]));
+  const sold30 = new Map<string, { qty: number; amount: number; commission: number }>();
+  const sold60 = new Map<string, number>();
+  for (const s of input.sales) {
+    const id = String(s.vendor_item_id);
+    const q = Number(s.quantity) || 0;
+    sold60.set(id, (sold60.get(id) ?? 0) + q);
+    if (String(s.sale_date).slice(0, 10) >= d30) {
+      const cur = sold30.get(id) ?? { qty: 0, amount: 0, commission: 0 };
+      cur.qty += q; cur.amount += Number(s.sales_amount) || 0; cur.commission += Number(s.commission) || 0;
+      sold30.set(id, cur);
+    }
+  }
+  const returned30 = new Map<string, number>();
+  for (const r of input.returns) {
+    if (!r.vendor_item_id || !isActiveReturn(r.status)) continue;
+    const id = String(r.vendor_item_id);
+    returned30.set(id, (returned30.get(id) ?? 0) + (Number(r.quantity) || 1));
+  }
+  const inv = new Map(input.inventory.map(r => [r.vendorItemId, r]));
+
+  const items: HealthItem[] = [];
+  const counts: Record<HealthKind, number> = { 'cost-missing': 0, 'thin-margin': 0, 'stock-low': 0, 'return-high': 0, idle: 0, stopped: 0 };
+  const push = (it: HealthItem) => { items.push(it); counts[it.kind] += 1; };
+
+  for (const it of input.items) {
+    const id = String(it.vendor_item_id);
+    if (isResaleOption(it)) continue; // 재판매는 원가도 재고도 우리 것이 아니다
+    const channel: HealthItem['channel'] = it.business_type === 'growth' ? 'growth' : 'marketplace';
+    const base = { vendorItemId: id, productName: String(it.product_name ?? '이름 없는 상품'), optionName: String(it.option_name ?? ''), channel };
+    const s30 = sold30.get(id) ?? { qty: 0, amount: 0, commission: 0 };
+    const s60 = sold60.get(id) ?? 0;
+    const c = costs.get(id);
+    const costSum = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (channel === 'growth' ? Number(c.fulfillment_cost) || 0 : 0) : 0;
+    const stock = channel === 'growth' ? (input.growthStock.get(id) ?? (it.stock ?? null)) : (it.stock ?? null);
+    const stopped = /중지|SUSPEND|STOP|PAUSE/i.test(String(it.status ?? ''));
+
+    // 1) 원가 미입력 — 팔리는데 원가가 없으면 순이익이 그만큼 부풀려진다
+    if (s30.qty > 0 && costSum <= 0) {
+      push({ ...base, kind: 'cost-missing', severity: s30.qty >= 10 ? 'high' : 'mid', detail: `30일 ${s30.qty}개 판매 · 원가 없음 → 순이익이 ${won(s30.amount)}만큼 크게 보임` });
+    }
+    // 2) 마진 얇음 — 실제 수수료율(30일)로 계산. 판매 없으면 기본 10.8%
+    const price = Number(it.sale_price) || 0;
+    if (costSum > 0 && price > 0) {
+      const rate = s30.amount > 0 ? s30.commission / s30.amount : 0.108;
+      const margin = price * (1 - rate) - costSum;
+      const mr = margin / price;
+      if (mr < THIN_MARGIN_RATE) {
+        push({ ...base, kind: 'thin-margin', severity: margin < 0 ? 'high' : 'mid', detail: `판매가 ${won(price)} − 수수료 ${Math.round(rate * 100)}% − 원가 ${won(costSum)} = 개당 ${won(Math.round(margin))} (${Math.round(mr * 100)}%)` });
+      }
+    }
+    // 3) 재고 임박 — 재고 예측의 판정을 그대로 쓴다 (시즌 판단 포함)
+    const row = inv.get(id);
+    if (row && (row.risk === 'out' || row.risk === 'urgent') && row.sold14 > 0) {
+      push({ ...base, kind: 'stock-low', severity: row.risk === 'out' ? 'high' : 'mid', detail: row.risk === 'out' ? `품절 · 최근 14일 ${row.sold14}개 판매` : `${row.daysLeft}일치 남음 · 하루 ${row.velocity}개 · 입고 권장 ${row.reorderQty}개` });
+    }
+    // 4) 반품률 높음
+    const ret = returned30.get(id) ?? 0;
+    if (ret >= RETURN_MIN_COUNT && s30.qty > 0 && ret / s30.qty >= RETURN_RATE_WARN) {
+      push({ ...base, kind: 'return-high', severity: ret / s30.qty >= 0.3 ? 'high' : 'mid', detail: `30일 판매 ${s30.qty}개 중 반품 ${ret}개 (${Math.round((ret / s30.qty) * 100)}%)` });
+    }
+    // 5) 두 달 무판매인데 재고가 있다 — 정리 후보
+    if (!stopped && s60 === 0 && stock !== null && stock > 0) {
+      push({ ...base, kind: 'idle', severity: 'low', detail: `60일 판매 0 · 재고 ${stock}개` });
+    }
+    // 6) 판매중지인데 재고가 남아 있다
+    if (stopped && stock !== null && stock > 0) {
+      push({ ...base, kind: 'stopped', severity: 'low', detail: `판매중지 · 재고 ${stock}개` });
+    }
+  }
+  const sev = { high: 0, mid: 1, low: 2 };
+  items.sort((a, b) => sev[a.severity] - sev[b.severity] || a.productName.localeCompare(b.productName, 'ko'));
+  return { checkedAt: new Date().toISOString(), optionsChecked: input.items.length, counts, items };
+}
+
+async function handleHealthCheck(userId: string, res: VercelResponse) {
+  const today = kstToday();
+  const d60 = addDays(today, -60);
+  const d30 = addDays(today, -30);
+  const [itemRes, costRes, salesRes, returnRes, inventory, invRes] = await Promise.all([
+    selectAll<any>((f, t) => supabase!.from('coupang_items')
+      .select('vendor_item_id, product_name, option_name, sale_price, stock, status, business_type')
+      .eq('user_id', userId).order('vendor_item_id').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId).order('vendor_item_id').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_sales_daily')
+      .select('vendor_item_id, sale_date, quantity, sales_amount, commission')
+      .eq('user_id', userId).gte('sale_date', d60).order('sale_date').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_returns')
+      .select('vendor_item_id, quantity, status')
+      .eq('user_id', userId).gte('requested_at', `${d30}T00:00:00+09:00`).order('requested_at').range(f, t)),
+    computeInventory(userId, 14, 30),
+    selectAll<{ vendor_item_id: string; orderable_qty: number | null }>((f, t) => supabase!
+      .from('coupang_growth_inventory').select('vendor_item_id, orderable_qty').eq('user_id', userId).order('vendor_item_id').range(f, t)),
+  ]);
+  const growthStock = new Map<string, number>();
+  for (const r of invRes.rows) growthStock.set(String(r.vendor_item_id), Number(r.orderable_qty) || 0);
+  const report = buildHealthReport({ today, items: itemRes.rows, costs: costRes.rows, sales: salesRes.rows, returns: returnRes.rows, inventory: inventory.rows, growthStock });
+  return res.status(200).json(report);
 }
 
 // ── 매출 급감·급증 감지 ────────────────────────────────────────
@@ -5821,7 +5970,8 @@ async function sendDailyBrief(
     .maybeSingle();
   if (already) return false;
 
-  const d = await collectBrief(userId, day, leadTimeDays, minSales14);
+  const beta = Boolean(process.env.ADMIN_EMAIL) && email === process.env.ADMIN_EMAIL;
+  const d = await collectBrief(userId, day, leadTimeDays, minSales14, beta);
   if (!briefWorthSending(d)) return false;
 
   const sent = await sendEmail(

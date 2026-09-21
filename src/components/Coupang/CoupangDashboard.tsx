@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, Link2, Loader2, RefreshCw, ShoppingBag, Trash2 } from 'lucide-react';
 import { coupangApi, sinceText, type CoupangStatus, type SyncSummary } from '../../lib/coupang';
+import { getUser } from '../../lib/auth';
 import { KeySetup } from './KeySetup';
 import { ProfitDashboard } from './ProfitDashboard';
 import { CostEditor } from './CostEditor';
@@ -21,12 +22,15 @@ import { PriceRules } from './PriceRules';
 import { ReturnReasons } from './ReturnReasons';
 import { CouponEffect } from './CouponEffect';
 import { BriefSettings } from './BriefSettings';
+import { HealthCheck } from './HealthCheck';
 import { HowTo } from '../HowTo';
 
-type View = 'profit' | 'settlement' | 'inventory' | 'reconcile' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
+type View = 'profit' | 'health' | 'settlement' | 'inventory' | 'reconcile' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
 
-const VIEWS: Array<{ id: View; label: string }> = [
+// adminOnly: 베타 — 아직 관리자만 본다. 공개할 때 표시를 지운다.
+const VIEWS: Array<{ id: View; label: string; adminOnly?: boolean }> = [
   { id: 'profit', label: '순이익' },
+  { id: 'health', label: '훈프로 상품 진단', adminOnly: true },
   { id: 'settlement', label: '정산 캘린더' },
   { id: 'inventory', label: '재고 예측' },
   { id: 'reconcile', label: '재고 대조' },
@@ -39,9 +43,17 @@ const VIEWS: Array<{ id: View; label: string }> = [
 ];
 
 export function CoupangDashboard() {
+  const isAdmin = Boolean(getUser()?.isAdmin);
   const [status, setStatus] = useState<CoupangStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<View>('profit');
+  // 홈 카드에서 특정 화면으로 바로 오는 길 — 한 번 읽고 지운다
+  const [view, setView] = useState<View>(() => {
+    try {
+      const want = sessionStorage.getItem('hoonpro-coupang-view');
+      if (want) sessionStorage.removeItem('hoonpro-coupang-view');
+      return (VIEWS.some(v => v.id === want && (!v.adminOnly || getUser()?.isAdmin)) ? want : 'profit') as View;
+    } catch { return 'profit'; }
+  });
   const [syncing, setSyncing] = useState(false);
   // 수집은 최대 1~2분 걸린다. 도는 동안 화면이 조용하면 멈춘 줄 알고 새로고침하거나
   // 버튼을 다시 누른다. 초를 세어 보여주면 "돌고 있다"가 눈으로 확인된다.
@@ -157,7 +169,7 @@ export function CoupangDashboard() {
       {VIEWS.length > 1 && (
         <div className="flex items-end gap-2 border-b border-line">
           <nav className="flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="쿠팡 분석 화면">
-            {VIEWS.map(v => (
+            {VIEWS.filter(v => !v.adminOnly || isAdmin).map(v => (
               <button
                 key={v.id}
                 onClick={() => setView(v.id)}
@@ -169,6 +181,7 @@ export function CoupangDashboard() {
                 }`}
               >
                 {v.label}
+                {v.adminOnly && <span className="ml-1.5 rounded-control border border-accent/40 bg-accent-soft px-1 py-0.5 text-[10.5px] font-semibold text-ink-2">베타</span>}
               </button>
             ))}
           </nav>
@@ -192,6 +205,7 @@ export function CoupangDashboard() {
           <SettlementCheck />
         </div>
       )}
+      {view === 'health' && <HealthCheck onGo={v => setView(v as View)} />}
       {view === 'inventory' && <InventoryForecast />}
       {view === 'reconcile' && <GrowthReconcile />}
       {view === 'returns' && (
