@@ -20,14 +20,64 @@ const supabase = createClient(
 );
 
 function verifyAdmin(req: VercelRequest): boolean {
+  return verifyToken(req)?.isAdmin === true;
+}
+
+/** 로그인한 회원인지. 공지 읽기처럼 관리자가 아니어도 되는 곳에 쓴다 */
+function verifyToken(req: VercelRequest): { userId?: string; isAdmin?: boolean } | null {
   const auth = req.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) return false;
+  if (!auth?.startsWith('Bearer ')) return null;
   try {
-    const decoded = jwt.verify(auth.slice(7), process.env.JWT_SECRET!) as any;
-    return decoded.isAdmin === true;
+    return jwt.verify(auth.slice(7), process.env.JWT_SECRET!) as any;
   } catch {
-    return false;
+    return null;
   }
+}
+
+// ─── 공지사항 ─────────────────────────────────────────────
+//
+// 업데이트·점검 안내. 운영자(화면)와 AI 도우미(직접 저장)가 쓰고 회원은 읽는다.
+// 읽기는 로그인한 회원 누구나, 쓰기·지우기는 관리자만.
+async function handleNotices(res: VercelResponse) {
+  const { data, error } = await supabase
+    .from('notices')
+    .select('id, title, body, author, pinned, published_at, updated_at')
+    .order('pinned', { ascending: false })
+    .order('published_at', { ascending: false })
+    .limit(50);
+  if (error) return res.status(500).json({ error: '공지를 불러오지 못했습니다.' });
+  return res.status(200).json({ notices: data ?? [] });
+}
+
+async function handleNoticeSave(req: VercelRequest, res: VercelResponse, userId: string | undefined) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const body: any = req.body ?? {};
+  const title = String(body.title ?? '').trim().slice(0, 200);
+  const text = String(body.body ?? '').trim().slice(0, 20000);
+  if (!title || !text) return res.status(400).json({ error: '제목과 내용이 필요합니다.' });
+  const row: Record<string, unknown> = { title, body: text, pinned: body.pinned === true, updated_at: new Date().toISOString() };
+  const id = typeof body.id === 'string' && body.id ? body.id : null;
+  if (id) {
+    const { error } = await supabase.from('notices').update(row).eq('id', id);
+    if (error) return res.status(500).json({ error: '수정하지 못했습니다.' });
+    return res.status(200).json({ ok: true, id });
+  }
+  const { data, error } = await supabase
+    .from('notices')
+    .insert({ ...row, author: '운영자', created_by: userId ?? null })
+    .select('id')
+    .single();
+  if (error) return res.status(500).json({ error: '올리지 못했습니다.' });
+  return res.status(200).json({ ok: true, id: data?.id });
+}
+
+async function handleNoticeDelete(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = String(req.body?.id ?? '');
+  if (!id) return res.status(400).json({ error: '어느 공지인지 지정해주세요.' });
+  const { error } = await supabase.from('notices').delete().eq('id', id);
+  if (error) return res.status(500).json({ error: '지우지 못했습니다.' });
+  return res.status(200).json({ ok: true });
 }
 
 // ─── 서버 오류 ─────────────────────────────────────────────
@@ -186,8 +236,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // config 조회는 탭 순서(tab_order)를 모든 사용자 화면에서 쓰므로 비관리자에게도 그 값만 공개
     if (action === 'config') return await handleConfig(req, res, isAdmin);
+    // 공지 읽기는 로그인한 회원 누구나
+    if (action === 'notices') {
+      if (!verifyToken(req)) return res.status(401).json({ error: '로그인이 필요합니다.' });
+      return await handleNotices(res);
+    }
 
     if (!isAdmin) return res.status(403).json({ error: '관리자 권한이 필요합니다.' });
+    if (action === 'notice-save') return await handleNoticeSave(req, res, verifyToken(req)?.userId);
+    if (action === 'notice-delete') return await handleNoticeDelete(req, res);
     if (action === 'users') return await handleUsers(req, res);
     if (action === 'user-action') return await handleUserAction(req, res);
     if (action === 'stats') return await handleStats(req, res);

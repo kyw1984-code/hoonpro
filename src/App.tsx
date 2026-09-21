@@ -8,6 +8,7 @@ import { RankTracker } from './components/RankTracker';
 import { ReviewAnalyzer } from './components/ReviewAnalyzer';
 import { Footer } from './components/Layout/Footer';
 import { HowTo } from './components/HowTo';
+import { Notices } from './components/Notices';
 import { Feedback } from './components/Feedback';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdReportReceiver } from './components/AdCenter/AdReportReceiver';
@@ -340,6 +341,9 @@ export default function App() {
                   <span>오늘 {remainingCalls}회</span>
                 </span>
               )}
+              {/* 공지사항 — 업데이트·점검 안내. 사용 방법 왼쪽, 늘 같은 자리 */}
+              <Notices compact className="sm:hidden" />
+              <Notices className="hidden sm:flex" />
               {/* 지금 보고 있는 화면의 사용 방법. 늘 같은 자리에 있어야 찾지 않는다 */}
               <HowTo id={activeTab} compact className="sm:hidden" />
               <HowTo id={activeTab} className="hidden sm:flex" />
