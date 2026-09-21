@@ -276,6 +276,8 @@ create table if not exists coupons (
   expires_at timestamptz,
   active boolean default true,
   note text,
+  -- 한도가 다 찬 쿠폰을 입력하면 이 코드를 대신 안내한다 (예: 3주년 → 훈프로3)
+  fallback_code text,
   created_at timestamptz default now()
 );
 

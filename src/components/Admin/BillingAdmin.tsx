@@ -36,6 +36,8 @@ interface CouponRow {
   expires_at: string | null;
   active: boolean;
   note: string | null;
+  /** 한도가 다 찬 뒤 입력하면 대신 안내할 쿠폰 코드 */
+  fallback_code?: string | null;
   /** 지금 이 쿠폰으로 할인받고 있는 구독 수 — 서버가 세어서 내려준다 */
   inUse?: number;
 }
@@ -139,7 +141,7 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
 
   const [form, setForm] = useState({
     code: '', type: 'free_period' as CouponRow['type'], value: '30',
-    trialDays: '', durationCycles: '1', maxRedemptions: '', expiresAt: '', note: '',
+    trialDays: '', durationCycles: '1', maxRedemptions: '', expiresAt: '', note: '', fallbackCode: '',
   });
 
   const reload = async () => {
@@ -209,10 +211,11 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
         maxRedemptions: form.maxRedemptions ? Number(form.maxRedemptions) : null,
         expiresAt: form.expiresAt ? new Date(form.expiresAt).toISOString() : null,
         note: form.note.trim() || null,
+        fallbackCode: form.fallbackCode.trim() || null,
       });
       showToast('쿠폰이 생성됐습니다.');
       setShowCreate(false);
-      setForm({ code: '', type: 'free_period', value: '30', trialDays: '', durationCycles: '1', maxRedemptions: '', expiresAt: '', note: '' });
+      setForm({ code: '', type: 'free_period', value: '30', trialDays: '', durationCycles: '1', maxRedemptions: '', expiresAt: '', note: '', fallbackCode: '' });
       await reload();
     } catch (e: any) {
       showToast(e?.message ?? '쿠폰 생성에 실패했습니다.');
@@ -638,6 +641,11 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
                 <input className={inputCls} type="date" value={form.expiresAt}
                   onChange={e => setForm(f => ({ ...f, expiresAt: e.target.value }))} />
               </div>
+              <div>
+                <label className="mb-1 block text-[12px] font-medium text-ink-2">소진 시 안내할 대체 쿠폰 (선택)</label>
+                <input className={inputCls} placeholder="예: 훈프로3 — 한도가 다 차면 이 코드를 팝업으로 안내" value={form.fallbackCode}
+                  onChange={e => setForm(f => ({ ...f, fallbackCode: e.target.value }))} />
+              </div>
               <div className="sm:col-span-2 lg:col-span-3">
                 <label className="mb-1 block text-[12px] font-medium text-ink-2">메모</label>
                 <input className={inputCls} placeholder="예: 기존 수강생 전원 무료 1개월" value={form.note}
@@ -689,7 +697,10 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
                         )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-ink-2">{c.expires_at ? c.expires_at.slice(0, 10) : '무기한'}</td>
-                      <td className="max-w-[180px] truncate px-4 py-3 text-[12px] text-ink-3">{c.note ?? ''}</td>
+                      <td className="max-w-[180px] truncate px-4 py-3 text-[12px] text-ink-3">
+                        {c.note ?? ''}
+                        {c.fallback_code && <span className="mt-0.5 block text-[11px] text-accent">소진 시 → {c.fallback_code}</span>}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${c.active ? 'bg-positive-soft text-positive' : 'bg-paper-2 text-ink-3'}`}>
                           {c.active ? '사용 가능' : '중지됨'}

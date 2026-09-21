@@ -66,8 +66,20 @@ async function call<T>(action: string, body?: Record<string, unknown>): Promise<
     body: JSON.stringify(body ?? {}),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? '요청에 실패했습니다.');
+  // 오류 본문에 안내용 부가 정보(소진 쿠폰의 대체 코드 등)가 실려 올 수 있다
+  if (!res.ok) throw Object.assign(new Error(data.error ?? '요청에 실패했습니다.'), { data });
   return data as T;
+}
+
+/** 소진된 쿠폰 대신 안내할 쿠폰 — coupon-validate 오류 본문에 실린다 */
+export interface CouponFallback {
+  code: string;
+  benefit: string;
+}
+
+export function couponFallbackOf(e: unknown): CouponFallback | null {
+  const fb = (e as any)?.data?.fallback;
+  return fb && typeof fb.code === 'string' ? { code: fb.code, benefit: String(fb.benefit ?? '') } : null;
 }
 
 export const fetchBillingStatus = () => call<BillingStatus>('status');

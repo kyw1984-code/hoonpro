@@ -2,10 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { withVat } from '../../lib/vat';
 import { won } from '../../lib/coupang';
 import { FeatureCompare } from './FeatureCompare';
-import { CreditCard, BadgeCheck, AlertTriangle, Ticket, Loader2, CalendarClock, Receipt, Gift } from 'lucide-react';
+import { CreditCard, BadgeCheck, AlertTriangle, Ticket, Loader2, CalendarClock, Receipt, Gift, X } from 'lucide-react';
+import { ModalPortal } from '../ModalPortal';
 import { getToken, removeToken } from '../../lib/auth';
 import {
-  fetchBillingStatus, validateCoupon, subscribeWithCard, cancelSubscription, resumeSubscription,
+  fetchBillingStatus, validateCoupon, couponFallbackOf, type CouponFallback, subscribeWithCard, cancelSubscription, resumeSubscription,
   changeCard, requestRefund, startCardRegistration, consumeBillingReturn, tossConfigured,
   type BillingStatus, type CouponPreview,
 } from '../../lib/billing';
@@ -60,6 +61,8 @@ export function SubscriptionPage() {
 
   const [couponCode, setCouponCode] = useState('');
   const [couponPreview, setCouponPreview] = useState<CouponPreview | null>(null);
+  /** 소진된 쿠폰을 넣었을 때 대체 쿠폰을 알리는 팝업 */
+  const [couponFallback, setCouponFallback] = useState<CouponFallback | null>(null);
   // 연간 결제를 기본 선택으로 유도.
   // 랜딩 요금표에서 고르고 가입한 경우 그 선택을 이어받는다.
   const [selectedPlanId, setSelectedPlanId] = useState(() => {
@@ -201,6 +204,26 @@ export function SubscriptionPage() {
       setCouponPreview(await validateCoupon(code, selectedPlan.id));
     } catch (e: any) {
       setCouponPreview(null);
+      const fallback = couponFallbackOf(e);
+      if (fallback) setCouponFallback(fallback);
+      else setMessage({ text: e?.message ?? '쿠폰 확인에 실패했습니다.', type: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** 팝업에서 대체 쿠폰을 고르면 그 코드를 넣고 바로 검증한다 */
+  const applyFallbackCoupon = async () => {
+    const fb = couponFallback;
+    if (!fb) return;
+    setCouponFallback(null);
+    setCouponCode(fb.code);
+    setBusy(true);
+    setMessage(null);
+    try {
+      setCouponPreview(await validateCoupon(fb.code, selectedPlan.id));
+    } catch (e: any) {
+      setCouponPreview(null);
       setMessage({ text: e?.message ?? '쿠폰 확인에 실패했습니다.', type: 'error' });
     } finally {
       setBusy(false);
@@ -283,6 +306,36 @@ export function SubscriptionPage() {
 
   return (
     <div className="mx-auto w-full max-w-[720px] px-6">
+      {/* 소진된 쿠폰 안내 — 대체 쿠폰이 붙어 있는 코드를 넣었을 때만 뜬다 */}
+      {couponFallback && (
+        <ModalPortal>
+          <div
+            className="fixed inset-0 z-[85] flex items-center justify-center bg-ink/50 p-4 backdrop-blur-sm"
+            role="dialog" aria-modal="true" aria-label="쿠폰 안내"
+            onClick={() => setCouponFallback(null)}
+          >
+            <div className="w-full max-w-[420px] rounded-panel border border-line bg-paper p-6 shadow-overlay" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <Ticket className="h-5 w-5 text-accent" />
+                  <h3 className="text-[17px] font-semibold text-ink">쿠폰이 모두 소진되었습니다</h3>
+                </div>
+                <button type="button" onClick={() => setCouponFallback(null)} aria-label="닫기" className="shrink-0 rounded-full p-1.5 text-ink-3 hover:bg-paper-2 hover:text-ink">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <p className="mt-3 break-keep text-[14px] leading-relaxed text-ink-2">
+                대신 <span className="font-semibold text-ink">{couponFallback.code}</span>을 입력하면{' '}
+                <span className="font-semibold text-positive">{couponFallback.benefit}</span>이 적용됩니다.
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <button type="button" onClick={() => setCouponFallback(null)} className="rounded-control border border-line px-4 py-2 text-[13px] font-medium text-ink-2 hover:text-ink">닫기</button>
+                <button type="button" onClick={applyFallbackCoupon} className="rounded-control bg-accent px-4 py-2 text-[13px] font-bold text-ground hover:opacity-90">{couponFallback.code} 적용하기</button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
       {message && (
         <p className={`mb-4 rounded-control px-4 py-3 text-[13px] ${
           message.type === 'error' ? 'bg-critical-soft text-critical' : 'bg-positive-soft text-positive'
