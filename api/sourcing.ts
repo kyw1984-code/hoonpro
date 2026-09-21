@@ -9,7 +9,7 @@ import { emailFrom } from "../src/lib/emailFrom.js";
 import { createHmac } from "crypto";
 import jwt from "jsonwebtoken";
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
-import { tabDisabledMessage } from "../lib/feature-gate.js";
+import { tabDisabledMessage, featureHidden } from "../lib/feature-gate.js";
 import { checkAccess } from "../src/lib/accessGate.js";
 import { runIn, selectIn } from "../src/lib/chunkedIn.js";
 import { parseProductRef, productPageUrl } from "../src/lib/coupangUrl.js";
@@ -2451,6 +2451,75 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// 경쟁 상품 변동 — 관심 키워드 전체를 N일 전과 견준다
+//
+// '시장 변화'(rankwatch changes)는 키워드 하나를 어제와 견준다. 여기서는 이
+// 회원의 관심 키워드(★ 저장 + 순위 추적) 전부를 한 표에 놓는다. 관측은
+// 크론이 매일 하고 있어 새 수집이 없다.
+// ═══════════════════════════════════════════════════════════════════════════════
+async function handleCompetitorChanges(req: VercelRequest, res: VercelResponse, decoded: any) {
+  if (!supabase) return res.status(500).json({ error: "서버 저장소가 설정되지 않았습니다." });
+  const userId = String(decoded?.userId ?? "");
+  const days = Math.min(30, Math.max(3, Number(req.query.days) || 7));
+  const [{ data: favs }, { data: watches }] = await Promise.all([
+    supabase.from("sourcing_favorites").select("keyword").eq("user_id", userId).limit(50),
+    supabase.from("sourcing_rank_watch").select("keyword").eq("user_id", userId).limit(50),
+  ]);
+  const keywords = [...new Set([...(favs ?? []), ...(watches ?? [])].map(r => String(r.keyword)))].slice(0, 20);
+  const since = new Date(Date.now() - (days + 2) * 86400000).toISOString();
+  const items: any[] = [];
+  let from = "";
+  let to = "";
+  for (const keyword of keywords) {
+    const { data: rows } = await supabase
+      .from("sourcing_product_obs")
+      .select("product_id, product_name, rank, price, review_count, is_ad, captured_at")
+      .eq("keyword", keyword).gte("captured_at", since)
+      .order("captured_at", { ascending: true }).limit(4000);
+    if (!rows || rows.length === 0) continue;
+    const dayList = [...new Set(rows.map(r => String(r.captured_at).slice(0, 10)))].sort();
+    if (dayList.length < 2) continue;
+    const latest = dayList[dayList.length - 1];
+    // N일 전에 가장 가까운 관측일 — 없으면 가장 오래된 날
+    const target = new Date(Date.parse(`${latest}T00:00:00Z`) - days * 86400000).toISOString().slice(0, 10);
+    const base = dayList.filter(d => d <= target).pop() ?? dayList[0];
+    if (base === latest) continue;
+    from = from && from < base ? from : base;
+    to = to && to > latest ? to : latest;
+    const snap = (day: string) => {
+      const m = new Map<string, any>();
+      for (const r of rows) if (String(r.captured_at).slice(0, 10) === day) m.set(String(r.product_id), r);
+      return m;
+    };
+    const a = snap(base);
+    const b = snap(latest);
+    for (const [pid, cur] of b) {
+      if (cur.is_ad) continue;
+      const prev = a.get(pid);
+      if (!prev) continue;
+      const pFrom = Number(prev.price) || 0;
+      const pTo = Number(cur.price) || 0;
+      const rFrom = Number(prev.review_count) || 0;
+      const rTo = Number(cur.review_count) || 0;
+      const common = {
+        keyword, productId: pid, productName: String(cur.product_name ?? prev.product_name ?? `상품 ${pid}`),
+        productUrl: `https://www.coupang.com/vp/products/${pid}`,
+        priceFrom: pFrom || null, priceTo: pTo || null, pricePct: pFrom > 0 && pTo > 0 ? Math.round(((pTo - pFrom) / pFrom) * 100) : null,
+        reviewFrom: rFrom, reviewTo: rTo, reviewDelta: rTo - rFrom,
+        rankFrom: prev.rank ?? null, rankTo: cur.rank ?? null,
+      };
+      if (common.pricePct !== null && common.pricePct <= -5) items.push({ kind: "price-down", ...common });
+      else if (common.pricePct !== null && common.pricePct >= 5) items.push({ kind: "price-up", ...common });
+      if (rTo - rFrom >= 10 && (rFrom === 0 || (rTo - rFrom) / rFrom >= 0.15)) items.push({ kind: "review-surge", ...common });
+      if (typeof cur.rank === "number" && cur.rank <= 10 && (prev.rank === null || prev.rank === undefined || Number(prev.rank) - cur.rank >= 5)) items.push({ kind: "rank-jump", ...common });
+    }
+  }
+  const weight: Record<string, number> = { "price-down": 0, "review-surge": 1, "rank-jump": 2, "price-up": 3 };
+  items.sort((x, y) => weight[x.kind] - weight[y.kind] || Math.abs(y.pricePct ?? 0) + (y.reviewDelta ?? 0) - (Math.abs(x.pricePct ?? 0) + (x.reviewDelta ?? 0)));
+  return res.status(200).json({ days, from, to, keywords: keywords.length, items: items.slice(0, 60) });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // 관심 키워드 (서버 저장 — 크론 자동 추적의 대상)
 // ═══════════════════════════════════════════════════════════════════════════════
 async function handleFavorites(req: VercelRequest, res: VercelResponse, decoded: any) {
@@ -2905,5 +2974,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (type === "favorites") return handleFavorites(req, res, decoded);
   if (type === "rankwatch") return handleRankWatch(req, res, decoded);
   if (type === "saved-compare") return handleSavedCompare(req, res);
+  if (type === "competitor-changes") {
+    if (await featureHidden(supabase, "ranktracker.changes", decoded?.isAdmin === true)) return res.status(403).json({ error: "준비 중인 기능입니다." });
+    return handleCompetitorChanges(req, res, decoded);
+  }
   return res.status(400).json({ error: "type=keywords | trend | briefing | products | reviews | favorites | rankwatch 가 필요합니다." });
 }
