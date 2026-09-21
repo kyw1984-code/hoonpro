@@ -118,26 +118,45 @@ export function ReviewAnalyzer() {
   const [input, setInput] = useState('');
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
+  // 리뷰는 모였는데 AI 요약은 아직인 상태 — 표본을 먼저 보여준다
+  const [summarizing, setSummarizing] = useState(false);
   const [data, setData] = useState<any | null>(null);
 
+  // 두 번 부른다. 먼저 리뷰만 모아(stage=collect) 표본을 바로 그리고, 이어서
+  // 요약을 받는다. 캐시된 상품은 첫 호출이 완성본을 주므로 한 번으로 끝난다.
   const analyze = async () => {
     const target = input.trim();
-    if (!target || loading) return;
+    if (!target || loading || summarizing) return;
     setLoading(true);
+    setSummarizing(false);
     setData(null);
-    try {
-      const params = new URLSearchParams({ type: 'reviews', product: target });
-      if (name.trim()) params.set('name', name.trim().slice(0, 100));
-      const res = await fetch(`/api/sourcing?${params.toString()}`, { headers: authHeaders() });
-      const json = await safeJson(res);
-      setData(json);
-      if (typeof json.remaining === 'number') {
+    const base = new URLSearchParams({ type: 'reviews', product: target });
+    if (name.trim()) base.set('name', name.trim().slice(0, 100));
+    const bump = (json: any) => {
+      if (typeof json?.remaining === 'number') {
         window.dispatchEvent(new CustomEvent('usage-updated', { detail: { remaining: json.remaining } }));
       }
+    };
+    try {
+      const collect = new URLSearchParams(base);
+      collect.set('stage', 'collect');
+      const res = await fetch(`/api/sourcing?${collect.toString()}`, { headers: authHeaders() });
+      const json = await safeJson(res);
+      bump(json);
+      setData(json);
+      setLoading(false);
+      if (json.error || !json.pending) return;
+      setSummarizing(true);
+      const res2 = await fetch(`/api/sourcing?${base.toString()}`, { headers: authHeaders() });
+      const full = await safeJson(res2);
+      bump(full);
+      // 요약이 실패해도 모아 둔 표본은 남긴다
+      setData(full.error ? { ...json, pending: false, summary: { error: full.error } } : full);
     } catch (e: any) {
-      setData({ error: e.message });
+      setData((prev: any) => (prev && prev.pending ? { ...prev, pending: false, summary: { error: e.message } } : { error: e.message }));
     } finally {
       setLoading(false);
+      setSummarizing(false);
     }
   };
 
@@ -178,6 +197,24 @@ export function ReviewAnalyzer() {
         <div className="rounded-panel border border-line bg-paper p-6">
           {data.productName && data.productName !== '상품' && (
             <h3 className="mb-3 truncate text-[16px] font-semibold text-ink">{data.productName}</h3>
+          )}
+          {data.pending && !data.error && (
+            <div className="mb-4">
+              <p className="flex items-center gap-2 text-[14.5px] font-semibold text-ink">
+                <Loader2 className="h-4 w-4 animate-spin text-accent" />
+                리뷰 {data.reviewCount}개를 모았습니다. 훈프로AI가 요약하는 중... (10~20초)
+              </p>
+              {Array.isArray(data.samples) && data.samples.length > 0 && (
+                <div className="mt-3 rounded-card border border-line bg-paper-2 px-4 py-3">
+                  <p className="mb-2 text-[13.5px] font-semibold text-ink-2">실제 리뷰 샘플 (수집 {data.reviewCount}개 중)</p>
+                  {data.samples.map((s: any, i: number) => (
+                    <p key={i} className="mb-1.5 text-[13.5px] leading-relaxed text-ink-2">
+                      {s.rating > 0 && <b className="text-ink">[{s.rating}점]</b>} {String(s.text).slice(0, 160)}{String(s.text).length > 160 ? '...' : ''}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <ReviewSummaryView data={data} />
           <div className="mt-4 border-t border-line pt-4">
