@@ -60,6 +60,30 @@ async function request<T>(action: string, init?: { method?: 'GET' | 'POST'; body
   return data as T;
 }
 
+/** 광고 보고서 원본 저장 조각 크기 — 서버 한도 4.5MB에 넉넉히 못 미치게 */
+const AD_RAW_CHUNK_BYTES = 1_500_000;
+/** 원본 읽기 페이지 크기 */
+const AD_RAW_PAGE_ROWS = 3000;
+
+/** JSON 크기 기준으로 행을 나눈다. 한 조각이 maxBytes를 넘지 않게, 행 하나는 쪼개지 않는다 */
+export function chunkByBytes<T>(rows: T[], maxBytes: number): T[][] {
+  const out: T[][] = [];
+  let cur: T[] = [];
+  let size = 0;
+  for (const r of rows) {
+    const n = JSON.stringify(r).length + 1;
+    if (cur.length > 0 && size + n > maxBytes) {
+      out.push(cur);
+      cur = [];
+      size = 0;
+    }
+    cur.push(r);
+    size += n;
+  }
+  if (cur.length > 0) out.push(cur);
+  return out;
+}
+
 export interface ProfitRow {
   vendorItemId: string;
   productName: string;
@@ -204,6 +228,8 @@ export interface CostRow {
   status: string;
   /** 'growth'면 로켓그로스 상품이다 — 입출고비 칸이 이 상품에만 뜬다 */
   businessType: string;
+  /** 반품 재판매 옵션 — 순이익 계산은 이 줄의 원가를 0으로 본다 */
+  resale?: boolean;
   soldLast30: number;
   unitCost: number;
   packagingCost: number;
@@ -509,11 +535,37 @@ export const coupangApi = {
    * 광고 보고서 원본을 그대로 저장한다 — 광고분석AI가 파일 없이 읽는다.
    * 광고비만 뽑아 두던 것과 별개다. 키워드·노출·클릭·전환이 여기 남는다.
    */
-  adReportRawSave: (body: { from: string; to: string; columns: string[]; rows: any[] }) =>
-    request<{ ok: true; rowCount: number; truncated: boolean }>('ad-report-raw-save', { method: 'POST', body }),
+  //
+  // 서버는 요청·응답을 4.5MB에서 자른다(413). 한 달치 키워드 보고서는 그보다
+  // 크므로 저장은 조각으로 보내고, 읽기는 페이지로 받아 이어 붙인다.
+  adReportRawSave: async (body: { from: string; to: string; columns: string[]; rows: any[] }) => {
+    const { rows, ...meta } = body;
+    const chunks = chunkByBytes(rows, AD_RAW_CHUNK_BYTES);
+    let last: { ok: true; rowCount: number; truncated: boolean } = { ok: true, rowCount: 0, truncated: false };
+    for (let part = 0; part < chunks.length; part++) {
+      last = await request<{ ok: true; rowCount: number; truncated: boolean }>('ad-report-raw-save', {
+        method: 'POST',
+        body: { ...meta, rows: chunks[part], part, parts: chunks.length },
+      });
+      if (last.truncated) break;
+    }
+    return last;
+  },
 
-  adReportRaw: () =>
-    request<{ report: null | { from: string; to: string; columns: string[]; rows: any[]; rowCount: number; truncated: boolean; savedAt: string } }>('ad-report-raw'),
+  adReportRaw: async () => {
+    type Page = { report: null | { from: string; to: string; columns: string[]; rows: any[]; rowCount: number; offset: number; hasMore: boolean; truncated: boolean; savedAt: string } };
+    const first = await request<Page>(`ad-report-raw&offset=0&limit=${AD_RAW_PAGE_ROWS}`);
+    if (!first.report) return { report: null };
+    const rows = [...first.report.rows];
+    let more = first.report.hasMore;
+    while (more && rows.length < first.report.rowCount) {
+      const page = await request<Page>(`ad-report-raw&offset=${rows.length}&limit=${AD_RAW_PAGE_ROWS}`);
+      if (!page.report || page.report.rows.length === 0) break;
+      rows.push(...page.report.rows);
+      more = page.report.hasMore;
+    }
+    return { report: { ...first.report, rows } };
+  },
 
   /** 옵션별 판매가·원가·입출고비 — 마진 계산 칸을 손으로 채우지 않게 */
   marginPreset: (days = 30) =>

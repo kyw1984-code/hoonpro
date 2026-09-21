@@ -4,6 +4,7 @@ import { checkMonth, isReserveSettlement, type MonthCheck } from '../src/lib/set
 import { rollupMonths, type MonthProfit } from '../src/lib/monthlyProfit.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
 import { emailFrom } from '../src/lib/emailFrom.js';
+import { wrapEmail } from '../src/lib/emailTemplate.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
@@ -2947,15 +2948,6 @@ function daysToExpiry(keyExpiresAt: string | null): number | null {
 }
 
 // ── 이메일 (billing.ts와 같은 Resend 경로) ────────────────────
-function wrapEmail(title: string, bodyHtml: string): string {
-  return (
-    `<div style="background:#0a0f1f;padding:28px 16px;font-family:-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo',sans-serif;">` +
-    `<div style="max-width:520px;margin:0 auto;background:#131d36;border:1px solid #23304f;border-radius:14px;padding:26px;">` +
-    `<h1 style="margin:0 0 14px;font-size:17px;color:#e8ecf5;">${title}</h1>` +
-    `<div style="font-size:13.5px;line-height:1.75;color:#a8b3c9;">${bodyHtml}</div>` +
-    `</div></div>`
-  );
-}
 
 /**
  * 메일 한 통. 보냈는지 아닌지를 정직하게 돌려준다.
@@ -3342,7 +3334,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'ad-cost-save': return await handleAdCostSave(userId, req, res);
       case 'ad-cost-delete': return await handleAdCostDelete(userId, req, res);
       case 'ad-import-url': return await handleAdImportUrl(userId, req, res);
-      case 'ad-report-raw': return await handleAdReportRaw(userId, res);
+      case 'ad-report-raw': return await handleAdReportRaw(userId, req, res);
       case 'ad-report-raw-save': return await handleAdReportRawSave(userId, req, res);
       case 'margin-preset': return await handleMarginPreset(userId, req, res);
       case 'settlement': return await handleSettlement(userId, res);
@@ -3924,8 +3916,11 @@ export async function computeProfit(
   const rows: ProfitRow[] = [];
   for (const row of agg.values()) {
     const c = costs.get(row.vendorItemId);
-    const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (Number(c.fulfillment_cost) || 0) : 0;
-    row.costEntered = Boolean(c) && perUnit > 0;
+    // 재판매 옵션은 원가를 0으로 본다. 반품된 물건을 쿠팡이 새 옵션ID로 다시
+    // 파는 것이라 매입비는 첫 판매 때 이미 나갔다. 원가 화면에 값이 들어 있어도
+    // 여기서 또 빼면 같은 돈이 두 번 빠진다. 원가 미입력으로도 세지 않는다.
+    const perUnit = row.resale ? 0 : c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (Number(c.fulfillment_cost) || 0) : 0;
+    row.costEntered = row.resale ? true : Boolean(c) && perUnit > 0;
     row.unitCostTotal = perUnit * row.quantity;
     const ret = returnAgg.get(row.vendorItemId) ?? { count: 0, quantity: 0 };
     row.returnCount = ret.count;
@@ -4075,7 +4070,9 @@ export async function computeProfit(
     const d = String(sale.sale_date ?? '').slice(0, 10);
     if (!d) continue;
     const c = costs.get(String(sale.vendor_item_id));
-    const perUnit = c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (Number(c.fulfillment_cost) || 0) : 0;
+    // 위 옵션별 계산과 같은 규칙 — 재판매는 원가 0
+    const perUnit = isResaleOption(items.get(String(sale.vendor_item_id))) ? 0
+      : c ? (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (Number(c.fulfillment_cost) || 0) : 0;
     const qty = Number(sale.quantity) || 0;
     const cur = dayOf(d);
     cur.quantity += qty;
@@ -4410,6 +4407,8 @@ async function handleCosts(userId: string, res: VercelResponse) {
       // 로켓그로스 상품에만 입출고비 칸을 띄운다 — 판매자배송 상품에 0을
       // 넣게 만들면 안 넣은 것과 구분이 안 된다.
       businessType: String(it.business_type ?? 'marketplace'),
+      // 재판매 옵션 — 순이익 계산은 이 줄의 원가를 0으로 본다 (isResaleOption 참고)
+      resale: isResaleOption(it),
       soldLast30: sold.get(String(it.vendor_item_id)) ?? 0,
       unitCost: c?.unit_cost ?? 0,
       packagingCost: c?.packaging_cost ?? 0,
@@ -4716,58 +4715,106 @@ async function handleAdCostDelete(userId: string, req: VercelRequest, res: Verce
 // ═══════════════════════════════════════════════════════════════
 
 // ── 광고 보고서 원본 (광고분석AI가 그대로 읽는다) ────────────────
+//
+// 보고서는 키워드×일자 단위라 한 달치가 수만 줄, JSON으로 수 MB다. Vercel은
+// 요청·응답 본문을 4.5MB에서 자르므로(413) 한 번에 보내면 함수에 닿지도 못하고
+// 로그도 안 남는다 — 실제로 그렇게 조용히 비어 있었다. 그래서 줄은 별도 표에
+// 한 줄씩 두고, 저장은 조각으로 받고 읽기는 페이지로 준다.
 
 /** 한 번에 담을 수 있는 최대 행 수. 넘으면 잘라 두고 잘렸다고 알린다 */
 const AD_RAW_MAX_ROWS = 20000;
+/** 한 페이지로 돌려주는 최대 행 수 — 응답도 4.5MB 안이어야 한다 */
+const AD_RAW_PAGE_MAX = 5000;
 
-async function handleAdReportRaw(userId: string, res: VercelResponse) {
+async function handleAdReportRaw(userId: string, req: VercelRequest, res: VercelResponse) {
+  const offset = Math.max(0, Math.floor(Number(req.query.offset) || 0));
+  const limit = Math.min(AD_RAW_PAGE_MAX, Math.max(1, Math.floor(Number(req.query.limit) || 3000)));
   const { data, error } = await supabase!
     .from('coupang_ad_report_raw')
-    .select('date_from, date_to, columns, rows, row_count, truncated, saved_at')
+    .select('date_from, date_to, columns, row_count, truncated, saved_at')
     .eq('user_id', userId)
     .maybeSingle();
-  if (error) return res.status(200).json({ report: null });
-  if (!data) return res.status(200).json({ report: null });
+  if (error || !data) return res.status(200).json({ report: null });
+  const rowCount = Number(data.row_count) || 0;
+  const { data: lines, error: lineErr } = await supabase!
+    .from('coupang_ad_report_raw_rows')
+    .select('row')
+    .eq('user_id', userId)
+    .order('idx')
+    .range(offset, offset + limit - 1);
+  if (lineErr) {
+    console.error('[광고보고서] 원본 읽기 실패', { code: lineErr.code, detail: lineErr.message });
+    return res.status(500).json({ error: '보고서를 읽지 못했습니다.' });
+  }
+  const rows = (lines ?? []).map((l: any) => l.row);
   return res.status(200).json({
     report: {
       from: data.date_from,
       to: data.date_to,
       columns: data.columns ?? [],
-      rows: data.rows ?? [],
-      rowCount: data.row_count ?? 0,
+      rows,
+      rowCount,
+      offset,
+      hasMore: offset + rows.length < rowCount,
       truncated: data.truncated === true,
       savedAt: data.saved_at,
     },
   });
 }
 
+/**
+ * 조각 저장. part=0이 오면 이전 보고서를 지우고 새로 시작하고, 이후 조각은
+ * 뒤에 이어 붙인다. 클라이언트가 순서대로 하나씩 보내므로 겹치지 않는다.
+ */
 async function handleAdReportRawSave(userId: string, req: VercelRequest, res: VercelResponse) {
   const body: any = req.body ?? {};
   const rows = Array.isArray(body.rows) ? body.rows : [];
-  if (rows.length === 0) return res.status(400).json({ error: '저장할 보고서 행이 없습니다.' });
+  const part = Math.max(0, Math.floor(Number(body.part) || 0));
+  if (part === 0 && rows.length === 0) return res.status(400).json({ error: '저장할 보고서 행이 없습니다.' });
 
-  const truncated = rows.length > AD_RAW_MAX_ROWS;
-  const kept = truncated ? rows.slice(0, AD_RAW_MAX_ROWS) : rows;
-  const columns = Array.isArray(body.columns) && body.columns.length > 0
-    ? body.columns
-    : Object.keys(kept[0] ?? {});
-
-  const { error } = await supabase!.from('coupang_ad_report_raw').upsert({
-    user_id: userId,
-    date_from: body.from || null,
-    date_to: body.to || null,
-    columns,
-    rows: kept,
-    row_count: kept.length,
-    truncated,
-    saved_at: new Date().toISOString(),
-  }, { onConflict: 'user_id' });
-
-  if (error) {
-    console.error('[광고보고서] 원본 저장 실패', { code: error.code, detail: error.message });
+  const fail = (where: string, e: { code?: string; message?: string }) => {
+    console.error('[광고보고서] 원본 저장 실패', { where, part, code: e.code, detail: e.message });
     return res.status(500).json({ error: '보고서를 저장하지 못했습니다.' });
+  };
+
+  if (part === 0) {
+    const columns = Array.isArray(body.columns) && body.columns.length > 0 ? body.columns : Object.keys(rows[0] ?? {});
+    const { error: delErr } = await supabase!.from('coupang_ad_report_raw_rows').delete().eq('user_id', userId);
+    if (delErr) return fail('clear', delErr);
+    const { error: headErr } = await supabase!.from('coupang_ad_report_raw').upsert({
+      user_id: userId,
+      date_from: body.from || null,
+      date_to: body.to || null,
+      columns,
+      rows: null,
+      row_count: 0,
+      truncated: false,
+      saved_at: new Date().toISOString(),
+    }, { onConflict: 'user_id' });
+    if (headErr) return fail('head', headErr);
   }
-  return res.status(200).json({ ok: true, rowCount: kept.length, truncated });
+
+  const { data: head, error: readErr } = await supabase!
+    .from('coupang_ad_report_raw').select('row_count, truncated').eq('user_id', userId).maybeSingle();
+  if (readErr) return fail('read', readErr);
+  if (!head) return res.status(409).json({ error: '보고서 저장을 처음부터 다시 시작해주세요.' });
+
+  const have = Number(head.row_count) || 0;
+  const room = Math.max(0, AD_RAW_MAX_ROWS - have);
+  const kept = rows.slice(0, room);
+  const truncated = head.truncated === true || rows.length > kept.length;
+
+  for (let i = 0; i < kept.length; i += 1000) {
+    const batch = kept.slice(i, i + 1000).map((row: unknown, j: number) => ({ user_id: userId, idx: have + i + j, row }));
+    const { error: insErr } = await supabase!.from('coupang_ad_report_raw_rows').upsert(batch, { onConflict: 'user_id,idx' });
+    if (insErr) return fail('rows', insErr);
+  }
+  const rowCount = have + kept.length;
+  const { error: updErr } = await supabase!.from('coupang_ad_report_raw')
+    .update({ row_count: rowCount, truncated, saved_at: new Date().toISOString() })
+    .eq('user_id', userId);
+  if (updErr) return fail('count', updErr);
+  return res.status(200).json({ ok: true, rowCount, truncated, part });
 }
 
 // ── 마진 계산 기본값 (광고분석AI가 손입력 대신 불러온다) ──────────

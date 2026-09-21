@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { retryOnce } from '../../src/lib/dbRetry.js';
 import crypto from 'node:crypto';
 import { emailFrom } from '../../src/lib/emailFrom.js';
+import { wrapEmail } from '../../src/lib/emailTemplate.js';
 
 // 가입 API — 이메일 인증코드 + 관리자 승인 (기본 운영 방식)
 //   RESEND_API_KEY가 설정되면: 6자리 인증코드로 메일함 소유 확인 + 만 14세 확인
@@ -54,24 +55,6 @@ function passwordProblem(pw: unknown): string | null {
 }
 
 // 브랜드 템플릿 (api/auth/login.ts · api/billing.ts와 동일 디자인)
-function wrapEmail(heading: string, bodyHtml: string): string {
-  return `<div style="margin:0;padding:24px 12px;background:#0b1020;font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;">
-  <div style="max-width:520px;margin:0 auto;background:#141b31;border:1px solid #1c2542;border-radius:18px;overflow:hidden;">
-    <div style="padding:22px 28px 0;">
-      <span style="display:inline-block;width:30px;height:30px;line-height:30px;text-align:center;border-radius:9px;background:linear-gradient(135deg,#7cf5ff,#8b7bff);color:#0b1020;font-weight:800;font-size:14px;">훈</span>
-      <span style="margin-left:9px;font-size:14px;font-weight:600;color:#e8ecf5;vertical-align:middle;">쇼크트리 훈프로 <span style="color:#5a627a;font-weight:500;">AI 자동화</span></span>
-    </div>
-    <div style="padding:18px 28px 26px;">
-      <h1 style="margin:0 0 14px;font-size:19px;line-height:1.4;color:#ffffff;font-weight:700;">${heading}</h1>
-      <div style="font-size:14px;line-height:1.75;color:#b9c0d0;">${bodyHtml}</div>
-    </div>
-    <div style="padding:16px 28px;border-top:1px solid #1c2542;font-size:11.5px;line-height:1.7;color:#5a627a;">
-      본 메일은 발신 전용입니다. 문의는 서비스 내 [훈프로 코칭AI]를 이용해주세요.<br>
-      <a href="https://hoonproai.com" style="color:#7cf5ff;text-decoration:none;">hoonproai.com</a>
-    </div>
-  </div>
-</div>`;
-}
 
 function hashCode(email: string, code: string): string {
   return crypto.createHash('sha256').update(`${email}:${code}:${process.env.JWT_SECRET}`).digest('hex');
