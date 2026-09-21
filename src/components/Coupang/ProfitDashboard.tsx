@@ -14,6 +14,7 @@ import { AlertTriangle, ArrowUpRight, Download, Loader2, TrendingDown, TrendingU
 import { coupangApi, pct, won, type ProfitResponse } from '../../lib/coupang';
 import { DailyTrendChart } from './DailyTrendChart';
 import { AdCenterConnect } from '../AdCenter/AdCenterConnect';
+import { GrowthCancelUpload } from './GrowthCancelUpload';
 
 /**
  * 엑셀 라이브러리는 쓸 때만 받는다.
@@ -516,7 +517,14 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                 />
                 <ChannelRow
                   label="로켓그로스"
-                  note="결제일 기준 · 취소 전 금액 · 수수료는 윙 요율로 계산"
+                  note={
+                    ch.growth.cancel && ch.growth.cancel.quantity > 0
+                      ? `결제일 기준 · 취소 ${ch.growth.cancel.quantity.toLocaleString('ko-KR')}개 −${won(ch.growth.cancel.amount)} 뺌 (${[
+                          ch.growth.cancel.fileQty > 0 ? `파일 ${ch.growth.cancel.fileQty}개` : '',
+                          ch.growth.cancel.estimateQty > 0 ? `추정 ${ch.growth.cancel.estimateQty}개` : '',
+                        ].filter(Boolean).join(' · ')})`
+                      : '결제일 기준 · 취소 반영 전 · 수수료는 윙 요율로 계산'
+                  }
                   amount={ch.growth.salesAmount}
                   quantity={ch.growth.quantity}
                   total={ch.marketplace.salesAmount + ch.growth.salesAmount}
@@ -528,9 +536,11 @@ export function ProfitDashboard({ onEditCosts }: Props) {
                 정산예정액까지 함께 옵니다. 로켓그로스는 <b className="text-ink-2">주문만</b> 조회돼 결제일 기준이고
                 수수료가 오지 않아, 같은 상품의 윙 실적에서 나온 실제 수수료율을 그대로 적용했습니다.
                 입출고비는 [원가 입력]의 그로스 입출고비 칸에 넣으면 순이익에 함께 반영됩니다.
-                로켓그로스 금액은 <b className="text-ink-2">취소 전</b> 결제 금액입니다 — 쿠팡 주문 API가 취소 여부를 주지 않아
-                쿠팡 판매분석의 "매출"(취소를 뺀 값)보다 큽니다. 판매분석 파일의 <b className="text-ink-2">총 매출·총 판매수</b>와 같은 숫자입니다.
+                로켓그로스 취소는 쿠팡 주문 API가 알려주지 않습니다. 그래서 쿠팡이 주는 옵션별 <b className="text-ink-2">최근 30일 판매수</b>(취소 뺀 값)와
+                우리 결제 수량의 비율로 <b className="text-ink-2">추정</b>해 빼고, 판매분석 파일을 올린 날짜는 그 파일의 취소 값으로 정확히 뺍니다.
+                취소를 빼기 전 금액은 쿠팡 판매분석의 "총 매출"과 같습니다.
               </p>
+              {ch.growth.salesAmount > 0 && <GrowthCancelUpload onDone={load} />}
             </div>
           )}
 

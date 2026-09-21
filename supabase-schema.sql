@@ -1038,6 +1038,29 @@ create index if not exists idx_coc_cancel_user_order on coupang_order_cancels(us
 alter table coupang_order_cancels enable row level security;
 revoke all on coupang_order_cancels from anon, authenticated;
 
+-- 로켓그로스 취소 반영. 주문 API는 취소를 안 주므로 (1) 쿠팡 30일 집계로 추정하거나
+-- (2) 판매분석 파일(옵션별 총 취소)을 올려 정확히 뺀다. quantity·sales_amount는 취소를
+-- 뺀 값이고, 원래 값은 gross_*에 남긴다.
+alter table coupang_sales_daily add column if not exists gross_quantity int;
+alter table coupang_sales_daily add column if not exists gross_amount bigint;
+alter table coupang_sales_daily add column if not exists cancel_quantity int not null default 0;
+alter table coupang_sales_daily add column if not exists cancel_amount bigint not null default 0;
+alter table coupang_sales_daily add column if not exists cancel_source text;   -- 'estimate' | 'file' | null
+
+create table if not exists coupang_growth_cancels_daily (
+  user_id uuid not null references users(id) on delete cascade,
+  sale_date date not null,
+  vendor_item_id text not null,
+  cancel_qty int not null default 0,
+  cancel_amount bigint not null default 0,
+  gross_qty int,
+  gross_amount bigint,
+  uploaded_at timestamptz default now(),
+  primary key (user_id, sale_date, vendor_item_id)
+);
+alter table coupang_growth_cancels_daily enable row level security;
+revoke all on coupang_growth_cancels_daily from anon, authenticated;
+
 -- ─────────────────────────────────────────────────────────────
 -- 34. 주문의 쿠폰 할인 — 판매가와 실제 판매가는 다르다
 -- ─────────────────────────────────────────────────────────────
