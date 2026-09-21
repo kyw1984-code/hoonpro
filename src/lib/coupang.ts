@@ -154,7 +154,11 @@ export interface ProfitResponse {
    */
   channels?: {
     marketplace: { quantity: number; salesAmount: number };
-    growth: { quantity: number; salesAmount: number };
+    growth: {
+      quantity: number; salesAmount: number;
+      /** 그로스에서 뺀 취소. 주문 API가 취소를 안 줘 추정(쿠팡 30일 집계 비율) 또는 판매분석 파일로 뺀다 */
+      cancel?: { quantity: number; amount: number; estimateQty: number; fileQty: number; fileDays: number };
+    };
   };
   /** 기간 안의 모든 날짜. 판매가 없던 날도 0으로 채워져 있다 */
   daily: ProfitDay[];
@@ -484,6 +488,9 @@ export const coupangApi = {
     orderedAt?: string | null; orderedQty?: number; receivedAt?: string | null; receivedQty?: number | null; memo?: string;
   }) => request<{ ok: true; id: string }>('growth-inbound-save', { method: 'POST', body }),
   growthInboundDelete: (id: string) => request<{ ok: true }>('growth-inbound-delete', { method: 'POST', body: { id } }),
+  /** 쿠팡 판매분석 파일(옵션별)의 그로스 취소를 그 날짜 매출에 반영 */
+  growthCancelUpload: (body: { date: string; rows: Array<{ vendorItemId: string; cancelQty: number; cancelAmount: number; grossQty?: number; grossAmount?: number }> }) =>
+    request<{ ok: true; date: string; options: number; matched: number; cancelQty: number; cancelAmount: number; fileGross: number; ourGross: number }>('growth-cancel-upload', { method: 'POST', body }),
   adCosts: (days: number) => request<AdCostsResponse>(`ad-costs&days=${days}`),
   adCostSave: (body: {
     from: string; to: string; daily?: { date: string; cost: number }[]; total?: number; source?: 'report' | 'manual';

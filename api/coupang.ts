@@ -1469,10 +1469,12 @@ async function syncRocketGrowth(
   }
 
   const batchAt = new Date().toISOString();
+  // 취소를 뺀다. 주문 API가 취소를 안 주므로 판매분석 파일이 있는 날은 그 값으로,
+  // 없는 날은 쿠팡 30일 집계에서 나온 옵션별 취소율로 추정한다.
+  const cancels = await loadGrowthCancelBasis(userId, from, to);
   const rows = [...agg.values()].map(r => {
     const coupon = couponByKey.get(`${r.sale_date}:${r.vendor_item_id}`) ?? 0;
-    const { commission, settlement } = growthSettlement(r.sales_amount, coupon);
-    return { ...r, commission, settlement_amount: settlement, updated_at: batchAt };
+    return { ...applyGrowthCancel(r, coupon, cancels), updated_at: batchAt };
   });
 
   // 윙과 같은 이유로 먼저 덮어쓰고 나중에 치운다. 이 판매자는 매출의 여덟 할이
@@ -1494,6 +1496,167 @@ async function syncRocketGrowth(
       .lt('updated_at', batchAt);
   }
   sum.growthCancelled = cancelled;
+}
+
+// ── 그로스 취소 반영 ──────────────────────────────────────────
+//
+// 로켓그로스 주문 API는 결제된 주문만 주고 취소 여부는 주지 않는다 (응답 키가
+// vendorId·orderId·paidAt·orderItems 네 개뿐이고, 취소 조회 API는 판매자배송만
+// 돌려준다 — 후보 경로를 전부 두드려 확인했다). 그래서 우리 숫자는 쿠팡 판매
+// 분석의 '총 매출·총 판매수'(취소 전)와 같고, 화면의 '매출'(취소 뺀 값)보다 크다.
+//
+// 두 가지로 뺀다.
+//   1) 판매분석 파일: 옵션별 '총 취소된 상품수·취소 금액'을 그 날짜에 그대로 적용 (정확)
+//   2) 추정: 재고 API가 주는 옵션별 '최근 30일 판매수'(취소 뺀 값)와 우리 30일
+//      결제 수량의 비율을 취소율로 잡는다 (날짜별로는 어긋날 수 있다)
+// quantity·sales_amount는 취소를 뺀 값이고 원래 값은 gross_*에 남긴다. 순이익·
+// 추이·리포트가 전부 quantity를 읽으므로 여기서 한 번 빼면 어디서나 반영된다.
+
+interface GrowthCancelBasis {
+  /** 파일로 올린 정확한 취소 — key: date:vendorItemId */
+  file: Map<string, { qty: number; amount: number }>;
+  /** 옵션별 추정 취소율 (0~0.9) */
+  ratio: Map<string, number>;
+  /** 옵션별 30일 표본이 작을 때 쓰는 계정 전체 취소율 */
+  overallRatio: number;
+}
+
+async function loadGrowthCancelBasis(userId: string, from: string, to: string): Promise<GrowthCancelBasis> {
+  const empty: GrowthCancelBasis = { file: new Map(), ratio: new Map(), overallRatio: 0 };
+  if (!supabase) return empty;
+  const today = kstToday();
+  const [fileRes, invRes, salesRes] = await Promise.all([
+    selectAll<any>((f, t) => supabase!.from('coupang_growth_cancels_daily')
+      .select('sale_date, vendor_item_id, cancel_qty, cancel_amount')
+      .eq('user_id', userId).gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
+    selectAll<any>((f, t) => supabase!.from('coupang_growth_inventory')
+      .select('vendor_item_id, sales_30d, synced_at').eq('user_id', userId).order('vendor_item_id').range(f, t)),
+    // 쿠팡 30일 집계와 같은 창: 재고를 받은 날의 전날부터 30일
+    selectAll<any>((f, t) => supabase!.from('coupang_sales_daily')
+      .select('vendor_item_id, sale_date, quantity, gross_quantity')
+      .eq('user_id', userId).eq('channel', 'growth')
+      .gte('sale_date', addDays(today, -31)).lte('sale_date', addDays(today, -1))
+      .order('sale_date').range(f, t)),
+  ]);
+  for (const r of fileRes.rows) {
+    empty.file.set(`${String(r.sale_date).slice(0, 10)}:${r.vendor_item_id}`, {
+      qty: Number(r.cancel_qty) || 0, amount: Number(r.cancel_amount) || 0,
+    });
+  }
+  const gross30 = new Map<string, number>();
+  for (const r of salesRes.rows) {
+    const id = String(r.vendor_item_id);
+    // gross_quantity가 없는 옛 행은 quantity가 곧 총 수량이다
+    const g = r.gross_quantity === null || r.gross_quantity === undefined ? Number(r.quantity) || 0 : Number(r.gross_quantity) || 0;
+    gross30.set(id, (gross30.get(id) ?? 0) + g);
+  }
+  let netAll = 0;
+  let grossAll = 0;
+  for (const inv of invRes.rows) {
+    const id = String(inv.vendor_item_id);
+    const net = inv.sales_30d === null || inv.sales_30d === undefined ? null : Number(inv.sales_30d) || 0;
+    const gross = gross30.get(id) ?? 0;
+    if (net === null || gross <= 0) continue;
+    netAll += Math.min(net, gross);
+    grossAll += gross;
+    // 표본이 열 개는 넘어야 옵션별 비율을 믿는다. 그 아래는 계정 전체 비율을 쓴다.
+    if (gross >= 10) empty.ratio.set(id, Math.min(0.9, Math.max(0, 1 - net / gross)));
+  }
+  empty.overallRatio = grossAll > 0 ? Math.min(0.9, Math.max(0, 1 - netAll / grossAll)) : 0;
+  return empty;
+}
+
+/** 그로스 매출 행 하나에 취소를 적용한다. r은 취소 전(gross) 값이어야 한다 */
+function applyGrowthCancel(
+  r: { sale_date: string; vendor_item_id: string; quantity: number; sales_amount: number; [k: string]: any },
+  coupon: number,
+  basis: GrowthCancelBasis,
+) {
+  const grossQty = Math.max(0, Number(r.quantity) || 0);
+  const grossAmt = Math.max(0, Number(r.sales_amount) || 0);
+  const file = basis.file.get(`${r.sale_date}:${r.vendor_item_id}`);
+  let cancelQty = 0;
+  let cancelAmt = 0;
+  let source: string | null = null;
+  if (file) {
+    cancelQty = Math.min(grossQty, file.qty);
+    cancelAmt = Math.min(grossAmt, file.amount);
+    source = 'file';
+  } else {
+    const ratio = basis.ratio.get(String(r.vendor_item_id)) ?? basis.overallRatio;
+    if (ratio > 0 && grossQty > 0) {
+      cancelQty = Math.min(grossQty, Math.round(grossQty * ratio));
+      cancelAmt = Math.round(grossAmt * (cancelQty / grossQty));
+      source = 'estimate';
+    }
+  }
+  const netQty = grossQty - cancelQty;
+  const netAmt = grossAmt - cancelAmt;
+  // 취소된 주문의 쿠폰도 같이 빠진다. 주문별로는 모르니 비율로 줄인다.
+  const netCoupon = grossQty > 0 ? Math.round(coupon * (netQty / grossQty)) : coupon;
+  const { commission, settlement } = growthSettlement(netAmt, netCoupon);
+  return {
+    ...r,
+    quantity: netQty, sales_amount: netAmt,
+    gross_quantity: grossQty, gross_amount: grossAmt,
+    cancel_quantity: cancelQty, cancel_amount: cancelAmt, cancel_source: source,
+    commission, settlement_amount: settlement,
+  };
+}
+
+/**
+ * 판매분석 파일(옵션별)로 올린 취소를 저장하고 그 날짜의 그로스 매출에 바로 적용한다.
+ * body: { date, rows: [{ vendorItemId, cancelQty, cancelAmount, grossQty, grossAmount }] }
+ */
+async function handleGrowthCancelUpload(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const date = String(req.body?.date ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: '날짜가 필요합니다.' });
+  const input = Array.isArray(req.body?.rows) ? req.body.rows : [];
+  if (input.length === 0) return res.status(400).json({ error: '로켓그로스 줄이 없습니다.' });
+  if (input.length > 2000) return res.status(400).json({ error: '한 번에 2000줄까지 올릴 수 있습니다.' });
+  const n = (v: any) => Math.max(0, Math.round(Math.abs(Number(v) || 0)));
+  const rows = input
+    .map((r: any) => ({
+      user_id: userId, sale_date: date, vendor_item_id: String(r.vendorItemId ?? '').trim(),
+      cancel_qty: n(r.cancelQty), cancel_amount: n(r.cancelAmount),
+      gross_qty: r.grossQty === undefined ? null : n(r.grossQty), gross_amount: r.grossAmount === undefined ? null : n(r.grossAmount),
+      uploaded_at: new Date().toISOString(),
+    }))
+    .filter((r: any) => r.vendor_item_id);
+  const err = await upsertChunked('coupang_growth_cancels_daily', rows, 'user_id,sale_date,vendor_item_id');
+  if (err) return res.status(500).json({ error: `저장하지 못했습니다: ${err}` });
+
+  // 그 날짜의 그로스 매출 행에 바로 적용한다. 다음 수집을 기다리지 않는다.
+  const { rows: sales } = await selectAll<any>((f, t) => supabase!.from('coupang_sales_daily')
+    .select('*').eq('user_id', userId).eq('channel', 'growth').eq('sale_date', date).order('vendor_item_id').range(f, t));
+  const { rows: couponRows } = await selectAll<any>((f, t) => supabase!.from('coupang_order_coupons')
+    .select('vendor_item_id, discount').eq('user_id', userId).eq('channel', 'growth').eq('sale_date', date)
+    .order('vendor_item_id').range(f, t));
+  const couponBy = new Map<string, number>();
+  for (const c of couponRows) couponBy.set(String(c.vendor_item_id), (couponBy.get(String(c.vendor_item_id)) ?? 0) + (Number(c.discount) || 0));
+  const basis = await loadGrowthCancelBasis(userId, date, date);
+  const updated = sales.map((s: any) => {
+    const gross = {
+      ...s,
+      quantity: s.gross_quantity ?? s.quantity,
+      sales_amount: s.gross_amount ?? s.sales_amount,
+    };
+    return { ...applyGrowthCancel(gross, couponBy.get(String(s.vendor_item_id)) ?? 0, basis), updated_at: new Date().toISOString() };
+  });
+  if (updated.length > 0) {
+    const uErr = await upsertChunked('coupang_sales_daily', updated, 'user_id,sale_date,vendor_item_id,channel');
+    if (uErr) return res.status(500).json({ error: `매출에 반영하지 못했습니다: ${uErr}` });
+  }
+  // 파일의 총 판매수와 우리 결제 수량이 맞는지 — 날짜를 잘못 골랐으면 여기서 드러난다
+  const ourGross = updated.reduce((acc: number, r: any) => acc + (Number(r.gross_quantity) || 0), 0);
+  const fileGross = rows.reduce((acc: number, r: any) => acc + (Number(r.gross_qty) || 0), 0);
+  const applied = updated.reduce((acc: number, r: any) => acc + (r.cancel_source === 'file' ? Number(r.cancel_quantity) || 0 : 0), 0);
+  const appliedAmount = updated.reduce((acc: number, r: any) => acc + (r.cancel_source === 'file' ? Number(r.cancel_amount) || 0 : 0), 0);
+  return res.status(200).json({
+    ok: true, date, options: rows.length, matched: updated.filter((r: any) => r.cancel_source === 'file').length,
+    cancelQty: applied, cancelAmount: appliedAmount, fileGross, ourGross,
+  });
 }
 
 // ── 그로스 주문별 쿠폰 ────────────────────────────────────────
@@ -3190,6 +3353,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'reorder-rule': return await handleReorderRule(userId, req, res);
       case 'inventory': return await handleInventory(userId, req, res);
       case 'growth-reconcile': return await handleGrowthReconcile(userId, res);
+      case 'growth-cancel-upload': return await handleGrowthCancelUpload(userId, req, res);
       case 'growth-inbound-save': return await handleGrowthInboundSave(userId, req, res);
       case 'growth-inbound-delete': return await handleGrowthInboundDelete(userId, req, res);
       case 'returns': return await handleReturns(userId, req, res);
@@ -3871,10 +4035,21 @@ export async function computeProfit(
   // 윙(마켓플레이스)과 로켓그로스는 회계 기준이 다르다. 합계 하나로 뭉치면
   // 확정 정산과 주문 기준 추정이 소리 없이 섞이므로 따로 낸다.
   const byChannel = { marketplace: { quantity: 0, salesAmount: 0 }, growth: { quantity: 0, salesAmount: 0 } };
+  // 그로스에서 뺀 취소. 화면이 "총 N개 중 취소 M개(추정 a·파일 b)"라고 밝힌다.
+  const growthCancel = { quantity: 0, amount: 0, estimateQty: 0, fileQty: 0, fileDays: new Set<string>() };
   for (const sale of salesRes.rows) {
     const bucket = sale.channel === 'growth' ? byChannel.growth : byChannel.marketplace;
     bucket.quantity += Number(sale.quantity) || 0;
     bucket.salesAmount += Number(sale.sales_amount) || 0;
+    if (sale.channel === 'growth' && sale.cancel_quantity) {
+      const cq = Number(sale.cancel_quantity) || 0;
+      growthCancel.quantity += cq;
+      growthCancel.amount += Number(sale.cancel_amount) || 0;
+      if (sale.cancel_source === 'file') {
+        growthCancel.fileQty += cq;
+        growthCancel.fileDays.add(String(sale.sale_date).slice(0, 10));
+      } else growthCancel.estimateQty += cq;
+    }
   }
 
   // ── 일별 추이 ──
@@ -3966,6 +4141,13 @@ export async function computeProfit(
       growth: {
         quantity: byChannel.growth.quantity,
         salesAmount: Math.round(byChannel.growth.salesAmount),
+        cancel: {
+          quantity: growthCancel.quantity,
+          amount: Math.round(growthCancel.amount),
+          estimateQty: growthCancel.estimateQty,
+          fileQty: growthCancel.fileQty,
+          fileDays: growthCancel.fileDays.size,
+        },
       },
     },
     // 원가를 하나도 안 넣었으면 순이익이 매출과 같아 보여 오해를 부른다. 화면에서 경고한다.
