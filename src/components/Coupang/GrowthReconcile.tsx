@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Boxes, ChevronDown, ChevronUp, Loader2, Plus, Scale, Trash2 } from 'lucide-react';
-import { coupangApi, type InboundRecord, type ReconcileResponse, type ReconcileRow, type ReconcileStatus } from '../../lib/coupang';
+import { coupangApi, type InboundRecord, type InventoryRow, type ReconcileResponse, type ReconcileRow, type ReconcileStatus } from '../../lib/coupang';
 
 const STATUS_META: Record<ReconcileStatus, { label: string; className: string }> = {
   short: { label: '부족', className: 'border-critical/35 bg-critical-soft text-critical' },
@@ -41,6 +41,8 @@ const emptyDraft = (): Draft => ({ kind: 'inbound', orderedAt: today(), orderedQ
 
 export function GrowthReconcile() {
   const [data, setData] = useState<ReconcileResponse | null>(null);
+  // 재고 예측의 판정(남은 일수·입고 권장)을 옵션별로 붙인다 — 대조하면서 바로 발주 수량을 본다
+  const [forecast, setForecast] = useState<Map<string, InventoryRow>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<'all' | 'tracked' | 'off'>('all');
@@ -49,8 +51,12 @@ export function GrowthReconcile() {
 
   const load = useCallback(async () => {
     try {
-      const d = await coupangApi.growthReconcile();
+      const [d, inv] = await Promise.all([
+        coupangApi.growthReconcile(),
+        coupangApi.inventory(14, 30).catch(() => null),
+      ]);
       setData(d);
+      if (inv) setForecast(new Map(inv.rows.map(r => [r.vendorItemId, r])));
       setError(null);
     } catch (e: any) {
       setError(e.message);
@@ -146,6 +152,7 @@ export function GrowthReconcile() {
                   <th className="px-3 py-2.5 text-right font-medium">예상 재고</th>
                   <th className="px-3 py-2.5 text-right font-medium">쿠팡 재고</th>
                   <th className="px-3 py-2.5 text-right font-medium">차이</th>
+                  <th className="px-3 py-2.5 text-right font-medium">발주 제안<span className="block text-[10px] font-normal">리드타임 14일</span></th>
                   <th className="px-4 py-2.5 text-right font-medium">기록</th>
                 </tr>
               </thead>
@@ -157,6 +164,7 @@ export function GrowthReconcile() {
                     <RowGroup
                       key={r.vendorItemId}
                       row={r}
+                      forecast={forecast.get(r.vendorItemId) ?? null}
                       meta={meta}
                       isOpen={isOpen}
                       onToggle={() => setOpen(isOpen ? null : r.vendorItemId)}
@@ -174,9 +182,10 @@ export function GrowthReconcile() {
 }
 
 function RowGroup({
-  row, meta, isOpen, onToggle, onChanged,
+  row, forecast, meta, isOpen, onToggle, onChanged,
 }: {
   row: ReconcileRow;
+  forecast: InventoryRow | null;
   meta: { label: string; className: string };
   isOpen: boolean;
   onToggle: () => void;
@@ -209,6 +218,21 @@ function RowGroup({
           {row.diff === null ? '-' : `${row.diff > 0 ? '+' : ''}${num(row.diff)}`}
           <span className={`ml-1.5 inline-flex rounded-control border px-1.5 py-0.5 text-[10.5px] font-semibold ${meta.className}`}>{meta.label}</span>
         </td>
+        <td className="px-3 py-2.5 text-right tabular-nums">
+          {!forecast || forecast.risk === 'idle' ? (
+            <span className="text-ink-3">-</span>
+          ) : forecast.reorderQty > 0 ? (
+            <>
+              <span className={`font-semibold ${forecast.risk === 'out' || forecast.risk === 'urgent' ? 'text-critical' : 'text-ink'}`}>{num(forecast.reorderQty)}개</span>
+              <span className="block text-[10px] text-ink-3">{forecast.daysLeft === null ? '판매 없음' : forecast.risk === 'out' ? '품절' : `${forecast.daysLeft}일치 남음`} · 하루 {forecast.velocity}개</span>
+            </>
+          ) : (
+            <>
+              <span className="text-ink-3">충분</span>
+              {forecast.daysLeft !== null && <span className="block text-[10px] text-ink-3">{forecast.daysLeft}일치</span>}
+            </>
+          )}
+        </td>
         <td className="px-4 py-2.5 text-right">
           <button
             onClick={onToggle}
@@ -220,7 +244,7 @@ function RowGroup({
       </tr>
       {isOpen && (
         <tr className="border-b border-line/60 bg-paper-2/40">
-          <td colSpan={9} className="px-4 py-3">
+          <td colSpan={10} className="px-4 py-3">
             <RecordsPanel row={row} onChanged={onChanged} />
           </td>
         </tr>

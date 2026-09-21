@@ -22,14 +22,16 @@ import { ReturnReasons } from './ReturnReasons';
 import { CouponEffect } from './CouponEffect';
 import { BriefSettings } from './BriefSettings';
 import { HealthCheck } from './HealthCheck';
+import { OrderHours } from './OrderHours';
 import { HowTo } from '../HowTo';
 
-type View = 'profit' | 'health' | 'settlement' | 'inventory' | 'reconcile' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
+type View = 'profit' | 'health' | 'hours' | 'settlement' | 'inventory' | 'reconcile' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
 
 // feature: 관리자 [탭 표시·순서]에서 숨길 수 있는 기능 id. 숨기면 수강생에게 안 보인다.
 const VIEWS: Array<{ id: View; label: string; feature?: string }> = [
   { id: 'profit', label: '순이익' },
   { id: 'health', label: '훈프로 상품 진단', feature: 'coupang.health' },
+  { id: 'hours', label: '주문 시간대', feature: 'coupang.hours' },
   { id: 'settlement', label: '정산 캘린더' },
   { id: 'inventory', label: '재고 예측' },
   { id: 'reconcile', label: '재고 대조' },
@@ -206,6 +208,7 @@ export function CoupangDashboard({ hiddenTabs = [], adminHidden = [] }: { hidden
         </div>
       )}
       {view === 'health' && <HealthCheck onGo={v => setView(v as View)} />}
+      {view === 'hours' && <OrderHours />}
       {view === 'inventory' && <InventoryForecast />}
       {view === 'reconcile' && <GrowthReconcile />}
       {view === 'returns' && (

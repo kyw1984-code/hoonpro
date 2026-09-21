@@ -1026,6 +1026,8 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
   // 발주서의 할인 항목은 의미가 애매하다(같은 상품인데 주문마다 개당 9천~1만9천원).
   // 쿠팡이 "이 주문에 적용된 쿠폰"을 직접 알려주는 주문별 쿠폰 조회를 윙에도 쓴다.
   const orderMeta = new Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number; sheetDiscount?: number }> }>();
+  // 주문 시각(시) 집계 — 주문 시간대 화면용
+  const hourAgg = new Map<string, { user_id: string; order_date: string; hour: number; channel: string; quantity: number; amount: number }>();
   let sampleLogged = false;
 
   for (const [cFrom, cTo] of dateChunks(from, to)) {
@@ -1079,6 +1081,7 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
             cur.order_amount += amount;
             cur.seller_discount += discount.seller;
             cur.coupang_discount += discount.coupang;
+            addOrderHour(hourAgg, userId, orderDate, kstHourOf(sheet?.orderedAt ?? sheet?.paidAt ?? sheet?.createdAt), 'wing', qty, amount);
 
             if (orderId) {
               // 발주서 상태(결제완료·상품준비중…)를 같이 둔다. 쿠폰 조회가 500으로
@@ -1118,6 +1121,9 @@ async function syncOrders(userId: string, creds: CoupangCreds, from: string, to:
   const err = await upsertChunked('coupang_orders_daily', rows, 'user_id,order_date,vendor_item_id');
   if (err) sum.errors.push(err);
   sum.orders = rows.length;
+  // 시간대 집계. 실패해도 매출 수집은 그대로 간다 — 부가 자료다.
+  const hourErr = await upsertChunked('coupang_order_hours', [...hourAgg.values()].map(r => ({ ...r, updated_at: batchAt })), 'user_id,order_date,hour,channel');
+  if (hourErr) console.error('[coupang] 주문 시간대 저장 실패(윙)', { detail: hourErr });
 
   // 쿠팡에서 사라진 줄만 치운다. 중간에 한 번이라도 실패했으면 지금 모은 값이
   // 불완전하므로 치우지 않는다 — 멀쩡하던 과거 데이터가 날아간다.
@@ -1279,6 +1285,39 @@ export function rgOrdersQuery(from: string, to: string, token: string): string {
 }
 
 /** epoch millis(또는 날짜 문자열) → 한국 날짜 YYYY-MM-DD */
+/**
+ * 주문 시각의 한국 시간 '시'(0~23). 숫자(epoch)면 +9시간, 문자열에 시간대가
+ * 붙어 있으면 그걸 존중하고, 없으면 쿠팡이 한국 시간으로 준 것이라 그대로 읽는다.
+ */
+function kstHourOf(value: unknown): number | null {
+  if (typeof value === 'number' || (typeof value === 'string' && /^\d{10,}$/.test(value))) {
+    const ms = Number(value);
+    if (!Number.isFinite(ms)) return null;
+    const t = ms < 1e12 ? ms * 1000 : ms;
+    return new Date(t + 9 * 3600 * 1000).getUTCHours();
+  }
+  if (typeof value !== 'string') return null;
+  if (/(Z|[+-]\d{2}:?\d{2})$/.test(value)) {
+    const t = Date.parse(value);
+    return Number.isFinite(t) ? new Date(t + 9 * 3600 * 1000).getUTCHours() : null;
+  }
+  const m = value.match(/[T ](\d{2}):\d{2}/);
+  return m ? Math.min(23, Math.max(0, Number(m[1]))) : null;
+}
+
+/** 시간대 집계 한 줄 더하기 — date·hour·channel 키로 수량과 금액을 모은다 */
+function addOrderHour(
+  hourAgg: Map<string, { user_id: string; order_date: string; hour: number; channel: string; quantity: number; amount: number }>,
+  userId: string, date: string, hour: number | null, channel: 'wing' | 'growth', qty: number, amount: number,
+) {
+  if (hour === null || !date) return;
+  const key = `${date}:${hour}:${channel}`;
+  const cur = hourAgg.get(key) ?? { user_id: userId, order_date: date, hour, channel, quantity: 0, amount: 0 };
+  cur.quantity += qty;
+  cur.amount += amount;
+  hourAgg.set(key, cur);
+}
+
 function kstDateOf(value: unknown): string | null {
   if (typeof value === 'number' || (typeof value === 'string' && /^\d{10,}$/.test(value))) {
     const ms = Number(value);
@@ -1308,6 +1347,7 @@ async function syncRocketGrowth(
   let cancelled = 0;
   let firstOrderShape = '';
   const hourHist: Record<number, number> = {};
+  const hourAgg = new Map<string, { user_id: string; order_date: string; hour: number; channel: string; quantity: number; amount: number }>();
   const orderKeyUnion = new Set<string>();
   const itemKeyUnion = new Set<string>();
   // 주문별 쿠폰을 물으려면 주문번호와 옵션별 금액이 필요하다
@@ -1407,6 +1447,7 @@ async function syncRocketGrowth(
           cur.quantity += qty;
           cur.sales_amount += lineAmount;
           agg.set(key, cur);
+          addOrderHour(hourAgg, userId, date, kstHourOf(it?.paidAt ?? order?.paidAt ?? order?.paidDate), 'growth', qty, lineAmount);
 
           const orderId = pickStr(order, ['orderId', 'orderID']);
           if (orderId) {
@@ -1471,6 +1512,10 @@ async function syncRocketGrowth(
   }
 
   const batchAt = new Date().toISOString();
+  {
+    const hourErr = await upsertChunked('coupang_order_hours', [...hourAgg.values()].map(r => ({ ...r, updated_at: batchAt })), 'user_id,order_date,hour,channel');
+    if (hourErr) console.error('[coupang] 주문 시간대 저장 실패(그로스)', { detail: hourErr });
+  }
   // 취소를 뺀다. 주문 API가 취소를 안 주므로 판매분석 파일이 있는 날은 그 값으로,
   // 없는 날은 쿠팡 30일 집계에서 나온 옵션별 취소율로 추정한다.
   const cancels = await loadGrowthCancelBasis(userId, from, to);
@@ -3342,6 +3387,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'goals-save':
         if (await featureHidden(supabase, 'home.goals', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
         return await handleGoalsSave(userId, req, res);
+      case 'order-hours':
+        if (await featureHidden(supabase, 'coupang.hours', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        return await handleOrderHours(userId, req, res);
       case 'costs': return await handleCosts(userId, res);
       case 'cost-save': return await handleCostSave(userId, req, res);
       case 'ad-costs': return await handleAdCosts(userId, req, res);
@@ -5821,6 +5869,36 @@ async function handleGoalsSave(userId: string, req: VercelRequest, res: VercelRe
   }, { onConflict: 'user_id,month' });
   if (error) return res.status(500).json({ error: '목표를 저장하지 못했습니다.' });
   return res.status(200).json({ ok: true, month });
+}
+
+// ── 주문 시간대·요일 패턴 ────────────────────────────────────
+async function handleOrderHours(userId: string, req: VercelRequest, res: VercelResponse) {
+  const days = Math.min(180, Math.max(7, Number(req.query.days) || 28));
+  const to = addDays(kstToday(), -1);
+  const from = addDays(to, -(days - 1));
+  const { rows } = await selectAll<{ order_date: string; hour: number; channel: string; quantity: number; amount: number }>((f, t) => supabase!
+    .from('coupang_order_hours').select('order_date, hour, channel, quantity, amount')
+    .eq('user_id', userId).gte('order_date', from).lte('order_date', to).order('order_date').range(f, t));
+  const byHour = Array.from({ length: 24 }, (_, hour) => ({ hour, quantity: 0, amount: 0 }));
+  const byWeekday = Array.from({ length: 7 }, (_, weekday) => ({ weekday, quantity: 0, amount: 0 }));
+  const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
+  for (const r of rows) {
+    const h = Math.min(23, Math.max(0, Number(r.hour) || 0));
+    // 날짜 문자열 그대로의 요일 — Z로 읽어 시간대 보정이 끼어들지 않게 한다
+    const weekday = new Date(`${String(r.order_date).slice(0, 10)}T00:00:00Z`).getUTCDay();
+    const q = Number(r.quantity) || 0;
+    const a = Number(r.amount) || 0;
+    byHour[h].quantity += q; byHour[h].amount += a;
+    byWeekday[weekday].quantity += q; byWeekday[weekday].amount += a;
+    grid[weekday][h] += q;
+  }
+  const total = byHour.reduce((n, h) => n + h.quantity, 0);
+  const peakHours = [...byHour].sort((a, b) => b.quantity - a.quantity).slice(0, 3).filter(h => h.quantity > 0).map(h => h.hour).sort((a, b) => a - b);
+  const peakQty = peakHours.reduce((n, h) => n + byHour[h].quantity, 0);
+  const peakWeekday = byWeekday.reduce((best, d) => (d.quantity > byWeekday[best].quantity ? d.weekday : best), 0);
+  return res.status(200).json({
+    from, to, days, byHour, byWeekday, grid, peakHours, peakShare: total > 0 ? Math.round((peakQty / total) * 100) : 0, peakWeekday,
+  });
 }
 
 // ── 매출 급감·급증 감지 ────────────────────────────────────────

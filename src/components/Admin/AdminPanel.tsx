@@ -511,6 +511,7 @@ const TAB_LABELS: { id: string; label: string }[] = [
 // lib/feature-gate.ts FEATURE_IDS, api/admin.ts FEATURE_IDS와 같은 목록이어야 한다.
 const FEATURE_LABELS: Array<{ id: string; label: string }> = [
   { id: 'coupang.health', label: '정산AI › 훈프로 상품 진단' },
+  { id: 'coupang.hours', label: '정산AI › 주문 시간대·요일 패턴' },
   { id: 'home.movers', label: '홈 › 이번 주 매출 변화 카드 (+브리핑 메일 항목)' },
   { id: 'home.goals', label: '홈 › 월 목표 진행률 카드' },
 ];
