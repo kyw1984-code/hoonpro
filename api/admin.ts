@@ -519,7 +519,7 @@ const DEFAULTS = { imageModel: 'gpt-image-2', imageQuality: 'high', aiIntegrated
 // (coupang이 빠져 있어 쿠팡 탭은 순서를 바꿀 수 없었다 — 추가했다)
 const TAB_IDS = ['home', 'thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'coupang', 'qa', 'works'];
 // 탭 안의 기능·홈 카드 — 숨김만 되고 순서는 없다 (lib/feature-gate.ts FEATURE_IDS와 같아야 한다)
-const FEATURE_IDS = ['coupang.health', 'coupang.hours', 'home.movers', 'home.goals'];
+const FEATURE_IDS = ['coupang.health', 'coupang.hours', 'home.movers', 'home.goals', 'ranktracker.changes'];
 const HIDEABLE_IDS = [...TAB_IDS, ...FEATURE_IDS];
 
 // 사업자 정보 항목 (프론트 src/lib/company.ts CompanyInfo와 일치)

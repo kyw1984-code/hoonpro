@@ -358,10 +358,57 @@ export function ProfitDashboard({ onEditCosts }: Props) {
       '원가', '반품건수', '반품비용', '순이익', '이익률(%)', '원가입력',
     ];
     const XLSX = await loadXLSX();
+    const wb = XLSX.utils.book_new();
+
+    // 요약 시트 — 세무사에게 넘길 때 첫 장에서 기간 합계가 바로 보이게
+    const summaryRows: Array<[string, string | number]> = [
+      ['기간', `${data.from} ~ ${data.to}`],
+      ['판매수량', data.totals.quantity],
+      ['매출(실판매가)', Math.round(data.totals.salesAmount)],
+      ['쿠폰할인(판매자 부담)', Math.round(data.totals.couponDiscount ?? 0)],
+      ['쿠팡수수료', Math.round(data.totals.commission)],
+      ['정산예정액', Math.round(data.totals.settlementAmount)],
+      ['원가', Math.round(data.totals.unitCostTotal)],
+      ['반품비용', Math.round(data.totals.returnCost)],
+      ['광고비', Math.round(adCost)],
+      ['광고비 차감 후 순이익', Math.round(netProfit)],
+      ['이익률(%)', Number(netMargin.toFixed(1))],
+      ['원가 입력 비율(%)', Math.round(data.costCoverage ?? 0)],
+    ];
+    if (data.channels) {
+      summaryRows.push(['윙(판매자배송) 매출', Math.round(data.channels.marketplace.salesAmount)]);
+      summaryRows.push(['로켓그로스 매출', Math.round(data.channels.growth.salesAmount)]);
+      if (data.channels.growth.cancel && data.channels.growth.cancel.quantity > 0) {
+        summaryRows.push(['로켓그로스 취소 반영', `${data.channels.growth.cancel.quantity}개 · ${Math.round(data.channels.growth.cancel.amount)}원`]);
+      }
+    }
+    if (data.adCost && data.adCost.coveredDays < data.adCost.spanDays) {
+      summaryRows.push(['광고비 참고', `${data.adCost.spanDays}일 중 ${data.adCost.coveredDays}일치만 있음 — 순이익이 실제보다 클 수 있음`]);
+    }
+    const wsSummary = XLSX.utils.aoa_to_sheet([['항목', '값'], ...summaryRows]);
+    wsSummary['!cols'] = [{ wch: 26 }, { wch: 40 }];
+    XLSX.utils.book_append_sheet(wb, wsSummary, '요약');
+
     const ws = XLSX.utils.json_to_sheet(sheet, { header });
     ws['!cols'] = [{ wch: 38 }, { wch: 20 }, { wch: 14 }, ...Array(9).fill({ wch: 12 })];
-    const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '상품별 순이익');
+
+    // 일별 시트 — 광고비를 뺀 순이익까지. 날짜별 추이를 표로 보려는 요청이 많다.
+    if (data.daily && data.daily.length > 0) {
+      const dailyRows = data.daily.map(d => ({
+        날짜: d.date,
+        판매수량: d.quantity,
+        매출: Math.round(d.salesAmount),
+        쿠팡수수료: Math.round(d.commission),
+        광고비: Math.round(d.adCost ?? 0),
+        '순이익(광고비 전)': Math.round(d.profit),
+        '순이익(광고비 후)': Math.round(d.profit - (d.adCost ?? 0)),
+      }));
+      const wsDaily = XLSX.utils.json_to_sheet(dailyRows);
+      wsDaily['!cols'] = [{ wch: 12 }, ...Array(6).fill({ wch: 14 })];
+      XLSX.utils.book_append_sheet(wb, wsDaily, '일별');
+    }
+
     XLSX.writeFile(wb, `훈프로_순이익_${data.from}_${data.to}.xlsx`);
   };
 

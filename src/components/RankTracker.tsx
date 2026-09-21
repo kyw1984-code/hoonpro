@@ -9,6 +9,7 @@ import { ChevronDown, ListOrdered, Loader2, RefreshCw, Users, X } from 'lucide-r
 import { getToken } from '../lib/auth';
 import { RankSparkline } from './RankSparkline';
 import { CompetitorPanel } from './CompetitorPanel';
+import { CompetitorChanges } from './CompetitorChanges';
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -124,6 +125,9 @@ export function RankTracker() {
         </div>
         {msg && <p className={`mt-2.5 text-[12px] ${msg.includes('완료') ? 'text-positive' : 'text-critical'}`}>{msg}</p>}
       </div>
+
+      {/* 경쟁 상품 변동 — 숨김이면 서버가 403을 주고 이 블록은 비어 있다 */}
+      <CompetitorChanges />
 
       <div className="rounded-panel border border-line bg-paper p-6">
         <div className="mb-4 flex items-center gap-2">
