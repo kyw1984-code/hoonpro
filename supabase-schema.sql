@@ -1019,6 +1019,25 @@ create table if not exists coupang_growth_inventory_daily (
 alter table coupang_growth_inventory_daily enable row level security;
 revoke all on coupang_growth_inventory_daily from anon, authenticated;
 
+-- 결제완료 단계에서 취소된 주문 (반품/취소 요청 목록 API, cancelType=CANCEL).
+-- 로켓그로스 주문 API는 취소 여부를 안 주므로, 여기서 잡히는 주문번호로 그로스 매출에서 뺀다.
+create table if not exists coupang_order_cancels (
+  user_id uuid not null references users(id) on delete cascade,
+  receipt_id text not null,
+  order_id text,
+  vendor_item_id text,
+  quantity int not null default 0,
+  cancel_type text,
+  status text,
+  requested_at timestamptz,
+  raw jsonb,
+  updated_at timestamptz default now(),
+  primary key (user_id, receipt_id)
+);
+create index if not exists idx_coc_cancel_user_order on coupang_order_cancels(user_id, order_id);
+alter table coupang_order_cancels enable row level security;
+revoke all on coupang_order_cancels from anon, authenticated;
+
 -- ─────────────────────────────────────────────────────────────
 -- 34. 주문의 쿠폰 할인 — 판매가와 실제 판매가는 다르다
 -- ─────────────────────────────────────────────────────────────

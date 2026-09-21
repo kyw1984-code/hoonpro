@@ -2248,6 +2248,72 @@ async function syncReturns(userId: string, creds: CoupangCreds, from: string, to
   const err = await upsertChunked('coupang_returns', rows, 'user_id,receipt_id');
   if (err) sum.errors.push(err);
   sum.returns = rows.length;
+
+  // 결제완료 단계 취소. 같은 API에 status 없이 cancelType=CANCEL로 물으면 온다
+  // (쿠팡 FAQ). 로켓그로스 주문 API는 취소 여부를 안 주므로 — 응답 키가
+  // vendorId·orderId·paidAt·orderItems 네 개뿐이다 — 그로스 판매수가 쿠팡 자체
+  // 30일 집계보다 20~40% 많았다. 여기서 잡히는 주문번호가 그로스 주문과 겹치면
+  // 그게 답이다. 반품 표와 섞지 않고 따로 둔다 — 반품 분석 화면이 취소를 반품으로
+  // 세면 안 된다.
+  const cancelRows: any[] = [];
+  let cancelShapeLogged = false;
+  for (const [cFrom, cTo] of dateChunks(from, to, 14)) {
+    if (outOfTime(deadline, sum)) break;
+    let nextToken = '';
+    for (let page = 0; page < LIMITS.pagesPerQuery; page++) {
+      if (outOfTime(deadline, sum)) break;
+      const query =
+        `createdAtFrom=${cFrom}&createdAtTo=${cTo}&cancelType=CANCEL&maxPerPage=50` +
+        (nextToken ? `&nextToken=${nextToken}` : '');
+      let r = await callReturns(query);
+      if (!r.ok && r.status === 429 && !outOfTime(deadline, sum)) {
+        await sleep(3_000);
+        r = await callReturns(query);
+      }
+      if (!r.ok) {
+        if (r.authFailed) {
+          sum.authFailed = true;
+          return;
+        }
+        const msg = `취소 조회: ${r.error}`;
+        if (!sum.errors.includes(msg)) sum.errors.push(msg);
+        break;
+      }
+      const list = listOf(r.data);
+      if (!cancelShapeLogged && list[0]) {
+        cancelShapeLogged = true;
+        const first = list[0];
+        const items = Array.isArray(first?.returnItems) ? first.returnItems : [];
+        console.info('coupang cancel shape —', `${list.length}건 / 키=${Object.keys(first).join(',')}` +
+          (items[0] ? ` / 항목키=${Object.keys(items[0]).join(',')}` : ''));
+      }
+      for (const c of list) {
+        const receiptId = pickStr(c, ['receiptId', 'cancelId', 'returnDeliveryId']);
+        if (!receiptId) continue;
+        const items = Array.isArray(c?.returnItems) ? c.returnItems : [c];
+        const first = items[0] ?? {};
+        cancelRows.push({
+          user_id: userId,
+          receipt_id: `C${receiptId}`,
+          order_id: pickStr(c, ['orderId', 'orderID']) || null,
+          vendor_item_id: pickStr(first, ['vendorItemId', 'vendorItemID']) || null,
+          quantity: items.reduce((n: number, it: any) => n + pickNum(it, ['cancelCount', 'purchaseCount', 'quantity'], 1), 0),
+          cancel_type: pickStr(c, ['cancelType', 'receiptType']) || null,
+          status: pickStr(c, ['receiptStatus', 'status', 'receiptStatusName']) || null,
+          requested_at: toIso(pickRaw(c, ['createdAt', 'receiptInsertDate', 'requestedAt'])),
+          raw: c,
+          updated_at: new Date().toISOString(),
+        });
+      }
+      nextToken = nextTokenOf(r.data);
+      if (!nextToken) break;
+    }
+  }
+  if (cancelRows.length > 0) {
+    const cErr = await upsertChunked('coupang_order_cancels', cancelRows, 'user_id,receipt_id');
+    if (cErr) sum.errors.push(`취소 저장: ${cErr}`);
+    console.info('coupang cancels —', `${cancelRows.length}건 (${from}~${to})`);
+  }
 }
 
 // ── 고객문의 동기화 ───────────────────────────────────────────
