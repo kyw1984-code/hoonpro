@@ -717,6 +717,11 @@ function detectDelivery(s: string): ParsedProduct["deliveryType"] {
   const lower = s.toLowerCase();
   if (/logorocketmerchant|merchant_?rocket|seller_?rocket|판매자로켓|rocket_?growth|로켓그로스/.test(lower)) return "jet";
   if (/logo_rocket|rocket_logo|rocketbadge|badge\.rocket|로켓배송|rocket-fresh|logorocketfresh|rocket_wow|로켓와우|"rocket"|rocketdelivery/.test(lower)) return "rocket";
+  // 배지 이름은 자주 바뀐다. 이미지·클래스·대체글 속성 안에 rocket/로켓이 있으면
+  // 로켓이다. 로켓그로스 상품도 구매자 화면에는 로켓배송 배지로 보이므로 여기서
+  // 잡힌다. 상품명(텍스트)에 든 '로켓'은 속성이 아니라 걸리지 않는다.
+  if (/(?:src|srcset|alt|class|title|aria-label)="[^"]*(?:rocket|로켓)/.test(lower)) return "rocket";
+  if (/>\s*로켓(?:배송|와우|프레시|설치|직구)?\s*</.test(s)) return "rocket";
   return "general";
 }
 
@@ -1006,6 +1011,25 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
   }
   products = [...merged.values()];
 
+  // 배지 목록을 남긴다 — 로켓·광고 배지 이름이 바뀌면 여기서 드러난다.
+  // 배지·로고로 보이는 이미지의 파일 이름과 대체글만, 상품 이미지는 제외.
+  if (products.length >= 20) {
+    const badges = new Map<string, number>();
+    for (const m of html.matchAll(/<img[^>]+>/g)) {
+      const tag = m[0];
+      if (!/badge|logo|rocket|로켓|ad_|_ad\b|delivery/i.test(tag)) continue;
+      const src = (tag.match(/src="([^"]+)"/)?.[1] ?? "").split("?")[0].split("/").pop() ?? "";
+      const alt = tag.match(/alt="([^"]*)"/)?.[1] ?? "";
+      const key = `${src}|${alt}`.slice(0, 80);
+      badges.set(key, (badges.get(key) ?? 0) + 1);
+    }
+    const rocket = products.filter(p => p.deliveryType !== "general").length;
+    console.log("coupang search badges —", {
+      products: products.length, rocket, ads: products.filter(p => p.isAd).length,
+      badges: [...badges.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, n]) => `${k}×${n}`),
+    });
+  }
+
   // 광고 표시가 하나도 안 잡히면 마크업이 바뀐 것일 수 있다. 첫 블록의 태그
   // 구조만(글자·주소 값 없이) 남겨 다음 표시를 찾을 단서로 삼는다.
   const adCount = products.filter(p => p.isAd).length;
@@ -1268,16 +1292,25 @@ async function checkRankNow(keyword: string, productId: string, decoded: any, de
   // 깊은 조회는 페이지마다 한도를 쓴다. 1페이지 시점의 남은 횟수를 그대로 돌려주면
   // 5회를 쓰고도 1회만 쓴 것처럼 보인다 — 마지막으로 확인한 값으로 갱신한다.
   let remaining = r.remaining ?? null;
-  for (let page = 2; page <= RANK_MAX_PAGES; page++) {
-    const more = await fetchSearchPage(keyword, page, decoded);
-    if (typeof more.remaining === "number") remaining = more.remaining;
-    if (more.stop) { stoppedBy = more.stop; break; }   // 한도에 걸렸거나 수집에 실패했다
-    if (!more.products || more.products.length === 0) break;   // 결과가 거기서 끝났다
-    all.push(...organicList(more.products));
+  // 두 쪽씩 한꺼번에 부른다. 한 쪽씩 기다리면 5쪽까지 다섯 배 걸린다. 한꺼번에
+  // 다 부르면 2쪽에 있는 상품에도 5쪽치 비용이 나가므로 둘씩 끊는다 — 시간은
+  // 절반, 헛돈은 최대 한 쪽.
+  const RANK_PARALLEL = 2;
+  for (let page = 2; page <= RANK_MAX_PAGES; page += RANK_PARALLEL) {
+    const pages = Array.from({ length: Math.min(RANK_PARALLEL, RANK_MAX_PAGES - page + 1) }, (_, i) => page + i);
+    const batch = await Promise.all(pages.map(pg => fetchSearchPage(keyword, pg, decoded)));
+    let ended = false;
+    for (const more of batch) {
+      if (typeof more.remaining === "number") remaining = more.remaining;
+      if (more.stop) { stoppedBy = more.stop; ended = true; break; }   // 한도에 걸렸거나 수집에 실패했다
+      if (!more.products || more.products.length === 0) { ended = true; break; }   // 결과가 거기서 끝났다
+      all.push(...organicList(more.products));
+    }
     idx = all.findIndex(p => p.productId === productId);
     if (idx >= 0) {
       return { rankChecked: true, currentRank: idx + 1, remaining, searchedTo: all.length };
     }
+    if (ended) break;
   }
   return { rankChecked: true, currentRank: null, remaining, searchedTo: all.length, stoppedBy };
 }
@@ -2203,8 +2236,26 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     return res.status(200).json({ ...cached.payload, cached: true });
   }
 
-  // 신규 수집은 사용 한도 포함 (Unlocker + GPT 비용 발생)
+  // 두 단계로 나눠 부를 수 있다. stage=collect는 리뷰만 모아 바로 돌려주고
+  // (화면이 표본을 먼저 보여준다), 뒤이어 stage 없이 부르면 방금 모은 리뷰를
+  // 다시 긁지 않고 요약만 한다. 모은 리뷰는 한 시간 둔다 — 요약이 실패해도
+  // 유료 수집을 다시 하지 않기 위해서다.
+  const stage = req.query.stage === "collect" ? "collect" : "full";
+  const rawKey = `rvraw:v1:${productId}`;
+  const raw = await cacheGet(rawKey);
+  const rawFresh = raw && raw.ageMs < 3600 * 1000 && Array.isArray(raw.payload?.reviews) && raw.payload.reviews.length > 0;
+
+  const reviews: { rating: number; text: string }[] = [];
+  const seenText = new Set<string>();
+  const diagParts: string[] = [];
+  const failLog: { label: string; status?: number; snippet?: string }[] = [];
   let remaining: number | null = null;
+
+  if (rawFresh) {
+    for (const rv of raw!.payload.reviews as { rating: number; text: string }[]) reviews.push(rv);
+    diagParts.push(String(raw!.payload.diag ?? "모은 리뷰 재사용"));
+  } else {
+  // 신규 수집은 사용 한도 포함 (Unlocker + GPT 비용 발생)
   if (!decoded?.isAdmin && supabase) {
     try {
       const today = kstToday();
@@ -2243,35 +2294,30 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     "Accept-Language": "ko-KR,ko;q=0.9",
   };
 
-  const reviews: { rating: number; text: string }[] = [];
-  const seenText = new Set<string>();
-  const diagParts: string[] = [];
-  const failLog: { label: string; status?: number; snippet?: string }[] = [];
-
-  for (let page = 1; page <= REVIEW_MAX_PAGES; page++) {
-    // 첫 쪽만 재시도한다. 첫 쪽이 오면 나머지도 대개 오고, 안 오면 재시도해도
-    // 안 온다 — 상품 페이지를 긁던 시절에 네 번까지 늘려 보고 확인했다.
-    const r = await fetchViaUnlocker(
-      reviewApiUrl(productId, page),
-      page === 1 ? 1 : 0,
-      100,
-      { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
-      headers,
-      3000,
-    );
+  // 첫 쪽은 끈질기게 부른다. Bright Data가 502를 돌려주는 일이 간헐적으로 있고
+  // (같은 시각 다른 상품은 정상), 3초·6초·9초 뒤 다시 부르면 대개 온다.
+  // 첫 쪽이 꽉 찼으면 나머지 쪽은 한꺼번에 부른다 — 한 쪽씩 기다리면 쪽 수만큼
+  // 느리다. 첫 쪽이 덜 찼으면 뒤 쪽은 비어 있으니 부르지 않는다(유료 호출).
+  const fetchPage = (page: number, retries: number) => fetchViaUnlocker(
+    reviewApiUrl(productId, page),
+    retries,
+    100,
+    { userId: decoded?.userId ?? null, feature: "sourcing-reviews" },
+    headers,
+    3000,
+  );
+  const takePage = (page: number, r: Awaited<ReturnType<typeof fetchViaUnlocker>>): number => {
     if (!r.ok) {
       diagParts.push(`${page}쪽 실패: ${r.error}`);
       failLog.push({ label: `${page}쪽`, status: r.status, snippet: r.snippet });
-      // 한 쪽이 막히면 뒤 쪽도 막힌다. 여기서 멈춰야 헛돈이 안 나간다.
-      break;
+      return -1;
     }
     const got = parseReviewJson(r.html!);
     diagParts.push(`${page}쪽: len=${r.html!.length}, 파싱=${got.length}개`);
-    if (got.length === 0) {
+    if (got.length === 0 && page === 1) {
       // 응답은 제대로 받았는데 한 건도 못 뽑았다면 생김새가 바뀐 것이다.
       // 키 이름과 타입만 남긴다 — 리뷰 본문은 로그에 남기지 않는다.
-      if (page === 1) failLog.push({ label: "1쪽(파싱0)", status: 200, snippet: describeJson(r.html!) });
-      break;
+      failLog.push({ label: "1쪽(파싱0)", status: 200, snippet: describeJson(r.html!) });
     }
     // 쪽이 겹치는 경우가 있다. 같은 글을 두 번 세면 불만 빈도가 부풀려진다.
     for (const rv of got) {
@@ -2279,9 +2325,17 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
       seenText.add(rv.text);
       reviews.push(rv);
     }
-    // 한 쪽을 다 못 채웠으면 마지막 쪽이다. 더 불러 봐야 빈 응답만 온다.
-    if (got.length < REVIEW_PAGE_SIZE) break;
+    return got.length;
+  };
+  const first = takePage(1, await fetchPage(1, 3));
+  if (first >= REVIEW_PAGE_SIZE && REVIEW_MAX_PAGES > 1) {
+    const rest = await Promise.all(
+      Array.from({ length: REVIEW_MAX_PAGES - 1 }, (_, i) => fetchPage(i + 2, 1)),
+    );
+    rest.forEach((r, i) => takePage(i + 2, r));
   }
+  if (reviews.length > 0) await cacheSet(rawKey, { reviews, diag: diagParts.join(" | ") });
+  } // rawFresh else
 
   let diag = diagParts.join(" | ");
   // 응답 본문 조각은 운영자에게만 보여준다. 구독자에게는 읽을 수 없는
@@ -2301,6 +2355,14 @@ async function handleReviews(req: VercelRequest, res: VercelResponse, decoded: a
     return res.status(502).json({
       error: "리뷰를 수집하지 못했습니다. 리뷰가 아직 없는 상품이거나 쿠팡이 일시적으로 막은 경우입니다. 잠시 후 다시 시도해주세요.",
       diagnostics: diag,
+    });
+  }
+
+  // 모으기만 하는 단계 — 화면이 표본을 먼저 그리고, 요약은 이어서 부른다
+  if (stage === "collect") {
+    return res.status(200).json({
+      productId, productName, reviewCount: reviews.length, samples: reviews.slice(0, 5), pending: true,
+      ...(remaining !== null ? { remaining } : {}),
     });
   }
 
