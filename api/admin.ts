@@ -518,6 +518,9 @@ const DEFAULTS = { imageModel: 'gpt-image-2', imageQuality: 'high', aiIntegrated
 // App.tsx의 TABS, lib/feature-gate.ts의 FeatureTab과 같은 목록이어야 한다.
 // (coupang이 빠져 있어 쿠팡 탭은 순서를 바꿀 수 없었다 — 추가했다)
 const TAB_IDS = ['home', 'thumbnail', 'detail', 'sourcing', 'ranktracker', 'review', 'analyzer', 'coupang', 'qa', 'works'];
+// 탭 안의 기능·홈 카드 — 숨김만 되고 순서는 없다 (lib/feature-gate.ts FEATURE_IDS와 같아야 한다)
+const FEATURE_IDS = ['coupang.health', 'home.movers', 'home.goals'];
+const HIDEABLE_IDS = [...TAB_IDS, ...FEATURE_IDS];
 
 // 사업자 정보 항목 (프론트 src/lib/company.ts CompanyInfo와 일치)
 const COMPANY_KEYS = ['name', 'ceo', 'bizNumber', 'mailOrderNumber', 'address', 'email', 'phone', 'effectiveDate', 'dbRegion'];
@@ -568,7 +571,7 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
     let hiddenTabs: string[] = [];
     try {
       const parsed = JSON.parse(map.hidden_tabs || '[]');
-      if (Array.isArray(parsed)) hiddenTabs = parsed.filter((t) => TAB_IDS.includes(t));
+      if (Array.isArray(parsed)) hiddenTabs = parsed.filter((t) => HIDEABLE_IDS.includes(t));
     } catch { /* 잘못 저장된 값은 아무것도 숨기지 않은 것으로 본다 */ }
 
     // 사업자 정보는 법적으로 공개 표기 의무가 있는 값이라 비관리자(푸터·약관 페이지)에도 공개
@@ -631,7 +634,7 @@ async function handleConfig(req: VercelRequest, res: VercelResponse, isAdmin: bo
     }
 
     if (hiddenTabs !== undefined) {
-      if (!Array.isArray(hiddenTabs) || hiddenTabs.some((t) => !TAB_IDS.includes(t))) {
+      if (!Array.isArray(hiddenTabs) || hiddenTabs.some((t) => !HIDEABLE_IDS.includes(t))) {
         return res.status(400).json({ error: '올바르지 않은 탭 목록입니다.' });
       }
       // 홈은 끌 수 없다. 첫 화면이 사라지면 로그인 직후 빈 화면이 뜬다.

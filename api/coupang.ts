@@ -14,7 +14,7 @@ import { isTransientDbError } from '../src/lib/dbRetry.js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
-import { tabDisabledMessage } from '../lib/feature-gate.js';
+import { tabDisabledMessage, featureHidden } from '../lib/feature-gate.js';
 import * as XLSX from 'xlsx';
 import { extractDailyAdCost, extractItemAdCost, rowsFromMatrix } from '../src/lib/adcost.js';
 import { checkAccess } from '../src/lib/accessGate.js';
@@ -3329,13 +3329,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'sync': return await handleSync(userId, req, res);
       case 'profit': return await handleProfit(userId, req, res);
       case 'profit-monthly': return await handleProfitMonthly(userId, req, res);
-      // 베타 — 아직 관리자만 본다. 공개할 때 이 두 줄의 조건만 지우면 된다.
+      // 새 기능은 관리자 화면 [탭 표시·순서]에서 켜기 전까지 수강생에게 막힌다
       case 'sales-movers':
-        if (!decoded.isAdmin) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        if (await featureHidden(supabase, 'home.movers', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
         return await handleSalesMovers(userId, res);
       case 'health-check':
-        if (!decoded.isAdmin) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        if (await featureHidden(supabase, 'coupang.health', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
         return await handleHealthCheck(userId, res);
+      case 'goals':
+        if (await featureHidden(supabase, 'home.goals', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        return await handleGoals(userId, req, res);
+      case 'goals-save':
+        if (await featureHidden(supabase, 'home.goals', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        return await handleGoalsSave(userId, req, res);
       case 'costs': return await handleCosts(userId, res);
       case 'cost-save': return await handleCostSave(userId, req, res);
       case 'ad-costs': return await handleAdCosts(userId, req, res);
@@ -4104,10 +4110,17 @@ export async function computeProfit(
     dayOf(d).profit -= (Number(r.quantity) || 1) * (Number(c.return_shipping_cost) || 0);
   }
   // 판매가 없던 날도 0으로 채운다. 빠뜨리면 선이 이어져 없던 날이 사라진다.
-  const daily: Array<{ date: string; quantity: number; salesAmount: number; commission: number; profit: number }> = [];
+  // 일자별 광고비 — ROAS 추이용. 광고비를 뺀 순이익은 화면에서 profit − adCost로 만든다.
+  const adByDate = new Map<string, number>();
+  for (const a of adRes.rows) {
+    const d = String(a.ad_date).slice(0, 10);
+    adByDate.set(d, (adByDate.get(d) ?? 0) + (Number(a.cost) || 0));
+  }
+  const daily: Array<{ date: string; quantity: number; salesAmount: number; commission: number; profit: number; adCost: number }> = [];
   if (buildDaily) {
     for (let d = from; d <= to; d = addDays(d, 1)) {
-      daily.push(dailyMap.get(d) ?? { date: d, quantity: 0, salesAmount: 0, commission: 0, profit: 0 });
+      const cur = dailyMap.get(d) ?? { date: d, quantity: 0, salesAmount: 0, commission: 0, profit: 0 };
+      daily.push({ ...cur, adCost: Math.round(adByDate.get(d) ?? 0) });
       if (daily.length > 400) break;
     }
   }
@@ -5760,6 +5773,56 @@ async function handleHealthCheck(userId: string, res: VercelResponse) {
   return res.status(200).json(report);
 }
 
+// ── 월 목표 매출·순이익 ──────────────────────────────────────
+//
+// 목표가 없으면 이번 달이 잘 가는 중인지 알 길이 없다. 목표를 적어 두면
+// 홈에서 진행률과 이 속도로 가면 얼마가 될지를 본다. 순이익은 광고비까지
+// 뺀 값이다 — 광고비를 빼기 전 숫자로 목표를 세면 늘 달성한 것처럼 보인다.
+async function handleGoals(userId: string, req: VercelRequest, res: VercelResponse) {
+  const today = kstToday();
+  const month = /^\d{4}-\d{2}$/.test(String(req.query.month ?? '')) ? String(req.query.month) : today.slice(0, 7);
+  const monthStart = `${month}-01`;
+  const monthEnd = addDays(`${month}-01`, 31).slice(0, 7) === month ? addDays(`${month}-01`, 31) : addDays(`${addDays(`${month}-01`, 31).slice(0, 7)}-01`, -1);
+  const endDay = today < monthEnd ? today : monthEnd;
+  const daysInMonth = daysBetween(monthStart, monthEnd) + 1;
+  const daysPassed = Math.max(1, Math.min(daysInMonth, daysBetween(monthStart, endDay) + 1));
+
+  const [{ data: goal }, profit] = await Promise.all([
+    supabase!.from('coupang_goals').select('revenue_goal, profit_goal').eq('user_id', userId).eq('month', month).maybeSingle(),
+    computeProfit(userId, monthStart, endDay, { totalsOnly: true }),
+  ]);
+  // 옵션별로 이미 뺀 광고비(adCost)는 되돌리고 일자별 광고비 총액을 뺀다 — 둘이 같은 돈이다
+  const netProfit = Math.round(profit.totals.profit + (profit.totals.adCost || 0) - (profit.adCost?.total || 0));
+  const sales = Math.round(profit.totals.salesAmount);
+  const ratio = daysInMonth / daysPassed;
+  return res.status(200).json({
+    month,
+    revenueGoal: Number(goal?.revenue_goal) || 0,
+    profitGoal: Number(goal?.profit_goal) || 0,
+    actual: {
+      salesAmount: sales,
+      profit: netProfit,
+      daysPassed,
+      daysInMonth,
+      projectedSales: Math.round(sales * ratio),
+      projectedProfit: Math.round(netProfit * ratio),
+      adCostCoveredDays: profit.adCost?.coveredDays ?? 0,
+    },
+  });
+}
+
+async function handleGoalsSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const body: any = req.body ?? {};
+  const month = /^\d{4}-\d{2}$/.test(String(body.month ?? '')) ? String(body.month) : kstToday().slice(0, 7);
+  const n = (v: unknown) => Math.max(0, Math.min(9_999_999_999, Math.round(Number(v) || 0)));
+  const { error } = await supabase!.from('coupang_goals').upsert({
+    user_id: userId, month, revenue_goal: n(body.revenueGoal), profit_goal: n(body.profitGoal), updated_at: new Date().toISOString(),
+  }, { onConflict: 'user_id,month' });
+  if (error) return res.status(500).json({ error: '목표를 저장하지 못했습니다.' });
+  return res.status(200).json({ ok: true, month });
+}
+
 // ── 매출 급감·급증 감지 ────────────────────────────────────────
 //
 // 최근 7일과 그 전 7일을 옵션별로 견준다. 윙은 발주서(주문일), 그로스는
@@ -5970,7 +6033,8 @@ async function sendDailyBrief(
     .maybeSingle();
   if (already) return false;
 
-  const beta = Boolean(process.env.ADMIN_EMAIL) && email === process.env.ADMIN_EMAIL;
+  const isAdminUser = Boolean(process.env.ADMIN_EMAIL) && email === process.env.ADMIN_EMAIL;
+  const beta = isAdminUser || !(await featureHidden(supabase, 'home.movers', false));
   const d = await collectBrief(userId, day, leadTimeDays, minSales14, beta);
   if (!briefWorthSending(d)) return false;
 

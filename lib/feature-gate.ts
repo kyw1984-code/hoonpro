@@ -32,6 +32,21 @@ const TAB_LABEL: Record<FeatureTab, string> = {
   works: '내 작업',
 };
 
+/**
+ * 탭 안의 기능·홈 카드. 새 기능은 먼저 여기 올려 '숨김'으로 배포하고, 관리자가
+ * 써 본 뒤 [탭 표시·순서]에서 켠다. 관리자에게는 늘 보인다.
+ * src/components/Admin/AdminPanel.tsx의 FEATURE_LABELS와 같은 목록이어야 한다.
+ */
+export const FEATURE_IDS = ['coupang.health', 'home.movers', 'home.goals'] as const;
+export type FeatureId = (typeof FEATURE_IDS)[number];
+
+/** 숨긴 기능인가. 관리자는 항상 false */
+export async function featureHidden(supabase: SupabaseClient | null, id: FeatureId, isAdmin: boolean): Promise<boolean> {
+  if (isAdmin || !supabase) return false;
+  const hidden = await loadHidden(supabase);
+  return hidden.has(id);
+}
+
 // 요청마다 조회하면 기능 하나 쓸 때마다 DB를 한 번 더 친다. 서버리스 인스턴스는
 // 재사용되므로 짧게 캐시한다. 관리자가 토글한 뒤 최대 이만큼 늦게 반영된다.
 const TTL_MS = 60_000;

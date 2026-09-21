@@ -507,8 +507,17 @@ const TAB_LABELS: { id: string; label: string }[] = [
   { id: 'works', label: '내 작업' },
 ];
 
+// 탭 안의 기능·홈 카드 — 순서는 없고 숨김만 된다. 새 기능은 숨김으로 배포하고 여기서 켠다.
+// lib/feature-gate.ts FEATURE_IDS, api/admin.ts FEATURE_IDS와 같은 목록이어야 한다.
+const FEATURE_LABELS: Array<{ id: string; label: string }> = [
+  { id: 'coupang.health', label: '정산AI › 훈프로 상품 진단' },
+  { id: 'home.movers', label: '홈 › 이번 주 매출 변화 카드 (+브리핑 메일 항목)' },
+  { id: 'home.goals', label: '홈 › 월 목표 진행률 카드' },
+];
+
 function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
   const defaultOrder = TAB_LABELS.map(t => t.id);
+  const hideable = [...defaultOrder, ...FEATURE_LABELS.map(f => f.id)];
   const [order, setOrder] = useState<string[]>(defaultOrder);
   // 숨긴 탭 — "보일 것"이 아니라 "숨긴 것"을 저장한다. 반대로 하면 새 기능을
   // 배포할 때마다 켜 주기 전까지 아무에게도 안 보여 배포 사고처럼 보인다.
@@ -527,7 +536,7 @@ function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
           setOrder([...saved, ...defaultOrder.filter(id => !saved.includes(id))]);
         }
         if (res.ok && Array.isArray(data.hiddenTabs)) {
-          setHidden(data.hiddenTabs.filter((id: string) => defaultOrder.includes(id)));
+          setHidden(data.hiddenTabs.filter((id: string) => hideable.includes(id)));
         }
       } catch { /* 기본 순서 유지 */ }
     })();
@@ -617,6 +626,26 @@ function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {
               <button onClick={() => move(idx, 1)} disabled={idx === order.length - 1}
                 className="rounded-control border border-line p-1.5 text-ink-2 transition-colors hover:border-line-strong hover:text-ink disabled:opacity-30">
                 <ArrowDown className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <h3 className="mt-6 mb-1.5 text-[14px] font-semibold text-ink">탭 안의 기능·홈 카드</h3>
+      <p className="mb-3 text-sm leading-relaxed text-ink-3">새 기능은 여기 '숨김'으로 먼저 올라옵니다. 직접 써 보고 켜면 수강생에게 열립니다.</p>
+      <div className="bg-paper rounded-card border border-line overflow-hidden">
+        {FEATURE_LABELS.map(f => {
+          const off = hidden.includes(f.id);
+          return (
+            <div key={f.id} className={`flex items-center gap-3 border-b border-line px-4 py-2.5 last:border-b-0 ${off ? 'bg-paper-2' : ''}`}>
+              <span className={`flex-1 text-sm font-medium ${off ? 'text-ink-3 line-through' : 'text-ink'}`}>{f.label}</span>
+              <button
+                onClick={() => { setHidden(off ? hidden.filter(h => h !== f.id) : [...hidden, f.id]); setDirty(true); }}
+                role="switch" aria-checked={!off} aria-label={`${f.label} 표시`}
+                className={`flex items-center gap-1.5 rounded-control border px-2 py-1 text-[11.5px] font-semibold transition-colors ${off ? 'border-line text-ink-3 hover:border-line-strong' : 'border-positive/35 bg-positive-soft text-positive'}`}
+              >
+                {off ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {off ? '숨김' : '표시'}
               </button>
             </div>
           );
