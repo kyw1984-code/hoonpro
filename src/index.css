@@ -97,6 +97,16 @@ thead th {
   color: var(--color-ink);
 }
 
+/* 브라우저가 직접 그리는 컨트롤(select 목록·달력·스크롤바)을 다크로.
+   이걸 안 하면 select를 펼쳤을 때 흰 바탕에 흰 글씨가 나온다. */
+html {
+  color-scheme: dark;
+}
+select option {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+}
+
 /* 입력칸 안내 문구 — 브라우저 기본 회색은 네이비 위에서 거의 안 보인다 */
 ::placeholder {
   color: var(--color-ink-3);
