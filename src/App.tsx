@@ -99,7 +99,7 @@ const getTabButtonClass = (active: boolean): string => (
   `relative flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-[13px] transition-all -mb-px ${
     active
       ? 'border-accent text-ink font-semibold'
-      : 'border-transparent text-ink-3 font-medium hover:text-ink hover:bg-white/[0.02]'
+      : 'border-transparent text-ink-2 font-medium hover:text-ink hover:bg-white/[0.02]'
   }`
 );
 
