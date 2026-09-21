@@ -200,6 +200,21 @@ export function SourcingFinder() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
 
+  // ─── 카테고리 한정어 ──────────────────────────────────────────────────────
+  // 추천 키워드는 카테고리로 뽑히지만 쿠팡 검색은 키워드만 받는다. 성별·연령이
+  // 갈리는 카테고리는 검색어 앞에 그 말을 붙인다. 키워드에 이미 들어 있으면
+  // 그대로 둔다 ("여성 경량패딩"이 "여성 여성 경량패딩"이 되면 안 된다).
+  const CATEGORY_QUALIFIER: Record<string, { prefix: string; has: RegExp }> = {
+    '여성패션': { prefix: '여성', has: /여성|여자|우먼|레이디|women|woman|lady/i },
+    '남성패션': { prefix: '남성', has: /남성|남자|맨즈|men\b|man\b|mens/i },
+    '출산/유아': { prefix: '유아', has: /유아|아기|아동|키즈|베이비|신생아|주니어|임산부|출산/i },
+  };
+  const qualifyForCategory = (kw: string, cat: string | null): string => {
+    const q = cat ? CATEGORY_QUALIFIER[cat] : undefined;
+    if (!q || q.has.test(kw)) return kw;
+    return `${q.prefix} ${kw}`;
+  };
+
   // ─── API: 키워드 발굴 ───────────────────────────────────────────────────────
   const fetchKeywords = async (kw: string, mode: 'new' | 'drill' | 'trail' = 'new') => {
     const trimmed = kw.trim();
@@ -377,7 +392,10 @@ export function SourcingFinder() {
   };
 
   // ─── API: 쿠팡 상품 분석 ────────────────────────────────────────────────────
-  const fetchProducts = async (kw: string, volume = 0) => {
+  const fetchProducts = async (rawKw: string, volume = 0) => {
+    // 카테고리에서 고른 키워드는 카테고리를 붙여 찾는다. "여성패션 › 경량패딩"을
+    // 그냥 "경량패딩"으로 검색하면 남성 패딩이 섞여 나온다.
+    const kw = qualifyForCategory(rawKw, activeKwCategory);
     setActiveKeyword(kw);
     void ensureTrend(kw); // 시장 분석 헤더의 계절성 배지용 (7일 캐시라 부담 없음)
     setProdLoading(true);
