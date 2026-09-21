@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { getToken, getUser } from '../../lib/auth';
 import { UsageLimits } from './UsageLimits';
+import { coupangApi, won, type SalesMoversResponse } from '../../lib/coupang';
 
 const authHeaders = (): Record<string, string> => {
   const token = getToken();
@@ -54,6 +55,8 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
   const [watches, setWatches] = useState<any[] | null>(null);
   const [report, setReport] = useState<any[] | null>(null);
   const [briefing, setBriefing] = useState<any | null>(null);
+  // 이번 주 매출 변화 — 쿠팡 연동이 없으면 서버가 빈 목록을 준다
+  const [movers, setMovers] = useState<SalesMoversResponse | null | 'none'>(null);
   const userName = getUser()?.name || '';
 
   useEffect(() => {
@@ -95,6 +98,9 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
         const data = await res.json();
         if (res.ok && !data.error) setBriefing(data);
       } catch { /* 무시 */ }
+    })();
+    (async () => {
+      try { setMovers(await coupangApi.salesMovers()); } catch { setMovers('none'); }
     })();
   }, []);
 
@@ -302,6 +308,50 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
         </div>
         )}
       </div>
+
+      {/* 이번 주 매출 변화 — 최근 7일 vs 그 전 7일. 빠진 것부터, 원인 후보 한 줄과 함께 */}
+      {shown('coupang') && movers !== 'none' && movers !== null && (movers.drops.length > 0 || movers.rises.length > 0) && (
+        <div className="rounded-panel border border-line bg-paper p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" style={{ color: '#ffb454' }} />
+            <h3 className="text-sm font-semibold text-ink">이번 주 매출 변화</h3>
+            <span className="text-[12px] text-ink-3">{movers.from.slice(5).replace('-', '/')}~{movers.to.slice(5).replace('-', '/')} vs 그 전 7일</span>
+            <button onClick={() => onNavigate('coupang')} className="ml-auto flex items-center gap-0.5 text-[12px] font-medium text-ink-2 hover:text-accent">
+              정산AI <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {[
+              { key: 'drops', title: '빠진 옵션', rows: movers.drops, color: 'text-critical', badge: 'border-critical/35 bg-critical-soft text-critical' },
+              { key: 'rises', title: '뛴 옵션', rows: movers.rises, color: 'text-positive', badge: 'border-positive/35 bg-positive-soft text-positive' },
+            ].map(g => (
+              <div key={g.key}>
+                <p className={`mb-1.5 text-[12.5px] font-semibold ${g.color}`}>{g.title} {g.rows.length}개</p>
+                {g.rows.length === 0 ? (
+                  <p className="text-[12.5px] text-ink-3">없음</p>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    {g.rows.slice(0, 5).map(m => (
+                      <div key={m.vendorItemId} className="rounded-card border border-line bg-paper-2 px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-[13px] text-ink">
+                            {m.productName}{m.optionName ? <span className="text-ink-3"> / {m.optionName}</span> : null}
+                          </span>
+                          <span className={`${BADGE} shrink-0 ${g.badge}`}>{m.pct === null ? '신규' : `${m.pct > 0 ? '+' : ''}${m.pct}%`}</span>
+                        </div>
+                        <p className="mt-0.5 text-[12px] text-ink-3">
+                          {m.prevQty}개 → {m.recentQty}개 · {won(m.recentAmount)}
+                          {m.hints[0] ? <span className="ml-1.5 text-ink-2">· {m.hints[0]}</span> : null}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 이번 주 추천 소싱 키워드 — 시안·보라 그라디언트 배너 */}
       <div
