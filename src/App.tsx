@@ -96,7 +96,7 @@ const applyTabOrder = (order: string[] | null): TabDef[] => {
  * 다크 테크 탭 — 활성 탭에 시안 언더라인 + 상단 미세 글로우
  */
 const getTabButtonClass = (active: boolean): string => (
-  `relative flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-3 text-[13px] transition-all -mb-px ${
+  `relative flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3.5 py-3 text-[15px] transition-all -mb-px ${
     active
       ? 'border-accent text-ink font-semibold'
       : 'border-transparent text-ink-2 font-medium hover:text-ink hover:bg-white/[0.02]'
@@ -348,7 +348,7 @@ export default function App() {
               <span className="hidden whitespace-nowrap text-[13px] font-medium text-ink sm:inline">{user.name}</span>
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-1 whitespace-nowrap rounded-control px-2 py-1 text-xs text-ink-3 transition-colors hover:bg-white/5 hover:text-ink"
+                className="flex items-center gap-1 whitespace-nowrap rounded-control px-2 py-1 text-[14px] text-ink-2 transition-colors hover:bg-white/5 hover:text-ink"
               >
                 <LogOut className="h-3.5 w-3.5" />로그아웃
               </button>
