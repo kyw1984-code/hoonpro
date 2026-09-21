@@ -322,6 +322,51 @@ export interface InventoryResponse {
   coverDays: number;
 }
 
+/** 그로스 재고 대조 — 판매자가 적은 사입 주문·입고 한 건 */
+export interface InboundRecord {
+  id: string;
+  /** baseline: 대조를 시작한 날의 재고 / inbound: 사입 주문 → 입고 */
+  kind: 'inbound' | 'baseline';
+  orderedAt: string | null;
+  orderedQty: number;
+  receivedAt: string | null;
+  receivedQty: number | null;
+  memo: string;
+}
+
+export type ReconcileStatus = 'match' | 'short' | 'over' | 'nobase';
+
+export interface ReconcileRow {
+  vendorItemId: string;
+  productName: string;
+  optionName: string;
+  /** 쿠팡 로켓창고 판매가능 재고. 재고 응답에 없는 옵션이면 null */
+  stock: number | null;
+  stockSyncedAt: string | null;
+  coupangSold30: number | null;
+  hasBaseline: boolean;
+  baselineQty: number | null;
+  /** 셈을 시작하는 날 — 기준 재고일 또는 첫 입고 기록일 */
+  startDate: string | null;
+  orderedTotal: number;
+  receivedTotal: number;
+  /** 주문했는데 입고 기록이 없는 수량 */
+  pendingQty: number;
+  receivedAfter: number;
+  soldAfter: number;
+  expected: number | null;
+  /** 쿠팡 재고 − 예상 재고. 음수면 보낸 것보다 적다 */
+  diff: number | null;
+  status: ReconcileStatus;
+  records: InboundRecord[];
+  snapshots: Array<{ date: string; qty: number }>;
+}
+
+export interface ReconcileResponse {
+  rows: ReconcileRow[];
+  counts: { tracked: number; short: number; over: number; pendingQty: number };
+}
+
 export interface ReturnRow {
   vendorItemId: string;
   productName: string;
@@ -432,6 +477,13 @@ export const coupangApi = {
   /** 날짜를 직접 골라 보는 순이익. from·to는 YYYY-MM-DD */
   profitRange: (from: string, to: string) => request<ProfitResponse>(`profit&from=${from}&to=${to}`),
   costs: () => request<{ rows: CostRow[] }>('costs'),
+  /** 그로스 재고 대조 — 사입·입고 기록 대비 쿠팡 재고 */
+  growthReconcile: () => request<ReconcileResponse>('growth-reconcile'),
+  growthInboundSave: (body: {
+    id?: string; vendorItemId: string; kind: 'inbound' | 'baseline';
+    orderedAt?: string | null; orderedQty?: number; receivedAt?: string | null; receivedQty?: number | null; memo?: string;
+  }) => request<{ ok: true; id: string }>('growth-inbound-save', { method: 'POST', body }),
+  growthInboundDelete: (id: string) => request<{ ok: true }>('growth-inbound-delete', { method: 'POST', body: { id } }),
   adCosts: (days: number) => request<AdCostsResponse>(`ad-costs&days=${days}`),
   adCostSave: (body: {
     from: string; to: string; daily?: { date: string; cost: number }[]; total?: number; source?: 'report' | 'manual';
