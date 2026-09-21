@@ -117,7 +117,17 @@ export const REVIEW_MAX_PAGES = 3;
  * 질의 문자열을 브라우저가 실제로 보내는 것과 같은 모양으로 맞춘다. 빈
  * ratings·market도 그대로 붙인다. 다르게 보내면 거절될 여지를 남긴다.
  */
-export function reviewApiUrl(productId: string, page = 1, size = REVIEW_PAGE_SIZE): string {
-  return `https://www.coupang.com/next-api/review?productId=${productId}`
-    + `&page=${page}&size=${size}&sortBy=ORDER_SCORE_ASC&ratingSummary=true&ratings=&market=`;
+export interface ReviewQueryOpts {
+  /** 정렬. 기본 인기순. 리뷰가 많은 상품은 인기순이 느려 빈 응답이 오는 때가 있어 최신순으로 다시 부른다 */
+  sortBy?: 'ORDER_SCORE_ASC' | 'DATE_DESC';
+  /** 옵션 번호까지 붙인다. 리뷰 조각이 옵션 단위라 없으면 빈 조각이 오는 경우가 있다 */
+  itemId?: string;
+  vendorItemId?: string;
+}
+
+export function reviewApiUrl(productId: string, page = 1, size = REVIEW_PAGE_SIZE, opts: ReviewQueryOpts = {}): string {
+  const sortBy = opts.sortBy ?? 'ORDER_SCORE_ASC';
+  const item = (opts.itemId ? `&itemId=${opts.itemId}` : '') + (opts.vendorItemId ? `&vendorItemId=${opts.vendorItemId}` : '');
+  return `https://www.coupang.com/next-api/review?productId=${productId}${item}`
+    + `&page=${page}&size=${size}&sortBy=${sortBy}&ratingSummary=true&ratings=&market=`;
 }
