@@ -6,8 +6,13 @@ import { parseLimits } from '../src/lib/featureLimits.js';
 import { withVat } from '../src/lib/vat.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
 import { emailFrom } from '../src/lib/emailFrom.js';
+import { wrapEmail as wrapEmailBase } from '../src/lib/emailTemplate.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
+
+// 결제 메일은 문의처가 다르다 — 틀은 공용, 바닥글만 바꾼다
+const wrapEmail = (heading: string, bodyHtml: string) =>
+  wrapEmailBase(heading, bodyHtml, '본 메일은 발신 전용입니다. 결제 관련 문의는 서비스 내 [구독 관리]에서 확인해주세요.');
 
 // 구독 결제 통합 엔드포인트 (서버리스 함수 1개로 통합 — Vercel 함수 한도 대응)
 //   subscribe        카드 등록(빌링키 발급) + 첫 결제 → 구독 활성화
@@ -132,24 +137,6 @@ function verifyAuth(req: VercelRequest): { userId: string; email: string; name: 
 }
 
 // 브랜드 이메일 템플릿 (api/auth/login.ts · api/auth/signup.ts와 동일 디자인)
-function wrapEmail(heading: string, bodyHtml: string): string {
-  return `<div style="margin:0;padding:24px 12px;background:#0b1020;font-family:-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;">
-  <div style="max-width:520px;margin:0 auto;background:#141b31;border:1px solid #1c2542;border-radius:18px;overflow:hidden;">
-    <div style="padding:22px 28px 0;">
-      <span style="display:inline-block;width:30px;height:30px;line-height:30px;text-align:center;border-radius:9px;background:linear-gradient(135deg,#7cf5ff,#8b7bff);color:#0b1020;font-weight:800;font-size:14px;">훈</span>
-      <span style="margin-left:9px;font-size:14px;font-weight:600;color:#e8ecf5;vertical-align:middle;">쇼크트리 훈프로 <span style="color:#5a627a;font-weight:500;">AI 자동화</span></span>
-    </div>
-    <div style="padding:18px 28px 26px;">
-      <h1 style="margin:0 0 14px;font-size:19px;line-height:1.4;color:#ffffff;font-weight:700;">${heading}</h1>
-      <div style="font-size:14px;line-height:1.75;color:#b9c0d0;">${bodyHtml}</div>
-    </div>
-    <div style="padding:16px 28px;border-top:1px solid #1c2542;font-size:11.5px;line-height:1.7;color:#5a627a;">
-      본 메일은 발신 전용입니다. 결제 관련 문의는 서비스 내 [구독 관리]에서 확인해주세요.<br>
-      <a href="https://hoonproai.com" style="color:#7cf5ff;text-decoration:none;">hoonproai.com</a>
-    </div>
-  </div>
-</div>`;
-}
 
 // 본문 안에서 쓰는 버튼 (구독 관리로 유도)
 function emailButton(label: string, href = 'https://hoonproai.com'): string {

@@ -327,7 +327,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
             <tbody>
               {filtered.map(r => {
                 const growth = isGrowth(r);
-                const totalCost = shownFields
+                const totalCost = r.resale ? 0 : shownFields
                   .filter(f => f.key !== 'returnShippingCost' && (!f.growthOnly || growth))
                   .reduce((n, f) => n + valueOf(r, f.key), 0);
                 // 손님이 내는 값은 판매가가 아니라 쿠폰을 뺀 값이다. 쿠폰이 붙은
@@ -343,9 +343,18 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
                             그로스
                           </span>
                         )}
+                        {r.resale && (
+                          <span
+                            title="쿠팡이 반품된 물건을 새 옵션으로 다시 파는 것입니다. 매입비는 첫 판매 때 나갔으므로 순이익 계산은 이 줄의 원가를 0으로 봅니다."
+                            className="mr-1.5 rounded-control border border-accent/40 bg-accent-soft px-1 py-0.5 text-[9.5px] align-middle text-ink-2"
+                          >
+                            재판매
+                          </span>
+                        )}
                         {r.productName}
                       </p>
                       {optionOf(r) && <p className="truncate text-[11px] text-ink-3">{optionOf(r)}</p>}
+                      {r.resale && <p className="text-[10.5px] text-ink-3">원가 0으로 계산 — 첫 판매 때 이미 나간 돈</p>}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink-2">
                       {r.salePrice ? won(r.salePrice) : '-'}
@@ -363,6 +372,9 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
                           // 판매자배송 상품에는 입출고비가 없다. 0이 든 칸을 두면
                           // '아직 안 넣음'과 '정말 0원'이 구분되지 않는다.
                           <span className="inline-block w-[86px] text-center text-ink-3">–</span>
+                        ) : r.resale && f.key !== 'returnShippingCost' ? (
+                          // 재판매는 원가가 없다 — 넣어도 계산에서 0으로 보니 칸을 닫는다
+                          <span className="inline-block w-[86px] text-center text-ink-3" title="재판매 옵션은 원가를 0으로 봅니다">0</span>
                         ) : (
                           <input
                             type="number"

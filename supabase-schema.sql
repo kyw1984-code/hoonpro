@@ -1115,6 +1115,19 @@ create table if not exists coupang_ad_report_raw (
 alter table coupang_ad_report_raw enable row level security;
 revoke all on coupang_ad_report_raw from anon, authenticated;
 
+-- 보고서 줄은 여기 한 줄씩 둔다. 위 표의 rows(jsonb)에 통째로 넣었더니 한 달치
+-- 키워드 보고서가 4.5MB를 넘어 Vercel이 요청을 413으로 잘랐고, 함수에 닿지
+-- 못해 로그도 없이 표가 비어 있었다. 조각으로 받아 idx 순서로 쌓고, 읽을 때는
+-- 페이지로 준다. rows 열은 더 쓰지 않는다(null).
+create table if not exists coupang_ad_report_raw_rows (
+  user_id uuid not null references users(id) on delete cascade,
+  idx int not null,
+  row jsonb not null,
+  primary key (user_id, idx)
+);
+alter table coupang_ad_report_raw_rows enable row level security;
+revoke all on coupang_ad_report_raw_rows from anon, authenticated;
+
 -- ─────────────────────────────────────────────────────────────
 -- 36. 마지막 광고 보고서의 모양 — 값은 없고 열 이름만
 -- ─────────────────────────────────────────────────────────────
