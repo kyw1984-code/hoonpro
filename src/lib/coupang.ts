@@ -494,7 +494,17 @@ export interface PriceLog {
   created_at: string;
 }
 
+export interface SalesMoverRow {
+  vendorItemId: string; productName: string; optionName: string; channel: 'wing' | 'growth';
+  recentQty: number; prevQty: number; recentAmount: number; prevAmount: number; stock: number | null;
+  pct: number | null; hints: string[];
+}
+export interface SalesMoversResponse { from: string; to: string; prevFrom: string; prevTo: string; drops: SalesMoverRow[]; rises: SalesMoverRow[] }
+
 export const coupangApi = {
+  /** 최근 7일 vs 그 전 7일 — 눈에 띄게 빠지거나 뛴 옵션 */
+  salesMovers: () => request<SalesMoversResponse>('sales-movers'),
+
   status: () => request<CoupangStatus>('status'),
   adminVendors: () => request<{ vendors: CoupangVendor[] }>('admin-vendors'),
   adminVendorsSave: (vendors: CoupangVendor[]) =>

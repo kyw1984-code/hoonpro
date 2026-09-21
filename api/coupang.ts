@@ -5,6 +5,7 @@ import { rollupMonths, type MonthProfit } from '../src/lib/monthlyProfit.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
 import { emailFrom } from '../src/lib/emailFrom.js';
 import { wrapEmail } from '../src/lib/emailTemplate.js';
+import { pickMovers, type MoverInput, type SalesMovers } from '../src/lib/salesMovers.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
@@ -3328,6 +3329,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'sync': return await handleSync(userId, req, res);
       case 'profit': return await handleProfit(userId, req, res);
       case 'profit-monthly': return await handleProfitMonthly(userId, req, res);
+      case 'sales-movers': return await handleSalesMovers(userId, res);
       case 'costs': return await handleCosts(userId, res);
       case 'cost-save': return await handleCostSave(userId, req, res);
       case 'ad-costs': return await handleAdCosts(userId, req, res);
@@ -5417,6 +5419,8 @@ export interface BriefData {
   seasonalSkipped: number;
   /** 광고비가 며칠째 비어 있나 — 비어 있으면 순이익이 그만큼 크게 나온다 */
   adGap: AdGap;
+  /** 최근 7일 vs 그 전 7일에서 눈에 띄게 빠지거나 뛴 옵션 */
+  movers?: SalesMovers;
 }
 
 /**
@@ -5578,6 +5582,7 @@ async function collectBrief(
   // 광고비는 쿠팡이 API로 주지 않아 판매자가 직접 가져온다. 그 한 번을 잊으면
   // 그날부터 순이익이 광고비만큼 크게 나온다. 며칠째 비었는지 세어 둔다.
   const adGap = await collectAdGap(userId, day);
+  const movers = await computeSalesMovers(userId, day);
 
   const reorder = needsReorder(inventory.rows, leadTimeDays, minSales14);
   // 시즌 판단으로 빠진 개수 — 기준을 끄고 세어 차이를 본다
@@ -5596,13 +5601,83 @@ async function collectBrief(
     minSales14,
     seasonalSkipped: Math.max(0, withoutSeason.length - reorder.length),
     adGap,
+    movers,
   };
 }
 
 /** 보낼 만한 내용이 있는가 — 아무 일도 없던 날은 메일을 만들지 않는다 */
 export function briefWorthSending(d: BriefData): boolean {
   return d.quantity > 0 || d.reorder.length > 0 || d.newInquiries > 0 || d.newReturns > 0
-    || d.adGap.shouldWarn;
+    || d.adGap.shouldWarn || Boolean(d.movers && (d.movers.drops.length > 0 || d.movers.rises.length > 0));
+}
+
+// ── 매출 급감·급증 감지 ────────────────────────────────────────
+//
+// 최근 7일과 그 전 7일을 옵션별로 견준다. 윙은 발주서(주문일), 그로스는
+// 매출내역(결제일)에서 온다 — 둘 다 '주문이 들어온 날' 기준이라 같이 놓을 수
+// 있다. 판정은 src/lib/salesMovers.ts에 있고 여기서는 자료만 모은다.
+async function computeSalesMovers(userId: string, day: string): Promise<SalesMovers> {
+  const to = day;
+  const from = addDays(day, -6);
+  const prevTo = addDays(day, -7);
+  const prevFrom = addDays(day, -13);
+  const empty: SalesMovers = { from, to, prevFrom, prevTo, drops: [], rises: [] };
+  if (!supabase) return empty;
+  const [wingRes, growthRes, itemRes, invRes] = await Promise.all([
+    selectAll<{ order_date: string; vendor_item_id: string; product_name: string | null; quantity: number; order_amount: number }>((f, t) => supabase!
+      .from('coupang_orders_daily')
+      .select('order_date, vendor_item_id, product_name, quantity, order_amount')
+      .eq('user_id', userId).gte('order_date', prevFrom).lte('order_date', to)
+      .order('order_date').range(f, t)),
+    selectAll<{ sale_date: string; vendor_item_id: string; product_name: string | null; quantity: number; sales_amount: number }>((f, t) => supabase!
+      .from('coupang_sales_daily')
+      .select('sale_date, vendor_item_id, product_name, quantity, sales_amount')
+      .eq('user_id', userId).eq('channel', 'growth').gte('sale_date', prevFrom).lte('sale_date', to)
+      .order('sale_date').range(f, t)),
+    selectAll<{ vendor_item_id: string; product_name: string | null; option_name: string | null; stock: number | null; business_type: string | null }>((f, t) => supabase!
+      .from('coupang_items')
+      .select('vendor_item_id, product_name, option_name, stock, business_type')
+      .eq('user_id', userId).order('vendor_item_id').range(f, t)),
+    selectAll<{ vendor_item_id: string; orderable_qty: number | null }>((f, t) => supabase!
+      .from('coupang_growth_inventory')
+      .select('vendor_item_id, orderable_qty')
+      .eq('user_id', userId).order('vendor_item_id').range(f, t)),
+  ]);
+  const items = new Map<string, { product_name: string | null; option_name: string | null; stock: number | null }>();
+  for (const it of itemRes.rows) items.set(String(it.vendor_item_id), it);
+  const growthStock = new Map<string, number>();
+  for (const r of invRes.rows) growthStock.set(String(r.vendor_item_id), Number(r.orderable_qty) || 0);
+
+  const agg = new Map<string, MoverInput>();
+  const bump = (id: string, name: string | null, channel: 'wing' | 'growth', date: string, qty: number, amount: number) => {
+    const it = items.get(id);
+    let cur = agg.get(id);
+    if (!cur) {
+      const stock = channel === 'growth'
+        ? (growthStock.has(id) ? growthStock.get(id)! : null)
+        : (it && it.stock !== null && it.stock !== undefined ? Number(it.stock) : null);
+      cur = {
+        vendorItemId: id,
+        productName: String(it?.product_name ?? name ?? '이름 없는 상품'),
+        optionName: String(it?.option_name ?? ''),
+        channel, recentQty: 0, prevQty: 0, recentAmount: 0, prevAmount: 0, stock,
+      };
+      agg.set(id, cur);
+    }
+    if (date >= from) { cur.recentQty += qty; cur.recentAmount += amount; }
+    else { cur.prevQty += qty; cur.prevAmount += amount; }
+  };
+  for (const o of wingRes.rows) bump(String(o.vendor_item_id), o.product_name, 'wing', String(o.order_date).slice(0, 10), Number(o.quantity) || 0, Number(o.order_amount) || 0);
+  for (const g of growthRes.rows) bump(String(g.vendor_item_id), g.product_name, 'growth', String(g.sale_date).slice(0, 10), Number(g.quantity) || 0, Number(g.sales_amount) || 0);
+
+  const { drops, rises } = pickMovers([...agg.values()]);
+  return { from, to, prevFrom, prevTo, drops, rises };
+}
+
+async function handleSalesMovers(userId: string, res: VercelResponse) {
+  // 어제까지가 온전한 하루다. 오늘은 아직 쌓이는 중이라 넣으면 급감으로 보인다.
+  const day = addDays(kstToday(), -1);
+  return res.status(200).json(await computeSalesMovers(userId, day));
 }
 
 export function briefHtml(name: string, day: string, d: BriefData): string {
@@ -5647,6 +5722,21 @@ export function briefHtml(name: string, day: string, d: BriefData): string {
             `<span style="color:#7c88a3;">${s.qty}개 · ${won(s.amount)}</span></div>`,
         )
         .join('');
+  }
+
+  // 이번 주 눈에 띄는 변화 — 빠진 것부터. 원인 후보를 한 줄 붙여 다음 행동을 잇는다.
+  if (d.movers && (d.movers.drops.length > 0 || d.movers.rises.length > 0)) {
+    const line = (m: SalesMovers['drops'][number], color: string) => {
+      const label = `${m.productName}${m.optionName ? ` / ${m.optionName}` : ''}`.slice(0, 44);
+      const pct = m.pct === null ? '신규' : `${m.pct > 0 ? '+' : ''}${m.pct}%`;
+      return `<div style="font-size:12.5px;padding:3px 0;">${escapeHtml(label)} ` +
+        `<span style="color:${color};font-weight:700;">${pct}</span> ` +
+        `<span style="color:#7c88a3;">${m.prevQty}→${m.recentQty}개` +
+        (m.hints.length ? ` · ${escapeHtml(m.hints[0])}` : '') + `</span></div>`;
+    };
+    html += `<p style="margin:18px 0 6px;font-size:12px;color:#7c88a3;">이번 주 눈에 띄는 변화 (최근 7일 vs 그 전 7일)</p>`;
+    html += d.movers.drops.slice(0, 3).map(m => line(m, '#ff8a8a')).join('');
+    html += d.movers.rises.slice(0, 3).map(m => line(m, '#5fd3a6')).join('');
   }
 
   // 발주는 가장 급한 항목이라 실적보다 눈에 띄게 둔다. 품절은 매출만 잃는 게
