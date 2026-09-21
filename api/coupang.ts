@@ -3725,10 +3725,12 @@ export async function computeProfit(
       .gte('sale_date', from).lte('sale_date', to).order('sale_date').range(f, t)),
     selectAll((f, t) => supabase!.from('coupang_costs').select('*').eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
-    lite ? Promise.resolve({ rows: [] as any[] }) : selectAll((f, t) => supabase!.from('coupang_items')
-      // status·business_type은 재판매 판정(isResaleOption)에 쓴다. 빼먹으면
-      // 판정이 조용히 전부 false가 된다.
-      .select('vendor_item_id, product_name, option_name, sale_price, stock, status, business_type').eq('user_id', userId)
+    // status·business_type은 재판매 판정(isResaleOption)에 쓴다. 빼먹으면
+    // 판정이 조용히 전부 false가 된다. 합계만 볼 때(lite)도 이 둘은 있어야
+    // 월별 리포트·전기 비교·주간 메일의 원가가 순이익 화면과 같아진다.
+    selectAll((f, t) => supabase!.from('coupang_items')
+      .select(lite ? 'vendor_item_id, option_name, status, business_type' : 'vendor_item_id, product_name, option_name, sale_price, stock, status, business_type')
+      .eq('user_id', userId)
       .order('vendor_item_id').range(f, t)),
     // 저장된 시각은 한국 시각을 UTC로 옮긴 값이다. 경계도 한국 시각으로 잡아야
     // 새벽에 접수된 반품이 앞뒤 날짜로 밀리지 않는다.
@@ -4731,10 +4733,13 @@ async function handleAdReportRaw(userId: string, req: VercelRequest, res: Vercel
   const limit = Math.min(AD_RAW_PAGE_MAX, Math.max(1, Math.floor(Number(req.query.limit) || 3000)));
   const { data, error } = await supabase!
     .from('coupang_ad_report_raw')
-    .select('date_from, date_to, columns, row_count, truncated, saved_at')
+    .select('date_from, date_to, columns, row_count, truncated, saved_at, complete')
     .eq('user_id', userId)
     .maybeSingle();
   if (error || !data) return res.status(200).json({ report: null });
+  // 조각 저장이 중간에 끊긴 보고서는 없는 것으로 친다. 앞 조각만으로 키워드
+  // 합계를 내면 틀린 숫자가 아무 표시 없이 나간다.
+  if (data.complete !== true) return res.status(200).json({ report: null });
   const rowCount = Number(data.row_count) || 0;
   const { data: lines, error: lineErr } = await supabase!
     .from('coupang_ad_report_raw_rows')
@@ -4770,7 +4775,9 @@ async function handleAdReportRawSave(userId: string, req: VercelRequest, res: Ve
   const body: any = req.body ?? {};
   const rows = Array.isArray(body.rows) ? body.rows : [];
   const part = Math.max(0, Math.floor(Number(body.part) || 0));
+  const parts = Math.max(1, Math.floor(Number(body.parts) || 1));
   if (part === 0 && rows.length === 0) return res.status(400).json({ error: '저장할 보고서 행이 없습니다.' });
+  if (part >= parts) return res.status(400).json({ error: '조각 번호가 맞지 않습니다.' });
 
   const fail = (where: string, e: { code?: string; message?: string }) => {
     console.error('[광고보고서] 원본 저장 실패', { where, part, code: e.code, detail: e.message });
@@ -4789,6 +4796,7 @@ async function handleAdReportRawSave(userId: string, req: VercelRequest, res: Ve
       rows: null,
       row_count: 0,
       truncated: false,
+      complete: false,
       saved_at: new Date().toISOString(),
     }, { onConflict: 'user_id' });
     if (headErr) return fail('head', headErr);
@@ -4810,11 +4818,13 @@ async function handleAdReportRawSave(userId: string, req: VercelRequest, res: Ve
     if (insErr) return fail('rows', insErr);
   }
   const rowCount = have + kept.length;
+  // 마지막 조각이 들어왔거나 상한에 걸려 더 받을 게 없으면 완성이다
+  const complete = part === parts - 1 || truncated;
   const { error: updErr } = await supabase!.from('coupang_ad_report_raw')
-    .update({ row_count: rowCount, truncated, saved_at: new Date().toISOString() })
+    .update({ row_count: rowCount, truncated, complete, saved_at: new Date().toISOString() })
     .eq('user_id', userId);
   if (updErr) return fail('count', updErr);
-  return res.status(200).json({ ok: true, rowCount, truncated, part });
+  return res.status(200).json({ ok: true, rowCount, truncated, complete, part });
 }
 
 // ── 마진 계산 기본값 (광고분석AI가 손입력 대신 불러온다) ──────────

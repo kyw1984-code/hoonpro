@@ -1109,8 +1109,11 @@ create table if not exists coupang_ad_report_raw (
   rows jsonb,
   row_count int not null default 0,
   truncated boolean not null default false,
+  -- 조각 저장이 끝까지 왔는가. 중간에 끊긴 보고서는 읽지 않는다.
+  complete boolean not null default false,
   saved_at timestamptz default now()
 );
+alter table coupang_ad_report_raw add column if not exists complete boolean not null default false;
 
 alter table coupang_ad_report_raw enable row level security;
 revoke all on coupang_ad_report_raw from anon, authenticated;
