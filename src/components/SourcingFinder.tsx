@@ -20,7 +20,7 @@ import { getToken } from '../lib/auth';
 import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
 import { SaveToWorksButton } from './SaveToWorks';
 
-/** 정다리(1688 소싱처) 가입 시 넣는 훈프로 추천인 코드 */
+/** 중달이(1688 소싱처) 가입 시 넣는 훈프로 추천인 코드 */
 const JUNGDARI_REFERRAL_CODE = 'hoonpro05';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -193,8 +193,8 @@ export function SourcingFinder() {
   const [myProducts, setMyProducts] = useState<MyProductHit[]>([]);
   const [servedFrom, setServedFrom] = useState<string>('fresh');
   const [prodDebug, setProdDebug] = useState<string | null>(null);
-  // 1688 소싱처(정다리) 추천인 안내 — 버튼을 누른 뒤 잠깐 뜬다
-  // 1688 소싱처(정다리) 팝업 — 추천인 코드 복사와 이동 버튼만 둔다
+  // 1688 소싱처(중달이) 추천인 안내 — 버튼을 누른 뒤 잠깐 뜬다
+  // 1688 소싱처(중달이) 팝업 — 추천인 코드 복사와 이동 버튼만 둔다
   const [referralModal, setReferralModal] = useState<{ imageUrl: string; copied: boolean; blocked: boolean } | null>(null);
   const [rocketFilter, setRocketFilter] = useState<'all' | 'general' | 'jet' | 'rocket'>('all');
   const [prodSort, setProdSort] = useState<'opportunityScore' | 'reviewCount' | 'rank' | 'priceAsc'>('opportunityScore');
@@ -458,7 +458,7 @@ export function SourcingFinder() {
     if (!win) return false;
     if (!imageUrl) { win.location.href = 'https://jungdari.com'; return true; }
     try {
-      win.document.write('<p style="font:14px sans-serif;padding:24px">정다리(1688 소싱처)로 이동하는 중...</p>');
+      win.document.write('<p style="font:14px sans-serif;padding:24px">중달이(1688 소싱처)로 이동하는 중...</p>');
     } catch { /* 이미 다른 문서가 있으면 그냥 넘어간다 */ }
     const form = document.createElement('form');
     form.method = 'POST';
@@ -477,7 +477,7 @@ export function SourcingFinder() {
   // 눌러도 다음 날 또 떠서, 기억에 남는 건 혜택이 아니라 팝업이었다. 그런데
   // 팝업을 걷어내면서 안내 자체가 사라져 코드를 아는 사람이 없어졌다.
   //
-  // 정다리는 다른 사이트라 가입 칸을 우리가 대신 채울 수는 없다. 대신 누르는
+  // 중달이는 다른 사이트라 가입 칸을 우리가 대신 채울 수는 없다. 대신 누르는
   // 순간 코드를 클립보드에 넣고, 가로막지 않는 안내를 잠깐 띄운다. 가입 칸에
   // 붙여넣기만 하면 된다.
   const copyReferralCode = async () => {
@@ -561,7 +561,7 @@ export function SourcingFinder() {
   // ─── 렌더 ───────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-paper text-ink">
-      {/* 1688 소싱처(정다리) 팝업 — 추천인 코드 복사 + 이동 */}
+      {/* 1688 소싱처(중달이) 팝업 — 추천인 코드 복사 + 이동 */}
       <AnimatePresence>
         {referralModal && (
           <>
@@ -574,14 +574,14 @@ export function SourcingFinder() {
               <div className="flex items-start justify-between gap-4 px-7 pb-2 pt-7">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-widest text-accent">1688 소싱처</p>
-                  <h3 className="mt-1.5 text-[19px] font-semibold text-ink">정다리로 이동합니다</h3>
+                  <h3 className="mt-1.5 text-[19px] font-semibold text-ink">중달이로 이동합니다</h3>
                 </div>
                 <button onClick={() => setReferralModal(null)} className="rounded-full p-1.5 text-ink-3 transition-all hover:bg-paper-2 hover:text-ink">
                   <X className="h-5 w-5" />
                 </button>
               </div>
               <div className="flex flex-col gap-4 px-7 pb-6 pt-2">
-                <p className="text-[14px] leading-relaxed text-ink-2">정다리 회원가입 시 추천인 코드를 넣어주세요.</p>
+                <p className="text-[14px] leading-relaxed text-ink-2">중달이 회원가입 시 추천인 코드를 넣어주세요.</p>
                 <div className="flex items-center justify-between gap-3 rounded-card border border-accent-line bg-accent-soft px-5 py-4">
                   <span className="text-[22px] font-bold tracking-wide text-ink">{JUNGDARI_REFERRAL_CODE}</span>
                   <button
@@ -595,7 +595,7 @@ export function SourcingFinder() {
                 {referralModal.blocked && (
                   <p className="rounded-control border border-caution/40 bg-caution-soft px-3 py-2 text-[13px] leading-relaxed text-ink">
                     브라우저가 새 창을 막았습니다. 주소창 오른쪽의 팝업 차단 아이콘에서 hoonproai.com을 허용하거나, 여기서{' '}
-                    <a href="https://jungdari.com" target="_blank" rel="noreferrer" className="font-semibold text-accent underline underline-offset-2">정다리 열기</a>
+                    <a href="https://jungdari.com" target="_blank" rel="noreferrer" className="font-semibold text-accent underline underline-offset-2">중달이 열기</a>
                     를 눌러주세요.
                   </p>
                 )}
@@ -603,7 +603,7 @@ export function SourcingFinder() {
               <div className="flex gap-2 border-t border-line px-7 pb-7 pt-4">
                 <button onClick={() => setReferralModal(null)} className="flex-1 rounded-card bg-paper-2 py-3 text-[13.5px] font-semibold text-ink transition-all hover:bg-line">닫기</button>
                 <button onClick={go1688} className="flex-1 rounded-card bg-accent py-3 text-[13.5px] font-bold text-ground transition-all hover:bg-accent-hover">
-                  정다리로 이동
+                  중달이로 이동
                 </button>
               </div>
             </motion.div>
@@ -1354,7 +1354,7 @@ export function SourcingFinder() {
                               </div>
                               <div className="flex gap-2">
                                 <button onClick={() => handle1688Click(product)}
-                                  title={`상품 이미지로 1688 소싱처(정다리) 검색 — 가입 시 추천인 코드 ${JUNGDARI_REFERRAL_CODE}`}
+                                  title={`상품 이미지로 1688 소싱처(중달이) 검색 — 가입 시 추천인 코드 ${JUNGDARI_REFERRAL_CODE}`}
                                   className="flex-1 py-3 bg-accent-soft rounded-card text-[11px] font-semibold text-accent flex items-center justify-center gap-2 hover:bg-accent-soft transition-colors">
                                   1688 소싱처
                                 </button>
