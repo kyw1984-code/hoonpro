@@ -234,6 +234,24 @@ interface CouponRow {
   active: boolean;
   /** 추천 코드는 'referral:{발행자 userId}'가 들어 있다. 본인 사용을 막는 데 쓴다 */
   note?: string | null;
+  /** 한도가 다 찬 뒤 입력하면 대신 안내할 쿠폰 코드 */
+  fallback_code?: string | null;
+}
+
+const SOLD_OUT_MESSAGE = '쿠폰 사용 한도가 모두 소진됐습니다.';
+
+/** 소진된 쿠폰에 대체 코드가 붙어 있으면 그 코드의 할인 한 줄을 만든다 */
+async function fallbackNotice(coupon: CouponRow | null, problem: string | null) {
+  if (!coupon || problem !== SOLD_OUT_MESSAGE || !coupon.fallback_code) return null;
+  const { data } = await supabase.from('coupons').select('*').eq('code', coupon.fallback_code).maybeSingle();
+  const fb = data as CouponRow | null;
+  if (!fb || !fb.active) return null;
+  if (fb.expires_at && new Date(fb.expires_at) < new Date()) return null;
+  if (fb.max_redemptions !== null && fb.redeemed_count >= fb.max_redemptions) return null;
+  const benefit = fb.type === 'percent' ? `${fb.value}% 할인`
+    : fb.type === 'free_period' ? `${fb.value}일 무료`
+    : `${won(fb.value)} 할인`;
+  return { code: fb.code, benefit };
 }
 
 // 쿠폰 유효성 검사 — 통과 시 null, 실패 시 사용자에게 보여줄 사유 반환
@@ -248,7 +266,7 @@ async function checkCoupon(coupon: CouponRow | null, userId: string, ci: string 
   if (!coupon.active) return '사용이 중지된 쿠폰입니다.';
   if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) return '유효기간이 지난 쿠폰입니다.';
   if (coupon.max_redemptions !== null && coupon.redeemed_count >= coupon.max_redemptions) {
-    return '쿠폰 사용 한도가 모두 소진됐습니다.';
+    return SOLD_OUT_MESSAGE;
   }
   // 1인 1회: 같은 계정 또는 같은 CI(본인인증)로 이미 사용했으면 거부
   const { data: byUser } = await supabase
@@ -710,7 +728,18 @@ async function couponValidate(user: any, req: VercelRequest, res: VercelResponse
   if (!plan) return res.status(400).json({ error: '플랜을 찾을 수 없습니다.' });
 
   const problem = await checkCoupon(coupon as CouponRow | null, user.userId, userRow?.ci ?? null);
-  if (problem) return res.status(400).json({ error: problem });
+  if (problem) {
+    // 소진된 쿠폰에 대체 코드가 있으면 화면이 팝업으로 안내한다
+    const fallback = await fallbackNotice(coupon as CouponRow | null, problem);
+    if (fallback) {
+      return res.status(400).json({
+        error: `쿠폰이 모두 소진되었습니다. 대신 ${fallback.code}을 입력하면 ${fallback.benefit}이 적용됩니다.`,
+        soldOut: true,
+        fallback,
+      });
+    }
+    return res.status(400).json({ error: problem });
+  }
 
   const c = coupon as CouponRow;
   const intervalLabel = plan.interval === 'year' ? '연' : '월';
@@ -1788,7 +1817,7 @@ async function adminCouponDelete(req: VercelRequest, res: VercelResponse) {
 }
 
 async function adminCouponCreate(req: VercelRequest, res: VercelResponse) {
-  const { code, type, value, durationCycles, maxRedemptions, expiresAt, note, trialDays } = req.body ?? {};
+  const { code, type, value, durationCycles, maxRedemptions, expiresAt, note, trialDays, fallbackCode } = req.body ?? {};
   if (!code || !type || !value) return res.status(400).json({ error: '코드·유형·값은 필수입니다.' });
   if (!['free_period', 'percent', 'amount', 'amount_monthly'].includes(type)) {
     return res.status(400).json({ error: '잘못된 쿠폰 유형입니다.' });
@@ -1812,6 +1841,7 @@ async function adminCouponCreate(req: VercelRequest, res: VercelResponse) {
     max_redemptions: maxRedemptions ? Number(maxRedemptions) : null,
     expires_at: expiresAt || null,
     note: note || null,
+    fallback_code: fallbackCode ? String(fallbackCode).trim().toUpperCase() : null,
   }).select('*').single();
 
   if (error) {
