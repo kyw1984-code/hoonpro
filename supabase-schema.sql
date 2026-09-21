@@ -1480,3 +1480,19 @@ alter table coupang_settlements
   add column if not exists last_amount bigint;      -- 최종액 (30%, 익익월 1일 지급)
 create index if not exists idx_cpst_recognition
   on coupang_settlements (user_id, recognition_month);
+
+-- ─────────────────────────────────────────────────────────────
+-- 공지사항. 운영자와 AI 도우미가 업데이트 내용을 적고, 모든 회원이 읽는다.
+create table if not exists notices (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  body text not null,
+  author text not null default '운영자',
+  pinned boolean not null default false,
+  published_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid references users(id) on delete set null
+);
+create index if not exists idx_notices_published on notices(published_at desc);
+alter table notices enable row level security;
+revoke all on notices from anon, authenticated;
