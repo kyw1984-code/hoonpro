@@ -2015,7 +2015,9 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
       }
     }
     const url = `https://www.coupang.com/np/search?q=${encodeURIComponent(keyword)}&channel=user&sorter=scoreDesc&listSize=60`;
-    const result = await fetchViaUnlocker(url, 2, 20000, { userId: decoded?.userId ?? null, feature: "sourcing-products" });
+    // 쿠팡이 빈 응답을 돌려주는 때(차단)가 몰려서 온다. 1.5초 간격 세 번으로는
+    // 같은 차단에 세 번 부딪힐 뿐이라, 3·6·9초로 벌려 네 번 부른다.
+    const result = await fetchViaUnlocker(url, 3, 20000, { userId: decoded?.userId ?? null, feature: "sourcing-products" }, undefined, 3000);
     if (result.ok) {
       const p = parseCoupangSearch(result.html!);
       parseDebug = p.diagnostics;
@@ -2041,6 +2043,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
       parsed = cached.payload;
       servedFrom = "stale";
     } else {
+      console.error("[소싱] 수집 실패", { keyword, status: result.status, error: String(result.error ?? "").slice(0, 300), snippet: String(result.snippet ?? "").slice(0, 200) });
       await refundQuota(decoded?.userId, "sourcing");
       return res.status(502).json({ error: result.error });
     }
