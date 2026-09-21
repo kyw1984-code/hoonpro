@@ -1302,6 +1302,7 @@ async function syncRocketGrowth(
   let lastCallAt = 0;
   let cancelled = 0;
   let firstOrderShape = '';
+  const hourHist: Record<number, number> = {};
   // 주문별 쿠폰을 물으려면 주문번호와 옵션별 금액이 필요하다
   const orderMeta = new Map<string, { date: string; status?: string; items: Array<{ vendorItemId: string; amount: number; qty: number; sheetDiscount?: number }> }>();
 
@@ -1350,9 +1351,26 @@ async function syncRocketGrowth(
           ? order.orderItems
           : Array.isArray(order?.items) ? order.items : [order];
         if (!firstOrderShape) {
-          firstOrderShape = `주문키=${Object.keys(order ?? {}).slice(0, 14).join(',')}` +
-            (items[0] ? ` / 항목키=${Object.keys(items[0]).slice(0, 14).join(',')}` : '');
+          // 키를 전부 남긴다 — 취소 여부를 담은 키가 있는지 봐야 한다. 한 계정의
+          // 그로스 판매수가 쿠팡 자체 30일 집계보다 30% 많았는데, 주문 응답에
+          // 상태 키가 안 보여 취소 주문을 못 거른 것이 첫 번째 의심이다.
+          // paidAt은 값의 형태(epoch인지 문자열인지)와 그걸 한국 날짜로 바꾼 결과를
+          // 같이 남긴다. 시간대를 잘못 읽으면 저녁 주문이 다음 날로 넘어간다.
+          const paidRaw = order?.paidAt ?? order?.paidDate;
+          firstOrderShape = `주문키=${Object.keys(order ?? {}).join(',')}` +
+            (items[0] ? ` / 항목키=${Object.keys(items[0]).join(',')}` : '') +
+            ` / paidAt=${typeof paidRaw}:${String(paidRaw).slice(0, 40)}→${kstDateOf(paidRaw)}`;
           console.info('coupang rg order shape —', firstOrderShape);
+        }
+        {
+          // 결제 시각의 한국 시간대 분포. 손님은 낮에 주문하는데 새벽에 몰려 있으면
+          // 시간대를 잘못 읽은 것이다.
+          const raw = order?.paidAt ?? order?.paidDate;
+          const ms = typeof raw === 'number' ? raw : (typeof raw === 'string' && /^\d{10,}$/.test(raw) ? Number(raw) : NaN);
+          if (Number.isFinite(ms)) {
+            const h = new Date((ms < 1e12 ? ms * 1000 : ms) + 9 * 3600 * 1000).getUTCHours();
+            hourHist[h] = (hourHist[h] ?? 0) + 1;
+          }
         }
         for (const it of items) {
           const vendorItemId = pickStr(it, ['vendorItemId', 'vendorItemID']);
@@ -1394,6 +1412,10 @@ async function syncRocketGrowth(
       if (!token) break;
     }
     if (failedThisRun) break;
+  }
+
+  if (Object.keys(hourHist).length > 0) {
+    console.info('coupang rg order hours(KST) —', Object.entries(hourHist).sort((a, b) => Number(a[0]) - Number(b[0])).map(([h, n]) => `${h}시:${n}`).join(' '), `/ 취소로 뺀 주문 ${cancelled}건`);
   }
 
   // 쿠폰을 먼저 채운다. 수수료가 쿠폰을 뺀 실결제액에 붙기 때문이다.
