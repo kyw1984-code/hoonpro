@@ -181,6 +181,10 @@ export function SourcingFinder() {
   // 필터/정렬 (키워드)
   const [sortKey, setSortKey] = useState<'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('opportunityScore');
   const [minVolume, setMinVolume] = useState('100');
+  // 표 필터 — 키워드 글자, 등급, 경쟁강도. 132개 목록에서 원하는 줄만 남긴다.
+  const [kwFilter, setKwFilter] = useState('');
+  const [gradeFilter, setGradeFilter] = useState<'all' | 'Great' | 'Good' | 'Normal' | 'Bad'>('all');
+  const [compFilter, setCompFilter] = useState<'all' | '낮음' | '중간' | '높음'>('all');
 
   // 관심 키워드
 
@@ -504,6 +508,9 @@ export function SourcingFinder() {
   const sourceList = keywords;
   const displayKeywords = sourceList
     .filter(k => k.monthlyVolume >= (Number(minVolume) || 0))
+    .filter(k => !kwFilter.trim() || k.keyword.replace(/\s+/g, '').includes(kwFilter.replace(/\s+/g, '')))
+    .filter(k => gradeFilter === 'all' || k.grade === gradeFilter)
+    .filter(k => compFilter === 'all' || k.compIdx === compFilter)
     .sort((a, b) => {
       if (sortKey === 'competition') return a.competition - b.competition;
       return (b[sortKey] as number) - (a[sortKey] as number);
@@ -815,6 +822,42 @@ export function SourcingFinder() {
                 <span className="text-[10px] font-semibold text-ink-3 flex items-center gap-1"><RefreshCw className="w-3 h-3" />캐시 데이터</span>
               )}
               <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+                <div className="flex items-center gap-1 bg-paper-2 rounded-control px-2 py-1">
+                  <Search className="w-3 h-3 text-ink-3" />
+                  <input
+                    type="text"
+                    value={kwFilter}
+                    onChange={e => setKwFilter(e.target.value)}
+                    placeholder="키워드 검색"
+                    className="w-24 bg-transparent text-[12px] font-medium text-ink outline-none"
+                  />
+                  {kwFilter && (
+                    <button type="button" onClick={() => setKwFilter('')} className="text-ink-3 hover:text-ink" title="지우기">
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 bg-paper-2 rounded-control px-2 py-1.5">
+                  <span className="text-[11px] text-ink-3">등급</span>
+                  <select value={gradeFilter} onChange={e => setGradeFilter(e.target.value as any)}
+                    className="cursor-pointer bg-transparent text-[12px] font-medium text-ink outline-none">
+                    <option value="all">전체</option>
+                    <option value="Great">Great</option>
+                    <option value="Good">Good</option>
+                    <option value="Normal">Normal</option>
+                    <option value="Bad">Bad</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-1 bg-paper-2 rounded-control px-2 py-1.5">
+                  <span className="text-[11px] text-ink-3">경쟁</span>
+                  <select value={compFilter} onChange={e => setCompFilter(e.target.value as any)}
+                    className="cursor-pointer bg-transparent text-[12px] font-medium text-ink outline-none">
+                    <option value="all">전체</option>
+                    <option value="낮음">낮음</option>
+                    <option value="중간">중간</option>
+                    <option value="높음">높음</option>
+                  </select>
+                </div>
                 <div className="flex items-center gap-1 bg-paper-2 rounded-control px-2 py-1">
                   <span className="text-[11px] text-ink-3">검색량 ≥</span>
                   <input type="number" value={minVolume} onChange={e => setMinVolume(e.target.value)}
