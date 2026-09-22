@@ -1501,3 +1501,60 @@ alter table notices add column if not exists popup boolean not null default fals
 create index if not exists idx_notices_published on notices(published_at desc);
 alter table notices enable row level security;
 revoke all on notices from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 변경 효과 측정 — "이 날 이걸 바꿨다"를 적으면 전후 N일을 자동으로 견준다
+-- ─────────────────────────────────────────────────────────────
+-- 셀러는 가격을 내리고 썸네일을 바꾸지만 "그래서 효과가 있었나"를 알 방법이
+-- 없었다. 판매·매출·광고비·순위는 이미 날짜별로 쌓여 있으니, 바꾼 날짜 하나만
+-- 적으면 전후 비교는 계산으로 나온다. 외부 호출이 없다.
+create table if not exists coupang_experiments (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  product_id text not null,                  -- 노출상품ID (옵션은 상품으로 되접는다)
+  product_name text,
+  kind text not null default 'other',        -- price / thumbnail / title / detail / ad / coupon / stock / other
+  note text,                                 -- "29,900 → 26,900"
+  changed_on date not null,
+  window_days int not null default 7,        -- 전후 며칠씩 볼지 (7·14·28)
+  created_at timestamptz default now()
+);
+create index if not exists idx_cpexp_user on coupang_experiments(user_id, changed_on desc);
+alter table coupang_experiments enable row level security;
+revoke all on coupang_experiments from anon, authenticated;
+
+-- ─────────────────────────────────────────────────────────────
+-- 1688 매입 기록 — 개당 입고 원가를 계산해 원가 현황에 넣는다
+-- ─────────────────────────────────────────────────────────────
+-- 원가를 안 넣는 회원이 많다. 위안 단가·수량·배송비·관세·부가세만 적으면
+-- 개당 원가가 나오고, 같은 옵션을 여러 번 매입하면 가중평균으로 관리한다.
+-- 수입부가세는 일반과세자는 매입세액으로 돌려받으므로 기본은 원가에서 뺀다.
+create table if not exists coupang_purchases (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid not null references users(id) on delete cascade,
+  vendor_item_id text not null,
+  purchased_on date not null,
+  qty int not null default 1,
+  unit_price_cny numeric not null default 0,   -- 위안 단가
+  fx_rate numeric not null default 0,          -- 매입 당시 환율 (원/위안)
+  domestic_ship_cny numeric not null default 0,-- 중국 내 배송비 합계 (위안)
+  intl_ship_krw int not null default 0,        -- 배대지·국제배송비 합계 (원)
+  customs_krw int not null default 0,          -- 관세 합계 (원)
+  vat_krw int not null default 0,              -- 수입부가세 합계 (원)
+  other_krw int not null default 0,            -- 검수비·라벨비 등 (원)
+  include_vat boolean not null default false,  -- true = 간이과세자 등, 부가세를 원가에 넣는다
+  memo text,
+  created_at timestamptz default now()
+);
+create index if not exists idx_cppur_user on coupang_purchases(user_id, vendor_item_id, purchased_on desc);
+alter table coupang_purchases enable row level security;
+revoke all on coupang_purchases from anon, authenticated;
+
+-- 환율 캐시 — 무료 환율 API 값을 12시간 들고 있는다
+create table if not exists fx_rates (
+  pair text primary key,                       -- 'CNYKRW'
+  rate numeric not null,
+  fetched_at timestamptz default now()
+);
+alter table fx_rates enable row level security;
+revoke all on fx_rates from anon, authenticated;

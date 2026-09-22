@@ -6,6 +6,8 @@ import { runCron } from '../src/lib/cronHeartbeat.js';
 import { emailFrom } from '../src/lib/emailFrom.js';
 import { wrapEmail } from '../src/lib/emailTemplate.js';
 import { pickMovers, type MoverInput, type SalesMovers } from '../src/lib/salesMovers.js';
+import { verdict as experimentVerdict, type SideMetrics, type RankPair } from '../src/lib/experimentCompare.js';
+import { landedTotal, landedUnit, weightedUnitCost, type PurchaseInput } from '../src/lib/landedCost.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
 import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
@@ -3390,6 +3392,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'order-hours':
         if (await featureHidden(supabase, 'coupang.hours', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
         return await handleOrderHours(userId, req, res);
+      case 'experiments': case 'experiment-save': case 'experiment-delete': {
+        if (await featureHidden(supabase, 'coupang.experiments', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        if (action === 'experiments') return await handleExperiments(userId, res);
+        if (action === 'experiment-save') return await handleExperimentSave(userId, req, res);
+        return await handleExperimentDelete(userId, req, res);
+      }
+      case 'purchases': case 'purchase-save': case 'purchase-delete': case 'purchase-apply': case 'fx-rate': {
+        if (await featureHidden(supabase, 'coupang.purchases', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        if (action === 'purchases') return await handlePurchases(userId, res);
+        if (action === 'purchase-save') return await handlePurchaseSave(userId, req, res);
+        if (action === 'purchase-delete') return await handlePurchaseDelete(userId, req, res);
+        if (action === 'purchase-apply') return await handlePurchaseApply(userId, req, res);
+        return await handleFxRate(res);
+      }
       case 'costs': return await handleCosts(userId, res);
       case 'cost-save': return await handleCostSave(userId, req, res);
       case 'ad-costs': return await handleAdCosts(userId, req, res);
@@ -5869,6 +5885,408 @@ async function handleGoalsSave(userId: string, req: VercelRequest, res: VercelRe
   }, { onConflict: 'user_id,month' });
   if (error) return res.status(500).json({ error: '목표를 저장하지 못했습니다.' });
   return res.status(200).json({ ok: true, month });
+}
+
+// ── 변경 효과 측정 (실험 노트) ────────────────────────────────
+// "이 날 이걸 바꿨다"를 적으면 전후 N일의 판매·매출·광고비·추정 순이익·순위를
+// 하루 평균으로 견준다. 데이터는 전부 이미 쌓인 것이라 외부 호출이 없다.
+const EXPERIMENT_KINDS = ['price', 'thumbnail', 'title', 'detail', 'ad', 'coupon', 'stock', 'other'] as const;
+const EXPERIMENT_WINDOWS = [7, 14, 28];
+const EXPERIMENT_LIMIT = 30;
+
+/** 노출상품ID → 옵션ID 묶음. 상품 상세와 발주서 두 경로를 합쳐야 연결이 안 끊긴다 */
+async function vendorItemsByProductIds(userId: string, productIds: string[], from: string): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  if (productIds.length === 0) return map;
+  const [{ rows: items }, { rows: orderLinks }] = await Promise.all([
+    selectAll<{ vendor_item_id: string; product_id: string | null }>((f, t) =>
+      supabase!.from('coupang_items').select('vendor_item_id, product_id').eq('user_id', userId)
+        .in('product_id', productIds).order('vendor_item_id').range(f, t)),
+    selectAll<{ vendor_item_id: string; product_id: string | null }>((f, t) =>
+      supabase!.from('coupang_orders_daily').select('vendor_item_id, product_id').eq('user_id', userId)
+        .in('product_id', productIds).gte('order_date', from).order('order_date').range(f, t)),
+  ]);
+  const add = (pid: string, vid: string) => {
+    if (!pid || !vid) return;
+    const list = map.get(pid) ?? [];
+    if (!list.includes(vid)) list.push(vid);
+    map.set(pid, list);
+  };
+  for (const it of items) add(String(it.product_id ?? ''), String(it.vendor_item_id));
+  for (const o of orderLinks) add(String(o.product_id ?? ''), String(o.vendor_item_id));
+  return map;
+}
+
+async function handleExperiments(userId: string, res: VercelResponse) {
+  const { data: exps, error } = await supabase!
+    .from('coupang_experiments').select('*').eq('user_id', userId)
+    .order('changed_on', { ascending: false }).limit(EXPERIMENT_LIMIT);
+  if (error) return res.status(500).json({ error: '기록을 불러오지 못했습니다.' });
+  if (!exps || exps.length === 0) return res.status(200).json({ items: [] });
+
+  const today = kstToday();
+  let minFrom = today;
+  for (const e of exps) {
+    const f = addDays(String(e.changed_on), -Number(e.window_days || 7));
+    if (f < minFrom) minFrom = f;
+  }
+  const productIds = [...new Set(exps.map(e => String(e.product_id)))];
+  const linkMap = await vendorItemsByProductIds(userId, productIds, minFrom);
+  const allVids = [...new Set([...linkMap.values()].flat())];
+
+  const [orderRes, growthRes, adRes, costRes, watchRes] = await Promise.all([
+    allVids.length > 0
+      ? selectAll<any>((f, t) => supabase!.from('coupang_orders_daily')
+          .select('vendor_item_id, order_date, quantity, order_amount').eq('user_id', userId)
+          .in('vendor_item_id', allVids).gte('order_date', minFrom).order('order_date').range(f, t))
+      : Promise.resolve({ rows: [] as any[], truncated: false }),
+    allVids.length > 0
+      ? selectAll<any>((f, t) => supabase!.from('coupang_sales_daily')
+          .select('vendor_item_id, sale_date, quantity, sales_amount, commission').eq('user_id', userId)
+          .eq('channel', 'growth').in('vendor_item_id', allVids).gte('sale_date', minFrom).order('sale_date').range(f, t))
+      : Promise.resolve({ rows: [] as any[], truncated: false }),
+    allVids.length > 0
+      ? selectAll<any>((f, t) => supabase!.from('coupang_ad_costs_items')
+          .select('vendor_item_id, ad_date, cost').eq('user_id', userId)
+          .in('vendor_item_id', allVids).gte('ad_date', minFrom).order('ad_date').range(f, t))
+      : Promise.resolve({ rows: [] as any[], truncated: false }),
+    allVids.length > 0
+      ? selectAll<any>((f, t) => supabase!.from('coupang_costs')
+          .select('vendor_item_id, unit_cost, packaging_cost, shipping_cost, fulfillment_cost').eq('user_id', userId)
+          .in('vendor_item_id', allVids).order('vendor_item_id').range(f, t))
+      : Promise.resolve({ rows: [] as any[], truncated: false }),
+    supabase!.from('sourcing_rank_watch').select('keyword, product_id').eq('user_id', userId).in('product_id', productIds),
+  ]);
+
+  // 옵션·날짜별 {수량, 매출, 수수료, 광고비}
+  type DayCell = { qty: number; amount: number; commission: number; ad: number };
+  const daily = new Map<string, Map<string, DayCell>>();
+  const cell = (vid: string, date: string) => {
+    const days = daily.get(vid) ?? new Map<string, DayCell>();
+    const c = days.get(date) ?? { qty: 0, amount: 0, commission: 0, ad: 0 };
+    days.set(date, c);
+    daily.set(vid, days);
+    return c;
+  };
+  let feeSum = 0, feeBase = 0;
+  for (const r of orderRes.rows) {
+    const c = cell(String(r.vendor_item_id), String(r.order_date));
+    c.qty += Number(r.quantity) || 0;
+    c.amount += Number(r.order_amount) || 0;
+  }
+  for (const r of growthRes.rows) {
+    const c = cell(String(r.vendor_item_id), String(r.sale_date));
+    c.qty += Number(r.quantity) || 0;
+    c.amount += Number(r.sales_amount) || 0;
+    c.commission += Number(r.commission) || 0;
+    feeSum += Number(r.commission) || 0;
+    feeBase += Number(r.sales_amount) || 0;
+  }
+  for (const r of adRes.rows) cell(String(r.vendor_item_id), String(r.ad_date)).ad += Number(r.cost) || 0;
+  // 발주서(윙)에는 수수료가 없다. 그로스 실측 비율이 있으면 그걸, 없으면 기본 요율을 쓴다
+  const feeRate = feeBase > 0 ? feeSum / feeBase : COUPANG_FEE_RATE_PCT / 100;
+  const unitCost = new Map<string, number>();
+  for (const c of costRes.rows) {
+    unitCost.set(String(c.vendor_item_id),
+      (Number(c.unit_cost) || 0) + (Number(c.packaging_cost) || 0) + (Number(c.shipping_cost) || 0) + (Number(c.fulfillment_cost) || 0));
+  }
+
+  // 순위: 관심 키워드의 날짜별 평균 오가닉 순위
+  const watches = (watchRes.data ?? []) as Array<{ keyword: string; product_id: string }>;
+  const rankByDay = new Map<string, Map<string, { sum: number; n: number }>>(); // `${pid}::${kw}` → day → avg
+  if (watches.length > 0) {
+    const { rows: obs } = await selectAll<any>((f, t) => supabase!.from('sourcing_rank_obs')
+      .select('keyword, product_id, rank, captured_at').in('product_id', productIds)
+      .gte('captured_at', `${minFrom}T00:00:00+09:00`).order('captured_at').range(f, t));
+    const watched = new Set(watches.map(w => `${w.product_id}::${w.keyword}`));
+    for (const o of obs) {
+      if (o.rank === null || o.rank === undefined) continue;
+      const key = `${o.product_id}::${o.keyword}`;
+      if (!watched.has(key)) continue;
+      const day = String(o.captured_at).slice(0, 10);
+      const perDay = rankByDay.get(key) ?? new Map();
+      const cur = perDay.get(day) ?? { sum: 0, n: 0 };
+      cur.sum += Number(o.rank); cur.n += 1;
+      perDay.set(day, cur);
+      rankByDay.set(key, perDay);
+    }
+  }
+
+  const sumSide = (vids: string[], from: string, to: string): SideMetrics => {
+    const out = { days: 0, quantity: 0, salesAmount: 0, adCost: 0, profit: 0 };
+    if (from > to) return out;
+    out.days = daysBetween(from, to) + 1;
+    for (const vid of vids) {
+      const days = daily.get(vid);
+      const uc = unitCost.get(vid) ?? 0;
+      if (!days) continue;
+      for (const [date, c] of days) {
+        if (date < from || date > to) continue;
+        out.quantity += c.qty;
+        out.salesAmount += c.amount;
+        out.adCost += c.ad;
+        const fee = c.commission > 0 ? c.commission : c.amount * feeRate;
+        out.profit += c.amount - fee - uc * c.qty - c.ad;
+      }
+    }
+    out.profit = Math.round(out.profit);
+    out.salesAmount = Math.round(out.salesAmount);
+    out.adCost = Math.round(out.adCost);
+    return out;
+  };
+  const avgRank = (pid: string, kw: string, from: string, to: string): number | null => {
+    const perDay = rankByDay.get(`${pid}::${kw}`);
+    if (!perDay) return null;
+    let sum = 0, n = 0;
+    for (const [day, v] of perDay) {
+      if (day < from || day > to) continue;
+      sum += v.sum / v.n; n += 1;
+    }
+    return n > 0 ? Math.round((sum / n) * 10) / 10 : null;
+  };
+
+  const items = exps.map(e => {
+    const pid = String(e.product_id);
+    const w = Number(e.window_days || 7);
+    const changed = String(e.changed_on);
+    const beforeFrom = addDays(changed, -w);
+    const beforeTo = addDays(changed, -1);
+    const afterFrom = changed;
+    const afterEnd = addDays(changed, w - 1);
+    const afterTo = afterEnd < today ? afterEnd : today;
+    const vids = linkMap.get(pid) ?? [];
+    const before = sumSide(vids, beforeFrom, beforeTo);
+    const after = changed > today ? { days: 0, quantity: 0, salesAmount: 0, adCost: 0, profit: 0 } : sumSide(vids, afterFrom, afterTo);
+    const ranks: RankPair[] = watches.filter(x => String(x.product_id) === pid).map(x => ({
+      keyword: x.keyword,
+      before: avgRank(pid, x.keyword, beforeFrom, beforeTo),
+      after: avgRank(pid, x.keyword, afterFrom, afterTo),
+    })).filter(r => r.before !== null || r.after !== null);
+    const costKnown = vids.some(v => (unitCost.get(v) ?? 0) > 0);
+    return {
+      id: e.id,
+      productId: pid,
+      productName: e.product_name || `상품 ${pid}`,
+      kind: e.kind,
+      note: e.note || '',
+      changedOn: changed,
+      windowDays: w,
+      linked: vids.length,
+      costKnown,
+      before, after,
+      window: { beforeFrom, beforeTo, afterFrom, afterTo, complete: afterEnd <= today },
+      ranks,
+      verdict: experimentVerdict(before, after, ranks),
+    };
+  });
+  return res.status(200).json({ items, today });
+}
+
+async function handleExperimentSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const b: any = req.body ?? {};
+  const productId = String(b.productId ?? '').trim();
+  if (!productId) return res.status(400).json({ error: '상품을 고르세요.' });
+  const changedOn = String(b.changedOn ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(changedOn)) return res.status(400).json({ error: '바꾼 날짜가 올바르지 않습니다.' });
+  if (changedOn > addDays(kstToday(), 1)) return res.status(400).json({ error: '미래 날짜는 적을 수 없습니다.' });
+  const kind = EXPERIMENT_KINDS.includes(b.kind) ? String(b.kind) : 'other';
+  const windowDays = EXPERIMENT_WINDOWS.includes(Number(b.windowDays)) ? Number(b.windowDays) : 7;
+  const row: any = {
+    user_id: userId, product_id: productId,
+    product_name: typeof b.productName === 'string' ? b.productName.slice(0, 200) : null,
+    kind, note: typeof b.note === 'string' ? b.note.slice(0, 300) : null,
+    changed_on: changedOn, window_days: windowDays,
+  };
+  if (b.id) {
+    const { error } = await supabase!.from('coupang_experiments').update(row).eq('id', String(b.id)).eq('user_id', userId);
+    if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
+    return res.status(200).json({ ok: true, id: String(b.id) });
+  }
+  const { count } = await supabase!.from('coupang_experiments').select('id', { count: 'exact', head: true }).eq('user_id', userId);
+  if ((count ?? 0) >= 200) return res.status(400).json({ error: '기록은 200개까지 둘 수 있습니다. 오래된 것을 지워주세요.' });
+  const { data, error } = await supabase!.from('coupang_experiments').insert(row).select('id').single();
+  if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
+  return res.status(200).json({ ok: true, id: data.id });
+}
+
+async function handleExperimentDelete(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = String(req.body?.id ?? '');
+  if (!id) return res.status(400).json({ error: '잘못된 요청입니다.' });
+  const { error } = await supabase!.from('coupang_experiments').delete().eq('id', id).eq('user_id', userId);
+  if (error) return res.status(500).json({ error: '지우지 못했습니다.' });
+  return res.status(200).json({ ok: true });
+}
+
+// ── 1688 매입 원가 ────────────────────────────────────────────
+// 위안 단가·수량·배송비·관세·부가세 → 개당 입고 원가. 같은 옵션을 여러 번
+// 매입하면 가중평균으로 원가 현황(coupang_costs.unit_cost)에 넣는다.
+const FX_TTL_MS = 12 * 3600_000;
+const FX_PAIR = 'CNYKRW';
+
+function purchaseInput(r: any): PurchaseInput {
+  return {
+    qty: Number(r.qty) || 0, unitPriceCny: Number(r.unit_price_cny) || 0, fxRate: Number(r.fx_rate) || 0,
+    domesticShipCny: Number(r.domestic_ship_cny) || 0, intlShipKrw: Number(r.intl_ship_krw) || 0,
+    customsKrw: Number(r.customs_krw) || 0, vatKrw: Number(r.vat_krw) || 0, otherKrw: Number(r.other_krw) || 0,
+    includeVat: r.include_vat === true,
+  };
+}
+
+/** 옵션 하나의 가중평균 원가를 원가 현황에 넣는다. 매입 기록이 없으면 건드리지 않는다 */
+async function applyPurchaseCost(userId: string, vendorItemId: string): Promise<number | null> {
+  const { data: rows } = await supabase!.from('coupang_purchases').select('*')
+    .eq('user_id', userId).eq('vendor_item_id', vendorItemId);
+  const avg = weightedUnitCost((rows ?? []).map(purchaseInput));
+  if (avg === null) return null;
+  const { data: existing } = await supabase!.from('coupang_costs').select('vendor_item_id')
+    .eq('user_id', userId).eq('vendor_item_id', vendorItemId).maybeSingle();
+  const now = new Date().toISOString();
+  if (existing) {
+    await supabase!.from('coupang_costs').update({ unit_cost: avg, updated_at: now })
+      .eq('user_id', userId).eq('vendor_item_id', vendorItemId);
+  } else {
+    await supabase!.from('coupang_costs').insert({ user_id: userId, vendor_item_id: vendorItemId, unit_cost: avg, updated_at: now });
+  }
+  return avg;
+}
+
+async function handlePurchases(userId: string, res: VercelResponse) {
+  const { data: rows, error } = await supabase!.from('coupang_purchases').select('*')
+    .eq('user_id', userId).order('purchased_on', { ascending: false }).limit(500);
+  if (error) return res.status(500).json({ error: '매입 기록을 불러오지 못했습니다.' });
+  const vids = [...new Set((rows ?? []).map(r => String(r.vendor_item_id)))];
+  const [{ rows: items }, { rows: costs }] = await Promise.all([
+    vids.length > 0
+      ? selectAll<any>((f, t) => supabase!.from('coupang_items').select('vendor_item_id, product_name, option_name')
+          .eq('user_id', userId).in('vendor_item_id', vids).order('vendor_item_id').range(f, t))
+      : Promise.resolve({ rows: [] as any[], truncated: false }),
+    vids.length > 0
+      ? selectAll<any>((f, t) => supabase!.from('coupang_costs').select('vendor_item_id, unit_cost')
+          .eq('user_id', userId).in('vendor_item_id', vids).order('vendor_item_id').range(f, t))
+      : Promise.resolve({ rows: [] as any[], truncated: false }),
+  ]);
+  const name = new Map(items.map((i: any) => [String(i.vendor_item_id), i]));
+  const cost = new Map(costs.map((c: any) => [String(c.vendor_item_id), Number(c.unit_cost) || 0]));
+
+  const byVid = new Map<string, any[]>();
+  for (const r of rows ?? []) {
+    const list = byVid.get(String(r.vendor_item_id)) ?? [];
+    list.push(r);
+    byVid.set(String(r.vendor_item_id), list);
+  }
+  const summary = [...byVid.entries()].map(([vid, list]) => {
+    const inputs = list.map(purchaseInput);
+    const it = name.get(vid);
+    return {
+      vendorItemId: vid,
+      productName: it?.product_name || `옵션 ${vid}`,
+      optionName: it?.option_name || '',
+      records: list.length,
+      totalQty: inputs.reduce((a, p) => a + p.qty, 0),
+      avgUnitCost: weightedUnitCost(inputs),
+      currentUnitCost: cost.get(vid) ?? null,
+      lastPurchasedOn: String(list[0].purchased_on),
+    };
+  }).sort((a, b) => b.lastPurchasedOn.localeCompare(a.lastPurchasedOn));
+
+  const list = (rows ?? []).map(r => {
+    const p = purchaseInput(r);
+    const it = name.get(String(r.vendor_item_id));
+    return {
+      id: r.id, vendorItemId: String(r.vendor_item_id),
+      productName: it?.product_name || `옵션 ${r.vendor_item_id}`, optionName: it?.option_name || '',
+      purchasedOn: String(r.purchased_on), qty: p.qty, unitPriceCny: p.unitPriceCny, fxRate: p.fxRate,
+      domesticShipCny: p.domesticShipCny, intlShipKrw: p.intlShipKrw, customsKrw: p.customsKrw, vatKrw: p.vatKrw,
+      otherKrw: p.otherKrw, includeVat: p.includeVat, memo: r.memo || '',
+      total: landedTotal(p), unit: landedUnit(p),
+    };
+  });
+  return res.status(200).json({ rows: list, summary });
+}
+
+async function handlePurchaseSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const b: any = req.body ?? {};
+  const vendorItemId = String(b.vendorItemId ?? '').trim();
+  if (!vendorItemId) return res.status(400).json({ error: '옵션을 고르세요.' });
+  const purchasedOn = String(b.purchasedOn ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(purchasedOn)) return res.status(400).json({ error: '매입일이 올바르지 않습니다.' });
+  const num = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
+  const qty = Math.round(num(b.qty, 1_000_000));
+  if (qty <= 0) return res.status(400).json({ error: '수량은 1 이상이어야 합니다.' });
+  const fxRate = num(b.fxRate, 10_000);
+  if (fxRate <= 0) return res.status(400).json({ error: '환율을 입력하세요.' });
+  const row: any = {
+    user_id: userId, vendor_item_id: vendorItemId, purchased_on: purchasedOn, qty,
+    unit_price_cny: num(b.unitPriceCny, 1_000_000), fx_rate: fxRate,
+    domestic_ship_cny: num(b.domesticShipCny, 10_000_000),
+    intl_ship_krw: Math.round(num(b.intlShipKrw, 1_000_000_000)),
+    customs_krw: Math.round(num(b.customsKrw, 1_000_000_000)),
+    vat_krw: Math.round(num(b.vatKrw, 1_000_000_000)),
+    other_krw: Math.round(num(b.otherKrw, 1_000_000_000)),
+    include_vat: b.includeVat === true,
+    memo: typeof b.memo === 'string' ? b.memo.slice(0, 200) : null,
+  };
+  let id = String(b.id ?? '');
+  if (id) {
+    const { error } = await supabase!.from('coupang_purchases').update(row).eq('id', id).eq('user_id', userId);
+    if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
+  } else {
+    const { data, error } = await supabase!.from('coupang_purchases').insert(row).select('id').single();
+    if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
+    id = data.id;
+  }
+  const applied = b.applyCost === false ? null : await applyPurchaseCost(userId, vendorItemId);
+  return res.status(200).json({ ok: true, id, appliedUnitCost: applied });
+}
+
+async function handlePurchaseDelete(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const id = String(req.body?.id ?? '');
+  if (!id) return res.status(400).json({ error: '잘못된 요청입니다.' });
+  const { data: row } = await supabase!.from('coupang_purchases').select('vendor_item_id').eq('id', id).eq('user_id', userId).maybeSingle();
+  if (!row) return res.status(404).json({ error: '기록이 없습니다.' });
+  const { error } = await supabase!.from('coupang_purchases').delete().eq('id', id).eq('user_id', userId);
+  if (error) return res.status(500).json({ error: '지우지 못했습니다.' });
+  // 남은 기록이 있으면 평균을 다시 반영한다. 하나도 없으면 원가는 그대로 둔다.
+  const applied = req.body?.applyCost === false ? null : await applyPurchaseCost(userId, String(row.vendor_item_id));
+  return res.status(200).json({ ok: true, appliedUnitCost: applied });
+}
+
+/** 옵션 하나에 [원가에 반영] 버튼 — 평균을 다시 계산해 넣는다 */
+async function handlePurchaseApply(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const vendorItemId = String(req.body?.vendorItemId ?? '').trim();
+  if (!vendorItemId) return res.status(400).json({ error: '옵션을 고르세요.' });
+  const applied = await applyPurchaseCost(userId, vendorItemId);
+  if (applied === null) return res.status(400).json({ error: '이 옵션에는 매입 기록이 없습니다.' });
+  return res.status(200).json({ ok: true, appliedUnitCost: applied });
+}
+
+/** 위안→원 환율. 무료 API를 12시간 캐시하고, 실패하면 마지막 값을 stale로 준다 */
+async function handleFxRate(res: VercelResponse) {
+  const { data: cached } = await supabase!.from('fx_rates').select('rate, fetched_at').eq('pair', FX_PAIR).maybeSingle();
+  const fresh = cached && Date.now() - new Date(cached.fetched_at).getTime() < FX_TTL_MS;
+  if (fresh) return res.status(200).json({ rate: Number(cached.rate), fetchedAt: cached.fetched_at, stale: false });
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch('https://open.er-api.com/v6/latest/CNY', { signal: ctrl.signal });
+    clearTimeout(timer);
+    const j: any = await r.json();
+    const rate = Number(j?.rates?.KRW);
+    if (!Number.isFinite(rate) || rate <= 0) throw new Error('환율 응답이 비었습니다');
+    const rounded = Math.round(rate * 100) / 100;
+    const now = new Date().toISOString();
+    await supabase!.from('fx_rates').upsert({ pair: FX_PAIR, rate: rounded, fetched_at: now }, { onConflict: 'pair' });
+    return res.status(200).json({ rate: rounded, fetchedAt: now, stale: false });
+  } catch (e: any) {
+    console.warn('[쿠팡] 환율 조회 실패', { detail: e?.message });
+    if (cached) return res.status(200).json({ rate: Number(cached.rate), fetchedAt: cached.fetched_at, stale: true });
+    return res.status(200).json({ rate: null, fetchedAt: null, stale: true });
+  }
 }
 
 // ── 주문 시간대·요일 패턴 ────────────────────────────────────

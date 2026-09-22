@@ -524,7 +524,47 @@ export interface OrderHoursResponse {
   peakHours: number[]; peakShare: number; peakWeekday: number;
 }
 
+/** 변경 효과 측정 — 서버가 전후 기간을 견줘 준다 */
+export interface ExperimentSide { days: number; quantity: number; salesAmount: number; adCost: number; profit: number }
+export interface ExperimentItem {
+  id: string; productId: string; productName: string; kind: string; note: string; changedOn: string; windowDays: number;
+  linked: number; costKnown: boolean;
+  before: ExperimentSide; after: ExperimentSide;
+  window: { beforeFrom: string; beforeTo: string; afterFrom: string; afterTo: string; complete: boolean };
+  ranks: Array<{ keyword: string; before: number | null; after: number | null }>;
+  verdict: { tone: 'good' | 'bad' | 'mixed' | 'na'; headline: string; detail: string };
+}
+export interface MyProductLite { productId: string; productName: string; optionCount: number; quantity: number; salesAmount: number }
+
+/** 1688 매입 기록 */
+export interface PurchaseRow {
+  id: string; vendorItemId: string; productName: string; optionName: string; purchasedOn: string;
+  qty: number; unitPriceCny: number; fxRate: number; domesticShipCny: number; intlShipKrw: number; customsKrw: number;
+  vatKrw: number; otherKrw: number; includeVat: boolean; memo: string; total: number; unit: number;
+}
+export interface PurchaseSummary {
+  vendorItemId: string; productName: string; optionName: string; records: number; totalQty: number;
+  avgUnitCost: number | null; currentUnitCost: number | null; lastPurchasedOn: string;
+}
+
 export const coupangApi = {
+  /** 변경 효과 측정 (실험 노트) */
+  experiments: () => request<{ items: ExperimentItem[]; today: string }>('experiments'),
+  experimentSave: (body: { id?: string; productId: string; productName: string; kind: string; changedOn: string; windowDays: number; note: string }) =>
+    request<{ ok: true; id: string }>('experiment-save', { method: 'POST', body }),
+  experimentDelete: (id: string) => request<{ ok: true }>('experiment-delete', { method: 'POST', body: { id } }),
+  /** 내 상품(노출상품ID 단위) — 최근 N일 판매순 */
+  myProducts: (days = 90) => request<{ products: MyProductLite[] }>(`my-products&days=${days}`),
+  /** 1688 매입 원가 */
+  purchases: () => request<{ rows: PurchaseRow[]; summary: PurchaseSummary[] }>('purchases'),
+  purchaseSave: (body: {
+    id?: string; vendorItemId: string; purchasedOn: string; qty: number; unitPriceCny: number; fxRate: number;
+    domesticShipCny: number; intlShipKrw: number; customsKrw: number; vatKrw: number; otherKrw: number;
+    includeVat: boolean; memo: string; applyCost: boolean;
+  }) => request<{ ok: true; id: string; appliedUnitCost: number | null }>('purchase-save', { method: 'POST', body }),
+  purchaseDelete: (id: string) => request<{ ok: true; appliedUnitCost: number | null }>('purchase-delete', { method: 'POST', body: { id } }),
+  purchaseApply: (vendorItemId: string) => request<{ ok: true; appliedUnitCost: number }>('purchase-apply', { method: 'POST', body: { vendorItemId } }),
+  fxRate: () => request<{ rate: number | null; fetchedAt: string | null; stale: boolean }>('fx-rate'),
   /** 주문 시간대·요일 패턴 (한국 시간) */
   orderHours: (days = 28) => request<OrderHoursResponse>(`order-hours&days=${days}`),
   /** 월 목표와 이달 진행 */
