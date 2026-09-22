@@ -515,6 +515,8 @@ const FEATURE_LABELS: Array<{ id: string; label: string }> = [
   { id: 'home.movers', label: '홈 › 이번 주 매출 변화 카드 (+브리핑 메일 항목)' },
   { id: 'home.goals', label: '홈 › 월 목표 진행률 카드' },
   { id: 'ranktracker.changes', label: '순위추적AI › 경쟁 상품 변동(7일)' },
+  { id: 'coupang.experiments', label: '정산AI › 변경 효과 측정 (실험 노트)' },
+  { id: 'coupang.purchases', label: '정산AI › 1688 매입 원가 계산' },
 ];
 
 function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {

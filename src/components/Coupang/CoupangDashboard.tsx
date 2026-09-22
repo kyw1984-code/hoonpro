@@ -23,15 +23,19 @@ import { CouponEffect } from './CouponEffect';
 import { BriefSettings } from './BriefSettings';
 import { HealthCheck } from './HealthCheck';
 import { OrderHours } from './OrderHours';
+import { Experiments } from './Experiments';
+import { Purchases } from './Purchases';
 import { HowTo } from '../HowTo';
 
-type View = 'profit' | 'health' | 'hours' | 'settlement' | 'inventory' | 'reconcile' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
+type View = 'profit' | 'health' | 'hours' | 'experiments' | 'purchases' | 'settlement' | 'inventory' | 'reconcile' | 'returns' | 'inquiries' | 'rank' | 'price' | 'costs' | 'settings';
 
 // feature: 관리자 [탭 표시·순서]에서 숨길 수 있는 기능 id. 숨기면 수강생에게 안 보인다.
 const VIEWS: Array<{ id: View; label: string; feature?: string }> = [
   { id: 'profit', label: '순이익' },
   { id: 'health', label: '훈프로 상품 진단', feature: 'coupang.health' },
   { id: 'hours', label: '주문 시간대', feature: 'coupang.hours' },
+  { id: 'experiments', label: '변경 효과', feature: 'coupang.experiments' },
+  { id: 'purchases', label: '매입 원가', feature: 'coupang.purchases' },
   { id: 'settlement', label: '정산 캘린더' },
   { id: 'inventory', label: '재고 예측' },
   { id: 'reconcile', label: '재고 대조' },
@@ -100,7 +104,7 @@ export function CoupangDashboard({ hiddenTabs = [], adminHidden = [] }: { hidden
       // 원가·가격 화면에서 입력하던 값이 있으면 다시 만들지 않는다. 수집은 최대
       // 90초 걸리고 키 등록 직후 자동으로도 도는데, 그 사이 작성하던 내용이
       // 예고 없이 사라지면 안 된다. 그 화면들은 저장 후 스스로 다시 읽는다.
-      const editing = view === 'costs' || view === 'price' || view === 'reconcile';
+      const editing = view === 'costs' || view === 'price' || view === 'reconcile' || view === 'purchases' || view === 'experiments';
       if (!editing) setRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncMsg(e.message);
@@ -209,6 +213,8 @@ export function CoupangDashboard({ hiddenTabs = [], adminHidden = [] }: { hidden
       )}
       {view === 'health' && <HealthCheck onGo={v => setView(v as View)} />}
       {view === 'hours' && <OrderHours />}
+      {view === 'experiments' && <Experiments />}
+      {view === 'purchases' && <Purchases onGoCosts={() => setView('costs')} />}
       {view === 'inventory' && <InventoryForecast />}
       {view === 'reconcile' && <GrowthReconcile />}
       {view === 'returns' && (

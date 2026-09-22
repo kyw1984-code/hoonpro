@@ -37,7 +37,7 @@ const TAB_LABEL: Record<FeatureTab, string> = {
  * 써 본 뒤 [탭 표시·순서]에서 켠다. 관리자에게는 늘 보인다.
  * src/components/Admin/AdminPanel.tsx의 FEATURE_LABELS와 같은 목록이어야 한다.
  */
-export const FEATURE_IDS = ['coupang.health', 'coupang.hours', 'home.movers', 'home.goals', 'ranktracker.changes'] as const;
+export const FEATURE_IDS = ['coupang.health', 'coupang.hours', 'home.movers', 'home.goals', 'ranktracker.changes', 'coupang.experiments', 'coupang.purchases'] as const;
 export type FeatureId = (typeof FEATURE_IDS)[number];
 
 /** 숨긴 기능인가. 관리자는 항상 false */
