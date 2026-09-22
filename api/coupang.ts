@@ -6122,6 +6122,8 @@ async function handleExperimentDelete(userId: string, req: VercelRequest, res: V
 // ── 1688 매입 원가 ────────────────────────────────────────────
 // 위안 단가·수량·배송비·관세·부가세 → 개당 입고 원가. 같은 옵션을 여러 번
 // 매입하면 가중평균으로 원가 현황(coupang_costs.unit_cost)에 넣는다.
+// 같은 상품의 사이즈·색상 옵션은 원가가 같으므로, 한 기록이 옵션 여러 개를
+// 덮을 수 있다(vendor_item_ids). 그 기록의 개당 원가는 덮는 옵션마다 같다.
 const FX_TTL_MS = 12 * 3600_000;
 const FX_PAIR = 'CNYKRW';
 
@@ -6134,10 +6136,22 @@ function purchaseInput(r: any): PurchaseInput {
   };
 }
 
-/** 옵션 하나의 가중평균 원가를 원가 현황에 넣는다. 매입 기록이 없으면 건드리지 않는다 */
+/** 이 기록이 덮는 옵션들. 비어 있으면 vendor_item_id 하나 */
+function purchaseCoverage(r: any): string[] {
+  const list = Array.isArray(r.vendor_item_ids) ? r.vendor_item_ids.map(String).filter(Boolean) : [];
+  const one = String(r.vendor_item_id ?? '');
+  if (!list.includes(one) && one) list.unshift(one);
+  return list;
+}
+
+/**
+ * 옵션 하나의 가중평균 원가를 원가 현황에 넣는다. 그 옵션을 덮는 모든 기록
+ * (단독 기록 + 상품 전체 기록)을 합쳐 총액 ÷ 총수량이다. 기록이 없으면 건드리지 않는다.
+ */
 async function applyPurchaseCost(userId: string, vendorItemId: string): Promise<number | null> {
   const { data: rows } = await supabase!.from('coupang_purchases').select('*')
-    .eq('user_id', userId).eq('vendor_item_id', vendorItemId);
+    .eq('user_id', userId)
+    .or(`vendor_item_id.eq.${vendorItemId},vendor_item_ids.cs.{${vendorItemId}}`);
   const avg = weightedUnitCost((rows ?? []).map(purchaseInput));
   if (avg === null) return null;
   const { data: existing } = await supabase!.from('coupang_costs').select('vendor_item_id')
@@ -6152,11 +6166,20 @@ async function applyPurchaseCost(userId: string, vendorItemId: string): Promise<
   return avg;
 }
 
+async function applyPurchaseCosts(userId: string, vids: string[]): Promise<number | null> {
+  let last: number | null = null;
+  for (const vid of [...new Set(vids)]) {
+    const v = await applyPurchaseCost(userId, vid);
+    if (v !== null) last = v;
+  }
+  return last;
+}
+
 async function handlePurchases(userId: string, res: VercelResponse) {
   const { data: rows, error } = await supabase!.from('coupang_purchases').select('*')
     .eq('user_id', userId).order('purchased_on', { ascending: false }).limit(500);
   if (error) return res.status(500).json({ error: '매입 기록을 불러오지 못했습니다.' });
-  const vids = [...new Set((rows ?? []).map(r => String(r.vendor_item_id)))];
+  const vids = [...new Set((rows ?? []).flatMap(purchaseCoverage))];
   const [{ rows: items }, { rows: costs }] = await Promise.all([
     vids.length > 0
       ? selectAll<any>((f, t) => supabase!.from('coupang_items').select('vendor_item_id, product_name, option_name')
@@ -6170,33 +6193,65 @@ async function handlePurchases(userId: string, res: VercelResponse) {
   const name = new Map(items.map((i: any) => [String(i.vendor_item_id), i]));
   const cost = new Map(costs.map((c: any) => [String(c.vendor_item_id), Number(c.unit_cost) || 0]));
 
+  // 옵션별로 그 옵션을 덮는 기록을 모은다 → 옵션별 평균 → 상품명으로 묶는다
   const byVid = new Map<string, any[]>();
   for (const r of rows ?? []) {
-    const list = byVid.get(String(r.vendor_item_id)) ?? [];
-    list.push(r);
-    byVid.set(String(r.vendor_item_id), list);
+    for (const vid of purchaseCoverage(r)) {
+      const list = byVid.get(vid) ?? [];
+      list.push(r);
+      byVid.set(vid, list);
+    }
   }
-  const summary = [...byVid.entries()].map(([vid, list]) => {
-    const inputs = list.map(purchaseInput);
+  type OptionSummary = { vendorItemId: string; optionName: string; avgUnitCost: number | null; currentUnitCost: number | null };
+  const byProduct = new Map<string, { productName: string; options: OptionSummary[]; records: Set<string>; totalQty: number; lastPurchasedOn: string }>();
+  for (const [vid, list] of byVid) {
     const it = name.get(vid);
+    const productName = it?.product_name || `옵션 ${vid}`;
+    const g = byProduct.get(productName) ?? { productName, options: [], records: new Set<string>(), totalQty: 0, lastPurchasedOn: '' };
+    g.options.push({
+      vendorItemId: vid, optionName: it?.option_name || '',
+      avgUnitCost: weightedUnitCost(list.map(purchaseInput)),
+      currentUnitCost: cost.has(vid) ? (cost.get(vid) as number) : null,
+    });
+    for (const r of list) {
+      if (!g.records.has(String(r.id))) {
+        g.records.add(String(r.id));
+        g.totalQty += Number(r.qty) || 0;
+        if (String(r.purchased_on) > g.lastPurchasedOn) g.lastPurchasedOn = String(r.purchased_on);
+      }
+    }
+    byProduct.set(productName, g);
+  }
+  const summary = [...byProduct.values()].map(g => {
+    const avgs = g.options.map(o => o.avgUnitCost).filter((v): v is number => v !== null);
+    const curs = g.options.map(o => o.currentUnitCost);
+    const avgMin = avgs.length ? Math.min(...avgs) : null;
+    const avgMax = avgs.length ? Math.max(...avgs) : null;
+    const curSame = curs.every(c => c === curs[0]);
     return {
-      vendorItemId: vid,
-      productName: it?.product_name || `옵션 ${vid}`,
-      optionName: it?.option_name || '',
-      records: list.length,
-      totalQty: inputs.reduce((a, p) => a + p.qty, 0),
-      avgUnitCost: weightedUnitCost(inputs),
-      currentUnitCost: cost.get(vid) ?? null,
-      lastPurchasedOn: String(list[0].purchased_on),
+      productName: g.productName,
+      optionCount: g.options.length,
+      vendorItemIds: g.options.map(o => o.vendorItemId),
+      records: g.records.size,
+      totalQty: g.totalQty,
+      avgUnitCost: avgMin, avgUnitCostMax: avgMax,
+      currentUnitCost: curSame ? curs[0] : null,
+      currentMixed: !curSame,
+      // 하나라도 원가 현황과 다르면 반영할 것이 있다
+      needsApply: g.options.some(o => o.avgUnitCost !== null && o.avgUnitCost !== o.currentUnitCost),
+      lastPurchasedOn: g.lastPurchasedOn,
+      options: g.options,
     };
   }).sort((a, b) => b.lastPurchasedOn.localeCompare(a.lastPurchasedOn));
 
   const list = (rows ?? []).map(r => {
     const p = purchaseInput(r);
-    const it = name.get(String(r.vendor_item_id));
+    const cov = purchaseCoverage(r);
+    const it = name.get(cov[0]);
     return {
-      id: r.id, vendorItemId: String(r.vendor_item_id),
-      productName: it?.product_name || `옵션 ${r.vendor_item_id}`, optionName: it?.option_name || '',
+      id: r.id, vendorItemId: String(r.vendor_item_id), vendorItemIds: cov,
+      productName: it?.product_name || `옵션 ${r.vendor_item_id}`,
+      optionName: cov.length > 1 ? `옵션 ${cov.length}개 전체` : (it?.option_name || ''),
       purchasedOn: String(r.purchased_on), qty: p.qty, unitPriceCny: p.unitPriceCny, fxRate: p.fxRate,
       domesticShipCny: p.domesticShipCny, intlShipKrw: p.intlShipKrw, customsKrw: p.customsKrw, vatKrw: p.vatKrw,
       otherKrw: p.otherKrw, includeVat: p.includeVat, memo: r.memo || '',
@@ -6209,8 +6264,15 @@ async function handlePurchases(userId: string, res: VercelResponse) {
 async function handlePurchaseSave(userId: string, req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const b: any = req.body ?? {};
-  const vendorItemId = String(b.vendorItemId ?? '').trim();
-  if (!vendorItemId) return res.status(400).json({ error: '옵션을 고르세요.' });
+  // 덮을 옵션들. 상품 전체면 그 상품의 옵션 ID 전부가 온다. 내 옵션인지 확인한다.
+  const wanted = [...new Set((Array.isArray(b.vendorItemIds) ? b.vendorItemIds : [b.vendorItemId]).map((v: unknown) => String(v ?? '').trim()).filter(Boolean))] as string[];
+  if (wanted.length === 0) return res.status(400).json({ error: '옵션을 고르세요.' });
+  if (wanted.length > 200) return res.status(400).json({ error: '한 기록에 옵션 200개까지 담을 수 있습니다.' });
+  const { data: mine } = await supabase!.from('coupang_items').select('vendor_item_id').eq('user_id', userId).in('vendor_item_id', wanted);
+  const known = new Set((mine ?? []).map(m => String(m.vendor_item_id)));
+  const vids = wanted.filter(v => known.has(v));
+  if (vids.length === 0) return res.status(400).json({ error: '내 상품 목록에 없는 옵션입니다. 수집 뒤 다시 시도하세요.' });
+
   const purchasedOn = String(b.purchasedOn ?? '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(purchasedOn)) return res.status(400).json({ error: '매입일이 올바르지 않습니다.' });
   const num = (v: unknown, max: number) => Math.max(0, Math.min(max, Number(v) || 0));
@@ -6219,7 +6281,7 @@ async function handlePurchaseSave(userId: string, req: VercelRequest, res: Verce
   const fxRate = num(b.fxRate, 10_000);
   if (fxRate <= 0) return res.status(400).json({ error: '환율을 입력하세요.' });
   const row: any = {
-    user_id: userId, vendor_item_id: vendorItemId, purchased_on: purchasedOn, qty,
+    user_id: userId, vendor_item_id: vids[0], vendor_item_ids: vids, purchased_on: purchasedOn, qty,
     unit_price_cny: num(b.unitPriceCny, 1_000_000), fx_rate: fxRate,
     domestic_ship_cny: num(b.domesticShipCny, 10_000_000),
     intl_ship_krw: Math.round(num(b.intlShipKrw, 1_000_000_000)),
@@ -6230,7 +6292,12 @@ async function handlePurchaseSave(userId: string, req: VercelRequest, res: Verce
     memo: typeof b.memo === 'string' ? b.memo.slice(0, 200) : null,
   };
   let id = String(b.id ?? '');
+  // 수정 전에 덮고 있던 옵션도 다시 계산해야 한다 (옵션을 바꿨을 수 있다)
+  let previous: string[] = [];
   if (id) {
+    const { data: old } = await supabase!.from('coupang_purchases').select('*').eq('id', id).eq('user_id', userId).maybeSingle();
+    if (!old) return res.status(404).json({ error: '기록이 없습니다.' });
+    previous = purchaseCoverage(old);
     const { error } = await supabase!.from('coupang_purchases').update(row).eq('id', id).eq('user_id', userId);
     if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
   } else {
@@ -6238,29 +6305,30 @@ async function handlePurchaseSave(userId: string, req: VercelRequest, res: Verce
     if (error) return res.status(500).json({ error: '저장하지 못했습니다.' });
     id = data.id;
   }
-  const applied = b.applyCost === false ? null : await applyPurchaseCost(userId, vendorItemId);
-  return res.status(200).json({ ok: true, id, appliedUnitCost: applied });
+  const applied = b.applyCost === false ? null : await applyPurchaseCosts(userId, [...vids, ...previous]);
+  return res.status(200).json({ ok: true, id, appliedUnitCost: applied, optionCount: vids.length });
 }
 
 async function handlePurchaseDelete(userId: string, req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const id = String(req.body?.id ?? '');
   if (!id) return res.status(400).json({ error: '잘못된 요청입니다.' });
-  const { data: row } = await supabase!.from('coupang_purchases').select('vendor_item_id').eq('id', id).eq('user_id', userId).maybeSingle();
+  const { data: row } = await supabase!.from('coupang_purchases').select('*').eq('id', id).eq('user_id', userId).maybeSingle();
   if (!row) return res.status(404).json({ error: '기록이 없습니다.' });
   const { error } = await supabase!.from('coupang_purchases').delete().eq('id', id).eq('user_id', userId);
   if (error) return res.status(500).json({ error: '지우지 못했습니다.' });
   // 남은 기록이 있으면 평균을 다시 반영한다. 하나도 없으면 원가는 그대로 둔다.
-  const applied = req.body?.applyCost === false ? null : await applyPurchaseCost(userId, String(row.vendor_item_id));
+  const applied = req.body?.applyCost === false ? null : await applyPurchaseCosts(userId, purchaseCoverage(row));
   return res.status(200).json({ ok: true, appliedUnitCost: applied });
 }
 
-/** 옵션 하나에 [원가에 반영] 버튼 — 평균을 다시 계산해 넣는다 */
+/** [원가에 반영] 버튼 — 옵션 하나 또는 상품의 옵션 전체 평균을 다시 계산해 넣는다 */
 async function handlePurchaseApply(userId: string, req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const vendorItemId = String(req.body?.vendorItemId ?? '').trim();
-  if (!vendorItemId) return res.status(400).json({ error: '옵션을 고르세요.' });
-  const applied = await applyPurchaseCost(userId, vendorItemId);
+  const b: any = req.body ?? {};
+  const vids = [...new Set((Array.isArray(b.vendorItemIds) ? b.vendorItemIds : [b.vendorItemId]).map((v: unknown) => String(v ?? '').trim()).filter(Boolean))] as string[];
+  if (vids.length === 0) return res.status(400).json({ error: '옵션을 고르세요.' });
+  const applied = await applyPurchaseCosts(userId, vids);
   if (applied === null) return res.status(400).json({ error: '이 옵션에는 매입 기록이 없습니다.' });
   return res.status(200).json({ ok: true, appliedUnitCost: applied });
 }

@@ -538,13 +538,19 @@ export interface MyProductLite { productId: string; productName: string; optionC
 
 /** 1688 매입 기록 */
 export interface PurchaseRow {
-  id: string; vendorItemId: string; productName: string; optionName: string; purchasedOn: string;
+  id: string; vendorItemId: string;
+  /** 이 기록이 덮는 옵션들 (상품 전체면 여러 개) */
+  vendorItemIds: string[];
+  productName: string; optionName: string; purchasedOn: string;
   qty: number; unitPriceCny: number; fxRate: number; domesticShipCny: number; intlShipKrw: number; customsKrw: number;
   vatKrw: number; otherKrw: number; includeVat: boolean; memo: string; total: number; unit: number;
 }
+/** 상품명으로 묶은 요약. 옵션마다 평균이 다를 수 있어 min·max를 준다 */
 export interface PurchaseSummary {
-  vendorItemId: string; productName: string; optionName: string; records: number; totalQty: number;
-  avgUnitCost: number | null; currentUnitCost: number | null; lastPurchasedOn: string;
+  productName: string; optionCount: number; vendorItemIds: string[]; records: number; totalQty: number;
+  avgUnitCost: number | null; avgUnitCostMax: number | null;
+  currentUnitCost: number | null; currentMixed: boolean; needsApply: boolean; lastPurchasedOn: string;
+  options: Array<{ vendorItemId: string; optionName: string; avgUnitCost: number | null; currentUnitCost: number | null }>;
 }
 
 export const coupangApi = {
@@ -558,12 +564,12 @@ export const coupangApi = {
   /** 1688 매입 원가 */
   purchases: () => request<{ rows: PurchaseRow[]; summary: PurchaseSummary[] }>('purchases'),
   purchaseSave: (body: {
-    id?: string; vendorItemId: string; purchasedOn: string; qty: number; unitPriceCny: number; fxRate: number;
+    id?: string; vendorItemIds: string[]; purchasedOn: string; qty: number; unitPriceCny: number; fxRate: number;
     domesticShipCny: number; intlShipKrw: number; customsKrw: number; vatKrw: number; otherKrw: number;
     includeVat: boolean; memo: string; applyCost: boolean;
-  }) => request<{ ok: true; id: string; appliedUnitCost: number | null }>('purchase-save', { method: 'POST', body }),
+  }) => request<{ ok: true; id: string; appliedUnitCost: number | null; optionCount: number }>('purchase-save', { method: 'POST', body }),
   purchaseDelete: (id: string) => request<{ ok: true; appliedUnitCost: number | null }>('purchase-delete', { method: 'POST', body: { id } }),
-  purchaseApply: (vendorItemId: string) => request<{ ok: true; appliedUnitCost: number }>('purchase-apply', { method: 'POST', body: { vendorItemId } }),
+  purchaseApply: (vendorItemIds: string[]) => request<{ ok: true; appliedUnitCost: number }>('purchase-apply', { method: 'POST', body: { vendorItemIds } }),
   fxRate: () => request<{ rate: number | null; fetchedAt: string | null; stale: boolean }>('fx-rate'),
   /** 주문 시간대·요일 패턴 (한국 시간) */
   orderHours: (days = 28) => request<OrderHoursResponse>(`order-hours&days=${days}`),
