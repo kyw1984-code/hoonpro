@@ -102,9 +102,14 @@ thead th {
 html {
   color-scheme: dark;
 }
-select option {
+select option,
+select optgroup {
   background-color: var(--color-paper);
   color: var(--color-ink);
+}
+select optgroup {
+  font-weight: 600;
+  color: var(--color-ink-2);
 }
 
 /* 입력칸 안내 문구 — 브라우저 기본 회색은 네이비 위에서 거의 안 보인다 */

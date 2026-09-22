@@ -5,7 +5,7 @@
  * 틀어진다. 위안 단가·수량·배송비·관세·부가세만 적으면 개당 입고 원가가 나오고,
  * 저장하면서 원가 현황에 바로 넣는다. 같은 옵션을 여러 번 매입하면 가중평균이다.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, PackageSearch, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { coupangApi, won, type CostRow, type PurchaseRow, type PurchaseSummary } from '../../lib/coupang';
 import { landedTotal, landedUnit, type PurchaseInput } from '../../lib/landedCost';
@@ -15,7 +15,7 @@ function todayKst(): string {
 }
 
 const EMPTY_FORM = {
-  id: '', vendorItemId: '', purchasedOn: todayKst(), qty: '', unitPriceCny: '', fxRate: '',
+  id: '', productName: '', vendorItemId: '', purchasedOn: todayKst(), qty: '', unitPriceCny: '', fxRate: '',
   domesticShipCny: '', intlShipKrw: '', customsKrw: '', vatKrw: '', otherKrw: '', includeVat: false, memo: '', applyCost: true,
 };
 
@@ -30,6 +30,25 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [productFilter, setProductFilter] = useState('');
+
+  // 쿠팡은 '상품명 · 옵션명'이고 같은 상품의 옵션은 원가가 거의 같다.
+  // 상품을 먼저 고르고, 옵션은 '전체'가 기본이다.
+  const products = useMemo(() => {
+    const map = new Map<string, CostRow[]>();
+    for (const o of options) {
+      const k = o.productName || o.vendorItemId;
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(o);
+    }
+    return [...map.entries()].map(([name, opts]) => ({ name, opts })).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  }, [options]);
+  const productChoices = useMemo(() => {
+    const needle = productFilter.trim().toLowerCase();
+    return needle ? products.filter(p => p.name.toLowerCase().includes(needle)) : products;
+  }, [products, productFilter]);
+  const chosenProduct = products.find(p => p.name === form.productName) ?? null;
+  const targetIds = chosenProduct ? (form.vendorItemId ? [form.vendorItemId] : chosenProduct.opts.map(o => o.vendorItemId)) : [];
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,7 +87,7 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
   };
   const openEdit = (r: PurchaseRow) => {
     setForm({
-      id: r.id, vendorItemId: r.vendorItemId, purchasedOn: r.purchasedOn, qty: String(r.qty), unitPriceCny: String(r.unitPriceCny),
+      id: r.id, productName: r.productName, vendorItemId: r.vendorItemIds.length > 1 ? '' : r.vendorItemId, purchasedOn: r.purchasedOn, qty: String(r.qty), unitPriceCny: String(r.unitPriceCny),
       fxRate: String(r.fxRate), domesticShipCny: String(r.domesticShipCny || ''), intlShipKrw: String(r.intlShipKrw || ''),
       customsKrw: String(r.customsKrw || ''), vatKrw: String(r.vatKrw || ''), otherKrw: String(r.otherKrw || ''),
       includeVat: r.includeVat, memo: r.memo, applyCost: true,
@@ -77,19 +96,19 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
   };
 
   const save = async () => {
-    if (!form.vendorItemId) { setError('옵션을 고르세요.'); return; }
+    if (targetIds.length === 0) { setError('상품을 고르세요.'); return; }
     if (!(Number(form.qty) > 0)) { setError('수량은 1 이상이어야 합니다.'); return; }
     if (!(Number(form.fxRate) > 0)) { setError('환율을 입력하세요.'); return; }
     setBusy(true);
     setError(null);
     try {
       const r = await coupangApi.purchaseSave({
-        id: form.id || undefined, vendorItemId: form.vendorItemId, purchasedOn: form.purchasedOn, qty: Number(form.qty),
+        id: form.id || undefined, vendorItemIds: targetIds, purchasedOn: form.purchasedOn, qty: Number(form.qty),
         unitPriceCny: Number(form.unitPriceCny) || 0, fxRate: Number(form.fxRate), domesticShipCny: Number(form.domesticShipCny) || 0,
         intlShipKrw: Number(form.intlShipKrw) || 0, customsKrw: Number(form.customsKrw) || 0, vatKrw: Number(form.vatKrw) || 0,
         otherKrw: Number(form.otherKrw) || 0, includeVat: form.includeVat, memo: form.memo, applyCost: form.applyCost,
       });
-      setNotice(r.appliedUnitCost !== null ? `저장했습니다. 이 옵션의 매입원가를 ${won(r.appliedUnitCost)}(가중평균)으로 원가 현황에 넣었습니다.` : '저장했습니다.');
+      setNotice(r.appliedUnitCost !== null ? `저장했습니다. 옵션 ${r.optionCount}개의 매입원가를 ${won(r.appliedUnitCost)}(가중평균)으로 원가 현황에 넣었습니다.` : '저장했습니다.');
       setShowForm(false);
       await load();
     } catch (e: any) {
@@ -112,10 +131,10 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
     }
   };
 
-  const apply = async (vendorItemId: string) => {
+  const apply = async (vendorItemIds: string[]) => {
     setBusy(true);
     try {
-      const r = await coupangApi.purchaseApply(vendorItemId);
+      const r = await coupangApi.purchaseApply(vendorItemIds);
       setNotice(`매입원가를 ${won(r.appliedUnitCost)}으로 원가 현황에 넣었습니다.`);
       await load();
     } catch (e: any) {
@@ -162,11 +181,19 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
               <button onClick={() => setShowForm(false)} aria-label="닫기" className="rounded-full p-1 text-ink-3 hover:text-ink"><X className="h-4 w-4" /></button>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-              <div className="col-span-2 sm:col-span-3 lg:col-span-4">
+              <div className="col-span-2 sm:col-span-2 lg:col-span-3">
+                <label className="mb-1 block text-[12px] font-medium text-ink-2">상품</label>
+                <input className={`${inputCls} mb-1.5`} placeholder="상품명으로 찾기" value={productFilter} onChange={e => setProductFilter(e.target.value)} />
+                <select className={inputCls} value={form.productName} onChange={e => setForm(f => ({ ...f, productName: e.target.value, vendorItemId: '' }))}>
+                  <option value="">상품을 고르세요{productChoices.length !== products.length ? ` (${productChoices.length}개 검색됨)` : ''}</option>
+                  {productChoices.map(p => <option key={p.name} value={p.name}>{p.name} · 옵션 {p.opts.length}개</option>)}
+                </select>
+              </div>
+              <div className="col-span-2 sm:col-span-1 lg:col-span-1">
                 <label className="mb-1 block text-[12px] font-medium text-ink-2">옵션</label>
-                <select className={inputCls} value={form.vendorItemId} onChange={e => setForm(f => ({ ...f, vendorItemId: e.target.value }))}>
-                  <option value="">옵션을 고르세요</option>
-                  {options.map(o => <option key={o.vendorItemId} value={o.vendorItemId}>{o.productName}{o.optionName ? ` · ${o.optionName}` : ''}{o.unitCost > 0 ? ` (현재 ${won(o.unitCost)})` : ''}</option>)}
+                <select className={inputCls} value={form.vendorItemId} disabled={!chosenProduct} onChange={e => setForm(f => ({ ...f, vendorItemId: e.target.value }))}>
+                  <option value="">{chosenProduct ? `전체 옵션 ${chosenProduct.opts.length}개` : '상품을 먼저 고르세요'}</option>
+                  {chosenProduct?.opts.map(o => <option key={o.vendorItemId} value={o.vendorItemId}>{o.optionName || '기본 옵션'}{o.unitCost > 0 ? ` (현재 ${won(o.unitCost)})` : ''}</option>)}
                 </select>
               </div>
               <div>
@@ -224,14 +251,14 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
       {summary.length > 0 && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="flex items-center justify-between">
-            <h3 className="text-[15px] font-semibold text-ink">옵션별 평균 원가</h3>
+            <h3 className="text-[15px] font-semibold text-ink">상품별 평균 원가</h3>
             {onGoCosts && <button onClick={onGoCosts} className="text-[12.5px] font-medium text-accent hover:underline">원가 입력 화면 →</button>}
           </div>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-[13px]">
               <thead>
                 <tr className="border-b border-line text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">
-                  <th className="px-2 py-2 text-left">옵션</th>
+                  <th className="px-2 py-2 text-left">상품</th>
                   <th className="px-2 py-2 text-right">매입</th>
                   <th className="px-2 py-2 text-right">총수량</th>
                   <th className="px-2 py-2 text-right">평균 원가</th>
@@ -240,21 +267,22 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
                 </tr>
               </thead>
               <tbody>
-                {summary.map(s => {
-                  const diff = s.avgUnitCost !== null && s.currentUnitCost !== null && s.avgUnitCost !== s.currentUnitCost;
-                  return (
-                    <tr key={s.vendorItemId} className="border-b border-line last:border-b-0">
-                      <td className="px-2 py-2 text-ink"><span className="font-medium">{s.productName}</span>{s.optionName && <span className="text-ink-3"> · {s.optionName}</span>}</td>
-                      <td className="px-2 py-2 text-right tabular-nums text-ink-2">{s.records}회</td>
-                      <td className="px-2 py-2 text-right tabular-nums text-ink-2">{s.totalQty.toLocaleString()}개</td>
-                      <td className="px-2 py-2 text-right tabular-nums font-semibold text-ink">{s.avgUnitCost === null ? '—' : won(s.avgUnitCost)}</td>
-                      <td className={`px-2 py-2 text-right tabular-nums ${diff ? 'text-caution' : 'text-ink-2'}`}>{s.currentUnitCost === null ? '없음' : won(s.currentUnitCost)}</td>
-                      <td className="px-2 py-2 text-right">
-                        {diff && <button onClick={() => apply(s.vendorItemId)} disabled={busy} className="rounded-control border border-line px-2.5 py-1 text-[11.5px] font-medium text-ink-2 hover:text-ink">원가에 반영</button>}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {summary.map(s => (
+                  <tr key={s.productName} className="border-b border-line last:border-b-0">
+                    <td className="px-2 py-2 text-ink"><span className="font-medium">{s.productName}</span><span className="text-ink-3"> · 옵션 {s.optionCount}개</span></td>
+                    <td className="px-2 py-2 text-right tabular-nums text-ink-2">{s.records}회</td>
+                    <td className="px-2 py-2 text-right tabular-nums text-ink-2">{s.totalQty.toLocaleString()}개</td>
+                    <td className="px-2 py-2 text-right tabular-nums font-semibold text-ink">
+                      {s.avgUnitCost === null ? '—' : s.avgUnitCostMax !== null && s.avgUnitCostMax !== s.avgUnitCost ? `${won(s.avgUnitCost)}~${won(s.avgUnitCostMax)}` : won(s.avgUnitCost)}
+                    </td>
+                    <td className={`px-2 py-2 text-right tabular-nums ${s.needsApply ? 'text-caution' : 'text-ink-2'}`}>
+                      {s.currentMixed ? '옵션마다 다름' : s.currentUnitCost === null ? '없음' : won(s.currentUnitCost)}
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      {s.needsApply && <button onClick={() => apply(s.vendorItemIds)} disabled={busy} className="rounded-control border border-line px-2.5 py-1 text-[11.5px] font-medium text-ink-2 hover:text-ink">원가에 반영</button>}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

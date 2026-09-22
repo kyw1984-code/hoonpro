@@ -1543,10 +1543,14 @@ create table if not exists coupang_purchases (
   vat_krw int not null default 0,              -- 수입부가세 합계 (원)
   other_krw int not null default 0,            -- 검수비·라벨비 등 (원)
   include_vat boolean not null default false,  -- true = 간이과세자 등, 부가세를 원가에 넣는다
+  -- 한 번의 매입이 덮는 옵션들. 같은 상품의 사이즈·색상 옵션은 원가가 같으므로
+  -- 상품 단위로 한 번 적고 옵션 전체에 반영한다. 비어 있으면 vendor_item_id 하나만.
+  vendor_item_ids text[],
   memo text,
   created_at timestamptz default now()
 );
 create index if not exists idx_cppur_user on coupang_purchases(user_id, vendor_item_id, purchased_on desc);
+create index if not exists idx_cppur_vids on coupang_purchases using gin (vendor_item_ids);
 alter table coupang_purchases enable row level security;
 revoke all on coupang_purchases from anon, authenticated;
 

@@ -5,7 +5,7 @@
  * 많이 팔리는데 원가가 비어 있는 옵션을 맨 위로 올려, 몇 개만 채워도
  * 순이익 숫자가 곧바로 쓸모 있어지게 만든다.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Save, Search, Upload } from 'lucide-react';
 import { coupangApi, won, type CostRow } from '../../lib/coupang';
 import { fillOptionNames } from '../../lib/optionName';
@@ -125,6 +125,27 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
     return typeof d === 'number' ? d : (row[key] as number) ?? 0;
   };
 
+  // 같은 상품의 사이즈·색상 옵션은 원가가 같은 경우가 대부분이다. 옵션이 셋이면
+  // 셋 다 따로 넣게 하지 말고, 상품 줄에서 한 번 넣으면 옵션 전체에 들어가게 한다.
+  const editGroup = (group: CostRow[], key: keyof CostRow, value: number) => {
+    const v = Math.max(0, Math.round(value) || 0);
+    setDraft(d => {
+      const next = { ...d };
+      for (const r of group) {
+        if (r.resale && key !== 'returnShippingCost') continue;
+        if (key === 'fulfillmentCost' && !isGrowth(r)) continue;
+        next[r.vendorItemId] = { ...next[r.vendorItemId], [key]: v };
+      }
+      return next;
+    });
+  };
+  // 옵션 값이 전부 같으면 그 값, 하나라도 다르면 null (칸을 비워 '다름'으로 보인다)
+  const groupValue = (group: CostRow[], key: keyof CostRow): number | null => {
+    const vals = group.filter(r => !(r.resale && key !== 'returnShippingCost') && !(key === 'fulfillmentCost' && !isGrowth(r))).map(r => valueOf(r, key));
+    if (vals.length === 0) return null;
+    return vals.every(v => v === vals[0]) ? vals[0] : null;
+  };
+
   const dirtyCount = Object.keys(draft).length;
 
   const save = async () => {
@@ -226,6 +247,18 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
     return rows.filter(r => `${r.productName} ${optionOf(r)}`.toLowerCase().includes(needle));
   }, [rows, q, optionOf]);
 
+  // 상품명으로 묶는다. 정렬(판매 많은데 원가 없는 것 위로)은 첫 옵션이 나온 자리를 따른다.
+  const groups = useMemo(() => {
+    const map = new Map<string, CostRow[]>();
+    const order: string[] = [];
+    for (const r of filtered) {
+      const k = r.productName || r.vendorItemId;
+      if (!map.has(k)) { map.set(k, []); order.push(k); }
+      map.get(k)!.push(r);
+    }
+    return order.map(k => ({ name: k, rows: map.get(k)! }));
+  }, [filtered]);
+
   // 로켓그로스 상품이 하나도 없는 판매자에게 입출고비 열은 빈 칸만 늘린다.
   // 검색 결과가 아니라 전체 목록으로 판단해야 검색할 때마다 열이 사라지지 않는다.
   const hasGrowth = useMemo(() => (rows ?? []).some(isGrowth), [rows]);
@@ -249,7 +282,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
         <h3 className="mb-1 text-sm font-semibold text-ink">원가 입력</h3>
         <p className="text-[12.5px] leading-relaxed text-ink-2">
           한 번만 넣으면 이후 순이익이 자동으로 계산됩니다. 최근 30일 판매가 많은데 원가가 비어 있는 옵션을 위로 올렸습니다.
-          부자재·배송비를 모르면 매입원가만 넣어도 됩니다.
+          부자재·배송비를 모르면 매입원가만 넣어도 됩니다. 옵션이 여러 개인 상품은 상품 줄(전체 적용)에 한 번 넣으면 옵션 전체에 들어갑니다.
           {hasGrowth && ' 로켓그로스 상품에는 입출고비 칸이 따로 있습니다 — 쿠팡 물류센터 입고·출고·포장에 개당 나가는 돈입니다.'}
         </p>
       </div>
@@ -325,7 +358,36 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(r => {
+              {groups.map(g => (
+                <Fragment key={g.name}>
+                  {g.rows.length > 1 && (
+                    <tr className="border-b border-line/60 bg-paper-2/60">
+                      <td className="max-w-[280px] px-4 py-2">
+                        <p className="truncate font-semibold text-ink">{g.name}</p>
+                        <p className="text-[11px] text-accent">옵션 {g.rows.length}개 · 여기 넣으면 전체 적용</p>
+                      </td>
+                      <td className="px-3 py-2" />
+                      <td className="px-3 py-2 text-right tabular-nums text-ink-3">{g.rows.reduce((n, r) => n + r.soldLast30, 0).toLocaleString('ko-KR')}</td>
+                      {shownFields.map(f => {
+                        const gv = groupValue(g.rows, f.key);
+                        return (
+                          <td key={String(f.key)} className="px-3 py-2 text-right">
+                            <input
+                              type="number"
+                              min={0}
+                              value={gv === null ? '' : gv}
+                              placeholder={gv === null ? '다름' : ''}
+                              onChange={e => editGroup(g.rows, f.key, Number(e.target.value))}
+                              className="w-[86px] rounded-control border border-accent/40 bg-paper px-2 py-1.5 text-right text-[12px] tabular-nums outline-none placeholder:text-ink-3 focus:ring-2 focus:ring-accent"
+                            />
+                          </td>
+                        );
+                      })}
+                      <td className="px-4 py-2" />
+                    </tr>
+                  )}
+                  {g.rows.map(r => {
+                const grouped = g.rows.length > 1;
                 const growth = isGrowth(r);
                 const totalCost = r.resale ? 0 : shownFields
                   .filter(f => f.key !== 'returnShippingCost' && (!f.growthOnly || growth))
@@ -351,9 +413,9 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
                             재판매
                           </span>
                         )}
-                        {r.productName}
+                        {grouped ? <span className="pl-3 text-ink-2">└ {optionOf(r) || '기본 옵션'}</span> : r.productName}
                       </p>
-                      {optionOf(r) && <p className="truncate text-[11px] text-ink-3">{optionOf(r)}</p>}
+                      {!grouped && optionOf(r) && <p className="truncate text-[11px] text-ink-3">{optionOf(r)}</p>}
                       {r.resale && <p className="text-[10.5px] text-ink-3">원가 0으로 계산 — 첫 판매 때 이미 나간 돈</p>}
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-ink-2">
@@ -391,7 +453,9 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
                     </td>
                   </tr>
                 );
-              })}
+                  })}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>

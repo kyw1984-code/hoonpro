@@ -74,6 +74,21 @@ export function AnalyzerDashboard() {
   // 쿠팡 연동에서 불러온 옵션별 판매가·원가
   const [presetItems, setPresetItems] = useState<any[] | null>(null);
   const [presetPick, setPresetPick] = useState<string>("");
+  // 쿠팡은 '상품명 · 옵션명'이다. 옵션명만 늘어놓으면 "4종세트 105"가 어느 상품인지
+  // 알 수 없어 상품명으로 묶고, 상품명으로 걸러 찾을 수 있게 한다.
+  const [presetFilter, setPresetFilter] = useState("");
+  const presetGroups = useMemo(() => {
+    const needle = presetFilter.trim().toLowerCase();
+    const map = new Map<string, any[]>();
+    const order: string[] = [];
+    for (const i of presetItems ?? []) {
+      const name = String(i.productName || i.vendorItemId);
+      if (needle && !`${name} ${i.optionName || ""}`.toLowerCase().includes(needle)) continue;
+      if (!map.has(name)) { map.set(name, []); order.push(name); }
+      map.get(name)!.push(i);
+    }
+    return order.map(name => ({ name, items: map.get(name)! }));
+  }, [presetItems, presetFilter]);
   const [presetBusy, setPresetBusy] = useState(false);
   const [presetMsg, setPresetMsg] = useState<string>("");
   const [error, setError] = useState<string>("");
@@ -875,20 +890,33 @@ export function AnalyzerDashboard() {
           </button>
 
           {presetItems && presetItems.length > 0 && (
-            <select
-              value={presetPick}
-              onChange={(e) => {
-                setPresetPick(e.target.value);
-                applyPreset(presetItems.find((i) => i.vendorItemId === e.target.value));
-              }}
-              className="mt-2 w-full rounded-control border border-line bg-paper px-2 py-1.5 text-[12px] text-ink"
-            >
-              {presetItems.map((i) => (
-                <option key={i.vendorItemId} value={i.vendorItemId}>
-                  {(i.optionName || i.productName || i.vendorItemId).slice(0, 30)} · {i.quantity}개 · 실결제 {Math.max(0, i.unitPrice - (i.couponPerUnit || 0)).toLocaleString()}원
-                </option>
-              ))}
-            </select>
+            <>
+              <input
+                value={presetFilter}
+                onChange={(e) => setPresetFilter(e.target.value)}
+                placeholder="상품명으로 찾기"
+                className="mt-2 w-full rounded-control border border-line bg-paper px-2 py-1.5 text-[12px] text-ink outline-none placeholder:text-ink-3 focus:border-accent"
+              />
+              <select
+                value={presetPick}
+                onChange={(e) => {
+                  setPresetPick(e.target.value);
+                  applyPreset(presetItems.find((i) => i.vendorItemId === e.target.value));
+                }}
+                className="mt-1.5 w-full rounded-control border border-line bg-paper px-2 py-1.5 text-[12px] text-ink"
+              >
+                {presetGroups.length === 0 && <option value="">검색 결과가 없습니다</option>}
+                {presetGroups.map((g) => (
+                  <optgroup key={g.name} label={`${g.name.slice(0, 40)} (옵션 ${g.items.length}개)`}>
+                    {g.items.map((i) => (
+                      <option key={i.vendorItemId} value={i.vendorItemId}>
+                        {(i.optionName || "기본 옵션").slice(0, 30)} · {i.quantity}개 · 실결제 {Math.max(0, i.unitPrice - (i.couponPerUnit || 0)).toLocaleString()}원
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </>
           )}
 
           <p className="mt-2 text-[11.5px] leading-relaxed text-ink-2">
