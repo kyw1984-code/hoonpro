@@ -1,11 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { HOWTO } from '../src/lib/howto.js';
-import { DEFAULT_FEATURE_LIMITS, decideQuota, isDisabled, parseLimits } from '../src/lib/featureLimits.js';
+import { DEFAULT_FEATURE_LIMITS, decideQuota, isDisabled, parseLimits, LIMIT_UNLIMITED } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { buildSellerContext } from '../lib/coupang-context.js';
 import { calcCostUsd } from '../src/lib/pricing.js';
-import { checkAccess } from '../src/lib/accessGate.js';
+import { checkAccess, isTestAccount } from '../src/lib/accessGate.js';
 import { emailFrom } from '../src/lib/emailFrom.js';
 import { wrapEmail, emailButton, emailQuote, toHtmlParagraphs } from '../src/lib/emailTemplate.js';
 
@@ -389,6 +389,8 @@ async function handleAsk(req: VercelRequest, res: VercelResponse, decoded: any) 
         .from('app_config').select('value').eq('key', 'feature_limits').maybeSingle();
       qaLimit = parseLimits(cfg?.value).qa;
     } catch { /* 설정 조회 실패 시 기본값 */ }
+    // 테스트 계정은 세지 않는다 (관리자 권한과는 별개)
+    if (await isTestAccount(supabase, decoded.userId)) qaLimit = LIMIT_UNLIMITED;
 
     // 예전에는 error를 아예 안 봤다. rpc가 실패하면 usage가 null이 되고
     // `usage?.exceeded`는 false라 그냥 통과했다. 한도가 통째로 풀린 셈이다.

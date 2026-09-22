@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { parseSet, medianUnitPrice } from "../src/lib/setProduct.js";
 import { buildSellerProfile, sellerFit, blendScore, type SellerProfile } from "../src/lib/sellerFit.js";
 import { detectOffCategory, scoreReasons } from "../src/lib/productRelevance.js";
-import { DEFAULT_FEATURE_LIMITS, decideQuota, isDisabled, parseLimits } from "../src/lib/featureLimits.js";
+import { DEFAULT_FEATURE_LIMITS, decideQuota, isDisabled, parseLimits, LIMIT_UNLIMITED } from "../src/lib/featureLimits.js";
 import { createClient } from "@supabase/supabase-js";
 import { runCron } from "../src/lib/cronHeartbeat.js";
 import { emailFrom } from "../src/lib/emailFrom.js";
@@ -10,7 +10,7 @@ import { createHmac } from "crypto";
 import jwt from "jsonwebtoken";
 // ESM이라 상대 경로 import에는 확장자가 필요하다. 빠지면 함수가 통째로 죽는다.
 import { tabDisabledMessage, featureHidden } from "../lib/feature-gate.js";
-import { checkAccess } from "../src/lib/accessGate.js";
+import { checkAccess, isTestAccount } from "../src/lib/accessGate.js";
 import { runIn, selectIn } from "../src/lib/chunkedIn.js";
 import { parseProductRef, productPageUrl } from "../src/lib/coupangUrl.js";
 import { REVIEW_MAX_PAGES, REVIEW_PAGE_SIZE, describeJson, parseReviewJson, reviewApiUrl, type ReviewQueryOpts } from "../src/lib/coupangReview.js";
@@ -1188,7 +1188,7 @@ async function fetchSearchProducts(keyword: string, decoded: any): Promise<{
     if (!decoded?.isAdmin && supabase) {
       try {
         const today = kstToday();
-        const limit = (await loadLimits()).rank;
+        const limit = (await isTestAccount(supabase, decoded.userId)) ? LIMIT_UNLIMITED : (await loadLimits()).rank;
         const rpc = await supabase.rpc("increment_feature_usage", {
           p_user_id: decoded.userId, p_date: today, p_feature: "rank", p_limit: limit,
         });
@@ -1256,7 +1256,7 @@ async function fetchSearchPage(keyword: string, page: number, decoded: any): Pro
   let remaining: number | null = null;
   if (!decoded?.isAdmin && supabase) {
     try {
-      const limit = (await loadLimits()).rank;
+      const limit = (await isTestAccount(supabase, decoded.userId)) ? LIMIT_UNLIMITED : (await loadLimits()).rank;
       const rpc = await supabase.rpc("increment_feature_usage", {
         p_user_id: decoded.userId, p_date: kstToday(), p_feature: "rank", p_limit: limit,
       });
@@ -2001,7 +2001,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
     if (!decoded?.isAdmin && supabase) {
       try {
         const today = kstToday();
-        const limit = (await loadLimits()).sourcing;
+        const limit = (await isTestAccount(supabase, decoded.userId)) ? LIMIT_UNLIMITED : (await loadLimits()).sourcing;
         const rpc = await supabase.rpc("increment_feature_usage", {
           p_user_id: decoded.userId,
           p_date: today,

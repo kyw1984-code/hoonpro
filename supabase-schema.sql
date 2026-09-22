@@ -1562,3 +1562,7 @@ create table if not exists fx_rates (
 );
 alter table fx_rates enable row level security;
 revoke all on fx_rates from anon, authenticated;
+
+-- 테스트 계정: 일일 한도와 구독 게이트를 면제한다. 관리자 권한은 아니다.
+-- (관리자는 ADMIN_EMAIL 하나뿐이고 관리자 화면까지 열리므로, 테스트용으로는 쓸 수 없다)
+alter table users add column if not exists test_account boolean not null default false;

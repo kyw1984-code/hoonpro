@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { DEFAULT_FEATURE_LIMITS, isDisabled, parseLimits } from '../src/lib/featureLimits.js';
 import { calcCostUsd } from '../src/lib/pricing.js';
-import { checkAccess } from '../src/lib/accessGate.js';
+import { checkAccess, isTestAccount } from '../src/lib/accessGate.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -225,6 +225,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'limits') {
     const limits = await loadLimits();
     const today = kstToday();
+    // 관리자와 테스트 계정은 한도가 없다 (테스트 계정에 관리자 권한은 없다)
+    const exempt = decoded.isAdmin === true || (await isTestAccount(supabase, decoded.userId));
 
     const { data: rows } = await supabase
       .from('feature_usage')
@@ -236,7 +238,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       resetAt: nextResetIso(),
-      unlimited: Boolean(decoded.isAdmin),
+      unlimited: exempt,
       features: Object.entries(limits).map(([feature, limit]) => {
         const used = usedMap.get(feature) ?? 0;
         return {
@@ -244,16 +246,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           limit,
           used,
           // 관리자와 무제한(음수)은 잔여를 -1로. 한도 0은 사용 중지라 잔여가 0이다
-          remaining: decoded.isAdmin || limit < 0 ? -1 : Math.max(0, limit - used),
-          disabled: !decoded.isAdmin && isDisabled(limit),
+          remaining: exempt || limit < 0 ? -1 : Math.max(0, limit - used),
+          disabled: !exempt && isDisabled(limit),
         };
       }),
     });
   }
 
   // 기본: 일일 사용 한도 증가 및 잔여 횟수 반환
-  // 관리자는 한도 제한 없음
-  if (decoded.isAdmin) {
+  // 관리자와 테스트 계정은 한도 제한 없음
+  if (decoded.isAdmin || (await isTestAccount(supabase, decoded.userId))) {
     return res.status(200).json({ remaining: 999 });
   }
 

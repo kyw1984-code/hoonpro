@@ -10,7 +10,7 @@ import { verdict as experimentVerdict, type SideMetrics, type RankPair } from '.
 import { landedTotal, landedUnit, weightedUnitCost, type PurchaseInput } from '../src/lib/landedCost.js';
 import { adCostGap, type AdGap } from '../src/lib/adCostGap.js';
 import { summarizeReturnReasons } from '../src/lib/returnReasons.js';
-import { decideQuota, isDisabled, parseLimits, type QuotaDecision } from '../src/lib/featureLimits.js';
+import { decideQuota, isDisabled, parseLimits, LIMIT_UNLIMITED, type QuotaDecision } from '../src/lib/featureLimits.js';
 import { createClient } from '@supabase/supabase-js';
 import { isTransientDbError } from '../src/lib/dbRetry.js';
 import crypto from 'crypto';
@@ -19,7 +19,7 @@ import jwt from 'jsonwebtoken';
 import { tabDisabledMessage, featureHidden } from '../lib/feature-gate.js';
 import * as XLSX from 'xlsx';
 import { extractDailyAdCost, extractItemAdCost, rowsFromMatrix } from '../src/lib/adcost.js';
-import { checkAccess } from '../src/lib/accessGate.js';
+import { checkAccess, isTestAccount } from '../src/lib/accessGate.js';
 
 export const config = { maxDuration: 300 };
 
@@ -7667,6 +7667,8 @@ async function consumeQuota(
   } catch {
     /* 설정을 못 읽으면 기본값으로 간다 */
   }
+  // 테스트 계정은 세지 않는다 (관리자 권한과는 별개)
+  if (await isTestAccount(supabase, userId)) limit = LIMIT_UNLIMITED;
   // 셈이 안 되면 내주지 않는다. 예전에는 rpc가 오류를 내면 ok를 돌려줘서,
   // 함수 이름이 바뀌거나 DB가 잠깐 붐비기만 해도 한도가 통째로 풀렸다.
   try {
