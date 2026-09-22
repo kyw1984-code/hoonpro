@@ -27,8 +27,8 @@ export type AccessDenial = {
 
 /** 부르는 쪽이 supabase 타입에 얽매이지 않게 최소한만 요구한다 */
 export interface GateRows {
-  /** users 한 줄 — 못 찾으면 null */
-  user: { status: string | null; withdrawn_at: string | null } | null;
+  /** users 한 줄 — 못 찾으면 null. test_account면 구독 게이트를 면제한다(관리자는 아니다) */
+  user: { status: string | null; withdrawn_at: string | null; test_account?: boolean | null } | null;
   /** app_config의 billing_enforced 값 */
   billingEnforced: boolean;
   /** subscriptions 한 줄 — 없으면 null */
@@ -62,7 +62,8 @@ export function decideAccess(rows: GateRows, isAdmin: boolean): AccessDenial | n
     return { status: 403, body: { error: '가입 승인 대기 중입니다.', reauth: true } };
   }
 
-  if (isAdmin) return null;
+  // 테스트 계정은 구독 없이 쓴다. 관리자 화면·권한은 없다 — 여기서는 유료화 게이트만 건너뛴다.
+  if (isAdmin || rows.user.test_account === true) return null;
 
   if (rows.billingEnforced && !LIVE_SUBSCRIPTION.includes(String(rows.subscription?.status ?? ''))) {
     return {
@@ -92,7 +93,7 @@ export async function checkAccess(
   if (!supabase || !userId) return null;
   try {
     const [userRes, cfgRes, subRes] = await Promise.all([
-      supabase.from('users').select('status, withdrawn_at').eq('id', userId).maybeSingle(),
+      supabase.from('users').select('status, withdrawn_at, test_account').eq('id', userId).maybeSingle(),
       supabase.from('app_config').select('value').eq('key', 'billing_enforced').maybeSingle(),
       supabase.from('subscriptions').select('status').eq('user_id', userId).maybeSingle(),
     ]);
@@ -107,5 +108,25 @@ export async function checkAccess(
   } catch {
     // 여기서 막으면 DB가 흔들릴 때 전원이 튕긴다
     return null;
+  }
+}
+
+// ── 테스트 계정 ──────────────────────────────────────────────
+// 일일 한도를 세지 않는 계정. 관리자와 달리 관리자 화면·권한은 없다.
+// 한도를 재는 곳(소싱·순위·코칭·정산)마다 users를 다시 읽지 않도록 1분 캐시한다.
+const testAccountCache = new Map<string, { at: number; value: boolean }>();
+const TEST_ACCOUNT_TTL_MS = 60_000;
+
+export async function isTestAccount(supabase: any, userId: string): Promise<boolean> {
+  if (!supabase || !userId) return false;
+  const hit = testAccountCache.get(userId);
+  if (hit && Date.now() - hit.at < TEST_ACCOUNT_TTL_MS) return hit.value;
+  try {
+    const { data } = await supabase.from('users').select('test_account').eq('id', userId).maybeSingle();
+    const value = data?.test_account === true;
+    testAccountCache.set(userId, { at: Date.now(), value });
+    return value;
+  } catch {
+    return false;
   }
 }

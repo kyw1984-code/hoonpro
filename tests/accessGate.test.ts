@@ -83,3 +83,16 @@ test('관리자는 유료화 게이트를 건너뛴다', () => {
 test('조회가 실패하면 막지 않는다', () => {
   assert.equal(decideAccess({ user: null, billingEnforced: true, subscription: null, lookupFailed: true }, false), null);
 });
+
+// ── 테스트 계정 ──
+
+test('테스트 계정은 유료화가 켜져 있어도 구독 없이 통과한다', () => {
+  const rows: GateRows = { user: { status: 'approved', withdrawn_at: null, test_account: true }, billingEnforced: true, subscription: null };
+  assert.equal(decideAccess(rows, false), null);
+});
+
+test('테스트 계정이라도 탈퇴·거절·대기 상태면 막는다', () => {
+  const base = { billingEnforced: true, subscription: null };
+  assert.equal(decideAccess({ ...base, user: { status: 'rejected', withdrawn_at: null, test_account: true } }, false)?.status, 403);
+  assert.equal(decideAccess({ ...base, user: { status: 'approved', withdrawn_at: '2026-09-01T00:00:00Z', test_account: true } }, false)?.status, 401);
+});
