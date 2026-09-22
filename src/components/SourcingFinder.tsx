@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getToken } from '../lib/auth';
+import { sortByRelevance } from '../lib/keywordRelevance';
 import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
 import { SaveToWorksButton } from './SaveToWorks';
 
@@ -179,7 +180,9 @@ export function SourcingFinder() {
   const [rankAdded, setRankAdded] = useState<Record<string, boolean>>({});
 
   // 필터/정렬 (키워드)
-  const [sortKey, setSortKey] = useState<'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('opportunityScore');
+  // 검색어로 찾았을 때는 관련도순이 기본이다. 기회점수순으로 늘어놓으면 검색어와
+  // 가장 가까운 키워드가 40번째 줄에 가 있어 셀러가 자기가 찾던 말을 다시 찾아야 한다.
+  const [sortKey, setSortKey] = useState<'relevance' | 'opportunityScore' | 'monthlyVolume' | 'monthlyClicks' | 'competition'>('relevance');
   const [minVolume, setMinVolume] = useState('100');
   // 표 필터 — 키워드 글자, 등급, 경쟁강도. 132개 목록에서 원하는 줄만 남긴다.
   const [kwFilter, setKwFilter] = useState('');
@@ -247,6 +250,7 @@ export function SourcingFinder() {
       setCached(!!data.cached);
       setCurrentSeed(trimmed);
       setSeedInput(trimmed);
+      setSortKey('relevance');
       if (mode === 'new') setSeedTrail([trimmed]);
       else if (mode === 'drill') setSeedTrail(prev => [...prev.filter(s => s !== trimmed), trimmed]);
       else setSeedTrail(prev => prev.slice(0, prev.indexOf(trimmed) + 1));
@@ -264,6 +268,7 @@ export function SourcingFinder() {
     setLoading(true);
     setError(null);
     setSeedStat(null);
+    setSortKey(k => (k === 'relevance' ? 'opportunityScore' : k));
     setSeedTrail([]);
     setSeedInput('');
     setCurrentSeed(cat);
@@ -291,6 +296,7 @@ export function SourcingFinder() {
     setLoading(true);
     setError(null);
     setSeedStat(null);
+    setSortKey(k => (k === 'relevance' ? 'opportunityScore' : k));
     setSeedTrail([]);
     setSeedInput('');
     setCurrentSeed(`${m}월 시즌`);
@@ -506,15 +512,24 @@ export function SourcingFinder() {
 
   // ─── 파생 목록 ──────────────────────────────────────────────────────────────
   const sourceList = keywords;
-  const displayKeywords = sourceList
+  // 관련도순은 검색어가 있을 때만 뜻이 있다. 카테고리·시즌 모드면 기회점수순으로 본다
+  const seedForRelevance = seedStat?.keyword || (!activeKwCategory && !activeMonth ? currentSeed : null);
+  const effectiveSort = sortKey === 'relevance' && !seedForRelevance ? 'opportunityScore' : sortKey;
+  const filteredKeywords = sourceList
     .filter(k => k.monthlyVolume >= (Number(minVolume) || 0))
     .filter(k => !kwFilter.trim() || k.keyword.replace(/\s+/g, '').includes(kwFilter.replace(/\s+/g, '')))
     .filter(k => gradeFilter === 'all' || k.grade === gradeFilter)
-    .filter(k => compFilter === 'all' || k.compIdx === compFilter)
-    .sort((a, b) => {
-      if (sortKey === 'competition') return a.competition - b.competition;
-      return (b[sortKey] as number) - (a[sortKey] as number);
-    });
+    .filter(k => compFilter === 'all' || k.compIdx === compFilter);
+  const sortedKeywords = effectiveSort === 'relevance'
+    ? sortByRelevance(seedForRelevance as string, filteredKeywords)
+    : [...filteredKeywords].sort((a, b) => {
+        if (effectiveSort === 'competition') return a.competition - b.competition;
+        return (b[effectiveSort] as number) - (a[effectiveSort] as number);
+      });
+  // 검색어 자체는 정렬·필터와 상관없이 늘 첫 줄. 셀러가 찾던 그 말이 맨 위에 있어야 한다
+  const displayKeywords = seedStat
+    ? [seedStat, ...sortedKeywords.filter(k => k.keyword !== seedStat.keyword)]
+    : sortedKeywords;
 
   const displayProducts = [...products]
     .filter(p => !excludeBrands || !p.isBrand)
@@ -865,8 +880,9 @@ export function SourcingFinder() {
                 </div>
                 <div className="flex items-center gap-1 bg-paper-2 rounded-control px-2 py-1.5">
                   <ArrowUpDown className="w-3 h-3 text-ink-3" />
-                  <select value={sortKey} onChange={e => setSortKey(e.target.value as any)}
+                  <select value={effectiveSort} onChange={e => setSortKey(e.target.value as any)}
                     className="cursor-pointer bg-transparent text-[12px] font-medium text-ink outline-none">
+                    {seedForRelevance && <option value="relevance">검색어 관련도순</option>}
                     <option value="opportunityScore">기회점수순</option>
                     <option value="monthlyVolume">검색량순</option>
                     <option value="monthlyClicks">클릭수순</option>
@@ -900,7 +916,12 @@ export function SourcingFinder() {
                           activeKeyword === k.keyword ? 'bg-accent-soft' : 'hover:bg-paper-2'
                         }`}
                       >
-                        <td className="whitespace-nowrap px-3 py-2.5 text-[13px] font-medium text-ink">{k.keyword}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-[13px] font-medium text-ink">
+                          {k.keyword}
+                          {seedStat && k.keyword === seedStat.keyword && (
+                            <span className="ml-2 rounded-full bg-accent-soft px-2 py-0.5 text-[10.5px] font-semibold text-accent">검색어</span>
+                          )}
+                        </td>
                         <td className="px-4 py-2.5 text-right tabular-nums">
                           <span className="text-[13px] font-semibold text-ink">{k.monthlyVolume.toLocaleString()}</span>
                           <span className="mt-0.5 block text-[11px] text-ink-3">PC {k.monthlyPcVolume.toLocaleString()} · MO {k.monthlyMobileVolume.toLocaleString()}</span>
