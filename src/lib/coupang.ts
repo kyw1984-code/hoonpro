@@ -221,6 +221,8 @@ export interface CostRow {
   vendorItemId: string;
   productName: string;
   optionName: string;
+  /** 등록상품ID — 옵션을 상품으로 묶는 열쇠. 재판매 옵션은 null */
+  sellerProductId?: string | null;
   salePrice: number | null;
   /** 판매가 출처 — 'detail' 상품 상세, 'sales' 최근 매출의 개당 금액(상세가 0을 준 로켓그로스 옵션) */
   priceSource?: 'detail' | 'sales' | null;

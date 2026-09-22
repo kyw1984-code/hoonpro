@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { groupProducts } from "../../lib/productGroup";
 import { Upload, Save, TrendingUp, X, Loader2 } from "lucide-react";
 import { getToken } from "../../lib/auth";
 import { coupangApi } from "../../lib/coupang";
@@ -79,15 +80,14 @@ export function AnalyzerDashboard() {
   const [presetFilter, setPresetFilter] = useState("");
   const presetGroups = useMemo(() => {
     const needle = presetFilter.trim().toLowerCase();
-    const map = new Map<string, any[]>();
-    const order: string[] = [];
-    for (const i of presetItems ?? []) {
-      const name = String(i.productName || i.vendorItemId);
-      if (needle && !`${name} ${i.optionName || ""}`.toLowerCase().includes(needle)) continue;
-      if (!map.has(name)) { map.set(name, []); order.push(name); }
-      map.get(name)!.push(i);
-    }
-    return order.map(name => ({ name, items: map.get(name)! }));
+    const rows = (presetItems ?? []).map((i: any) => ({ ...i, vendorItemId: String(i.vendorItemId), productName: String(i.productName || "") }));
+    const groups = groupProducts(rows);
+    return groups
+      .map(g => ({
+        name: g.name || g.rows[0]?.vendorItemId || "",
+        items: needle ? g.rows.filter((i: any) => `${g.name} ${i.optionName || ""}`.toLowerCase().includes(needle)) : g.rows,
+      }))
+      .filter(g => g.items.length > 0);
   }, [presetItems, presetFilter]);
   const [presetBusy, setPresetBusy] = useState(false);
   const [presetMsg, setPresetMsg] = useState<string>("");
