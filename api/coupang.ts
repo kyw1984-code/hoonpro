@@ -4484,6 +4484,8 @@ async function handleCosts(userId: string, res: VercelResponse) {
       vendorItemId: id,
       productName: it.product_name ?? '',
       optionName: it.option_name ?? '',
+      // 화면이 옵션을 상품으로 묶는 열쇠. 재판매 옵션은 없다
+      sellerProductId: it.seller_product_id ? String(it.seller_product_id) : null,
       salePrice,
       // 어디서 온 판매가인지. 'sales'면 상세엔 없어 최근 매출의 개당 금액을 쓴 것이다
       priceSource: detailPrice !== null ? 'detail' : salePrice !== null ? 'sales' : null,
@@ -4951,9 +4953,9 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
         .lte('sale_date', to)
         .order('vendor_item_id').range(f, t)),
     // 옵션명 — 상품명만 보여주면 같은 상품의 여러 옵션이 전부 같은 줄로 보인다
-    selectAll<{ vendor_item_id: string; option_name: string | null }>((f, t) =>
+    selectAll<{ vendor_item_id: string; option_name: string | null; seller_product_id: string | null; product_name: string | null }>((f, t) =>
       supabase!.from('coupang_items')
-        .select('vendor_item_id, option_name')
+        .select('vendor_item_id, option_name, seller_product_id, product_name')
         .eq('user_id', userId)
         .order('vendor_item_id').range(f, t)),
     // 반품 — 반품률 5%짜리 상품은 100개를 팔아도 95개치 마진만 남는다.
@@ -4976,7 +4978,14 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
   }
 
   const optionNames = new Map<string, string>();
-  for (const i of itemRes.rows) optionNames.set(String(i.vendor_item_id), i.option_name ?? '');
+  // 화면이 옵션을 상품으로 묶는 열쇠. 매출내역의 상품명은 재판매 옵션에 옵션명이 붙어 있어 이름으로는 못 묶는다
+  const sellerProductIds = new Map<string, string | null>();
+  const cleanNames = new Map<string, string>();
+  for (const i of itemRes.rows) {
+    optionNames.set(String(i.vendor_item_id), i.option_name ?? '');
+    sellerProductIds.set(String(i.vendor_item_id), i.seller_product_id ? String(i.seller_product_id) : null);
+    if (i.product_name) cleanNames.set(String(i.vendor_item_id), String(i.product_name));
+  }
 
   const returnQty = new Map<string, number>();
   for (const r of returnRes.rows) {
@@ -5003,8 +5012,10 @@ async function handleMarginPreset(userId: string, req: VercelRequest, res: Verce
       const c = costs.get(a.vendorItemId);
       return {
         vendorItemId: a.vendorItemId,
-        productName: a.productName,
+        // 상품 상세의 이름이 있으면 그것(옵션명이 안 붙은 원래 상품명), 없으면 매출내역의 이름
+        productName: cleanNames.get(a.vendorItemId) ?? a.productName,
         optionName: optionNames.get(a.vendorItemId) ?? '',
+        sellerProductId: sellerProductIds.get(a.vendorItemId) ?? null,
         channel: a.channel,
         quantity: a.quantity,
         // 주문금액 ÷ 수량 — 쿠폰이 아직 빠지지 않은 값이다

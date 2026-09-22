@@ -8,6 +8,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Loader2, Save, Search, Upload } from 'lucide-react';
 import { coupangApi, won, type CostRow } from '../../lib/coupang';
+import { groupProducts } from '../../lib/productGroup';
 import { fillOptionNames } from '../../lib/optionName';
 
 /**
@@ -247,17 +248,9 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
     return rows.filter(r => `${r.productName} ${optionOf(r)}`.toLowerCase().includes(needle));
   }, [rows, q, optionOf]);
 
-  // 상품명으로 묶는다. 정렬(판매 많은데 원가 없는 것 위로)은 첫 옵션이 나온 자리를 따른다.
-  const groups = useMemo(() => {
-    const map = new Map<string, CostRow[]>();
-    const order: string[] = [];
-    for (const r of filtered) {
-      const k = r.productName || r.vendorItemId;
-      if (!map.has(k)) { map.set(k, []); order.push(k); }
-      map.get(k)!.push(r);
-    }
-    return order.map(k => ({ name: k, rows: map.get(k)! }));
-  }, [filtered]);
+  // 등록상품ID로 묶고, ID 없는 재판매 줄은 상품명 접두어로 붙인다.
+  // 정렬(판매 많은데 원가 없는 것 위로)은 첫 옵션이 나온 자리를 따른다.
+  const groups = useMemo(() => groupProducts(filtered), [filtered]);
 
   // 로켓그로스 상품이 하나도 없는 판매자에게 입출고비 열은 빈 칸만 늘린다.
   // 검색 결과가 아니라 전체 목록으로 판단해야 검색할 때마다 열이 사라지지 않는다.
@@ -359,7 +352,7 @@ export function CostEditor({ onSaved }: { onSaved?: () => void }) {
             </thead>
             <tbody>
               {groups.map(g => (
-                <Fragment key={g.name}>
+                <Fragment key={g.key}>
                   {g.rows.length > 1 && (
                     <tr className="border-b border-line/60 bg-paper-2/60">
                       <td className="max-w-[280px] px-4 py-2">

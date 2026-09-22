@@ -9,13 +9,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, PackageSearch, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { coupangApi, won, type CostRow, type PurchaseRow, type PurchaseSummary } from '../../lib/coupang';
 import { landedTotal, landedUnit, type PurchaseInput } from '../../lib/landedCost';
+import { groupProducts } from '../../lib/productGroup';
 
 function todayKst(): string {
   return new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 }
 
 const EMPTY_FORM = {
-  id: '', productName: '', vendorItemId: '', purchasedOn: todayKst(), qty: '', unitPriceCny: '', fxRate: '',
+  id: '', productKey: '', vendorItemId: '', purchasedOn: todayKst(), qty: '', unitPriceCny: '', fxRate: '',
   domesticShipCny: '', intlShipKrw: '', customsKrw: '', vatKrw: '', otherKrw: '', includeVat: false, memo: '', applyCost: true,
 };
 
@@ -34,20 +35,18 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
 
   // 쿠팡은 '상품명 · 옵션명'이고 같은 상품의 옵션은 원가가 거의 같다.
   // 상품을 먼저 고르고, 옵션은 '전체'가 기본이다.
-  const products = useMemo(() => {
-    const map = new Map<string, CostRow[]>();
-    for (const o of options) {
-      const k = o.productName || o.vendorItemId;
-      if (!map.has(k)) map.set(k, []);
-      map.get(k)!.push(o);
-    }
-    return [...map.entries()].map(([name, opts]) => ({ name, opts })).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-  }, [options]);
+  // 재판매 옵션(쿠팡이 반품을 새 옵션으로 되파는 것)은 매입이 없으니 뺀다.
+  // 등록상품ID로 묶어야 같은 상품이 사이즈마다 갈라지지 않는다.
+  const products = useMemo(() =>
+    groupProducts(options.filter(o => !o.resale))
+      .map(g => ({ key: g.key, name: g.name, opts: g.rows }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'ko')),
+  [options]);
   const productChoices = useMemo(() => {
     const needle = productFilter.trim().toLowerCase();
     return needle ? products.filter(p => p.name.toLowerCase().includes(needle)) : products;
   }, [products, productFilter]);
-  const chosenProduct = products.find(p => p.name === form.productName) ?? null;
+  const chosenProduct = products.find(p => p.key === form.productKey) ?? null;
   const targetIds = chosenProduct ? (form.vendorItemId ? [form.vendorItemId] : chosenProduct.opts.map(o => o.vendorItemId)) : [];
 
   const load = useCallback(async () => {
@@ -87,7 +86,7 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
   };
   const openEdit = (r: PurchaseRow) => {
     setForm({
-      id: r.id, productName: r.productName, vendorItemId: r.vendorItemIds.length > 1 ? '' : r.vendorItemId, purchasedOn: r.purchasedOn, qty: String(r.qty), unitPriceCny: String(r.unitPriceCny),
+      id: r.id, productKey: products.find(p => p.opts.some(o => r.vendorItemIds.includes(o.vendorItemId)))?.key ?? '', vendorItemId: r.vendorItemIds.length > 1 ? '' : r.vendorItemId, purchasedOn: r.purchasedOn, qty: String(r.qty), unitPriceCny: String(r.unitPriceCny),
       fxRate: String(r.fxRate), domesticShipCny: String(r.domesticShipCny || ''), intlShipKrw: String(r.intlShipKrw || ''),
       customsKrw: String(r.customsKrw || ''), vatKrw: String(r.vatKrw || ''), otherKrw: String(r.otherKrw || ''),
       includeVat: r.includeVat, memo: r.memo, applyCost: true,
@@ -184,9 +183,9 @@ export function Purchases({ onGoCosts }: { onGoCosts?: () => void }) {
               <div className="col-span-2 sm:col-span-2 lg:col-span-3">
                 <label className="mb-1 block text-[12px] font-medium text-ink-2">상품</label>
                 <input className={`${inputCls} mb-1.5`} placeholder="상품명으로 찾기" value={productFilter} onChange={e => setProductFilter(e.target.value)} />
-                <select className={inputCls} value={form.productName} onChange={e => setForm(f => ({ ...f, productName: e.target.value, vendorItemId: '' }))}>
+                <select className={inputCls} value={form.productKey} onChange={e => setForm(f => ({ ...f, productKey: e.target.value, vendorItemId: '' }))}>
                   <option value="">상품을 고르세요{productChoices.length !== products.length ? ` (${productChoices.length}개 검색됨)` : ''}</option>
-                  {productChoices.map(p => <option key={p.name} value={p.name}>{p.name} · 옵션 {p.opts.length}개</option>)}
+                  {productChoices.map(p => <option key={p.key} value={p.key}>{p.name} · 옵션 {p.opts.length}개</option>)}
                 </select>
               </div>
               <div className="col-span-2 sm:col-span-1 lg:col-span-1">
