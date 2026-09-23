@@ -666,14 +666,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 // ── 사용자 액션 ───────────────────────────────────────────
 
 async function getStatus(user: any, res: VercelResponse) {
-  const [{ data: sub }, { data: planRows }, { data: cfg }, { data: limitCfg }] = await Promise.all([
+  const [{ data: sub }, { data: planRows }, { data: cfg }, { data: limitCfg }, { data: userRow }] = await Promise.all([
     supabase.from('subscriptions').select('*').eq('user_id', user.userId).maybeSingle(),
     supabase.from('plans').select('*').eq('active', true).order('price', { ascending: false }),
     supabase.from('app_config').select('value').eq('key', 'billing_enforced').maybeSingle(),
     // 기능 비교표의 '하루 N회'는 실제 한도를 그대로 보여준다. 화면에 숫자를
     // 따로 적어 두면 관리자가 한도를 바꿔도 안내만 옛날 값으로 남는다.
     supabase.from('app_config').select('value').eq('key', 'feature_limits').maybeSingle(),
+    // 테스트 계정은 서버 게이트(accessGate)가 이미 구독 없이 통과시킨다. 화면도
+    // 같은 답을 들어야 한다 — 여기서 '유료화 켜짐'이라고 하면 앱이 화면을 잠근다.
+    supabase.from('users').select('test_account').eq('id', user.userId).maybeSingle(),
   ]);
+  const testAccount = userRow?.test_account === true;
   const plans = (planRows ?? []).map(p => ({
     id: p.id, name: p.name, price: p.price, interval: p.interval ?? 'month',
     chargedPrice: withVat(p.price).total, vat: withVat(p.price).vat,
@@ -698,7 +702,8 @@ async function getStatus(user: any, res: VercelResponse) {
   }
 
   return res.status(200).json({
-    billingEnforced: cfg?.value === 'true',
+    billingEnforced: cfg?.value === 'true' && !testAccount,
+    testAccount,
     plans,
     plan,
     subscription: sub ? {
