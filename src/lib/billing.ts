@@ -35,7 +35,10 @@ export interface Plan {
 }
 
 export interface BillingStatus {
+  /** 유료화가 켜져 있고 이 계정에 적용되는가. 테스트 계정에는 false로 온다 */
   billingEnforced: boolean;
+  /** 한도·구독 면제 테스트 계정 (관리자 아님) */
+  testAccount?: boolean;
   plans: Plan[];
   plan: Plan | null;   // 현재 구독 중인 플랜
   subscription: SubscriptionInfo | null;
