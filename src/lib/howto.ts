@@ -69,6 +69,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   sourcing: {
     title: '소싱AI',
     lead: '무엇을 팔지 정합니다. 검색량과 경쟁, 그리고 원가 상한까지.',
+    video: '/howto/sourcing-guide.mp4',
     steps: [
       { title: '키워드 찾기', desc: '떠오르는 게 없으면 월별 시즌 칩(✓ 표시가 지금 준비할 달)이나 카테고리를 누르세요. 아이디어가 있으면 검색창에 직접 넣습니다.' },
       { title: '키워드 고르기', desc: '검색량은 많고 경쟁강도는 낮은 쪽이 좋습니다. [트렌드]를 누르면 매년 몇 월에 뜨는 키워드인지와 소싱 적기가 나옵니다.' },
@@ -164,6 +165,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.profit': {
     title: '순이익',
     lead: '판 돈이 아니라 남은 돈을 봅니다.',
+    video: '/howto/coupang-profit-guide.mp4',
     steps: [
       { title: '기간 고르기', desc: '날짜를 직접 정할 수 있습니다. 매출 인식은 배송 완료 뒤라 최근 며칠은 아직 안 잡힐 수 있습니다.' },
       { title: '상품별로 보기', desc: '표의 열 제목을 누르면 그 기준으로 정렬됩니다. 순이익이 마이너스인 상품부터 보세요.' },
