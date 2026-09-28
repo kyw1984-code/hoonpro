@@ -9,7 +9,7 @@ import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 // H.264 mp4로 바꾸려면 ffmpeg가 필요하다. FFMPEG_PATH가 없으면 PATH의 ffmpeg를 쓴다.
-// (ffmpeg-static을 devDependency로 넣지 않는 이유: 설치마다 70MB 바이너리를 받는다)
+// (정적 ffmpeg 패키지를 devDependency로 넣지 않는 이유: 설치마다 70MB 바이너리를 받는다)
 const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
 
 const BASE = process.env.HOWTO_BASE || 'http://127.0.0.1:4173';
@@ -58,7 +58,7 @@ async function installOverlay(page) {
 
 export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-export async function record({ name, title, subtitle, token, tokenKey, mocks, viewport = { width: 1280, height: 800 }, run }) {
+export async function record({ name, title, subtitle, token, tokenKey, mocks, session = {}, local = {}, viewport = { width: 1280, height: 800 }, run }) {
   const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {});
   const ctx = await browser.newContext({
     viewport, deviceScaleFactor: 1, locale: 'ko-KR', timezoneId: 'Asia/Seoul',
@@ -81,6 +81,13 @@ export async function record({ name, title, subtitle, token, tokenKey, mocks, vi
     return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(res) });
   });
   if (token) await page.addInitScript(([k, t]) => { localStorage.setItem(k, t); }, [tokenKey, token]);
+  // 정산AI 하위 화면(sessionStorage 'hoonpro-coupang-view') 등 미리 심어 둘 값
+  await page.addInitScript(([ss, ls]) => {
+    for (const [k, v] of Object.entries(ss)) sessionStorage.setItem(k, v);
+    for (const [k, v] of Object.entries(ls)) localStorage.setItem(k, v);
+  }, [session, local]);
+  // confirm()·alert()는 자동으로 확인한다 — 안 그러면 녹화가 멈춘다
+  page.on('dialog', d => d.accept().catch(() => {}));
   page.on('pageerror', e => console.warn('[pageerror]', e.message));
 
   const state = { step: 0, total: 0 };
@@ -137,7 +144,8 @@ export async function record({ name, title, subtitle, token, tokenKey, mocks, vi
     async type(selector, text, opts = {}) {
       const { loc } = await h.moveTo(selector, opts);
       await loc.click({ force: true });
-      await loc.fill('');
+      // 값이 있던 칸(예: 숫자 0)은 전체 선택 뒤 덮어쓴다. fill('')만 하면 제어 컴포넌트가 0을 되살려 "08500"이 된다
+      await page.keyboard.press('Control+a');
       await loc.pressSequentially(text, { delay: opts.delay ?? 70 });
       await sleep(opts.after ?? 500);
       await h.ringOff();

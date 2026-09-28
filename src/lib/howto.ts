@@ -38,6 +38,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   home: {
     title: '홈',
     lead: '오늘 무엇부터 할지 한 화면에서 봅니다.',
+    video: '/howto/home-guide.mp4',
     steps: [
       { title: '오늘 남은 사용량', desc: '기능별로 오늘 몇 번 더 쓸 수 있는지 보여줍니다. 매일 0시(한국 시각)에 초기화됩니다.' },
       { title: '바로가기', desc: '자주 쓰는 기능으로 바로 들어갑니다. 처음이라면 [정산AI → 연동 설정]에서 쿠팡을 먼저 연결하세요.' },
@@ -83,6 +84,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   ranktracker: {
     title: '순위추적AI',
     lead: '등록한 상품이 키워드 검색에서 몇 위인지 매일 기록합니다.',
+    video: '/howto/ranktracker-guide.mp4',
     steps: [
       { title: '상품 등록', desc: '키워드와 상품을 짝지어 등록합니다. 내 상품뿐 아니라 소싱AI에서 찾은 경쟁 상품도 담을 수 있습니다.' },
       { title: '매일 자동 기록', desc: '새벽 크론이 순위를 기록합니다. 직접 누르지 않아도 추이가 쌓입니다.' },
@@ -95,6 +97,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   review: {
     title: '리뷰 분석AI',
     lead: '고객이 실제로 무엇에 만족하고 무엇에 불만인지 뽑아냅니다.',
+    video: '/howto/review-guide.mp4',
     steps: [
       { title: '상품 넣기', desc: '쿠팡 상품 주소나 상품ID를 넣습니다. 소싱AI의 상품 카드에서 바로 열 수도 있습니다.' },
       { title: '수집과 요약', desc: '실제 리뷰를 모아 만족·불만·숨은 니즈·공략 포인트로 정리합니다.' },
@@ -106,6 +109,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   analyzer: {
     title: '광고분석AI',
     lead: '어느 광고가 돈을 벌고 어느 광고가 태우는지 가릅니다.',
+    video: '/howto/analyzer-guide.mp4',
     steps: [
       { title: '보고서 올리기', desc: '광고센터에서 받은 보고서 파일을 올립니다. [정산AI → 순이익]의 [광고센터 연결]을 쓰면 파일 없이 버튼 하나로 가져올 수 있습니다.' },
       { title: '성과 보기', desc: '키워드·캠페인별로 쓴 돈과 거둔 매출을 견줍니다.' },
@@ -130,6 +134,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   qa: {
     title: '훈프로 코칭AI',
     lead: '막히는 지점을 묻습니다. 훈프로 강의 내용을 근거로 답합니다.',
+    video: '/howto/qa-guide.mp4',
     steps: [
       { title: '질문하기', desc: '지금 막힌 것을 그대로 물으면 됩니다. 아래 추천 질문을 눌러 시작해도 좋습니다.' },
       { title: '근거 확인', desc: '답변에 어느 자료에서 왔는지 표시됩니다. 원문을 확인하고 싶을 때 보세요.' },
@@ -141,6 +146,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   works: {
     title: '내 작업',
     lead: '만들어 둔 결과물을 다시 꺼내 씁니다.',
+    video: '/howto/works-guide.mp4',
     steps: [
       { title: '목록 보기', desc: '지금까지 만든 것이 최근 순으로 쌓입니다.' },
       { title: '다시 쓰기', desc: '열어서 내려받거나 이어서 수정합니다.' },
@@ -151,6 +157,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   billing: {
     title: '구독 관리',
     lead: '결제 수단과 구독 상태를 봅니다.',
+    video: '/howto/billing-guide.mp4',
     steps: [
       { title: '구독 시작', desc: '카드를 등록하면 바로 이용할 수 있습니다. 표시 가격은 공급가액이고 실제 청구액에는 부가세 10%가 더해집니다.' },
       { title: '결제 내역', desc: '지난 결제와 영수증을 봅니다. 카드 매출전표가 매입세액 공제의 적격증빙입니다.' },
@@ -178,6 +185,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.health': {
     title: '훈프로 상품 진단 카드',
     lead: '옵션마다 손볼 것만 모아 보여줍니다.',
+    video: '/howto/coupang-health-guide.mp4',
     steps: [
       { title: '여섯 가지 점검', desc: '원가 미입력, 마진 5% 미만, 재고 임박·품절, 반품률 15% 이상, 60일 무판매, 판매중지 재고를 봅니다.' },
       { title: '급한 것부터', desc: '품절과 적자 옵션이 "급함"으로 맨 위에 옵니다. 필터 버튼으로 종류별로 볼 수 있습니다.' },
@@ -189,6 +197,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.hours': {
     title: '주문 시간대·요일 패턴',
     lead: '손님이 언제 주문하는지 봅니다.',
+    video: '/howto/coupang-hours-guide.mp4',
     steps: [
       { title: '시간대 막대', desc: '가장 많이 팔리는 세 시간이 밝게 표시됩니다. 광고 시간대와 쿠폰 시작 시각을 여기에 맞추세요.' },
       { title: '요일 × 시간대', desc: '진한 칸이 주문이 몰리는 때입니다. 주말 저녁형인지 평일 점심형인지가 보입니다.' },
@@ -200,6 +209,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.experiments': {
     title: '변경 효과 측정',
     lead: '바꾼 날 한 줄 적으면 전후를 견줘 줍니다.',
+    video: '/howto/coupang-experiments-guide.mp4',
     steps: [
       { title: '기록 추가', desc: '상품, 무엇을 바꿨는지(가격·썸네일·상품명 등), 바꾼 날, 전후 며칠씩 볼지를 고르고 메모를 적습니다.' },
       { title: '판정 읽기', desc: '전후 기간의 판매·매출·광고비·추정 순이익을 하루 평균으로 견줍니다. 순이익이 5% 이상 늘면 좋은 변경, 줄면 나쁜 변경입니다.' },
@@ -211,6 +221,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.purchases': {
     title: '1688 매입 원가 계산',
     lead: '위안 단가와 배송비만 적으면 개당 원가가 나옵니다.',
+    video: '/howto/coupang-purchases-guide.mp4',
     steps: [
       { title: '매입 기록', desc: '옵션, 매입일, 수량, 위안 단가, 환율(오늘 환율 자동), 중국 내 배송비, 배대지·국제배송비, 관세, 수입부가세, 기타 비용을 적습니다.' },
       { title: '개당 원가 확인', desc: '적는 즉시 개당 입고 원가가 계산됩니다. 저장하면 [원가 입력]의 매입원가에 바로 들어갑니다.' },
@@ -222,6 +233,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.settlement': {
     title: '정산 캘린더',
     lead: '언제 얼마가 들어오는지 봅니다.',
+    video: '/howto/coupang-settlement-guide.mp4',
     steps: [
       { title: '입금 예정 보기', desc: '쿠팡이 확정한 지급 예정 금액을 날짜별로 놓습니다.' },
       { title: '자금 계획', desc: '발주 대금을 낼 시점과 견줘 보세요. 들어올 돈보다 나갈 돈이 먼저면 미리 알아야 합니다.' },
@@ -232,6 +244,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.inventory': {
     title: '재고 예측',
     lead: '무엇이 며칠 뒤에 떨어지고 얼마를 발주해야 하는지 봅니다.',
+    video: '/howto/coupang-inventory-guide.mp4',
     steps: [
       { title: '남은 일수 보기', desc: '재고를 판매 속도로 나눈 값입니다. 급한 것부터 위에 옵니다.' },
       { title: '입고 권장 수량', desc: '리드타임과 목표 재고 기간을 채우는 데 필요한 수량입니다. 위쪽 입력칸에서 두 값을 바꾸면 즉시 다시 계산됩니다.' },
@@ -244,6 +257,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.reconcile': {
     title: '재고 대조',
     lead: '내가 보낸 만큼 로켓창고에 있는지 봅니다. 사입 주문·입고는 여기서 적고, 판매는 자동으로 셉니다.',
+    video: '/howto/coupang-reconcile-guide.mp4',
     steps: [
       { title: '기준 잡기', desc: '옵션을 펼쳐 [지금 재고를 기준으로 시작]을 누르세요. 오늘 쿠팡 재고가 기준이 되고, 그 뒤 입고와 판매로 예상 재고를 셉니다.' },
       { title: '사입 주문 적기', desc: '주문일과 주문수량을 적습니다. 입고일을 비워 두면 "미입고"로 남고, 물건이 들어오면 입고일·입고수량을 채우세요.' },
@@ -256,6 +270,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.returns': {
     title: '반품 분석',
     lead: '무엇을 고치면 반품이 줄어드는지 봅니다.',
+    video: '/howto/coupang-returns-guide.mp4',
     steps: [
       { title: '사유별로 보기', desc: '사이즈·사진과 다름·불량·배송 등으로 묶어 보여줍니다. 막대를 누르면 실제 사유 원문과 개선 방법이 나옵니다.' },
       { title: '상품별로 좁히기', desc: '아래 목록에서 어느 상품의 상세페이지를 고쳐야 하는지 짚어 줍니다.' },
@@ -267,6 +282,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.inquiries': {
     title: '고객문의',
     lead: '답변 안 한 문의를 찾아 초안으로 빠르게 처리합니다.',
+    video: '/howto/coupang-inquiries-guide.mp4',
     steps: [
       { title: '미답변 보기', desc: '기본은 아직 답 안 한 문의만 나옵니다.' },
       { title: '초안 만들기', desc: '[답변 초안]을 누르면 상품과 문의 내용을 보고 초안을 씁니다.' },
@@ -278,6 +294,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.rank': {
     title: '순위·매출',
     lead: '내 상품이 그 키워드에서 몇 위인지 지금 확인합니다.',
+    video: '/howto/coupang-rank-guide.mp4',
     steps: [
       { title: '상품 고르기', desc: '많이 파는 상품이 위에 옵니다. 옵션이 아니라 상품 단위로 묶여 있습니다.' },
       { title: '키워드 넣고 확인', desc: '키워드를 넣고 [순위 확인]을 누르면 지금 검색해 몇 위·몇 페이지인지 알려줍니다. 최대 300위까지 봅니다.' },
@@ -289,6 +306,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.price': {
     title: '가격 관리',
     lead: '시장 가격에 맞춰 판매가를 조정합니다.',
+    video: '/howto/coupang-price-guide.mp4',
     steps: [
       { title: '규칙 정하기', desc: '목표 이익률과 최저가를 정합니다. 원가가 있어야 계산됩니다.' },
       { title: '제안 확인', desc: '지금 시장가와 견줘 올릴지 내릴지 제안합니다.' },
@@ -300,6 +318,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.costs': {
     title: '원가 입력',
     lead: '여기를 채워야 순이익이 나옵니다.',
+    video: '/howto/coupang-costs-guide.mp4',
     steps: [
       { title: '상품별 원가', desc: '매입가에 배송비·부자재까지 넣은 값을 씁니다. 실제로 내 통장에서 나간 돈입니다.' },
       { title: '빠진 것 채우기', desc: '원가가 빈 상품은 순이익 계산에서 빠집니다. 순이익 화면의 경고에 몇 개가 비었는지 나옵니다.' },
@@ -311,6 +330,7 @@ export const HOWTO: Record<string, HowToGuide> = {
   'coupang.settings': {
     title: '연동 설정',
     lead: '쿠팡을 연결하고 알림을 정합니다.',
+    video: '/howto/coupang-settings-guide.mp4',
     steps: [
       { title: '키 등록', desc: '쿠팡 윙에서 발급한 API 키와 업체코드를 넣습니다. 이미 다른 주문수집 프로그램을 쓰신다면 키를 새로 발급하지 말고 기존 키를 그대로 넣으세요. 새로 발급하면 그쪽 연동이 끊깁니다.' },
       { title: 'IP 등록', desc: '윙에 훈프로 IP를 등록해야 호출이 통과합니다. 화면에 나온 주소를 그대로 넣으세요.' },
