@@ -42,7 +42,8 @@ async function handleNotices(res: VercelResponse) {
   const { data, error } = await supabase
     .from('notices')
     .select('id, title, body, author, pinned, popup, published_at, updated_at')
-    .order('pinned', { ascending: false })
+    // 최신 글이 늘 맨 위다. 고정(pinned)은 핀 표시와 팝업 판단에만 쓰고 순서는 바꾸지 않는다 —
+    // 고정 글이 위를 차지하면 새 공지가 그 아래에 묻힌다.
     .order('published_at', { ascending: false })
     .limit(50);
   if (error) return res.status(500).json({ error: '공지를 불러오지 못했습니다.' });
