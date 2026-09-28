@@ -136,7 +136,8 @@ export function Notices({ compact = false, className = '' }: { compact?: boolean
     }
   };
 
-  const sorted = [...(list ?? [])].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.published_at.localeCompare(a.published_at));
+  // 최신 글이 늘 맨 위. 고정은 핀 표시만 남긴다 (서버 정렬과 같다)
+  const sorted = [...(list ?? [])].sort((a, b) => b.published_at.localeCompare(a.published_at));
 
   return (
     <>
