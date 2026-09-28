@@ -1,3 +1,4 @@
 out/
 raw/
 node_modules/
+*.log

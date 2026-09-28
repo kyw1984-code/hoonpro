@@ -1,21 +1,18 @@
 // 자막 영상 녹화 도구. 로컬 미리보기(127.0.0.1:4173)를 열고 /api/* 를 가짜 응답으로
 // 채운 뒤, 가짜 커서·강조 링·하단 자막을 화면에 얹어 가며 클릭해 webm으로 찍고
 // H.264 mp4로 바꾼다.
-import { chromium } from 'playwright';
+import { chromium } from '/home/user/hoonpro/node_modules/playwright/index.mjs';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-// H.264 mp4로 바꾸려면 ffmpeg가 필요하다. FFMPEG_PATH가 없으면 PATH의 ffmpeg를 쓴다.
-// (ffmpeg-static을 devDependency로 넣지 않는 이유: 설치마다 70MB 바이너리를 받는다)
-const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
+const ffmpeg = require('ffmpeg-static');
 
-const BASE = process.env.HOWTO_BASE || 'http://127.0.0.1:4173';
-const HERE = path.dirname(new URL(import.meta.url).pathname);
-const OUT = path.resolve(HERE, 'out');
-const RAW = path.resolve(HERE, 'raw');
+const BASE = 'http://127.0.0.1:4173';
+const OUT = path.resolve('out');
+const RAW = path.resolve('raw');
 fs.mkdirSync(OUT, { recursive: true });
 fs.mkdirSync(RAW, { recursive: true });
 
@@ -58,8 +55,8 @@ async function installOverlay(page) {
 
 export function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-export async function record({ name, title, subtitle, token, tokenKey, mocks, viewport = { width: 1280, height: 800 }, run }) {
-  const browser = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {});
+export async function record({ name, title, subtitle, token, tokenKey, mocks, session = {}, local = {}, viewport = { width: 1280, height: 800 }, run }) {
+  const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
   const ctx = await browser.newContext({
     viewport, deviceScaleFactor: 1, locale: 'ko-KR', timezoneId: 'Asia/Seoul',
     recordVideo: { dir: RAW, size: viewport },
@@ -81,6 +78,13 @@ export async function record({ name, title, subtitle, token, tokenKey, mocks, vi
     return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(res) });
   });
   if (token) await page.addInitScript(([k, t]) => { localStorage.setItem(k, t); }, [tokenKey, token]);
+  // 정산AI 하위 화면(sessionStorage 'hoonpro-coupang-view') 등 미리 심어 둘 값
+  await page.addInitScript(([ss, ls]) => {
+    for (const [k, v] of Object.entries(ss)) sessionStorage.setItem(k, v);
+    for (const [k, v] of Object.entries(ls)) localStorage.setItem(k, v);
+  }, [session, local]);
+  // confirm()·alert()는 자동으로 확인한다 — 안 그러면 녹화가 멈춘다
+  page.on('dialog', d => d.accept().catch(() => {}));
   page.on('pageerror', e => console.warn('[pageerror]', e.message));
 
   const state = { step: 0, total: 0 };
@@ -137,7 +141,8 @@ export async function record({ name, title, subtitle, token, tokenKey, mocks, vi
     async type(selector, text, opts = {}) {
       const { loc } = await h.moveTo(selector, opts);
       await loc.click({ force: true });
-      await loc.fill('');
+      // 값이 있던 칸(예: 숫자 0)은 전체 선택 뒤 덮어쓴다. fill('')만 하면 제어 컴포넌트가 0을 되살려 "08500"이 된다
+      await page.keyboard.press('Control+a');
       await loc.pressSequentially(text, { delay: opts.delay ?? 70 });
       await sleep(opts.after ?? 500);
       await h.ringOff();
