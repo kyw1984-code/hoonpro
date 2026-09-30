@@ -2816,7 +2816,13 @@ interface AccountRow {
   backfill_step?: number | null;
   /** 지금 돌고 있는 수집이 시작된 시각. 같은 계정을 겹쳐 돌리지 않기 위한 잠금 */
   sync_started_at?: string | null;
+  /** 시연용 계정. 키가 가짜라 쿠팡을 한 번도 부르지 않고, 심어 둔 데이터만 보여준다 */
+  demo?: boolean | null;
 }
+
+// 시연 계정은 쿠팡에 닿는 모든 경로에서 걸러야 한다. 한 군데라도 새면 가짜 키가
+// 거부당해 status가 invalid로 바뀌고 "수집이 멈췄습니다" 메일까지 나간다.
+const DEMO_NO_COUPANG = '시연 계정은 쿠팡에 반영하지 않습니다. 심어 둔 데이터만 보여줍니다.';
 
 /** 수집이 이 시간보다 오래 '진행 중'이면 죽은 잠금으로 보고 무시한다 (함수 상한 300초) */
 const SYNC_LOCK_MS = 5 * 60_000;
@@ -3154,6 +3160,7 @@ async function cronSync(res: VercelResponse) {
     .from('coupang_accounts')
     .select('*')
     .eq('status', 'active')
+    .eq('demo', false)
     .or(`last_sync_at.is.null,backfill_done.eq.false,last_sync_at.lt.${staleBefore}`)
     .order('last_sync_at', { ascending: true, nullsFirst: true })
     .limit(50);
@@ -3242,6 +3249,7 @@ async function cronDaily(res: VercelResponse) {
     .not('key_expires_at', 'is', null);
 
   for (const acc of (accounts ?? []) as any[]) {
+    if (acc.demo === true) continue;
     const left = daysToExpiry(acc.key_expires_at);
     if (left === null) continue;
 
@@ -3294,7 +3302,8 @@ async function cronDaily(res: VercelResponse) {
   const { data: autoAccounts } = await supabase
     .from('coupang_accounts')
     .select('*')
-    .eq('status', 'active');
+    .eq('status', 'active')
+    .eq('demo', false);
   let priceApplied = 0;
   for (const acc of (autoAccounts ?? []) as AccountRow[]) {
     if (Date.now() - priceStartedAt > priceBudgetMs) break;
@@ -3636,6 +3645,16 @@ async function handleKeyDelete(userId: string, res: VercelResponse) {
 async function handleSync(userId: string, req: VercelRequest, res: VercelResponse, budgetMs = 90_000) {
   const acc = await loadAccount(userId);
   if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
+
+  // 시연 계정: 쿠팡을 부르지 않고 "방금 수집한 것처럼"만 남긴다.
+  if (acc.demo === true) {
+    await supabase!
+      .from('coupang_accounts')
+      .update({ last_sync_at: new Date().toISOString(), last_sync_error: null, sync_started_at: null, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    const summary = emptySummary();
+    return res.status(200).json({ ok: true, demo: true, summary, stoppedAt: null });
+  }
 
   const full = req.body?.full === true || String(req.query.full) === 'true' || !acc.backfill_done;
 
@@ -7766,6 +7785,7 @@ async function handleInquiryReply(userId: string, req: VercelRequest, res: Verce
 
   const acc = await loadAccount(userId);
   if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
+  if (acc.demo === true) return res.status(400).json({ error: DEMO_NO_COUPANG });
 
   const { data: q } = await supabase!
     .from('coupang_inquiries')
@@ -8577,6 +8597,7 @@ async function handlePriceApply(userId: string, req: VercelRequest, res: VercelR
 
   const acc = await loadAccount(userId);
   if (!acc) return res.status(400).json({ error: '먼저 쿠팡 API 키를 등록해주세요.' });
+  if (acc.demo === true) return res.status(400).json({ error: DEMO_NO_COUPANG });
 
   const expected = req.body?.expectedCurrentPrice;
   const result = await applyPrice(userId, credsOf(acc), vendorItemId, price, '수동 반영', undefined, {
