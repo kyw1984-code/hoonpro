@@ -637,6 +637,9 @@ alter table coupang_accounts add column if not exists backfill_step integer not 
 alter table coupang_accounts add column if not exists sync_started_at timestamptz;
 -- 키 거부·만료를 이메일로 알린 시각. 같은 사고로 매일 보내지 않기 위해 기록한다.
 alter table coupang_accounts add column if not exists status_notified_at timestamptz;
+-- 시연 계정. 키가 가짜라 수집·자동 가격·문의 답변 등 쿠팡을 부르는 경로를 모두 건너뛰고,
+-- 관리자가 심어 둔 데이터만 보여준다. (hoonpro@naver.com 시연용)
+alter table coupang_accounts add column if not exists demo boolean not null default false;
 -- 크론 분산 슬롯은 쓰지 않는다. 수집은 마지막 수집 시각 기준으로 오래된 계정부터 돈다.
 alter table coupang_accounts drop column if exists sync_shard;
 
