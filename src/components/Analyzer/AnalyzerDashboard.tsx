@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { groupProducts } from "../../lib/productGroup";
-import { Upload, Save, TrendingUp, X, Loader2 } from "lucide-react";
+import { Upload, Save, TrendingUp, X, Loader2, Copy, Check } from "lucide-react";
 import { getToken } from "../../lib/auth";
 import { coupangApi } from "../../lib/coupang";
 import { extractDailyAdCost, extractItemAdCost } from "../../lib/adcost";
@@ -1476,14 +1476,54 @@ export function AnalyzerDashboard() {
                         🔴 제외 후보 <span className="font-semibold text-critical">{processedData.keywordDiag.drain.length}개</span> —
                         충분한 클릭에도 판매 0건, 낭비 광고비 <span className="font-semibold text-critical">₩{processedData.keywordDiag.drainCost.toLocaleString()}</span>
                       </p>
-                      <p className="text-sm text-ink-2 mb-2">복사해서 제외 키워드로 등록하세요:</p>
-                      <textarea
-                        readOnly
-                        className="w-full h-24 p-3 bg-paper-2 border border-line rounded-control text-sm text-ink focus:outline-none"
-                        value={processedData.keywordDiag.drain.map((k: any) => k.키워드).join(", ")}
-                      />
+                      <ExcludeKeywordBox label="제외 후보" keywords={processedData.keywordDiag.drain.map((k: any) => k.키워드)} />
                     </div>
                   )}
+
+                  {/* 돈만 쓰고 판매 0건인 키워드 전체 — 제외 후보 + 판단 보류를 합친 목록.
+                      위 제외 후보는 '충분한 클릭'이 쌓인 것만 고른 확신 높은 목록이고,
+                      여기는 광고비가 1원이라도 나갔는데 한 건도 안 팔린 키워드 전부다.
+                      바로 제외하면 잠재 키워드를 놓칠 수 있어 보류분은 표에서 따로 표시한다. */}
+                  {(() => {
+                    const noSale = [...processedData.keywordDiag.drain, ...processedData.keywordDiag.watch]
+                      .filter((k: any) => k.판매수량 === 0 && k.광고비 > 0)
+                      .sort((a: any, b: any) => b.광고비 - a.광고비);
+                    if (noSale.length === 0) return null;
+                    const drainSet = new Set(processedData.keywordDiag.drain.map((k: any) => k.키워드));
+                    const cost = noSale.reduce((s: number, k: any) => s + k.광고비, 0);
+                    return (
+                      <div className="mt-4 bg-paper border border-line rounded-card p-4">
+                        <p className="text-sm text-ink-2 mb-1">
+                          💸 돈만 쓰고 판매 0건 <span className="font-semibold text-ink">{noSale.length}개</span> —
+                          광고비 <span className="font-semibold text-critical">₩{Math.round(cost).toLocaleString()}</span>
+                          <span className="ml-1 text-[12px] text-ink-3">(제외 후보 {processedData.keywordDiag.drain.length}개 + 판단 보류 {processedData.keywordDiag.watch.length}개)</span>
+                        </p>
+                        <div className="mb-3 overflow-x-auto border border-line rounded-card max-h-64">
+                          <table className="w-full text-sm text-left">
+                            <thead className="text-xs text-ink uppercase bg-paper-2 border-b border-line sticky top-0">
+                              <tr><th className="px-4 py-2.5">키워드</th><th className="px-4 py-2.5 text-right">노출</th><th className="px-4 py-2.5 text-right">클릭</th><th className="px-4 py-2.5 text-right">광고비</th><th className="px-4 py-2.5 text-right">판정</th></tr>
+                            </thead>
+                            <tbody>
+                              {noSale.map((k: any, i: number) => (
+                                <tr key={i} className="bg-paper border-b border-line last:border-b-0 hover:bg-paper-2">
+                                  <td className="px-4 py-2 font-medium text-ink">{k.키워드}</td>
+                                  <td className="px-4 py-2 text-right tabular-nums text-ink-2">{k.노출수.toLocaleString()}</td>
+                                  <td className="px-4 py-2 text-right tabular-nums text-ink-2">{k.클릭수.toLocaleString()}</td>
+                                  <td className="px-4 py-2 text-right tabular-nums">{k.광고비.toLocaleString()}원</td>
+                                  <td className="px-4 py-2 text-right">
+                                    {drainSet.has(k.키워드)
+                                      ? <span className="rounded-full border border-critical/35 bg-critical-soft px-2 py-0.5 text-[11px] font-semibold text-critical">제외 후보</span>
+                                      : <span className="rounded-full border border-line-strong bg-paper-2 px-2 py-0.5 text-[11px] font-semibold text-ink-2">판단 보류</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <ExcludeKeywordBox label="판매 0건 전체" keywords={noSale.map((k: any) => k.키워드)} />
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -1510,6 +1550,51 @@ export function AnalyzerDashboard() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * 쿠팡 광고센터 제외 키워드 입력창에 그대로 붙여 넣을 수 있는 목록.
+ *
+ * 광고센터는 쉼표로 나눈 여러 키워드를 한 번에 받는다. 판매자가 표를 보며
+ * 하나씩 옮겨 적지 않도록, 쉼표로 이어 붙인 문자열과 복사 버튼을 함께 둔다.
+ * 클립보드 API가 막힌 환경(http·권한 거부)에서는 textarea 선택으로 대신한다.
+ */
+function ExcludeKeywordBox({ keywords, label }: { keywords: string[]; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const text = keywords.join(", ");
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const el = document.getElementById(`exclude-kw-${label}`) as HTMLTextAreaElement | null;
+      el?.select();
+    }
+  };
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="text-sm text-ink-2">{label} — 복사해서 광고센터 <b className="text-ink">제외 키워드</b>에 붙여 넣으세요 ({keywords.length}개, 쉼표로 구분)</p>
+        <button
+          type="button"
+          onClick={copy}
+          disabled={keywords.length === 0}
+          className="inline-flex shrink-0 items-center gap-1 rounded-control border border-line bg-paper px-3 py-1.5 text-[12px] font-semibold text-ink-2 hover:border-line-strong hover:text-ink disabled:opacity-50"
+        >
+          {copied ? <Check className="h-3.5 w-3.5 text-positive" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? "복사됨" : "전체 복사"}
+        </button>
+      </div>
+      <textarea
+        id={`exclude-kw-${label}`}
+        readOnly
+        onFocus={(e) => e.currentTarget.select()}
+        className="w-full h-24 p-3 bg-paper-2 border border-line rounded-control text-sm text-ink focus:outline-none"
+        value={text}
+      />
     </div>
   );
 }
