@@ -814,6 +814,8 @@ ${bundleRules}
 
 [visualPrompt 규칙(영어)]
 - 제품이 돋보이는 사실적 촬영 장면을 shotType에 맞게 구체적으로 묘사하세요.
+- 실제 상업 사진가의 촬영 브리프처럼 쓰세요. 매 장에 반드시 포함: 장소(예: sunlit apartment living room, concrete studio with warm backdrop), 카메라와 렌즈 느낌(예: 85mm f/2 shallow depth, 35mm eye-level), 조명(예: soft window light from camera left, one large softbox), 모델 포즈/행동(사람이 있을 때), 제품이 프레임에서 차지하는 크기, 배경 색조. 60~110 단어.
+- 전체 장은 한 번의 촬영처럼 같은 장소군·같은 조명 성격·같은 색감을 공유하되, 장마다 구도·거리·포즈·크롭은 다르게 지정하세요.
 - 모든 visualPrompt를 모델컷으로 시작하지 마세요. 모델컷은 shotType=model 또는 일부 lifestyle에만 허용합니다.
 - shotType=product/detail/texture/cta인 경우 반드시 "no model, no person, product only"를 포함하세요.
 - shotType=detail은 제품 디테일 클로즈업, shotType=texture는 소재/프린팅/로고/패턴 클로즈업, shotType=cta는 제품 중심 마무리 컷입니다.
