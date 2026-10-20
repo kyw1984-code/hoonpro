@@ -76,7 +76,7 @@ const SHOT_GUIDE: Record<string, string> = {
 const POSITION_KO = { top: 'upper', middle: 'center', bottom: 'lower' } as const;
 
 /** 프롬프트는 세 덩어리만: 제품 보존, 장면, 글자 금지. 길고 모순된 지시는 품질을 깎는다. */
-const buildPrompt = (sec: Section, productName: string, tone: string, refCount: number): string => {
+const buildPrompt = (sec: Section, productName: string, tone: string, refCount: number, bundleCount = 1): string => {
     const shot = SHOT_GUIDE[sec.shotType || 'product'] || SHOT_GUIDE.product;
     const problem = sec.sectionType === 'problem';
     return [
@@ -88,9 +88,16 @@ const buildPrompt = (sec: Section, productName: string, tone: string, refCount: 
             : `SCENE: ${shot}`,
         `Direction: ${sec.visualPrompt}`,
         '',
-        problem ? '' : [
-            `PRODUCT FIDELITY (most important): the ${refCount} uploaded image${refCount > 1 ? 's are' : ' is'} the exact product. Keep its shape, color, print, logo, material, proportions and every visible detail identical. Never redesign, recolor, simplify or swap the product. If a person appears, use a new fictional Korean model, but the product stays the same.`,
-        ].join('\n'),
+        problem ? '' : bundleCount >= 2
+            ? [
+                `PRODUCT FIDELITY (most important): this is a ${bundleCount}-item set. Each of the ${refCount} uploaded images is a DIFFERENT item of the set. Keep every item's shape, color, print, logo, material and proportions identical to its reference. Never merge items into one, never recolor, never swap.`,
+                sec.shotType === 'model' || sec.shotType === 'lifestyle' || sec.shotType === 'cta' || sec.number === 1
+                    ? `Show all ${bundleCount} items together with equal visual weight. For apparel, use ${bundleCount} fictional Korean models side by side, each wearing one different item — same scale, same light, same background. Do not show one item worn and the others folded or held.`
+                    : `This section may focus on one item, but it must be one of the exact reference items.`,
+            ].join('\n')
+            : [
+                `PRODUCT FIDELITY (most important): the ${refCount} uploaded image${refCount > 1 ? 's are' : ' is'} the exact product. Keep its shape, color, print, logo, material, proportions and every visible detail identical. Never redesign, recolor, simplify or swap the product. If a person appears, use a new fictional Korean model, but the product stays the same.`,
+            ].join('\n'),
         '',
         `COMPOSITION: one focal subject, calm negative space. Keep the ${POSITION_KO[sec.textPosition]} third of the frame clean and uncluttered — Korean copy will be placed there later. Keep faces, hands and key product details out of that area.`,
         'NO TEXT: do not render any letters, numbers, logos, badges, labels, watermarks or signage. Only lettering that already exists on the uploaded product may remain.',
@@ -98,19 +105,42 @@ const buildPrompt = (sec: Section, productName: string, tone: string, refCount: 
     ].filter(Boolean).join('\n');
 };
 
-const toSections = (plan: DetailPlan): Section[] => plan.images.map((img, i) => ({
+/** 사람이 입고 쓰는 장면이 가장 잘 팔린다. 기획안이 디테일컷으로 채워 와도 60% 이상은 모델컷으로 돌린다. */
+const balanceShots = (imgs: DetailPlanImage[]): DetailPlanImage['shotType'][] => {
+    const n = imgs.length;
+    const want = Math.ceil(n * 0.6);
+    const shots = imgs.map((img, i) => (i === 0 ? 'model' : img.shotType || 'product') as NonNullable<DetailPlanImage['shotType']>);
+    const isPerson = (s: string) => s === 'model' || s === 'lifestyle';
+    let have = shots.filter(isPerson).length;
+    // 문제 공감은 사람 장면으로(제품 없이), 그다음 proof/detail 중 앞에서부터 모델컷으로 바꾼다
+    for (let i = 1; i < n && have < want; i++) {
+        if (isPerson(shots[i])) continue;
+        if (imgs[i].sectionType === 'problem') { shots[i] = 'lifestyle'; have++; continue; }
+    }
+    for (let i = 1; i < n && have < want; i++) {
+        if (isPerson(shots[i]) || imgs[i].sectionType === 'problem') continue;
+        if (shots[i] === 'texture') continue; // 소재 클로즈업 하나는 남긴다
+        shots[i] = 'model'; have++;
+    }
+    return shots;
+};
+
+const toSections = (plan: DetailPlan, bundleCount = 1): Section[] => {
+  const shots = balanceShots(plan.images);
+  return plan.images.map((img, i) => ({
     id: uid(),
     number: img.number || i + 1,
     role: img.role,
     sectionType: img.sectionType,
-    shotType: img.shotType,
+    shotType: shots[i],
     mainCopy: formatMainCopy(img.mainCopy),
     subCopy: (img.subCopy || '').replace(/\s+/g, ' ').trim().slice(0, 40),
     textPosition: img.textPosition || (i % 2 === 0 ? 'top' : 'bottom'),
     visualPrompt: img.visualPrompt,
     imageUrl: '',
     status: 'idle',
-}));
+  }));
+};
 
 export function DetailPlanner() {
     const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -119,6 +149,9 @@ export function DetailPlanner() {
     const [tone, setTone] = useState<Tone>('auto');
     const [count, setCount] = useState<(typeof COUNTS)[number]>(8);
     const [refs, setRefs] = useState<string[]>([]);
+    // 사진이 2장 이상이면 기본은 '서로 다른 구성품'(조합상품). 같은 제품의 다른 각도면 끌 수 있다.
+    const [bundle, setBundle] = useState(true);
+    const bundleCount = bundle && refs.length >= 2 ? refs.length : 1;
     const [plan, setPlan] = useState<DetailPlan | null>(null);
     const [sections, setSections] = useState<Section[]>([]);
     const [planning, setPlanning] = useState(false);
@@ -154,12 +187,13 @@ export function DetailPlanner() {
                 description: description.trim(),
                 target: '',
                 designTone: tone,
-                combinationType: 'single',
+                combinationType: bundleCount >= 2 ? `bundle-${bundleCount}` : 'single',
+                combinationCount: bundleCount,
                 length: count,
             });
             if (!result || !result.images?.length) { alert('기획안을 만들지 못했습니다. 다시 시도해주세요.'); return; }
             setPlan(result);
-            setSections(toSections(result));
+            setSections(toSections(result, bundleCount));
             setSaved('idle');
             setStep(2);
         } catch (e) {
@@ -176,7 +210,7 @@ export function DetailPlanner() {
         try {
             const latest = sectionsRef.current.find(s => s.id === sec.id) || sec;
             const designTone = tone === 'auto' ? (plan?.designSystem?.tone || 'premium') : tone;
-            const prompt = buildPrompt(latest, name.trim(), designTone, refs.length);
+            const prompt = buildPrompt(latest, name.trim(), designTone, refs.length, bundleCount);
             const useRefs = latest.sectionType === 'problem' ? [] : refs;
             const result = await generateImage(prompt, useRefs, '9:16', 'high', {
                 inputFidelity: 'high',
@@ -194,26 +228,19 @@ export function DetailPlanner() {
         }
     };
 
-    // ── 2 → 3: 전체 생성 (두 장씩 — 한꺼번에 보내면 분당 한도에 걸린다) ──
+    // ── 2 → 3: 전체 동시 생성. 분당 한도(429)는 aiService가 기다렸다 다시 보낸다 ──
     const generateAll = async () => {
         if (running) return;
         setRunning(true);
         setStep(3);
-        const queue = sectionsRef.current.filter(s => s.status !== 'done');
-        const worker = async () => {
-            while (queue.length) {
-                const next = queue.shift();
-                if (next) await generateOne(next);
-            }
-        };
-        await Promise.all([worker(), worker()]);
+        await Promise.all(sectionsRef.current.filter(s => s.status !== 'done').map(s => generateOne(s)));
         setRunning(false);
     };
 
     const retryFailed = async () => {
         if (running) return;
         setRunning(true);
-        for (const s of sectionsRef.current.filter(x => x.status === 'failed')) await generateOne(s);
+        await Promise.all(sectionsRef.current.filter(x => x.status === 'failed').map(s => generateOne(s)));
         setRunning(false);
     };
 
@@ -272,7 +299,7 @@ export function DetailPlanner() {
             <div className="flex items-center gap-2 text-[12px] text-ink-3">
                 {(['상품 정보', '기획안', '이미지'] as const).map((label, i) => (
                     <span key={label} className="flex items-center gap-2">
-                        <span className={`rounded-full px-2.5 py-1 font-semibold ${step === i + 1 ? 'bg-accent-soft text-accent' : step > i + 1 ? 'text-ink-2' : ''}`}>{i + 1}. {label}</span>
+                        <span className={`rounded-full px-2.5 py-1 font-semibold ${step === i + 1 ? 'bg-accent text-black' : step > i + 1 ? 'text-ink-2' : ''}`}>{i + 1}. {label}</span>
                         {i < 2 && <span>›</span>}
                     </span>
                 ))}
@@ -299,7 +326,7 @@ export function DetailPlanner() {
                                 <div className="flex flex-wrap gap-1.5">
                                     {TONES.map(t => (
                                         <button key={t} type="button" onClick={() => setTone(t)}
-                                            className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${tone === t ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-2 hover:border-line-strong'}`}>
+                                            className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${tone === t ? 'border-accent bg-accent text-black' : 'border-line text-ink-2 hover:border-line-strong'}`}>
                                             {t === 'auto' ? '자동' : t}
                                         </button>
                                     ))}
@@ -310,7 +337,7 @@ export function DetailPlanner() {
                                 <div className="flex gap-1.5">
                                     {COUNTS.map(c => (
                                         <button key={c} type="button" onClick={() => setCount(c)}
-                                            className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${count === c ? 'border-accent bg-accent-soft text-accent' : 'border-line text-ink-2 hover:border-line-strong'}`}>
+                                            className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${count === c ? 'border-accent bg-accent text-black' : 'border-line text-ink-2 hover:border-line-strong'}`}>
                                             {c}장
                                         </button>
                                     ))}
@@ -318,7 +345,7 @@ export function DetailPlanner() {
                             </div>
                         </div>
                         <button type="button" onClick={makePlan} disabled={planning}
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-control bg-accent px-4 py-3 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60">
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-control bg-accent px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60">
                             {planning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                             {planning ? '기획안을 짜는 중…' : '기획안 만들기'}
                         </button>
@@ -333,6 +360,12 @@ export function DetailPlanner() {
                             <p className="text-sm text-ink-2">클릭하거나 끌어다 놓기</p>
                             <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e => void addFiles(e.target.files)} />
                         </div>
+                        {refs.length >= 2 && (
+                            <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-control border border-line bg-paper-2 px-3 py-2 text-[12px] text-ink-2">
+                                <input type="checkbox" checked={bundle} onChange={e => setBundle(e.target.checked)} className="mt-0.5" />
+                                <span><b className="text-ink">사진은 서로 다른 구성품입니다 ({refs.length}종 세트)</b><br />켜면 조합상품으로 기획하고 인트로·활용·마무리 컷에 {refs.length}개가 함께 나옵니다. 같은 제품의 다른 각도라면 끄세요.</span>
+                            </label>
+                        )}
                         {refs.length > 0 && (
                             <div className="mt-3 grid grid-cols-4 gap-2">
                                 {refs.map((src, i) => (
@@ -364,7 +397,7 @@ export function DetailPlanner() {
                                 {saved === 'saved' ? '내 작업에 담았습니다' : '기획안 저장'}
                             </button>
                             <button type="button" onClick={generateAll}
-                                className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
+                                className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90">
                                 <ImageIcon className="h-4 w-4" /> 이미지 {sections.length}장 만들기
                             </button>
                         </div>
@@ -402,7 +435,7 @@ export function DetailPlanner() {
                                 </button>
                             )}
                             <button type="button" onClick={downloadZip} disabled={doneCount === 0 || zipping}
-                                className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60">
+                                className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60">
                                 {zipping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} ZIP 내려받기
                             </button>
                         </div>

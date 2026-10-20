@@ -484,13 +484,13 @@ const createFallbackDetailPlan = (data: any, reason = 'GPT 기획안 생성 실�
   ].join(' ');
   const flow = [
     { role: 'Hook', stage: '인지', sectionType: 'offer', shotType: 'model' as const, mainCopy: combinationType ? `${combinationLabel}\n한번에 준비` : `${productName}\n선택할 이유`, subCopy: combinationType ? `${combinationCount}개 구성을 한눈에 확인하세요` : '첫눈에 느껴지는 차이를 확인하세요', trigger: '감정적 보상', textPosition: 'bottom' as const },
-    { role: '문제 공감', stage: '공감', sectionType: 'problem', shotType: 'lifestyle' as const, mainCopy: '매번 고민되던\n그 순간', subCopy: '불편함을 먼저 이해한 제품입니다', trigger: '손실회피', textPosition: 'top' as const },
-    { role: '해결책', stage: '해결책', sectionType: 'solution', shotType: 'product' as const, mainCopy: '이제 더 쉽게\n바꿔보세요', subCopy: '일상 속 사용성을 중심으로 설계했습니다', trigger: '편의성', textPosition: 'bottom' as const },
-    { role: '상품 특장점', stage: '근거', sectionType: 'proof', shotType: 'product' as const, mainCopy: '한눈에보이는\n핵심특장점', subCopy: '이 상품의 장점을 명확하게 보여드립니다', trigger: '비교우위', textPosition: 'top' as const, visualPrompt: featureVisualPrompt },
-    { role: '소재/프린팅', stage: '상세 정보', sectionType: 'detail', shotType: 'texture' as const, mainCopy: '작은 차이가\n만족을 만듭니다', subCopy: '매일 쓰는 제품일수록 디테일이 중요합니다', trigger: '권위', textPosition: 'bottom' as const },
-    { role: '활용 장면', stage: '신뢰', sectionType: 'lifestyle', shotType: 'model' as const, mainCopy: '일상에 자연스럽게\n스며듭니다', subCopy: '사용하는 순간을 더 편하게 만듭니다', trigger: '감정적 보상', textPosition: 'middle' as const },
-    { role: '신뢰 강화', stage: '확신', sectionType: 'trust', shotType: 'detail' as const, mainCopy: '구매 전 마지막\n확인까지', subCopy: '품질과 활용성을 차분히 보여드립니다', trigger: '사회적 증거', textPosition: 'top' as const },
-    { role: 'CTA', stage: '구매 확신', sectionType: 'cta', shotType: 'cta' as const, mainCopy: '오늘부터 바로\n경험해보세요', subCopy: '망설임 없이 선택할 수 있도록 준비했습니다', trigger: '희소성', textPosition: 'bottom' as const },
+    { role: '문제 공감', stage: '공감', sectionType: 'problem', shotType: 'lifestyle' as const, mainCopy: '이런 적\n있으시죠?', subCopy: '', trigger: '손실회피', textPosition: 'top' as const },
+    { role: '해결책', stage: '해결책', sectionType: 'solution', shotType: 'product' as const, mainCopy: '이거 하나면\n해결돼요', subCopy: '', trigger: '편의성', textPosition: 'bottom' as const },
+    { role: '상품 특장점', stage: '근거', sectionType: 'proof', shotType: 'product' as const, mainCopy: '왜 이걸\n고르냐면요', subCopy: '', trigger: '비교우위', textPosition: 'top' as const, visualPrompt: featureVisualPrompt },
+    { role: '소재/프린팅', stage: '상세 정보', sectionType: 'detail', shotType: 'texture' as const, mainCopy: '가까이서 봐도\n깔끔해요', subCopy: '', trigger: '권위', textPosition: 'bottom' as const },
+    { role: '활용 장면', stage: '신뢰', sectionType: 'lifestyle', shotType: 'model' as const, mainCopy: '매일 손이\n가요', subCopy: '', trigger: '감정적 보상', textPosition: 'middle' as const },
+    { role: '신뢰 강화', stage: '확신', sectionType: 'trust', shotType: 'detail' as const, mainCopy: '받아보면\n알아요', subCopy: '', trigger: '사회적 증거', textPosition: 'top' as const },
+    { role: 'CTA', stage: '구매 확신', sectionType: 'cta', shotType: 'cta' as const, mainCopy: '고민 말고\n오늘 주문', subCopy: '지금 주문하면 내일 받아요', trigger: '희소성', textPosition: 'bottom' as const },
   ];
 
   const images = Array.from({ length: count }, (_, index) => {
@@ -642,7 +642,7 @@ const normalizeDetailPlan = (parsed: any, data: any): DetailPlan | null => {
       stage: '근거',
       sectionType: 'proof',
       shotType: 'product',
-      mainCopy: '한눈에보이는\n핵심특장점',
+      mainCopy: '왜 이걸\n고르냐면요',
       subCopy: '이 상품의 장점을 명확하게 보여드립니다',
       trigger: '비교우위',
       textPosition: 'top',
@@ -790,7 +790,8 @@ ${bundleRules}
 - 상품 특장점 장은 제품의 장점, 기능, 소재, 사용성, 차별점을 시각적으로 비교/강조하는 구성으로 만드세요.
 - 중간 이미지는 기능/감성/비교/사용 장면/디테일 등 서로 다른 각도로 구성하고 표현 중복을 피하세요.
 - shotType은 model, product, detail, texture, lifestyle, cta 중 하나를 반드시 지정하세요.
-- 모델컷은 전체의 1/3 이하로만 사용하고, 나머지는 제품 단독컷/디테일 클로즈업/소재·프린팅 클로즈업/CTA 제품컷으로 섞으세요.
+- 모델컷(shotType=model 또는 lifestyle)을 전체의 60% 이상으로 잡으세요. 사람이 실제로 입고·쓰는 장면이 가장 잘 팔립니다. 제품 단독컷·디테일·소재 클로즈업은 합쳐서 40% 이하로, 특히 의류·패션·잡화는 모델컷을 더 늘리세요.
+- 모델컷끼리는 장소·포즈·구도(전신/상반신/뒷모습/옆모습/앉은 자세/걷는 장면)를 매번 다르게 하세요.
 
 [STEP 6 — 신뢰성 검증 (필수)]
 - 사실 확인이 불가능한 문구는 절대 사용 금지: "국내 판매 1위", "만족도 99%", "누적 판매 100만개", "효과 보장", 검증되지 않은 할인율·판매량·리뷰 수·평점·인증 문구
@@ -801,11 +802,14 @@ ${bundleRules}
 - 카피 중복 금지. 모든 이미지는 서로 다른 설득 역할을 수행하고, 한 이미지 = 하나의 설득 완결.
 - 쿠팡·스마트스토어 상위 1% 상세페이지 수준의 설득력을 목표로 하되, 문구는 최소한으로 유지하세요.
 
-[카피 규칙 — 문구 최소화가 최우선]
-- 이미지 위 문구는 최소한으로. 비주얼이 설득하고 카피는 한 문장으로 정리합니다. 문구가 적을수록 고급스러운 상세페이지입니다.
-- mainCopy는 기본 1줄 12자 이내. 꼭 필요한 경우에만 2줄(\n 줄바꿈, 각 줄 12자 이내)
+[카피 규칙 — 요즘 쿠팡·스마트스토어에서 실제로 쓰는 말투]
+- 이미지 위 문구는 최소한으로. mainCopy는 기본 1줄 12자 이내, 꼭 필요한 경우에만 2줄(\n 줄바꿈, 각 줄 12자 이내)
 - subCopy는 Hook과 CTA 섹션에만 1줄 18자 이내로 작성하고, 나머지 모든 섹션은 반드시 빈 문자열 ""
-- 광고 문구가 아니라 '고객의 머릿속 생각을 대신 말하는' 방식, 존댓말, 미사여구·어려운 한자어 금지
+- 고객이 실제로 겪는 상황과 얻는 결과를 구체적으로. 추상적인 수식어 대신 눈에 보이는 사실·숫자·상황을 씁니다.
+  좋은 예: "세탁 10번 해도 안 늘어나요", "하나 입고 하나 빨고", "170cm M 사이즈 착용", "주머니에 쏙 들어가는 크기", "아침에 입고 저녁까지 편해요", "두 장 사면 일주일이 편해요", "땀나도 안 달라붙어요"
+  나쁜 예(금지): "섬세한 마감", "고급 소재", "프리미엄 퀄리티", "품격", "감성을 담은", "일상에 스며드는", "작은 차이가 만족을 만듭니다", "당신의 하루를 완성", "특별한 경험", "최고의 선택", "완벽한", "세련된"
+- 말투는 친구에게 설명하듯 짧고 쉬운 구어체 존댓말("~해요", "~돼요"). 한자어·영어 수식어·광고 투 과장 금지.
+- 상품 설명에 적힌 특징(수치·소재 비율·사이즈·기능)이 있으면 그 사실을 그대로 문구로 씁니다. 없는 사실은 지어내지 마세요.
 - 각 이미지마다 전환 트리거(손실회피/사회적 증거/권위/희소성/편의성/감정적 보상/비교우위) 중 하나 이상 적용하되, 트리거는 비주얼과 mainCopy 한 줄로만 표현
 
 [visualPrompt 규칙(영어)]
