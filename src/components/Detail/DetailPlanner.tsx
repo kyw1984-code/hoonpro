@@ -76,7 +76,7 @@ const SHOT_GUIDE: Record<string, string> = {
 const POSITION_KO = { top: 'upper', middle: 'center', bottom: 'lower' } as const;
 
 /** 프롬프트는 세 덩어리만: 제품 보존, 장면, 글자 금지. 길고 모순된 지시는 품질을 깎는다. */
-const buildPrompt = (sec: Section, productName: string, tone: string, refCount: number, bundleCount = 1): string => {
+const buildPrompt = (sec: Section, productName: string, tone: string, refCount: number, bundleCount = 1, hasHero = false): string => {
     const shot = SHOT_GUIDE[sec.shotType || 'product'] || SHOT_GUIDE.product;
     const problem = sec.sectionType === 'problem';
     return [
@@ -99,6 +99,7 @@ const buildPrompt = (sec: Section, productName: string, tone: string, refCount: 
                 `PRODUCT FIDELITY (most important): the ${refCount} uploaded image${refCount > 1 ? 's are' : ' is'} the exact product. Keep its shape, color, print, logo, material, proportions and every visible detail identical. Never redesign, recolor, simplify or swap the product. If a person appears, use a new fictional Korean model, but the product stays the same.`,
             ].join('\n'),
         '',
+        hasHero ? 'CONSISTENCY: the last input image is the approved hero of this same page. Use the same model (same face, hair, body), the same location family, the same light quality and the same color grade, but a different pose, angle and crop for this section. The page must read as one photo shoot.' : '',
         `COMPOSITION: one focal subject, calm negative space. Keep the ${POSITION_KO[sec.textPosition]} third of the frame clean and uncluttered — Korean copy will be placed there later. Keep faces, hands and key product details out of that area.`,
         'NO TEXT: do not render any letters, numbers, logos, badges, labels, watermarks or signage. Only lettering that already exists on the uploaded product may remain.',
         'AVOID: plastic skin, warped hands, floating objects, mismatched light, HDR glow, heavy vignette, split panels, white header/footer bands.',
@@ -153,6 +154,10 @@ export function DetailPlanner() {
     const [bundle, setBundle] = useState(true);
     const bundleCount = bundle && refs.length >= 2 ? refs.length : 1;
     const [plan, setPlan] = useState<DetailPlan | null>(null);
+    // 대표컷. 나머지 모든 장이 이 컷의 모델·장소·조명·색감을 따라간다.
+    // 장마다 따로 만들면 모델도 배경도 제각각이라 "한 브랜드 페이지"로 안 보인다.
+    const [hero, setHero] = useState<string>('');
+    const [heroBusy, setHeroBusy] = useState(false);
     const [sections, setSections] = useState<Section[]>([]);
     const [planning, setPlanning] = useState(false);
     const [running, setRunning] = useState(false);
@@ -194,6 +199,7 @@ export function DetailPlanner() {
             if (!result || !result.images?.length) { alert('기획안을 만들지 못했습니다. 다시 시도해주세요.'); return; }
             setPlan(result);
             setSections(toSections(result, bundleCount));
+            setHero('');
             setSaved('idle');
             setStep(2);
         } catch (e) {
@@ -210,12 +216,17 @@ export function DetailPlanner() {
         try {
             const latest = sectionsRef.current.find(s => s.id === sec.id) || sec;
             const designTone = tone === 'auto' ? (plan?.designSystem?.tone || 'premium') : tone;
-            const prompt = buildPrompt(latest, name.trim(), designTone, refs.length, bundleCount);
-            const useRefs = latest.sectionType === 'problem' ? [] : refs;
+            const prompt = buildPrompt(latest, name.trim(), designTone, refs.length, bundleCount, Boolean(hero) && latest.number !== 1);
+            const problem = latest.sectionType === 'problem';
+            const useRefs = problem ? [] : [...refs, ...(hero && latest.number !== 1 ? [hero] : [])];
+            const roles = problem ? [] : [
+                ...refs.map((_, i) => `Image ${i + 1}: the exact product to preserve`),
+                ...(hero && latest.number !== 1 ? [`Image ${refs.length + 1}: APPROVED HERO — match this model's identity, the location, lighting and color grade`] : []),
+            ];
             const result = await generateImage(prompt, useRefs, '9:16', 'high', {
                 inputFidelity: 'high',
                 variantCount: 1,
-                referenceRoles: useRefs.map((_, i) => `Image ${i + 1}: the exact product to preserve`),
+                referenceRoles: roles,
                 pacingMode: 'auto',
                 priority: latest.number,
             });
@@ -225,6 +236,33 @@ export function DetailPlanner() {
             patch(sec.id, { imageUrl, status: 'done' });
         } catch (e: any) {
             patch(sec.id, { status: 'failed', error: e?.message || '생성 실패' });
+        }
+    };
+
+    // ── 대표컷: 1번(Hook) 장면을 먼저 한 장 만들어 확인받는다 ──
+    const makeHero = async () => {
+        const first = sectionsRef.current[0];
+        if (!first || heroBusy) return;
+        setHeroBusy(true);
+        try {
+            const designTone = tone === 'auto' ? (plan?.designSystem?.tone || 'premium') : tone;
+            const prompt = buildPrompt({ ...first, shotType: 'model' }, name.trim(), designTone, refs.length, bundleCount, false);
+            const result = await generateImage(prompt, refs, '9:16', 'high', {
+                inputFidelity: 'high',
+                variantCount: 1,
+                referenceRoles: refs.map((_, i) => `Image ${i + 1}: the exact product to preserve`),
+                pacingMode: 'auto',
+                priority: 1,
+            });
+            if (!result?.image) { alert('대표컷을 받지 못했습니다. 다시 시도해주세요.'); return; }
+            setHero(result.image);
+            // 1번 장은 대표컷 그대로 쓴다 (문구만 얹어서)
+            const imageUrl = await overlayCopy(result.image, first, plan?.designSystem);
+            patch(first.id, { imageUrl, status: 'done' });
+        } catch (e: any) {
+            alert(e?.message || '대표컷 생성 실패');
+        } finally {
+            setHeroBusy(false);
         }
     };
 
@@ -396,12 +434,41 @@ export function DetailPlanner() {
                                 {saved === 'saved' ? <Check className="h-3.5 w-3.5 text-positive" /> : <FolderOpen className="h-3.5 w-3.5" />}
                                 {saved === 'saved' ? '내 작업에 담았습니다' : '기획안 저장'}
                             </button>
-                            <button type="button" onClick={generateAll}
-                                className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90">
-                                <ImageIcon className="h-4 w-4" /> 이미지 {sections.length}장 만들기
-                            </button>
+                            {hero ? (
+                                <button type="button" onClick={generateAll}
+                                    className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90">
+                                    <ImageIcon className="h-4 w-4" /> 이 느낌으로 {sections.length - 1}장 만들기
+                                </button>
+                            ) : (
+                                <button type="button" onClick={makeHero} disabled={heroBusy}
+                                    className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60">
+                                    {heroBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                                    {heroBusy ? '대표컷 만드는 중…' : '대표컷 먼저 만들기'}
+                                </button>
+                            )}
                         </div>
                     </div>
+
+                    {/* 대표컷 — 모델·장소·조명·색감의 기준. 마음에 들 때까지 이것만 다시 만든다 */}
+                    <div className="grid gap-4 rounded-card border border-line bg-paper p-4 md:grid-cols-[220px_1fr]">
+                        <div className="aspect-[860/1000] overflow-hidden rounded-control bg-paper-2">
+                            {hero
+                                ? <img src={hero} alt="대표컷" className="h-full w-full object-cover" />
+                                : <div className="flex h-full items-center justify-center px-4 text-center text-[12px] text-ink-3">{heroBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : '아직 없음'}</div>}
+                        </div>
+                        <div className="space-y-2 text-sm text-ink-2">
+                            <p className="font-semibold text-ink">1. 대표컷을 먼저 확정하세요</p>
+                            <p>나머지 {Math.max(0, sections.length - 1)}장은 이 컷의 <b className="text-ink">모델·장소·조명·색감</b>을 그대로 따라 만듭니다. 장마다 따로 만들면 모델도 배경도 제각각이라 한 브랜드의 페이지처럼 보이지 않습니다.</p>
+                            <p className="text-[12px] text-ink-3">마음에 들 때까지 대표컷만 다시 만드세요. 한 장 비용으로 전체 톤이 정해집니다.</p>
+                            {hero && (
+                                <button type="button" onClick={makeHero} disabled={heroBusy}
+                                    className="inline-flex items-center gap-1 rounded-control border border-line px-3 py-1.5 text-[12px] font-semibold text-ink-2 hover:border-line-strong disabled:opacity-60">
+                                    <RefreshCw className={`h-3.5 w-3.5 ${heroBusy ? 'animate-spin' : ''}`} /> 대표컷 다시 만들기
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
                     <div className="grid gap-3 md:grid-cols-2">
                         {sections.map(s => (
                             <div key={s.id} className="rounded-card border border-line bg-paper p-4">
