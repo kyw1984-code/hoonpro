@@ -39,6 +39,9 @@
     },
     "api/coupang.ts": {
       "maxDuration": 300
+    },
+    "api/ai.ts": {
+      "maxDuration": 300
     }
   },
   "regions": [
