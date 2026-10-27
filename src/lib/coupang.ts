@@ -583,7 +583,7 @@ export const coupangApi = {
   listingCreate: (body: Record<string, unknown>) => request<{ ok: true; sellerProductId: string; listingId: string | null }>('listing-create', { method: 'POST', body }),
   listings: () => request<{ items: ListingRow[] }>('listings'),
   /** 제품 사진 → 쿠팡 상위노출 기준 상품명 (api/ai) */
-  listingProductName: async (body: { images: string[]; brand?: string; hint?: string }) => {
+  listingProductName: async (body: { images: string[]; brand?: string; hint?: string; bundleCount?: number }) => {
     const token = getToken();
     const res = await fetch('/api/ai?action=product-name', {
       method: 'POST',
