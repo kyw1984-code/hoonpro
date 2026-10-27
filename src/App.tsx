@@ -18,7 +18,7 @@ import { WingCancelReceiver } from './components/Coupang/WingCancelReceiver';
 import { AskHoonpro } from './components/QA/AskHoonpro';
 import { HomeDashboard } from './components/Home/HomeDashboard';
 import { CoupangDashboard } from './components/Coupang/CoupangDashboard';
-import { Home, FolderOpen, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag, Loader2, LayoutTemplate } from 'lucide-react';
+import { Home, FolderOpen, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag, Loader2, LayoutTemplate, PackagePlus } from 'lucide-react';
 import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 import { fetchBillingStatus, type BillingStatus } from './lib/billing';
 
@@ -39,6 +39,7 @@ const WorksLibrary = lazy(() => import('./components/Works/WorksLibrary').then(m
 // 평소에는 꺼져 있어 아무도 안 받고, 켠 날에만 누른 사람이 받는다.
 const ThumbnailGenerator = lazy(() => import('./components/Thumbnail/ThumbnailGenerator').then(m => ({ default: m.ThumbnailGenerator })));
 const DetailPlanner = lazy(() => import('./components/Detail/DetailPlanner').then(m => ({ default: m.DetailPlanner })));
+const Listing = lazy(() => import('./components/Coupang/Listing').then(m => ({ default: m.Listing })));
 
 /** 청크를 받는 동안 보여 줄 것 — 화면이 덜컥 비지 않게 자리를 잡아 둔다 */
 function TabLoading() {
@@ -50,7 +51,7 @@ function TabLoading() {
   );
 }
 
-type Tab = 'home' | 'works' | 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'coupang' | 'qa' | 'billing' | 'admin';
+type Tab = 'home' | 'works' | 'thumbnail' | 'detail' | 'listing' | 'sourcing' | 'ranktracker' | 'review' | 'analyzer' | 'coupang' | 'qa' | 'billing' | 'admin';
 
 type TabDef = { id: Tab; label: string; icon: typeof ImageIcon };
 
@@ -58,6 +59,7 @@ const TABS: TabDef[] = [
   { id: 'home', label: '홈', icon: Home },
   { id: 'thumbnail', label: '썸네일 제작', icon: ImageIcon },
   { id: 'detail', label: '상세페이지 제작', icon: LayoutTemplate },
+  { id: 'listing', label: '상품등록AI', icon: PackagePlus },
   { id: 'sourcing', label: '소싱AI', icon: TrendingUp },
   { id: 'ranktracker', label: '순위추적AI', icon: ListOrdered },
   { id: 'review', label: '리뷰 분석AI', icon: MessageSquareText },
@@ -460,6 +462,7 @@ export default function App() {
               {shownTab === 'home' && <HomeDashboard onNavigate={(t) => setActiveTab(t as Tab)} hiddenTabs={user.isAdmin ? [] : hiddenTabs} />}
               {shownTab === 'thumbnail' && <ThumbnailGenerator />}
               {shownTab === 'detail' && <DetailPlanner />}
+              {shownTab === 'listing' && <Listing />}
               {shownTab === 'sourcing' && <SourcingFinder />}
               {shownTab === 'ranktracker' && <RankTracker />}
               {shownTab === 'review' && <ReviewAnalyzer />}

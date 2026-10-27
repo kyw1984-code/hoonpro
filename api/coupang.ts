@@ -3409,7 +3409,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       case 'listing-settings': case 'listing-settings-save': case 'listing-category': case 'listing-meta':
       case 'listing-upload': case 'listing-create': case 'listings': {
-        if (await featureHidden(supabase, 'coupang.listing', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        {
+          const blockedTab = await tabDisabledMessage(supabase, 'listing', decoded.isAdmin === true);
+          if (blockedTab) return res.status(403).json({ error: blockedTab });
+        }
         if (action === 'listing-settings') return await handleListingSettings(userId, res);
         if (action === 'listing-settings-save') return await handleListingSettingsSave(userId, req, res);
         if (action === 'listing-category') return await handleListingCategory(userId, req, res);

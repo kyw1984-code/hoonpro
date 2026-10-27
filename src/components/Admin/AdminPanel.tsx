@@ -498,6 +498,7 @@ const TAB_LABELS: { id: string; label: string }[] = [
   { id: 'home', label: '홈' },
   { id: 'thumbnail', label: '썸네일 제작' },
   { id: 'detail', label: '상세페이지 제작' },
+  { id: 'listing', label: '상품등록AI' },
   { id: 'sourcing', label: '소싱AI' },
   { id: 'ranktracker', label: '순위추적AI' },
   { id: 'review', label: '리뷰 분석AI' },
@@ -517,7 +518,6 @@ const FEATURE_LABELS: Array<{ id: string; label: string }> = [
   { id: 'ranktracker.changes', label: '순위추적AI › 경쟁 상품 변동(7일)' },
   { id: 'coupang.experiments', label: '정산AI › 변경 효과 측정 (실험 노트)' },
   { id: 'coupang.purchases', label: '정산AI › 1688 매입 원가 계산' },
-  { id: 'coupang.listing', label: '정산AI › 상품 등록 (간단 등록)' },
 ];
 
 function TabOrderConfig({ showToast }: { showToast: (msg: string) => void }) {

@@ -237,8 +237,8 @@ export const HOWTO: Record<string, HowToGuide> = {
     caution: '수입부가세는 일반과세자면 매입세액으로 돌려받는 돈이라 기본은 원가에서 뺍니다. 못 돌려받는 경우에만 "부가세를 원가에 포함"을 켜세요.',
   },
 
-  'coupang.listing': {
-    title: '상품 등록 (간단 등록)',
+  listing: {
+    title: '상품등록AI',
     lead: '상품명·사진·가격만 넣으면 쿠팡 윙에 바로 등록 요청합니다.',
     steps: [
       { title: '기본 설정 한 번', desc: '윙 로그인 ID, 출고지, 반품지, 택배사, A/S 연락처를 저장합니다. 출고지·반품지는 윙에 등록된 것을 불러옵니다. 한 번만 하면 됩니다.' },

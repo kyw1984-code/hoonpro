@@ -16,13 +16,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 /** App.tsx의 TABS, api/admin.ts의 TAB_IDS와 같은 목록이어야 한다 */
 export type FeatureTab =
-  | 'home' | 'thumbnail' | 'detail' | 'sourcing' | 'ranktracker'
+  | 'home' | 'thumbnail' | 'detail' | 'listing' | 'sourcing' | 'ranktracker'
   | 'review' | 'analyzer' | 'coupang' | 'qa' | 'works';
 
 const TAB_LABEL: Record<FeatureTab, string> = {
   home: '홈',
   thumbnail: '썸네일 제작',
   detail: '상세페이지 제작',
+  listing: '상품등록AI',
   sourcing: '훈프로 소싱AI',
   ranktracker: '순위 추적',
   review: '리뷰 분석',
@@ -37,7 +38,7 @@ const TAB_LABEL: Record<FeatureTab, string> = {
  * 써 본 뒤 [탭 표시·순서]에서 켠다. 관리자에게는 늘 보인다.
  * src/components/Admin/AdminPanel.tsx의 FEATURE_LABELS와 같은 목록이어야 한다.
  */
-export const FEATURE_IDS = ['coupang.health', 'coupang.hours', 'home.movers', 'home.goals', 'ranktracker.changes', 'coupang.experiments', 'coupang.purchases', 'coupang.listing'] as const;
+export const FEATURE_IDS = ['coupang.health', 'coupang.hours', 'home.movers', 'home.goals', 'ranktracker.changes', 'coupang.experiments', 'coupang.purchases'] as const;
 export type FeatureId = (typeof FEATURE_IDS)[number];
 
 /** 숨긴 기능인가. 관리자는 항상 false */
