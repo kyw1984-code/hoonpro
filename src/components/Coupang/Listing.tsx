@@ -6,7 +6,7 @@
  * 묻는다. 출고지·반품지·A/S 같은 것은 기본 설정에 한 번 저장해 두고 재사용한다.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Loader2, Plus, RefreshCw, Save, Search, Trash2, Upload, X } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { coupangApi, type ListingMeta, type ListingPlace, type ListingReturnPlace, type ListingRow, type ListingSettings } from '../../lib/coupang';
 
 const DELIVERY_COMPANIES: Array<{ code: string; name: string }> = [
@@ -115,6 +115,10 @@ export function Listing() {
   const [outboundDays, setOutboundDays] = useState('1');
   const [searchTags, setSearchTags] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // 사진으로 만든 상품명. 첫 대표 이미지가 올라오면 자동으로 한 번 만들고, 버튼으로 다시 만들 수 있다.
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameSuggest, setNameSuggest] = useState<{ candidates: string[]; keywords: string[]; productType: string } | null>(null);
+  const nameAutoDone = useRef(false);
 
   // ── 등록 내역 ──
   const [rows, setRows] = useState<ListingRow[]>([]);
@@ -179,6 +183,26 @@ export function Listing() {
 
   const returnPlace = useMemo(() => returns.find(r => r.code === settings.returnCenterCode) ?? null, [returns, settings.returnCenterCode]);
   const noticeList = useMemo(() => (meta?.notices ?? []).flatMap(n => n.details.map(d => ({ category: n.name, name: d.name, required: d.required }))), [meta]);
+  const suggestName = async (urls = images, auto = false) => {
+    if (urls.length === 0 || nameBusy) return;
+    if (auto && (nameAutoDone.current || productName.trim())) return;
+    setNameBusy(true);
+    try {
+      const r = await coupangApi.listingProductName({ images: urls.slice(0, 3), brand: brand.trim() || undefined });
+      nameAutoDone.current = true;
+      setProductName(r.name);
+      setNameSuggest({ candidates: r.candidates, keywords: r.keywords, productType: r.productType });
+      if (!searchTags.trim() && r.keywords.length) setSearchTags(r.keywords.slice(0, 10).join(', '));
+    } catch (e: any) {
+      if (!auto) alert(e?.message || '상품명을 만들지 못했습니다.');
+    } finally {
+      setNameBusy(false);
+    }
+  };
+  const onImagesChange = (urls: string[]) => {
+    setImages(urls);
+    if (urls.length > 0 && images.length === 0) void suggestName(urls, true);
+  };
   const patchItem = (id: string, p: Partial<ItemRow>) => setItems(prev => prev.map(it => (it.id === id ? { ...it, ...p } : it)));
 
   const submit = async () => {
@@ -214,7 +238,7 @@ export function Listing() {
       };
       const r = await coupangApi.listingCreate(body);
       alert(`쿠팡에 등록 요청했습니다.\n등록상품ID ${r.sellerProductId}\n승인에는 보통 몇 시간~하루가 걸립니다. [등록 내역]에서 상태를 확인하세요.`);
-      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags('');
+      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false;
       void loadRows();
     } catch (e: any) {
       alert(e?.message || '등록 실패');
@@ -272,8 +296,31 @@ export function Listing() {
       {/* ── 등록 폼 ── */}
       <div className="space-y-4 rounded-card border border-line bg-paper p-4">
         <p className="font-semibold text-ink">새 상품 등록</p>
+        <ImagePicker label="대표·추가 이미지 *" hint="첫 장이 대표(썸네일). 올리면 사진을 분석해 쿠팡 상위노출 기준 상품명을 자동으로 만듭니다. 정사각형 500px 이상, 글자·테두리 없는 것이 승인에 유리합니다." urls={images} onChange={onImagesChange} max={10} />
         <div className="grid gap-3 md:grid-cols-[1fr_200px]">
-          <div><label className={labelCls}>상품명 *</label><input value={productName} onChange={e => setProductName(e.target.value)} placeholder="예: 하루한잔 스테인리스 진공 보온텀블러 500ml" className={inputCls} /></div>
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className={`${labelCls} mb-0`}>상품명 *</label>
+              <button type="button" onClick={() => void suggestName()} disabled={nameBusy || images.length === 0} title={images.length === 0 ? '대표 이미지를 먼저 올리세요' : ''}
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-2 hover:text-ink disabled:opacity-50">
+                {nameBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />} 사진으로 상품명 {nameSuggest ? '다시 ' : ''}만들기
+              </button>
+            </div>
+            <input value={productName} onChange={e => setProductName(e.target.value)} placeholder={images.length ? (nameBusy ? '사진을 분석하는 중…' : '예: 하루한잔 스테인리스 진공 보온텀블러 500ml') : '대표 이미지를 올리면 자동으로 만들어집니다'} className={inputCls} />
+            <p className="mt-1 text-[11px] text-ink-3">{productName.length}/100자 · 브랜드 → 제품 유형 → 핵심 속성 → 용도 순이 쿠팡 검색에 잘 걸립니다.</p>
+            {nameSuggest && (
+              <div className="mt-2 space-y-1.5">
+                {nameSuggest.candidates.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {nameSuggest.candidates.map(c => (
+                      <button key={c} type="button" onClick={() => setProductName(c)} className="rounded-full border border-line bg-paper-2 px-2.5 py-1 text-left text-[11px] text-ink-2 hover:border-line-strong hover:text-ink">{c}</button>
+                    ))}
+                  </div>
+                )}
+                {nameSuggest.keywords.length > 0 && <p className="text-[11px] text-ink-3">검색 키워드: {nameSuggest.keywords.join(' · ')} — 검색 태그에 넣어 두었습니다.</p>}
+              </div>
+            )}
+          </div>
           <div><label className={labelCls}>브랜드</label><input value={brand} onChange={e => setBrand(e.target.value)} placeholder="없으면 비워도 됩니다" className={inputCls} /></div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -337,10 +384,7 @@ export function Listing() {
               {useOptions && <button type="button" onClick={() => setItems(p => [...p, { ...emptyItem(), salePrice: p[p.length - 1]?.salePrice ?? '', originalPrice: p[p.length - 1]?.originalPrice ?? '' }])} className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-ink-2 hover:text-ink"><Plus className="h-3.5 w-3.5" /> 옵션 추가</button>}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <ImagePicker label="대표·추가 이미지 *" hint="첫 장이 대표(썸네일). 정사각형 500px 이상, 글자·테두리 없는 것이 승인에 유리합니다." urls={images} onChange={setImages} max={10} />
-              <ImagePicker label="상세 이미지 *" hint="위에서 아래 순서대로. 상세페이지 제작에서 받은 파일을 그대로 올리세요." urls={detailImages} onChange={setDetailImages} max={30} />
-            </div>
+            <ImagePicker label="상세 이미지 *" hint="위에서 아래 순서대로. 상세페이지 제작에서 받은 파일을 그대로 올리세요." urls={detailImages} onChange={setDetailImages} max={30} />
 
             <div className="grid gap-3 md:grid-cols-4">
               <div><label className={labelCls}>배송비 (0이면 무료)</label><input inputMode="numeric" value={deliveryCharge} onChange={e => setDeliveryCharge(e.target.value.replace(/\D/g, ''))} className={inputCls} /></div>

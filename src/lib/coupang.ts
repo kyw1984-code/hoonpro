@@ -582,6 +582,18 @@ export const coupangApi = {
   listingUpload: (image: string) => request<{ url: string; path: string }>('listing-upload', { method: 'POST', body: { image } }),
   listingCreate: (body: Record<string, unknown>) => request<{ ok: true; sellerProductId: string; listingId: string | null }>('listing-create', { method: 'POST', body }),
   listings: () => request<{ items: ListingRow[] }>('listings'),
+  /** 제품 사진 → 쿠팡 상위노출 기준 상품명 (api/ai) */
+  listingProductName: async (body: { images: string[]; brand?: string; hint?: string }) => {
+    const token = getToken();
+    const res = await fetch('/api/ai?action=product-name', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || '상품명 생성에 실패했습니다.');
+    return data as { name: string; candidates: string[]; productType: string; attributes: string[]; keywords: string[] };
+  },
   /** 변경 효과 측정 (실험 노트) */
   experiments: () => request<{ items: ExperimentItem[]; today: string }>('experiments'),
   experimentSave: (body: { id?: string; productId: string; productName: string; kind: string; changedOn: string; windowDays: number; note: string }) =>
