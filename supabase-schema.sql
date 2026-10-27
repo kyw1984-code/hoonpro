@@ -1569,3 +1569,36 @@ revoke all on fx_rates from anon, authenticated;
 -- 테스트 계정: 일일 한도와 구독 게이트를 면제한다. 관리자 권한은 아니다.
 -- (관리자는 ADMIN_EMAIL 하나뿐이고 관리자 화면까지 열리므로, 테스트용으로는 쓸 수 없다)
 alter table users add column if not exists test_account boolean not null default false;
+
+-- ─────────────────────────────────────────────────────────────
+-- 쿠팡 상품 등록 (간단 등록) — 기본 설정과 등록 내역
+-- ─────────────────────────────────────────────────────────────
+create table if not exists coupang_listing_settings (
+  user_id uuid primary key references users(id) on delete cascade,
+  wing_user_id text,                      -- 윙 로그인 ID (vendorUserId, 등록 필수값)
+  outbound_code text,                     -- 출고지 코드
+  return_center_code text,                -- 반품지 코드
+  delivery_company text default 'CJGLS',  -- 택배사 코드
+  after_service_phone text,
+  after_service_info text,
+  updated_at timestamptz default now()
+);
+alter table coupang_listing_settings enable row level security;
+revoke all on coupang_listing_settings from anon, authenticated;
+
+create table if not exists coupang_listings (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  seller_product_id text,                 -- 쿠팡이 준 등록상품ID
+  product_name text not null,
+  display_category_code text,
+  status text,                            -- 쿠팡 statusName 원문 (승인대기중/승인완료/승인반려 …)
+  status_checked_at timestamptz,
+  payload jsonb,                          -- 보낸 요청 본문 (재등록·디버그용, 이미지는 URL만)
+  error text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create index if not exists idx_cpl_user on coupang_listings(user_id, created_at desc);
+alter table coupang_listings enable row level security;
+revoke all on coupang_listings from anon, authenticated;

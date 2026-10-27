@@ -555,7 +555,33 @@ export interface PurchaseSummary {
   options: Array<{ vendorItemId: string; optionName: string; avgUnitCost: number | null; currentUnitCost: number | null }>;
 }
 
+/** 상품 등록 — 카테고리 메타 */
+export interface ListingMeta {
+  allowSingleItem: boolean;
+  attributes: Array<{ name: string; required: boolean; dataType: string; basicUnit: string; exposed: boolean }>;
+  notices: Array<{ name: string; details: Array<{ name: string; required: boolean }> }>;
+  requiredDocuments: string[];
+  certifications: Array<{ type: string; name: string; required: boolean }>;
+}
+export interface ListingSettings {
+  wingUserId: string; outboundCode: string; returnCenterCode: string; deliveryCompany: string; afterServicePhone: string; afterServiceInfo: string;
+}
+export interface ListingPlace { code: string; name: string; usable: boolean }
+export interface ListingReturnPlace extends ListingPlace { zip: string; address: string; addressDetail: string; phone: string }
+export interface ListingRow {
+  id: string; sellerProductId: string | null; productName: string; categoryCode: string | null;
+  status: string | null; statusCheckedAt: string | null; error: string | null; createdAt: string;
+}
+
 export const coupangApi = {
+  /** 쿠팡 상품 등록 (간단 등록) */
+  listingSettings: () => request<{ settings: ListingSettings; outbound: ListingPlace[]; returns: ListingReturnPlace[]; errors: string[] }>('listing-settings'),
+  listingSettingsSave: (body: ListingSettings) => request<{ ok: true }>('listing-settings-save', { method: 'POST', body: body as unknown as Record<string, unknown> }),
+  listingCategory: (body: { productName: string; description?: string; brand?: string }) => request<{ code: string; name: string; meta: ListingMeta }>('listing-category', { method: 'POST', body }),
+  listingMeta: (code: string) => request<{ code: string; meta: ListingMeta }>('listing-meta', { method: 'POST', body: { code } }),
+  listingUpload: (image: string) => request<{ url: string; path: string }>('listing-upload', { method: 'POST', body: { image } }),
+  listingCreate: (body: Record<string, unknown>) => request<{ ok: true; sellerProductId: string; listingId: string | null }>('listing-create', { method: 'POST', body }),
+  listings: () => request<{ items: ListingRow[] }>('listings'),
   /** 변경 효과 측정 (실험 노트) */
   experiments: () => request<{ items: ExperimentItem[]; today: string }>('experiments'),
   experimentSave: (body: { id?: string; productId: string; productName: string; kind: string; changedOn: string; windowDays: number; note: string }) =>

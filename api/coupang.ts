@@ -3407,6 +3407,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (action === 'experiment-save') return await handleExperimentSave(userId, req, res);
         return await handleExperimentDelete(userId, req, res);
       }
+      case 'listing-settings': case 'listing-settings-save': case 'listing-category': case 'listing-meta':
+      case 'listing-upload': case 'listing-create': case 'listings': {
+        if (await featureHidden(supabase, 'coupang.listing', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
+        if (action === 'listing-settings') return await handleListingSettings(userId, res);
+        if (action === 'listing-settings-save') return await handleListingSettingsSave(userId, req, res);
+        if (action === 'listing-category') return await handleListingCategory(userId, req, res);
+        if (action === 'listing-meta') return await handleListingMeta(userId, req, res);
+        if (action === 'listing-upload') return await handleListingUpload(userId, req, res);
+        if (action === 'listing-create') return await handleListingCreate(userId, req, res);
+        return await handleListings(userId, res);
+      }
       case 'purchases': case 'purchase-save': case 'purchase-delete': case 'purchase-apply': case 'fx-rate': {
         if (await featureHidden(supabase, 'coupang.purchases', decoded.isAdmin === true)) return res.status(403).json({ error: '준비 중인 기능입니다.' });
         if (action === 'purchases') return await handlePurchases(userId, res);
@@ -6364,6 +6375,347 @@ async function handlePurchaseApply(userId: string, req: VercelRequest, res: Verc
 }
 
 /** 위안→원 환율. 무료 API를 12시간 캐시하고, 실패하면 마지막 값을 stale로 준다 */
+// ═══════════════════════════════════════════════════════════════
+// 쿠팡 상품 등록 (간단 등록)
+//
+// 윙 Open API의 상품 등록을 그대로 쓴다. 카테고리는 상품명으로 추천받고,
+// 그 카테고리의 필수 고시정보·옵션 속성만 물어서 한 번에 보낸다. 이미지는
+// 쿠팡이 URL로 가져가므로 Storage(works 버킷)에 올려 공개 주소를 만든다.
+// ═══════════════════════════════════════════════════════════════
+
+const EP_LISTING = {
+  predict: '/v2/providers/openapi/apis/api/v1/categorization/predict',
+  meta: (code: string) => `/v2/providers/seller_api/apis/api/v1/marketplace/meta/category-related-metas/display-category-codes/${code}`,
+  outbound: (vendorId: string) => `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/outboundShippingCenters`,
+  returns: (vendorId: string) => `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/returnShippingCenters`,
+};
+
+/** 쿠팡 응답은 {code, message, data} 꼴이다. data가 없으면 본문 자체를 돌려준다 */
+function coupangData(payload: any): any {
+  if (payload && typeof payload === 'object' && 'data' in payload) return payload.data;
+  return payload;
+}
+
+async function listingCreds(userId: string): Promise<{ acc: AccountRow; creds: CoupangCreds } | { error: string; status: number }> {
+  const acc = await loadAccount(userId);
+  if (!acc) return { error: '먼저 [연동 설정]에서 쿠팡 API 키를 등록해주세요.', status: 400 };
+  if (acc.demo === true) return { error: DEMO_NO_COUPANG, status: 400 };
+  return { acc, creds: credsOf(acc) };
+}
+
+async function handleListingSettings(userId: string, res: VercelResponse) {
+  const got = await listingCreds(userId);
+  if ('error' in got) return res.status(got.status).json({ error: got.error });
+  const { creds } = got;
+  const [{ data: row }, outbound, returns] = await Promise.all([
+    supabase!.from('coupang_listing_settings').select('*').eq('user_id', userId).maybeSingle(),
+    coupangCall(creds, 'GET', EP_LISTING.outbound(creds.vendorId), 'pageNum=1&pageSize=50'),
+    coupangCall(creds, 'GET', EP_LISTING.returns(creds.vendorId), 'pageNum=1&pageSize=50'),
+  ]);
+  if (outbound.authFailed || returns.authFailed) {
+    await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다.');
+    return res.status(400).json({ error: '쿠팡이 키를 거부했습니다. [연동 설정]에서 키를 확인해주세요.' });
+  }
+  const outboundList = listOf(coupangData(outbound.data)?.content ?? coupangData(outbound.data)).map((o: any) => ({
+    code: String(pickStr(o, ['outboundShippingPlaceCode', 'shippingPlaceCode', 'code'])),
+    name: pickStr(o, ['shippingPlaceName', 'name']),
+    usable: o?.usable !== false,
+  })).filter((o: any) => o.code);
+  const returnList = listOf(coupangData(returns.data)?.content ?? coupangData(returns.data)).map((r: any) => {
+    const addr = Array.isArray(r?.placeAddresses) ? r.placeAddresses[0] : r?.placeAddresses ?? {};
+    return {
+      code: String(pickStr(r, ['returnCenterCode', 'code'])),
+      name: pickStr(r, ['shippingPlaceName', 'name']),
+      zip: pickStr(addr, ['returnZipCode', 'zipCode']),
+      address: pickStr(addr, ['returnAddress', 'address']),
+      addressDetail: pickStr(addr, ['returnAddressDetail', 'addressDetail']),
+      phone: pickStr(addr, ['companyContactNumber', 'phone']),
+      usable: r?.usable !== false,
+    };
+  }).filter((r: any) => r.code);
+  return res.status(200).json({
+    settings: {
+      wingUserId: row?.wing_user_id ?? '',
+      outboundCode: row?.outbound_code ?? '',
+      returnCenterCode: row?.return_center_code ?? '',
+      deliveryCompany: row?.delivery_company ?? 'CJGLS',
+      afterServicePhone: row?.after_service_phone ?? '',
+      afterServiceInfo: row?.after_service_info ?? '',
+    },
+    outbound: outboundList,
+    returns: returnList,
+    errors: [outbound.ok ? '' : `출고지: ${outbound.error}`, returns.ok ? '' : `반품지: ${returns.error}`].filter(Boolean),
+  });
+}
+
+async function handleListingSettingsSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  const b = req.body ?? {};
+  const row = {
+    user_id: userId,
+    wing_user_id: String(b.wingUserId ?? '').trim().slice(0, 100) || null,
+    outbound_code: String(b.outboundCode ?? '').trim().slice(0, 50) || null,
+    return_center_code: String(b.returnCenterCode ?? '').trim().slice(0, 50) || null,
+    delivery_company: String(b.deliveryCompany ?? 'CJGLS').trim().slice(0, 30) || 'CJGLS',
+    after_service_phone: String(b.afterServicePhone ?? '').trim().slice(0, 30) || null,
+    after_service_info: String(b.afterServiceInfo ?? '').trim().slice(0, 500) || null,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase!.from('coupang_listing_settings').upsert(row, { onConflict: 'user_id' });
+  if (error) return res.status(500).json({ error: '저장 실패: ' + error.message });
+  return res.status(200).json({ ok: true });
+}
+
+/** 카테고리 메타를 화면이 쓰기 좋은 꼴로 */
+function normalizeCategoryMeta(meta: any) {
+  const attributes = listOf(meta?.attributes).map((a: any) => ({
+    name: pickStr(a, ['attributeTypeName']),
+    required: String(a?.required ?? '').toUpperCase() === 'MANDATORY',
+    dataType: pickStr(a, ['dataType']),
+    basicUnit: pickStr(a, ['basicUnit']),
+    exposed: String(a?.exposed ?? 'EXPOSED').toUpperCase() !== 'NONE',
+  })).filter((a: any) => a.name);
+  const notices = listOf(meta?.noticeCategories).map((n: any) => ({
+    name: pickStr(n, ['noticeCategoryName']),
+    details: listOf(n?.noticeCategoryDetailNames).map((d: any) => ({
+      name: pickStr(d, ['noticeCategoryDetailName']),
+      required: String(d?.required ?? '').toUpperCase() === 'MANDATORY',
+    })).filter((d: any) => d.name),
+  })).filter((n: any) => n.name);
+  return {
+    allowSingleItem: meta?.isAllowSingleItem !== false,
+    attributes,
+    notices,
+    requiredDocuments: listOf(meta?.requiredDocumentNames).map((d: any) => pickStr(d, ['templateName', 'name']) || String(d)),
+    certifications: listOf(meta?.certifications).map((c: any) => ({ type: pickStr(c, ['certificationType']), name: pickStr(c, ['name']), required: String(c?.required ?? '').toUpperCase() === 'MANDATORY' })),
+  };
+}
+
+async function fetchCategoryMeta(creds: CoupangCreds, code: string) {
+  const r = await coupangCall(creds, 'GET', EP_LISTING.meta(code));
+  if (!r.ok) return { error: r.error ?? `HTTP ${r.status}`, authFailed: r.authFailed };
+  return { meta: normalizeCategoryMeta(coupangData(r.data)) };
+}
+
+async function handleListingCategory(userId: string, req: VercelRequest, res: VercelResponse) {
+  const got = await listingCreds(userId);
+  if ('error' in got) return res.status(got.status).json({ error: got.error });
+  const productName = String(req.body?.productName ?? '').trim();
+  if (!productName) return res.status(400).json({ error: '상품명을 입력해주세요.' });
+  const r = await coupangCall(got.creds, 'POST', EP_LISTING.predict, '', {
+    productName,
+    productDescription: String(req.body?.description ?? '').slice(0, 1000) || undefined,
+    brand: String(req.body?.brand ?? '').slice(0, 100) || undefined,
+  });
+  if (r.authFailed) { await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다.'); return res.status(400).json({ error: '쿠팡이 키를 거부했습니다.' }); }
+  if (!r.ok) return res.status(502).json({ error: `카테고리 추천 실패: ${r.error}` });
+  const d = coupangData(r.data) ?? {};
+  const code = String(pickStr(d, ['autoCategoryId', 'displayCategoryCode', 'categoryId']));
+  if (!code) return res.status(502).json({ error: '쿠팡이 카테고리를 추천하지 못했습니다. 상품명을 더 구체적으로 적어주세요.' });
+  const name = pickStr(d, ['autoCategoryName', 'displayCategoryName', 'categoryName']);
+  const meta = await fetchCategoryMeta(got.creds, code);
+  if ('error' in meta) return res.status(502).json({ error: `카테고리 정보 조회 실패: ${meta.error}` });
+  return res.status(200).json({ code, name, meta: meta.meta });
+}
+
+async function handleListingMeta(userId: string, req: VercelRequest, res: VercelResponse) {
+  const got = await listingCreds(userId);
+  if ('error' in got) return res.status(got.status).json({ error: got.error });
+  const code = String(req.body?.code ?? req.query.code ?? '').replace(/\D/g, '');
+  if (!code) return res.status(400).json({ error: '카테고리 코드가 필요합니다.' });
+  const meta = await fetchCategoryMeta(got.creds, code);
+  if ('error' in meta) return res.status(502).json({ error: `카테고리 정보 조회 실패: ${meta.error}` });
+  return res.status(200).json({ code, meta: meta.meta });
+}
+
+/** 이미지를 Storage에 올려 쿠팡이 가져갈 공개 URL을 만든다 */
+async function handleListingUpload(userId: string, req: VercelRequest, res: VercelResponse) {
+  const image = req.body?.image;
+  const m = typeof image === 'string' ? image.match(/^data:image\/(png|jpe?g|webp);base64,(.+)$/) : null;
+  if (!m) return res.status(400).json({ error: '이미지 데이터가 올바르지 않습니다.' });
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > 8 * 1024 * 1024) return res.status(400).json({ error: '이미지가 너무 큽니다 (8MB 이하).' });
+  const path = `listing/${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase!.storage.from('works').upload(path, buf, { contentType: `image/${m[1]}`, upsert: false });
+  if (error) return res.status(400).json({ error: `이미지 업로드 실패: ${error.message}` });
+  const { data: pub } = supabase!.storage.from('works').getPublicUrl(path);
+  return res.status(200).json({ url: pub.publicUrl, path });
+}
+
+interface ListingItemInput {
+  attributes?: Record<string, string>;  // 옵션 속성 (예: 색상 → 블랙)
+  salePrice: number;
+  originalPrice?: number;
+  stock: number;
+  sku?: string;
+}
+
+async function handleListingCreate(userId: string, req: VercelRequest, res: VercelResponse) {
+  const got = await listingCreds(userId);
+  if ('error' in got) return res.status(got.status).json({ error: got.error });
+  const { creds } = got;
+  const b = req.body ?? {};
+  const { data: st } = await supabase!.from('coupang_listing_settings').select('*').eq('user_id', userId).maybeSingle();
+
+  const productName = String(b.productName ?? '').trim();
+  const categoryCode = String(b.categoryCode ?? '').replace(/\D/g, '');
+  const brand = String(b.brand ?? '').trim();
+  const wingUserId = String(b.wingUserId ?? st?.wing_user_id ?? '').trim();
+  const outboundCode = String(b.outboundCode ?? st?.outbound_code ?? '').trim();
+  const ret = b.returnCenter ?? {};
+  const returnCenterCode = String(ret.code ?? st?.return_center_code ?? '').trim();
+  const images: string[] = Array.isArray(b.images) ? b.images.map(String).filter((u: string) => /^https?:\/\//.test(u)).slice(0, 10) : [];
+  const detailImages: string[] = Array.isArray(b.detailImages) ? b.detailImages.map(String).filter((u: string) => /^https?:\/\//.test(u)).slice(0, 30) : [];
+  const detailHtml = String(b.detailHtml ?? '').trim();
+  const items: ListingItemInput[] = Array.isArray(b.items) ? b.items : [];
+  const notices: Array<{ category: string; name: string; content: string }> = Array.isArray(b.notices) ? b.notices : [];
+  const searchTags: string[] = Array.isArray(b.searchTags) ? b.searchTags.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 20) : [];
+  const deliveryCharge = Math.max(0, Math.round(Number(b.deliveryCharge) || 0));
+  const returnCharge = Math.max(0, Math.round(Number(b.returnCharge) || 0));
+  const outboundDays = Math.min(7, Math.max(1, Math.round(Number(b.outboundDays) || 1)));
+  const deliveryCompany = String(b.deliveryCompany ?? st?.delivery_company ?? 'CJGLS').trim() || 'CJGLS';
+  const afterServicePhone = String(b.afterServicePhone ?? st?.after_service_phone ?? '').trim();
+  const afterServiceInfo = String(b.afterServiceInfo ?? st?.after_service_info ?? '').trim() || '고객센터로 문의해주세요.';
+
+  const missing: string[] = [];
+  if (!productName) missing.push('상품명');
+  if (!categoryCode) missing.push('카테고리');
+  if (!wingUserId) missing.push('윙 로그인 ID');
+  if (!outboundCode) missing.push('출고지');
+  if (!returnCenterCode || !ret.zip || !ret.address) missing.push('반품지');
+  if (!afterServicePhone) missing.push('A/S 연락처');
+  if (images.length === 0) missing.push('대표 이미지');
+  if (detailImages.length === 0 && !detailHtml) missing.push('상세 이미지(또는 상세 설명)');
+  if (items.length === 0) missing.push('판매가·재고');
+  for (const it of items) {
+    if (!(Number(it.salePrice) > 0)) missing.push('판매가');
+    if (!(Number(it.stock) >= 0)) missing.push('재고');
+  }
+  if (missing.length) return res.status(400).json({ error: `입력이 비었습니다: ${[...new Set(missing)].join(', ')}` });
+
+  const now = new Date();
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+  const noticeRows = notices
+    .filter(n => n?.category && n?.name && String(n.content ?? '').trim())
+    .map(n => ({ noticeCategoryName: String(n.category), noticeCategoryDetailName: String(n.name), content: String(n.content).trim().slice(0, 500) }));
+  const imageRows = images.map((url, i) => ({ imageOrder: i, imageType: i === 0 ? 'REPRESENTATION' : 'DETAIL', vendorPath: url }));
+  const contents: any[] = [];
+  if (detailImages.length) contents.push({ contentsType: 'IMAGE', contentDetails: detailImages.map(url => ({ content: url, detailType: 'IMAGE' })) });
+  if (detailHtml) contents.push({ contentsType: 'TEXT', contentDetails: [{ content: detailHtml.slice(0, 20000), detailType: 'TEXT' }] });
+
+  const itemRows = items.map((it, idx) => {
+    const attrs = Object.entries(it.attributes ?? {}).filter(([k, v]) => k && String(v ?? '').trim());
+    const itemName = attrs.length ? attrs.map(([, v]) => String(v).trim()).join(', ') : productName.slice(0, 100);
+    const sale = Math.round(Number(it.salePrice));
+    const original = Math.max(sale, Math.round(Number(it.originalPrice) || sale));
+    return {
+      itemName,
+      originalPrice: original,
+      salePrice: sale,
+      maximumBuyCount: Math.round(Number(it.stock)),
+      maximumBuyForPerson: 0,
+      maximumBuyForPersonPeriod: 1,
+      outboundShippingTimeDay: outboundDays,
+      unitCount: 1,
+      adultOnly: 'EVERYONE',
+      taxType: b.taxFree ? 'FREE' : 'TAX',
+      parallelImported: 'NOT_PARALLEL_IMPORTED',
+      overseasPurchased: 'NOT_OVERSEAS_PURCHASED',
+      pccNeeded: false,
+      externalVendorSku: String(it.sku ?? '').trim().slice(0, 50) || `HP-${now.getTime().toString(36)}-${idx + 1}`,
+      emptyBarcode: true,
+      emptyBarcodeReason: '바코드 없는 상품',
+      certifications: [],
+      searchTags,
+      images: imageRows,
+      notices: noticeRows,
+      attributes: attrs.map(([k, v]) => ({ attributeTypeName: k, attributeValueName: String(v).trim(), exposed: 'EXPOSED' })),
+      contents,
+      offerCondition: 'NEW',
+    };
+  });
+
+  const payload = {
+    displayCategoryCode: Number(categoryCode),
+    sellerProductName: productName.slice(0, 100),
+    vendorId: creds.vendorId,
+    saleStartedAt: fmt(now),
+    saleEndedAt: '2099-12-31T23:59:59',
+    displayProductName: productName.slice(0, 100),
+    brand: brand.slice(0, 100),
+    deliveryMethod: 'SEQUENCIAL',
+    deliveryCompanyCode: deliveryCompany,
+    deliveryChargeType: deliveryCharge > 0 ? 'NOT_FREE' : 'FREE',
+    deliveryCharge,
+    freeShipOverAmount: 0,
+    deliveryChargeOnReturn: returnCharge,
+    remoteAreaDeliverable: 'N',
+    unionDeliveryType: 'UNION_DELIVERY',
+    returnCenterCode,
+    returnChargeName: String(ret.name ?? '반품지').slice(0, 100),
+    companyContactNumber: String(ret.phone ?? afterServicePhone),
+    returnZipCode: String(ret.zip),
+    returnAddress: String(ret.address),
+    returnAddressDetail: String(ret.addressDetail ?? ''),
+    returnCharge,
+    returnChargeVendor: 'N',
+    afterServiceInformation: afterServiceInfo.slice(0, 500),
+    afterServiceContactNumber: afterServicePhone,
+    outboundShippingPlaceCode: Number(outboundCode) || outboundCode,
+    vendorUserId: wingUserId,
+    requested: b.requestApproval !== false,
+    items: itemRows,
+    requiredDocuments: [],
+  };
+
+  const r = await coupangCall(creds, 'POST', EP.sellerProducts, '', payload);
+  if (r.authFailed) { await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다.'); return res.status(400).json({ error: '쿠팡이 키를 거부했습니다.' }); }
+  const sellerProductId = r.ok ? String(coupangData(r.data) ?? '') : '';
+  const errText = r.ok ? null : String(r.error ?? `HTTP ${r.status}`).slice(0, 2000);
+  const { data: saved } = await supabase!.from('coupang_listings').insert({
+    user_id: userId,
+    seller_product_id: sellerProductId || null,
+    product_name: productName,
+    display_category_code: categoryCode,
+    status: r.ok ? '등록 요청됨' : '등록 실패',
+    status_checked_at: r.ok ? now.toISOString() : null,
+    payload,
+    error: errText,
+  }).select('id').single();
+  if (!r.ok) return res.status(400).json({ error: `쿠팡이 등록을 거절했습니다: ${errText}`, listingId: saved?.id ?? null });
+  return res.status(200).json({ ok: true, sellerProductId, listingId: saved?.id ?? null });
+}
+
+/** 등록 내역 — 아직 승인 안 난 것은 쿠팡에 상태를 다시 묻는다 (최대 10건) */
+async function handleListings(userId: string, res: VercelResponse) {
+  const { data: rows } = await supabase!.from('coupang_listings')
+    .select('id, seller_product_id, product_name, display_category_code, status, status_checked_at, error, created_at')
+    .eq('user_id', userId).order('created_at', { ascending: false }).limit(50);
+  const list = (rows ?? []) as any[];
+  const acc = await loadAccount(userId);
+  if (acc && acc.demo !== true) {
+    const creds = credsOf(acc);
+    const pending = list.filter(r => r.seller_product_id && !/승인완료|판매중|반려|거부/.test(String(r.status ?? ''))).slice(0, 10);
+    for (const r of pending) {
+      const d = await coupangCall(creds, 'GET', EP.sellerProduct(String(r.seller_product_id)));
+      if (!d.ok) continue;
+      const detail = coupangData(d.data) ?? {};
+      const status = pickStr(detail, ['statusName', 'status']);
+      if (status && status !== r.status) {
+        r.status = status;
+        r.status_checked_at = new Date().toISOString();
+        await supabase!.from('coupang_listings').update({ status, status_checked_at: r.status_checked_at, updated_at: r.status_checked_at }).eq('id', r.id);
+      }
+    }
+  }
+  return res.status(200).json({
+    items: list.map(r => ({
+      id: r.id, sellerProductId: r.seller_product_id, productName: r.product_name, categoryCode: r.display_category_code,
+      status: r.status, statusCheckedAt: r.status_checked_at, error: r.error, createdAt: r.created_at,
+    })),
+  });
+}
+
 async function handleFxRate(res: VercelResponse) {
   const { data: cached } = await supabase!.from('fx_rates').select('rate, fetched_at').eq('pair', FX_PAIR).maybeSingle();
   const fresh = cached && Date.now() - new Date(cached.fetched_at).getTime() < FX_TTL_MS;
