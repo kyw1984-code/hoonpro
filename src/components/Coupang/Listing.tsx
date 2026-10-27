@@ -119,6 +119,8 @@ export function Listing() {
   const [nameBusy, setNameBusy] = useState(false);
   const [nameSuggest, setNameSuggest] = useState<{ candidates: string[]; keywords: string[]; productType: string } | null>(null);
   const nameAutoDone = useRef(false);
+  const [tagBusy, setTagBusy] = useState(false);
+  const [tagNote, setTagNote] = useState<string | null>(null);
 
   // ── 등록 내역 ──
   const [rows, setRows] = useState<ListingRow[]>([]);
@@ -197,6 +199,31 @@ export function Listing() {
       if (!auto) alert(e?.message || '상품명을 만들지 못했습니다.');
     } finally {
       setNameBusy(false);
+    }
+  };
+  /** 태그 20개 채우기: 상품명·제품 유형에서 시드를 뽑아 쿠팡 자동완성 + 네이버 연관 키워드로 채운다 */
+  const fillTags = async () => {
+    if (tagBusy) return;
+    const current = searchTags.split(/[,\n]/).map(t => t.trim()).filter(Boolean);
+    const seeds: string[] = [];
+    if (nameSuggest?.productType) seeds.push(nameSuggest.productType);
+    const nameWords = productName.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(w => w.length >= 2);
+    if (nameWords.length >= 2) { seeds.push(nameWords.slice(0, 2).join(' ')); seeds.push(nameWords.slice(1, 3).join(' ')); }
+    if (nameWords.length >= 1) seeds.push(nameWords[nameWords.length - 1]);
+    current.slice(0, 2).forEach(t => seeds.push(t));
+    const uniq = [...new Set(seeds.map(s => s.trim()).filter(Boolean))].slice(0, 5);
+    if (uniq.length === 0) { alert('상품명을 먼저 적어주세요.'); return; }
+    setTagBusy(true);
+    setTagNote(null);
+    try {
+      const r = await coupangApi.listingTagSuggest({ seeds: uniq, exclude: current, limit: Math.max(0, 20 - current.length) });
+      const merged = [...current, ...r.tags].slice(0, 20);
+      setSearchTags(merged.join(', '));
+      setTagNote(`${merged.length}/20개 · 쿠팡 연관 검색어 ${r.sources.coupang}개 + 네이버 검색량 상위 ${r.sources.naver}개 (시드: ${r.seeds.join(', ')})`);
+    } catch (e: any) {
+      setTagNote(e?.message || '연관 검색어를 가져오지 못했습니다.');
+    } finally {
+      setTagBusy(false);
     }
   };
   const onImagesChange = (urls: string[]) => {
@@ -390,7 +417,17 @@ export function Listing() {
               <div><label className={labelCls}>배송비 (0이면 무료)</label><input inputMode="numeric" value={deliveryCharge} onChange={e => setDeliveryCharge(e.target.value.replace(/\D/g, ''))} className={inputCls} /></div>
               <div><label className={labelCls}>반품 배송비 (편도)</label><input inputMode="numeric" value={returnCharge} onChange={e => setReturnCharge(e.target.value.replace(/\D/g, ''))} className={inputCls} /></div>
               <div><label className={labelCls}>출고 소요일</label><input inputMode="numeric" value={outboundDays} onChange={e => setOutboundDays(e.target.value.replace(/\D/g, ''))} className={inputCls} /></div>
-              <div><label className={labelCls}>검색 태그 (쉼표)</label><input value={searchTags} onChange={e => setSearchTags(e.target.value)} placeholder="텀블러, 보온병, 사무실" className={inputCls} /></div>
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <label className={`${labelCls} mb-0`}>검색 태그 <span className="font-normal text-ink-3">(쉼표 구분 · {searchTags.split(/[,\n]/).map(t => t.trim()).filter(Boolean).length}/20개)</span></label>
+                <button type="button" onClick={() => void fillTags()} disabled={tagBusy}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-2 hover:text-ink disabled:opacity-50">
+                  {tagBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />} 쿠팡 연관 검색어로 20개 채우기
+                </button>
+              </div>
+              <textarea value={searchTags} onChange={e => setSearchTags(e.target.value)} rows={3} placeholder="남자 니트, 남자 니트 가을, 남자 가을 니트 라운드 …" className={inputCls} />
+              <p className="mt-1 text-[11px] text-ink-3">{tagNote ?? '쿠팡 검색창의 연관 검색어(소비자가 실제로 치는 조합)를 긁어 와 채웁니다. 이미 적은 태그는 그대로 두고 빈 자리만 채웁니다.'}</p>
             </div>
 
             <div className="flex items-center justify-between gap-2 border-t border-line pt-3">

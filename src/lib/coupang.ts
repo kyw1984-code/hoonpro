@@ -582,6 +582,18 @@ export const coupangApi = {
   listingUpload: (image: string) => request<{ url: string; path: string }>('listing-upload', { method: 'POST', body: { image } }),
   listingCreate: (body: Record<string, unknown>) => request<{ ok: true; sellerProductId: string; listingId: string | null }>('listing-create', { method: 'POST', body }),
   listings: () => request<{ items: ListingRow[] }>('listings'),
+  /** 검색어(태그) 자동 채우기 — 쿠팡 자동완성 + 네이버 연관 키워드 (api/sourcing) */
+  listingTagSuggest: async (body: { seeds: string[]; exclude?: string[]; limit?: number }) => {
+    const token = getToken();
+    const res = await fetch('/api/sourcing?type=tag-suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || '연관 검색어를 가져오지 못했습니다.');
+    return data as { tags: string[]; seeds: string[]; sources: { coupang: number; naver: number }; cached: boolean };
+  },
   /** 제품 사진 → 쿠팡 상위노출 기준 상품명 (api/ai) */
   listingProductName: async (body: { images: string[]; brand?: string; hint?: string; bundleCount?: number }) => {
     const token = getToken();

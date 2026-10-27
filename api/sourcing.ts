@@ -307,6 +307,117 @@ const buildRelevanceCheck = (tokens: string[]) => {
   };
 };
 
+// ═══════════════════════════════════════════════════════════════
+// 상품등록AI — 검색어(태그) 20개 자동 채우기
+//
+// 쿠팡 검색창에 '남자 니트'를 치면 '남자 니트 가을' '남자 니트 라운드'처럼
+// 연관 검색어가 뜬다. 그게 곧 소비자가 실제로 치는 조합이라 태그의 답안지다.
+// 시드 키워드 몇 개로 자동완성을 긁고, 모자라면 네이버 키워드도구의 연관
+// 키워드(검색량 순)로 채운다. 결과는 12시간 캐시 — 같은 시드를 여러 번 긁지 않는다.
+// ═══════════════════════════════════════════════════════════════
+
+/** 자동완성 응답은 JSONP일 때도, 순수 JSON일 때도 있다. 문자열이든 {keyword}든 전부 뽑는다 */
+function extractSuggestions(body: string): string[] {
+  const text = String(body || "").trim();
+  if (!text) return [];
+  let json = text;
+  const jsonp = text.match(/^[\w$.]+\s*\((?<inner>[\s\S]*)\)\s*;?\s*$/);
+  if (jsonp?.groups?.inner) json = jsonp.groups.inner;
+  let parsed: any;
+  try { parsed = JSON.parse(json); } catch { return []; }
+  const out: string[] = [];
+  const walk = (v: any, depth: number) => {
+    if (depth > 4 || out.length > 60) return;
+    if (typeof v === "string") { if (v.length <= 40) out.push(v); return; }
+    if (Array.isArray(v)) { v.forEach(x => walk(x, depth + 1)); return; }
+    if (v && typeof v === "object") {
+      for (const key of ["keyword", "query", "text", "value", "name", "suggest", "suggestion"]) {
+        if (typeof v[key] === "string") { out.push(v[key]); return; }
+      }
+      Object.values(v).forEach(x => walk(x, depth + 1));
+    }
+  };
+  walk(parsed, 0);
+  return out;
+}
+
+async function coupangAutocomplete(keyword: string, userId: string | null): Promise<string[]> {
+  if (!BRIGHTDATA_API_TOKEN) return [];
+  const url = `https://www.coupang.com/np/search/autoComplete?keyword=${encodeURIComponent(keyword)}`;
+  const r = await fetchViaUnlocker(url, 1, 2, { userId, feature: "listing-tag-suggest" }, { Referer: "https://www.coupang.com/", Accept: "application/json, text/javascript, */*" }, 1500);
+  if (!r.ok || !r.html) return [];
+  return extractSuggestions(r.html);
+}
+
+/** 태그로 쓸 수 있게 다듬는다: 기호 제거, 공백 정리, 2~25자, 중복(띄어쓰기 무시) 제거 */
+function normalizeTags(list: string[], limit: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of list) {
+    const t = String(raw || "").replace(/[^\p{L}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+    if (t.length < 2 || t.length > 25) continue;
+    const key = t.replace(/\s+/g, "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+async function handleTagSuggest(req: VercelRequest, res: VercelResponse, decoded: any) {
+  const seeds = normalizeTags(
+    Array.isArray(req.body?.seeds) ? req.body.seeds.map(String) : String(req.query.seeds ?? "").split(","),
+    6,
+  );
+  if (seeds.length === 0) return res.status(400).json({ error: "시드 키워드가 필요합니다." });
+  const want = Math.min(30, Math.max(5, Number(req.body?.limit ?? req.query.limit) || 20));
+  const exclude = new Set(normalizeTags(Array.isArray(req.body?.exclude) ? req.body.exclude.map(String) : [], 100).map(t => t.replace(/\s+/g, "")));
+
+  const cacheKey = `tags:${seeds.map(s => s.replace(/\s+/g, "")).sort().join("|")}`;
+  const cached = await cacheGet(cacheKey);
+  let pool: Array<{ keyword: string; source: "coupang" | "naver"; volume: number }>;
+  if (cached && cached.ageMs < 12 * 3600 * 1000) {
+    pool = cached.payload.pool;
+  } else {
+    pool = [];
+    // 1) 쿠팡 자동완성 — 시드 그대로 + 시드 뒤에 한 글자씩 붙여 더 긴 조합을 끌어낸다
+    const probes = [...new Set(seeds.flatMap(s => [s, `${s} `]))].slice(0, 8);
+    const results = await Promise.all(probes.map(p => coupangAutocomplete(p, decoded?.userId ?? null)));
+    const coupangList = normalizeTags(results.flat(), 80);
+    coupangList.forEach(k => pool.push({ keyword: k, source: "coupang", volume: 0 }));
+    // 2) 네이버 키워드도구 — 검색량이 있는 연관 키워드로 보충
+    const naver = await callKeywordToolMerged(seeds.slice(0, 5));
+    if (naver.ok) {
+      for (const kw of naver.list) {
+        const keyword = String(kw?.relKeyword ?? "").trim();
+        if (!keyword) continue;
+        const volume = parseQcCnt(kw.monthlyPcQcCnt) + parseQcCnt(kw.monthlyMobileQcCnt);
+        pool.push({ keyword, source: "naver", volume });
+      }
+    }
+    // 시드 단어를 하나라도 품은 것만 — 키워드도구가 섞어 주는 엉뚱한 인기 키워드를 거른다
+    const seedTokens = [...new Set(seeds.flatMap(s => s.split(" ")).filter(t => t.length >= 2))];
+    const related = (k: string) => seedTokens.some(t => k.replace(/\s+/g, "").includes(t));
+    pool = pool.filter(p => related(p.keyword));
+    if (pool.length > 0) await cacheSet(cacheKey, { pool });
+  }
+
+  // 쿠팡 자동완성(실제 소비자 조합)을 먼저, 그다음 네이버 검색량 순. 이미 넣은 태그는 뺀다.
+  const ordered = [
+    ...pool.filter(p => p.source === "coupang"),
+    ...pool.filter(p => p.source === "naver").sort((a, b) => b.volume - a.volume),
+  ].filter(p => !exclude.has(p.keyword.replace(/\s+/g, "")));
+  const tags = normalizeTags(ordered.map(p => p.keyword), want);
+  const coupangCount = tags.filter(t => pool.some(p => p.source === "coupang" && p.keyword === t)).length;
+  return res.status(200).json({
+    tags,
+    seeds,
+    sources: { coupang: coupangCount, naver: tags.length - coupangCount },
+    cached: Boolean(cached && cached.ageMs < 12 * 3600 * 1000),
+  });
+}
+
 async function handleKeywords(req: VercelRequest, res: VercelResponse) {
   const seed = typeof req.query.seed === "string" ? req.query.seed.trim() : "";
   const category = typeof req.query.category === "string" ? req.query.category.trim() : "";
@@ -2954,8 +3065,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // 이 엔드포인트 하나가 화면 셋을 담당한다. 관리자가 끈 화면은 서버에서도
   // 막는다 — 감추기만 하면 열려 있던 브라우저 탭이 계속 호출한다.
-  const TAB_OF_TYPE: Record<string, "sourcing" | "ranktracker" | "review"> = {
-    keywords: "sourcing", trend: "sourcing", briefing: "sourcing",
+  const TAB_OF_TYPE: Record<string, "sourcing" | "ranktracker" | "review" | "listing"> = {
+    keywords: "sourcing", trend: "sourcing", briefing: "sourcing", "tag-suggest": "listing",
     products: "sourcing", favorites: "sourcing", "saved-compare": "sourcing",
     reviews: "review",
     rankwatch: "ranktracker",
@@ -2967,6 +3078,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (type === "keywords") return handleKeywords(req, res);
+  if (type === "tag-suggest") return handleTagSuggest(req, res, decoded);
   if (type === "trend") return handleTrend(req, res, decoded?.isAdmin === true);
   if (type === "briefing") return handleBriefing(req, res, decoded);
   if (type === "products") return handleProducts(req, res, decoded);
