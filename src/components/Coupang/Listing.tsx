@@ -188,11 +188,11 @@ export function Listing() {
     if (auto && (nameAutoDone.current || productName.trim())) return;
     setNameBusy(true);
     try {
-      const r = await coupangApi.listingProductName({ images: urls.slice(0, 3), brand: brand.trim() || undefined });
+      const r = await coupangApi.listingProductName({ images: urls.slice(0, 3), brand: brand.trim() || undefined, bundleCount: useOptions ? 0 : items.length });
       nameAutoDone.current = true;
       setProductName(r.name);
       setNameSuggest({ candidates: r.candidates, keywords: r.keywords, productType: r.productType });
-      if (!searchTags.trim() && r.keywords.length) setSearchTags(r.keywords.slice(0, 10).join(', '));
+      if (!searchTags.trim() && r.keywords.length) setSearchTags(r.keywords.slice(0, 20).join(', '));
     } catch (e: any) {
       if (!auto) alert(e?.message || '상품명을 만들지 못했습니다.');
     } finally {
@@ -296,7 +296,7 @@ export function Listing() {
       {/* ── 등록 폼 ── */}
       <div className="space-y-4 rounded-card border border-line bg-paper p-4">
         <p className="font-semibold text-ink">새 상품 등록</p>
-        <ImagePicker label="대표·추가 이미지 *" hint="첫 장이 대표(썸네일). 올리면 사진을 분석해 쿠팡 상위노출 기준 상품명을 자동으로 만듭니다. 정사각형 500px 이상, 글자·테두리 없는 것이 승인에 유리합니다." urls={images} onChange={onImagesChange} max={10} />
+        <ImagePicker label="대표·추가 이미지 *" hint="첫 장이 대표(썸네일). 올리면 사진을 분석해 훈프로 코칭 기준(강의 자료)의 상품명과 검색어 20개를 자동으로 만듭니다. 정사각형 500px 이상, 글자·테두리 없는 것이 승인에 유리합니다." urls={images} onChange={onImagesChange} max={10} />
         <div className="grid gap-3 md:grid-cols-[1fr_200px]">
           <div>
             <div className="mb-1 flex items-center justify-between">
@@ -307,7 +307,7 @@ export function Listing() {
               </button>
             </div>
             <input value={productName} onChange={e => setProductName(e.target.value)} placeholder={images.length ? (nameBusy ? '사진을 분석하는 중…' : '예: 하루한잔 스테인리스 진공 보온텀블러 500ml') : '대표 이미지를 올리면 자동으로 만들어집니다'} className={inputCls} />
-            <p className="mt-1 text-[11px] text-ink-3">{productName.length}/100자 · 브랜드 → 제품 유형 → 핵심 속성 → 용도 순이 쿠팡 검색에 잘 걸립니다.</p>
+            <p className={`mt-1 text-[11px] ${productName.length > 40 ? 'text-critical' : productName.length > 35 ? 'text-caution' : 'text-ink-3'}`}>{productName.length}자 · 훈프로 기준: 브랜드 → 성별 → 계절 → 제품명 2개 → 소구점 → N종세트, 35자 이하 권장(최대 40), 색상·특수문자 없이.</p>
             {nameSuggest && (
               <div className="mt-2 space-y-1.5">
                 {nameSuggest.candidates.length > 0 && (
@@ -317,7 +317,7 @@ export function Listing() {
                     ))}
                   </div>
                 )}
-                {nameSuggest.keywords.length > 0 && <p className="text-[11px] text-ink-3">검색 키워드: {nameSuggest.keywords.join(' · ')} — 검색 태그에 넣어 두었습니다.</p>}
+                {nameSuggest.keywords.length > 0 && <p className="text-[11px] text-ink-3">검색어(태그) {nameSuggest.keywords.length}개를 검색 태그에 넣어 두었습니다 — 성별·계절·제품명을 앞뒤로 붙인 조합형입니다.</p>}
               </div>
             )}
           </div>
