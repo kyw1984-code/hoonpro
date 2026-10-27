@@ -594,6 +594,18 @@ export const coupangApi = {
     if (!res.ok) throw new Error(data?.error || '연관 검색어를 가져오지 못했습니다.');
     return data as { tags: string[]; seeds: string[]; sources: { coupang: number; naver: number }; cached: boolean };
   },
+  /** 제품 사진 + 카테고리 속성 목록 → 검색필터 값 (api/ai) */
+  listingAttrs: async (body: { images: string[]; attributes: Array<{ name: string; dataType?: string; basicUnit?: string }>; productName?: string; hint?: string }) => {
+    const token = getToken();
+    const res = await fetch('/api/ai?action=listing-attrs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || '검색필터를 채우지 못했습니다.');
+    return data as { values: Record<string, string>; filled: number; total: number };
+  },
   /** 제품 사진 → 쿠팡 상위노출 기준 상품명 (api/ai) */
   listingProductName: async (body: { images: string[]; brand?: string; hint?: string; bundleCount?: number }) => {
     const token = getToken();

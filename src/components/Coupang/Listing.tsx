@@ -121,6 +121,10 @@ export function Listing() {
   const nameAutoDone = useRef(false);
   const [tagBusy, setTagBusy] = useState(false);
   const [tagNote, setTagNote] = useState<string | null>(null);
+  // 검색필터(카테고리 속성) 값. 옵션으로 쓰는 속성은 제외하고 나머지를 채운다.
+  const [filters, setFilters] = useState<Record<string, string>>({});
+  const [filterBusy, setFilterBusy] = useState(false);
+  const [filterNote, setFilterNote] = useState<string | null>(null);
 
   // ── 등록 내역 ──
   const [rows, setRows] = useState<ListingRow[]>([]);
@@ -161,6 +165,26 @@ export function Listing() {
     setOptionAttrs(required);
     setUseOptions(required.length > 0 || !m.allowSingleItem);
     setItems([emptyItem()]);
+    setFilters({});
+    setFilterNote(null);
+    // 사진이 있으면 검색필터를 바로 채운다 — 카테고리마다 항목이 달라 메타가 온 다음에만 가능하다
+    if (images.length > 0) void fillFilters(m, required);
+  };
+  const fillFilters = async (m: ListingMeta | null = meta, exclude: string[] = optionAttrs) => {
+    if (!m || images.length === 0 || filterBusy) return;
+    const targets = m.attributes.filter(a => !exclude.includes(a.name)).map(a => ({ name: a.name, dataType: a.dataType, basicUnit: a.basicUnit }));
+    if (targets.length === 0) { setFilterNote('이 카테고리는 검색필터 항목이 없습니다.'); return; }
+    setFilterBusy(true);
+    setFilterNote(null);
+    try {
+      const r = await coupangApi.listingAttrs({ images: images.slice(0, 3), attributes: targets, productName: productName.trim() || undefined });
+      setFilters(prev => ({ ...r.values, ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v.trim())) }));
+      setFilterNote(`사진으로 확인된 ${r.filled}/${r.total}개를 채웠습니다. 나머지는 알면 직접 적고, 모르면 비워 두세요.`);
+    } catch (e: any) {
+      setFilterNote(e?.message || '검색필터를 채우지 못했습니다.');
+    } finally {
+      setFilterBusy(false);
+    }
   };
   const findCategory = async () => {
     if (!productName.trim()) { alert('상품명을 먼저 적어주세요.'); return; }
@@ -257,6 +281,7 @@ export function Listing() {
           salePrice: Number(it.salePrice), originalPrice: Number(it.originalPrice) || undefined, stock: Number(it.stock),
         })),
         notices: noticeList.map(n => ({ category: n.category, name: n.name, content: notices[`${n.category}|${n.name}`] ?? '' })).filter(n => n.content.trim()),
+        filters: Object.fromEntries(Object.entries(filters).filter(([k, v]) => v.trim() && !(useOptions && optionAttrs.includes(k)))),
         searchTags: searchTags.split(/[,\n]/).map(t => t.trim()).filter(Boolean),
         deliveryCharge: Number(deliveryCharge) || 0,
         returnCharge: Number(returnCharge) || 0,
@@ -265,7 +290,7 @@ export function Listing() {
       };
       const r = await coupangApi.listingCreate(body);
       alert(`쿠팡에 등록 요청했습니다.\n등록상품ID ${r.sellerProductId}\n승인에는 보통 몇 시간~하루가 걸립니다. [등록 내역]에서 상태를 확인하세요.`);
-      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false;
+      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false; setFilters({}); setFilterNote(null);
       void loadRows();
     } catch (e: any) {
       alert(e?.message || '등록 실패');
@@ -363,6 +388,27 @@ export function Listing() {
 
         {meta && (
           <>
+            {meta.attributes.some(a => !optionAttrs.includes(a.name)) && (
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <p className={`${labelCls} mb-0`}>검색필터 <span className="font-normal text-ink-3">(이 카테고리 항목 · 채울수록 필터 검색에 더 잡힙니다)</span></p>
+                  <button type="button" onClick={() => void fillFilters()} disabled={filterBusy || images.length === 0} title={images.length === 0 ? '대표 이미지를 먼저 올리세요' : ''}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-2 hover:text-ink disabled:opacity-50">
+                    {filterBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />} 사진으로 채우기
+                  </button>
+                </div>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {meta.attributes.filter(a => !optionAttrs.includes(a.name)).map(a => (
+                    <div key={a.name} className="flex items-center gap-2">
+                      <span className="w-28 shrink-0 truncate text-[12px] text-ink-2" title={a.name}>{a.name}{a.basicUnit ? <span className="text-ink-3"> ({a.basicUnit})</span> : null}</span>
+                      <input value={filters[a.name] ?? ''} onChange={e => setFilters(p => ({ ...p, [a.name]: e.target.value }))} placeholder="모르면 비워 두세요" className={`${inputCls} py-1.5`} />
+                    </div>
+                  ))}
+                </div>
+                {filterNote && <p className="mt-1 text-[11px] text-ink-3">{filterNote}</p>}
+              </div>
+            )}
+
             {noticeList.length > 0 && (
               <div>
                 <p className={labelCls}>상품 고시정보 <span className="font-normal text-ink-3">(이 카테고리 필수 항목만 · 모르면 "상세페이지 참조")</span></p>

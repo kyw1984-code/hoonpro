@@ -6571,6 +6571,10 @@ async function handleListingCreate(userId: string, req: VercelRequest, res: Verc
   const detailImages: string[] = Array.isArray(b.detailImages) ? b.detailImages.map(String).filter((u: string) => /^https?:\/\//.test(u)).slice(0, 30) : [];
   const detailHtml = String(b.detailHtml ?? '').trim();
   const items: ListingItemInput[] = Array.isArray(b.items) ? b.items : [];
+  // 검색필터 — 옵션으로 보이지 않고(exposed NONE) 검색·필터에만 쓰이는 속성. 모든 옵션에 같은 값을 붙인다.
+  const filters: Array<[string, string]> = Object.entries((b.filters && typeof b.filters === 'object') ? b.filters : {})
+    .map(([k, v]) => [String(k).trim(), String(v ?? '').trim()] as [string, string])
+    .filter(([k, v]) => k && v).slice(0, 40);
   const notices: Array<{ category: string; name: string; content: string }> = Array.isArray(b.notices) ? b.notices : [];
   const searchTags: string[] = Array.isArray(b.searchTags) ? b.searchTags.map((t: any) => String(t).trim()).filter(Boolean).slice(0, 20) : [];
   const deliveryCharge = Math.max(0, Math.round(Number(b.deliveryCharge) || 0));
@@ -6632,7 +6636,10 @@ async function handleListingCreate(userId: string, req: VercelRequest, res: Verc
       searchTags,
       images: imageRows,
       notices: noticeRows,
-      attributes: attrs.map(([k, v]) => ({ attributeTypeName: k, attributeValueName: String(v).trim(), exposed: 'EXPOSED' })),
+      attributes: [
+        ...attrs.map(([k, v]) => ({ attributeTypeName: k, attributeValueName: String(v).trim(), exposed: 'EXPOSED' })),
+        ...filters.filter(([k]) => !attrs.some(([ak]) => ak === k)).map(([k, v]) => ({ attributeTypeName: k, attributeValueName: v, exposed: 'NONE' })),
+      ],
       contents,
       offerCondition: 'NEW',
     };
