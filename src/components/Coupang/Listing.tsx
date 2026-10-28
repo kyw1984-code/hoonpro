@@ -155,6 +155,12 @@ export function Listing() {
     appliedBrand.current = nextTrim;
   };
   const [tagBusy, setTagBusy] = useState(false);
+  // 자동 연쇄(상품명 → 카테고리 → 검색필터·고시·태그)는 비동기로 이어지므로 최신 값을 ref로 본다
+  const latest = useRef({ images: [] as string[], detailImages: [] as string[], meta: null as ListingMeta | null, productName: '', brand: '', optionAttrs: [] as string[], searchTags: '' });
+  latest.current = { images, detailImages, meta, productName, brand, optionAttrs, searchTags };
+  const [noticeBusy, setNoticeBusy] = useState(false);
+  const [noticeNote, setNoticeNote] = useState<string | null>(null);
+  const [autoStep, setAutoStep] = useState<string | null>(null);
   const [tagNote, setTagNote] = useState<string | null>(null);
   // 검색필터(카테고리 속성) 값. 옵션으로 쓰는 속성은 제외하고 나머지를 채운다.
   const [filters, setFilters] = useState<Record<string, string>>({});
@@ -224,7 +230,55 @@ export function Listing() {
     setFilters({});
     setFilterNote(null);
     // 사진이 있으면 검색필터를 바로 채운다 — 카테고리마다 항목이 달라 메타가 온 다음에만 가능하다
-    if (images.length > 0) void fillFilters(m, required);
+    if (latest.current.images.length > 0) void fillFilters(m, required);
+    if (latest.current.detailImages.length > 0) void fillNotices(m, latest.current.detailImages, required);
+  };
+  /** 상세페이지 이미지 → 제공고시 + 옵션(색상·사이즈). 읽힌 항목만 덮어쓰고, 옵션은 표가 비어 있을 때만 채운다 */
+  const fillNotices = async (m: ListingMeta | null = latest.current.meta, urls: string[] = latest.current.detailImages, attrsForOptions: string[] = latest.current.optionAttrs) => {
+    if (!m || urls.length === 0 || noticeBusy) return;
+    const names = m.notices.flatMap(n => n.details.map(d => d.name));
+    setNoticeBusy(true);
+    setNoticeNote(null);
+    try {
+      const r = await coupangApi.listingNotices({ images: [...urls.slice(0, 8), ...latest.current.images.slice(0, 2)], notices: names, productName: latest.current.productName.trim() || undefined });
+      // 고시: 읽힌 값만 덮어쓴다 (항목명 → 키)
+      setNotices(prev => {
+        const next = { ...prev };
+        for (const n of m.notices) for (const d of n.details) {
+          const v = r.notices[d.name];
+          if (v) next[`${n.name}|${d.name}`] = v;
+        }
+        return next;
+      });
+      // 옵션: 색상·사이즈 속성이 옵션 항목이고 표가 비어 있으면 조합으로 채운다
+      const colorAttr = attrsForOptions.find(a => /색상|컬러/.test(a));
+      const sizeAttr = attrsForOptions.find(a => /사이즈|크기/.test(a));
+      const colors = colorAttr ? r.options.colors : [];
+      const sizes = sizeAttr ? r.options.sizes : [];
+      let optionNote = '';
+      if ((colors.length || sizes.length)) {
+        setItems(prev => {
+          const blank = prev.every(it => !it.salePrice && Object.values(it.attributes).every(v => !v));
+          if (!blank) return prev;
+          const rows: ItemRow[] = [];
+          const cs = colors.length ? colors : [''];
+          const ss = sizes.length ? sizes : [''];
+          for (const c of cs) for (const sz of ss) {
+            const attributes: Record<string, string> = {};
+            if (colorAttr && c) attributes[colorAttr] = c;
+            if (sizeAttr && sz) attributes[sizeAttr] = sz;
+            rows.push({ ...emptyItem(), attributes });
+          }
+          return rows.slice(0, 60);
+        });
+        optionNote = ` 옵션 ${colors.length ? `색상 ${colors.length}` : ''}${colors.length && sizes.length ? ' × ' : ''}${sizes.length ? `사이즈 ${sizes.length}` : ''}도 채웠습니다 — 판매가·재고만 적으세요.`;
+      }
+      setNoticeNote(`상세페이지에서 ${r.filled}/${r.total}개 항목을 읽어 채웠습니다.${optionNote} 나머지는 의류 기본값입니다.`);
+    } catch (e: any) {
+      setNoticeNote(e?.message || '상세페이지 분석에 실패했습니다.');
+    } finally {
+      setNoticeBusy(false);
+    }
   };
   const fillFilters = async (m: ListingMeta | null = meta, exclude: string[] = optionAttrs) => {
     if (!m || images.length === 0 || filterBusy) return;
@@ -249,15 +303,20 @@ export function Listing() {
       setFilterBusy(false);
     }
   };
-  const findCategory = async () => {
-    if (!productName.trim()) { alert('상품명을 먼저 적어주세요.'); return; }
+  const findCategory = async (name = productName, auto = false): Promise<ListingMeta | null> => {
+    if (!name.trim()) { if (!auto) alert('상품명을 먼저 적어주세요.'); return null; }
     setCategoryBusy(true);
     try {
-      const r = await coupangApi.listingCategory({ productName: productName.trim(), brand: brand.trim() || undefined });
+      const r = await coupangApi.listingCategory({ productName: name.trim(), brand: latest.current.brand.trim() || undefined });
       setCategory({ code: r.code, name: r.name || `카테고리 ${r.code}` });
       setCategoryCodeInput(r.code);
       applyMeta(r.meta);
-    } catch (e: any) { alert(e?.message || '카테고리를 찾지 못했습니다.'); } finally { setCategoryBusy(false); }
+      return r.meta;
+    } catch (e: any) {
+      if (!auto) alert(e?.message || '카테고리를 찾지 못했습니다.');
+      else setAutoStep(`카테고리 자동 추천 실패: ${e?.message || ''} — [카테고리 찾기]를 눌러 주세요`);
+      return null;
+    } finally { setCategoryBusy(false); }
   };
   const loadMetaByCode = async () => {
     const code = categoryCodeInput.replace(/\D/g, '');
@@ -282,7 +341,18 @@ export function Listing() {
       setProductName(r.name);
       appliedBrand.current = brand.trim() && r.name.startsWith(brand.trim() + ' ') ? brand.trim() : '';
       setNameSuggest({ candidates: r.candidates, keywords: r.keywords, productType: r.productType });
-      if (!searchTags.trim() && r.keywords.length) setSearchTags(r.keywords.slice(0, 20).join(', '));
+      if (!latest.current.searchTags.trim() && r.keywords.length) setSearchTags(r.keywords.slice(0, 20).join(', '));
+      setNameBusy(false);
+      if (auto) {
+        // 한 번에 끝까지: 카테고리 → (검색필터·고시는 applyMeta가) → 검색 태그 20개
+        setAutoStep('카테고리를 찾는 중…');
+        const m = await findCategory(r.name, true);
+        if (m) {
+          setAutoStep('검색 태그를 채우는 중…');
+          await fillTags(r.name, r.productType, true);
+          setAutoStep(null);
+        }
+      }
     } catch (e: any) {
       if (!auto) alert(e?.message || '상품명을 만들지 못했습니다.');
     } finally {
@@ -290,17 +360,18 @@ export function Listing() {
     }
   };
   /** 태그 20개 채우기: 상품명·제품 유형에서 시드를 뽑아 쿠팡 자동완성 + 네이버 연관 키워드로 채운다 */
-  const fillTags = async () => {
+  const fillTags = async (name = latest.current.productName, productType = nameSuggest?.productType ?? '', auto = false) => {
     if (tagBusy) return;
-    const current = searchTags.split(/[,\n]/).map(t => t.trim()).filter(Boolean);
+    const current = latest.current.searchTags.split(/[,\n]/).map(t => t.trim()).filter(Boolean);
+    if (auto && current.length >= 20) return;
     const seeds: string[] = [];
-    if (nameSuggest?.productType) seeds.push(nameSuggest.productType);
-    const nameWords = productName.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(w => w.length >= 2);
+    if (productType) seeds.push(productType);
+    const nameWords = name.replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/).filter(w => w.length >= 2);
     if (nameWords.length >= 2) { seeds.push(nameWords.slice(0, 2).join(' ')); seeds.push(nameWords.slice(1, 3).join(' ')); }
     if (nameWords.length >= 1) seeds.push(nameWords[nameWords.length - 1]);
     current.slice(0, 2).forEach(t => seeds.push(t));
     const uniq = [...new Set(seeds.map(s => s.trim()).filter(Boolean))].slice(0, 5);
-    if (uniq.length === 0) { alert('상품명을 먼저 적어주세요.'); return; }
+    if (uniq.length === 0) { if (!auto) alert('상품명을 먼저 적어주세요.'); return; }
     setTagBusy(true);
     setTagNote(null);
     try {
@@ -362,7 +433,7 @@ export function Listing() {
       };
       const r = await coupangApi.listingCreate(body);
       alert(`쿠팡에 등록 요청했습니다.\n등록상품ID ${r.sellerProductId}\n승인에는 보통 몇 시간~하루가 걸립니다. [등록 내역]에서 상태를 확인하세요.`);
-      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false; setFilters({}); setFilterNote(null); appliedBrand.current = ''; setManufacturer(''); setCertMode('none'); setCertType(''); setCertCode(''); setParallelImport(false); setAdultOnly(false); setMaxPerPerson(''); setSaleEnd(''); setTaxFree(false);
+      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false; setFilters({}); setFilterNote(null); appliedBrand.current = ''; setNoticeNote(null); setAutoStep(null); setManufacturer(''); setCertMode('none'); setCertType(''); setCertCode(''); setParallelImport(false); setAdultOnly(false); setMaxPerPerson(''); setSaleEnd(''); setTaxFree(false);
       void loadRows();
     } catch (e: any) {
       alert(e?.message || '등록 실패');
@@ -458,6 +529,7 @@ export function Listing() {
             </div>
             <input value={productName} onChange={e => setProductName(e.target.value)} placeholder={images.length ? (nameBusy ? '사진을 분석하는 중…' : '예: 하루한잔 스테인리스 진공 보온텀블러 500ml') : '대표 이미지를 올리면 자동으로 만들어집니다'} className={inputCls} />
             
+            {autoStep && <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-accent"><Loader2 className="h-3 w-3 animate-spin" /> {autoStep}</p>}
             {nameSuggest && (
               <div className="mt-2 space-y-1.5">
                 {nameSuggest.candidates.length > 0 && (
@@ -521,7 +593,10 @@ export function Listing() {
             </div>
 
             {/* 상세페이지 */}
-            <ImagePicker label="상세페이지 이미지 *" hint="위에서 아래 순서대로. 상세페이지 제작에서 받은 파일을 그대로 올리세요." urls={detailImages} onChange={setDetailImages} max={30} />
+            <div>
+              <ImagePicker label="상세페이지 이미지 *" hint="위에서 아래 순서대로. 상세페이지 제작에서 받은 파일을 그대로 올리세요. 올리면 상세페이지를 읽어 제공고시(소재·치수·제조국·세탁법)와 옵션(색상·사이즈)을 자동으로 채웁니다." urls={detailImages} onChange={(urls) => { setDetailImages(urls); if (urls.length > detailImages.length && latest.current.meta) setTimeout(() => void fillNotices(latest.current.meta, urls), 0); }} max={30} />
+              {(noticeBusy || noticeNote) && <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-3">{noticeBusy ? <><Loader2 className="h-3 w-3 animate-spin" /> 상세페이지를 읽는 중…</> : noticeNote}</p>}
+            </div>
 
             {/* 검색필터 */}
             {meta.attributes.some(a => !optionAttrs.includes(a.name)) && (
@@ -628,7 +703,13 @@ export function Listing() {
             {/* 상품정보 제공고시 */}
             {noticeList.length > 0 && (
               <div>
-                <p className={labelCls}>상품정보 제공고시 <span className="font-normal text-ink-3">(의류 기준 기본값을 채워 두었습니다 · 제조국·치수 등 아는 값은 고쳐 주세요)</span></p>
+                <div className="mb-1 flex items-center justify-between">
+                  <p className={`${labelCls} mb-0`}>상품정보 제공고시 <span className="font-normal text-ink-3">(상세페이지에서 읽은 값 + 의류 기준 기본값)</span></p>
+                  <button type="button" onClick={() => void fillNotices()} disabled={noticeBusy || detailImages.length === 0} title={detailImages.length === 0 ? '상세페이지 이미지를 먼저 올리세요' : ''}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-2 hover:text-ink disabled:opacity-50">
+                    {noticeBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />} 상세페이지로 다시 채우기
+                  </button>
+                </div>
                 <div className="grid gap-2 md:grid-cols-2">
                   {noticeList.map(n => (
                     <div key={`${n.category}|${n.name}`} className="flex items-center gap-2">

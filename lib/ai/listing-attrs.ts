@@ -103,3 +103,95 @@ ${list}
     return res.status(500).json({ error: e?.message || '검색필터 분석 중 오류가 났습니다.' });
   }
 }
+
+
+/**
+ * 상세페이지 이미지 → 상품정보 제공고시 + 옵션(색상·사이즈).
+ *
+ * 상세페이지에는 소재 혼용률, 사이즈표, 제조국, 세탁 방법이 대개 적혀 있다.
+ * 그 그림을 읽어 고시 항목을 채우고, 사이즈표·색상 안내에서 옵션 값도 뽑는다.
+ * 보이지 않는 항목은 비워 둔다 — 추측한 고시정보는 반려 사유가 된다.
+ */
+export async function handleListingNotices(req: VercelRequest, res: VercelResponse) {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith('Bearer ')) return res.status(401).json({ error: '인증이 필요합니다.' });
+  let decoded: any;
+  try { decoded = jwt.verify(auth.slice(7), process.env.JWT_SECRET!); } catch { return res.status(401).json({ error: '유효하지 않은 토큰입니다.' }); }
+  const denied = await checkAccess(supabase, decoded.userId, decoded.isAdmin === true);
+  if (denied) return res.status(denied.status).json(denied.body);
+
+  const images: string[] = Array.isArray(req.body?.images) ? req.body.images.map(String).filter(Boolean).slice(0, 10) : [];
+  const names: string[] = Array.isArray(req.body?.notices) ? req.body.notices.map(String).filter(Boolean).slice(0, 30) : [];
+  const productName = String(req.body?.productName ?? '').slice(0, 120);
+  if (images.length === 0) return res.status(400).json({ error: '상세페이지 이미지가 필요합니다.' });
+
+  const apiKey = process.env.OPENAIAPIKEY || process.env.OPENAI_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'OPENAIAPIKEY가 설정되지 않았습니다.' });
+
+  const instruction = `
+당신은 쿠팡 상품 등록 담당자입니다. 첨부한 상세페이지 이미지(와 제품 사진)를 읽고 아래 JSON만 돌려주세요.
+
+상품명: ${productName || '(미입력)'}
+
+[상품정보 제공고시 항목 — 이 이름 그대로]
+${names.map(n => `- ${n}`).join('\n') || '- (없음)'}
+
+{
+  "notices": { "항목명": "값", ... },
+  "options": { "colors": ["색상 옵션 값"], "sizes": ["사이즈 옵션 값"] },
+  "summary": "상세페이지에서 읽은 핵심 한 줄"
+}
+
+[규칙]
+- 이미지에 실제로 적힌 내용만 채운다. 없으면 그 항목은 넣지 않는다 (추측 금지 — 틀린 고시정보는 승인 반려 사유).
+- 소재: "면 100%" "폴리에스터 65% 면 35%"처럼 혼용률 그대로. 색상: 상세페이지에 나온 색상들을 쉼표로. 치수: 사이즈표가 있으면 "M 가슴 54 총장 70 / L 가슴 57 총장 72"처럼 한 줄로 요약(200자 이내).
+- 제조자(수입자)·제조국·세탁방법 및 취급시 주의사항·품질보증기준·A/S 책임자와 전화번호: 적혀 있을 때만.
+- options.colors: 상세페이지에 보이는 색상 옵션 이름들(예: 블랙, 그레이). options.sizes: 사이즈표의 사이즈들(예: M, L, XL 또는 55, 66, 77). 없으면 빈 배열.
+- 값은 짧게. 광고 문구는 넣지 않는다.
+`.trim();
+
+  const content: any[] = [{ type: 'text', text: instruction }];
+  images.forEach(img => content.push({ type: 'image_url', image_url: { url: img, detail: 'high' } }));
+
+  try {
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OPENAI_VISION_MODEL,
+        messages: [{ role: 'system', content: 'Return valid JSON only.' }, { role: 'user', content }],
+        temperature: 0.1,
+        response_format: { type: 'json_object' },
+      }),
+    });
+    const data: any = await r.json();
+    if (!r.ok) return res.status(502).json({ error: data?.error?.message || '상세페이지 분석 실패' });
+    const parsed = extractJson(data?.choices?.[0]?.message?.content || '');
+    const inputTokens = Math.max(0, Number(data?.usage?.prompt_tokens) || 0);
+    const outputTokens = Math.max(0, Number(data?.usage?.completion_tokens) || 0);
+    try {
+      await supabase.from('api_calls').insert({
+        user_id: decoded.userId, feature: 'listing-notices', model: OPENAI_VISION_MODEL,
+        input_tokens: inputTokens, output_tokens: outputTokens, cost_usd: calcCostUsd(OPENAI_VISION_MODEL, inputTokens, outputTokens),
+      });
+    } catch { /* 기록 실패는 삼킨다 */ }
+
+    const allowed = new Set(names);
+    const notices: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed?.notices ?? {})) {
+      const key = String(k).trim();
+      const val = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+      if (allowed.has(key) && val && !/^(없음|모름|해당없음|확인불가|-)$/.test(val)) notices[key] = val;
+    }
+    const clean = (arr: any) => [...new Set((Array.isArray(arr) ? arr : []).map((x: any) => String(x).replace(/\s+/g, ' ').trim()).filter((x: string) => x && x.length <= 30))].slice(0, 20);
+    return res.status(200).json({
+      notices,
+      options: { colors: clean(parsed?.options?.colors), sizes: clean(parsed?.options?.sizes) },
+      summary: String(parsed?.summary ?? '').slice(0, 200),
+      filled: Object.keys(notices).length,
+      total: names.length,
+    });
+  } catch (e: any) {
+    return res.status(500).json({ error: e?.message || '상세페이지 분석 중 오류가 났습니다.' });
+  }
+}
