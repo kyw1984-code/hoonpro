@@ -562,6 +562,8 @@ export interface DetailPlanLite {
   detailCaptions: string[]; fit: string;
   sizeTable: { columns: string[]; rows: Array<{ size: string; values: string[] }>; note: string };
   material: string; care: string[]; season: string;
+  /** 생성 컷 연출 지시 (영어, 4개) */
+  shots?: string[];
 }
 
 /** 상품 등록 — 카테고리 메타 */

@@ -70,13 +70,15 @@ ${filterLines ? `확인된 속성:\n${filterLines}` : ''}
   "sizeTable": { "columns": ["총장", "가슴단면", "어깨너비", "소매길이"], "rows": [ { "size": "M", "values": [68, 55, 50, 61] } ], "note": "단면 기준, 측정 방법에 따라 1~3cm 오차" },
   "material": "소재 표기 (예: 아크릴 70% 면 30%)",
   "care": ["세탁·취급 주의 3~4개, 각 18자 이내"],
-  "season": "추천 계절 (예: 가을·겨울)"
+  "season": "추천 계절 (예: 가을·겨울)",
+  "shots": ["4 English photo directions, one per line: 0 hero full-body model shot, 1 model shot for point 1, 2 close-up detail for point 2, 3 back or side view for point 3"]
 }
 
 [규칙]
 - 문구는 실제 쿠팡 상위 상세페이지처럼 짧고 구체적인 구어체 존댓말. 과장(최고·1위·완벽)과 특수문자 금지.
 - points는 정확히 3개. imageIndex는 0~${imageCount - 1} 중 그 포인트를 가장 잘 보여줄 사진 번호(서로 다르게, 0번 제외 우선).
 - detailCaptions는 ${Math.max(0, Math.min(4, imageCount - 1))}개 — 1번부터 순서대로 사진마다 하나.
+- shots: 정확히 4개, 영어 한 문장씩(장소·분위기·포즈·카메라 거리). 0번은 가을/겨울 등 계절에 맞는 실내외 배경의 전신 모델컷, 1번은 포인트 1을 보여주는 다른 포즈, 2번은 포인트 2를 보여주는 근접 디테일(소재·마감), 3번은 뒷면 또는 측면 전신. 모두 같은 모델·같은 장소 계열로.
 - sizeTable: 사이즈 옵션이 있으면 그 사이즈대로 행을 만든다. 실측값을 모르므로 이 제품 유형의 한국 표준 치수(cm)를 넣고 note에 "표준 치수 — 실측값으로 수정하세요"를 포함한다. 열은 제품 유형에 맞게(상의: 총장·가슴단면·어깨너비·소매길이 / 하의: 총장·허리단면·밑위·허벅지단면·밑단단면). 사이즈 옵션이 없으면 FREE 한 줄.
 - material이 미확인이면 사진으로 추정하지 말고 "상세페이지 참조"로 둔다.
 `.trim();
@@ -129,6 +131,7 @@ ${filterLines ? `확인된 속성:\n${filterLines}` : ''}
       material: str(p?.material, 60) || material || '상세페이지 참조',
       care: list(p?.care, 4, 22),
       season: str(p?.season, 12),
+      shots: list(p?.shots, 4, 240),
     });
   } catch (e: any) {
     return res.status(500).json({ error: e?.message || '상세페이지 기획 중 오류가 났습니다.' });

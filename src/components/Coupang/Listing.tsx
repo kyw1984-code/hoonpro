@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { coupangApi, type DetailPlanLite, type ListingMeta, type ListingPlace, type ListingReturnPlace, type ListingRow, type ListingSettings } from '../../lib/coupang';
 import { renderClothingDetail } from '../../lib/detailTemplate';
+import { generateClothingShots } from '../../lib/detailShots';
 import { getUser } from '../../lib/auth';
 
 const DELIVERY_COMPANIES: Array<{ code: string; name: string }> = [
@@ -167,6 +168,7 @@ export function Listing() {
   const [dpPlan, setDpPlan] = useState<DetailPlanLite | null>(null);
   const [dpSections, setDpSections] = useState<string[]>([]);
   const [dpNote, setDpNote] = useState<string | null>(null);
+  const dpShots = useRef<string[]>([]); // 생성한 모델컷 — 다시 그리기에서 재사용 (재생성 안 함)
   const [tagNote, setTagNote] = useState<string | null>(null);
   // 검색필터(카테고리 속성) 값. 옵션으로 쓰는 속성은 제외하고 나머지를 채운다.
   const [filters, setFilters] = useState<Record<string, string>>({});
@@ -367,7 +369,7 @@ export function Listing() {
     }
   };
   /** 태그 20개 채우기: 상품명·제품 유형에서 시드를 뽑아 쿠팡 자동완성 + 네이버 연관 키워드로 채운다 */
-  /** 상세페이지 자동 제작: 기획(AI 1회) → 캔버스 6구간 → 업로드 → 상세페이지 이미지에 첨부 */
+  /** 상세페이지 자동 제작: 기획(AI 1회) → 모델컷 4장 생성(히어로 high + medium 3) → 캔버스 7구간 → 업로드 → 상세페이지 이미지에 첨부 */
   const makeDetailPage = async (planOverride?: DetailPlanLite, auto = false) => {
     const cur = latest.current;
     if (dpBusy) return;
@@ -375,6 +377,8 @@ export function Listing() {
     try {
       let plan = planOverride ?? null;
       if (!plan) {
+        if (!auto) dpShots.current = []; // 문안부터 다시: 모델컷도 새로 만든다
+
         setDpBusy('문안을 짜는 중…');
         const colorAttr = cur.optionAttrs.find(a => /색상|컬러/.test(a));
         const sizeAttr = cur.optionAttrs.find(a => /사이즈|크기/.test(a));
@@ -387,11 +391,22 @@ export function Listing() {
         });
         setDpPlan(plan);
       }
+      // 모델컷 4장 (히어로 high 1 + medium 3). 이미 만든 게 있으면 다시 쓰고 캔버스만 다시 그린다.
+      let shotNote = '';
+      if (dpShots.current.length === 0) {
+        try {
+          const r = await generateClothingShots(plan, cur.productName.trim(), cur.images, setDpBusy);
+          dpShots.current = r.shots;
+          if (r.failed) shotNote = ` 모델컷 ${r.failed}장은 만들지 못해 올린 사진으로 대신했습니다.`;
+        } catch (e: any) {
+          shotNote = ` 모델컷 생성에 실패해 올린 사진만으로 만들었습니다 (${e?.message || '오류'}).`;
+        }
+      }
       setDpBusy('구간을 그리는 중…');
       const colorAttr = cur.optionAttrs.find(a => /색상|컬러/.test(a));
       const colorsNow = [...new Set(cur.items.map(it => (colorAttr ? it.attributes[colorAttr] : '') || '').filter(Boolean))];
       const sections = await renderClothingDetail({
-        plan, images: cur.images, brand: cur.brand.trim(), colors: colorsNow,
+        plan, images: cur.images, shots: dpShots.current, brand: cur.brand.trim(), colors: colorsNow,
         deliveryCharge: Number(deliveryCharge) || 0, returnCharge: Number(returnCharge) || 0, afterServicePhone: settings.afterServicePhone,
       });
       setDpSections(sections);
@@ -403,7 +418,7 @@ export function Listing() {
         setDpBusy(`업로드 중… (${i + 1}/${sections.length})`);
       }
       setDetailImages(urls);
-      setDpNote(`상세페이지 ${urls.length}구간을 만들어 첨부했습니다. 사이즈표의 치수는 표준값이니 실측값으로 고친 뒤 [다시 그리기]를 누르세요.`);
+      setDpNote(`상세페이지 ${urls.length}구간을 만들어 첨부했습니다.${shotNote} 사이즈표의 치수는 표준값이니 실측값으로 고친 뒤 [다시 그리기]를 누르세요.`);
       // 만든 상세페이지를 읽어 고시·옵션도 채운다 (사이즈표·소재가 이미 그 안에 있다)
       if (latest.current.meta) setTimeout(() => void fillNotices(latest.current.meta, urls), 0);
     } catch (e: any) {
@@ -654,7 +669,7 @@ export function Listing() {
             <div className="rounded-card border border-line bg-paper-2 p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-[12px] font-semibold text-ink">상세페이지 자동 제작 <span className="font-normal text-ink-3">(의류 템플릿 · 올린 사진으로 6구간)</span></p>
+                  <p className="text-[12px] font-semibold text-ink">상세페이지 자동 제작 <span className="font-normal text-ink-3">(의류 템플릿 · 모델컷 4장 생성 + 올린 사진 · 7구간)</span></p>
                   <p className="mt-0.5 text-[11px] text-ink-3">{dpBusy ? dpBusy : dpNote ?? '대표 이미지로 상품명이 만들어지면 자동으로 제작돼 아래 상세페이지 이미지에 첨부됩니다. 직접 만든 상세페이지가 있으면 아래에서 바꿔 올리세요.'}</p>
                 </div>
                 <div className="flex gap-2">
