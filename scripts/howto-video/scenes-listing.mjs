@@ -72,7 +72,7 @@ const listingMocks = (r) => {
 await record({
   name: 'listing-guide', title: '상품등록AI', subtitle: '사진과 상품명만으로 쿠팡에 등록 요청', token: fakeToken(), tokenKey: TOKEN_KEY, mocks: listingMocks,
   async run(h) {
-    h.steps(9);
+    h.steps(11);
     await h.goto('/?tab=listing');
     await h.sleep(1200);
     await h.titleCard();
@@ -92,26 +92,33 @@ await record({
     await h.click('button:has-text("카테고리 찾기")', { after: 1600 });
     await wait(h, 1800);
 
-    await h.cap('<b>검색필터</b>는 사진으로 확인되는 값(핏 · 소매기장 · 넥라인 · 패턴 · 시즌)만 자동으로 채웁니다. 모르는 항목은 비워 두세요');
-    await h.scroll('p:has-text("검색필터")', { after: 700 }).catch(() => {});
-    await wait(h, 2800);
-
-    await h.cap('<b>고시정보</b>는 필수 항목만 묻습니다. 모르면 [빈 칸을 전부 "상세페이지 참조"로 채우기]');
-    await h.scroll('p:has-text("상품 고시정보")', { after: 700 }).catch(() => {});
-    await h.click('button:has-text("상세페이지 참조\\"로 채우기")', { after: 1200 }).catch(() => wait(h, 1200));
-    await wait(h, 1200);
-
-    await h.cap('<b>옵션별 판매가 · 재고</b>를 적습니다. 색상 · 사이즈처럼 옵션으로 갈리는 값은 여기서, 상품명에는 넣지 않습니다');
-    await h.scroll('p:has-text("판매가·재고")', { after: 700 }).catch(() => {});
+    await h.cap('<b>옵션 · 판매가 · 재고</b>를 적습니다. 색상 · 사이즈처럼 옵션으로 갈리는 값은 여기서, 상품명에는 넣지 않습니다');
+    await h.scroll('p:has-text("옵션 · 판매가 · 재고")', { after: 700 }).catch(() => {});
     await h.type('input[placeholder="색상"] >> nth=0', '블랙', { delay: 70 }).catch(() => {});
     await h.type('input[placeholder="사이즈"] >> nth=0', 'L', { delay: 70 }).catch(() => {});
     const price = h.page.locator('table input[inputmode="numeric"]').nth(0);
     await price.click({ force: true }).catch(() => {}); await price.fill('').catch(() => {}); await price.type('29800', { delay: 60 }).catch(() => {});
     await wait(h, 1400);
 
-    await h.cap('<b>상세 이미지</b>는 상세페이지 제작에서 받은 파일을 그대로. <b>검색 태그</b>는 쿠팡 연관 검색어로 20개를 채웁니다');
+    await h.cap('<b>상세페이지 이미지</b>는 상세페이지 제작에서 받은 파일을 위에서 아래 순서로 그대로 올립니다');
+    await h.scroll('p:has-text("상세페이지 이미지")', { after: 700 }).catch(() => {});
     await h.page.locator('input[type=file]').nth(1).setInputFiles([svgFile('상세 1', 215, 'd1.svg'), svgFile('상세 2', 200, 'd2.svg'), svgFile('상세 3', 230, 'd3.svg')]).catch(() => {});
-    await wait(h, 1200);
+    await wait(h, 2000);
+
+    await h.cap('<b>검색필터</b>는 사진으로 확인되는 값(핏 · 소매기장 · 넥라인 · 패턴 · 시즌)을 자동으로 채웁니다. 나머지는 직접 입력합니다');
+    await h.scroll('p:has-text("검색필터")', { after: 700 }).catch(() => {});
+    await wait(h, 2600);
+
+    await h.cap('<b>상품 주요 정보</b> — 제조사 · 인증 · 병행수입 · 구매 연령 · 구매수량 · 판매기간 · 부가세 · 배송비. 윙 기본값이 미리 선택돼 있습니다');
+    await h.scroll('p:has-text("상품 주요 정보")', { after: 700 }).catch(() => {});
+    await wait(h, 2800);
+
+    await h.cap('<b>상품정보 제공고시</b>는 의류 기준 기본값이 채워져 있습니다. 제조국 · 치수처럼 아는 값만 고치세요');
+    await h.scroll('p:has-text("상품정보 제공고시")', { after: 700 }).catch(() => {});
+    await wait(h, 2600);
+
+    await h.cap('<b>검색 태그</b>는 [쿠팡 연관 검색어로 20개 채우기] — 소비자가 실제로 치는 조합으로 채웁니다');
+    await h.scroll('label:has-text("검색 태그")', { after: 700 }).catch(() => {});
     await h.click('button:has-text("쿠팡 연관 검색어로 20개 채우기")', { after: 1400 }).catch(() => {});
     await wait(h, 2200);
 
