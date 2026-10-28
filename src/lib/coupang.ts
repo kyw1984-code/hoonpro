@@ -582,6 +582,8 @@ export const coupangApi = {
   listingUpload: (image: string) => request<{ url: string; path: string }>('listing-upload', { method: 'POST', body: { image } }),
   listingCreate: (body: Record<string, unknown>) => request<{ ok: true; sellerProductId: string; listingId: string | null }>('listing-create', { method: 'POST', body }),
   listings: () => request<{ items: ListingRow[] }>('listings'),
+  /** 관리자 진단 — 상품 등록 엔드포인트 변형별 응답 상태 */
+  listingProbe: () => request<{ vendorId: string; results: Array<{ label: string; method: string; path: string; query: string; ok: boolean; status: number; error: string; relayError: boolean }> }>('listing-probe'),
   /** 검색어(태그) 자동 채우기 — 쿠팡 자동완성 + 네이버 연관 키워드 (api/sourcing) */
   listingTagSuggest: async (body: { seeds: string[]; exclude?: string[]; limit?: number }) => {
     const token = getToken();
