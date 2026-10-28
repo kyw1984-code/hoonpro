@@ -393,7 +393,7 @@ export function Listing() {
               </button>
             </div>
             <input value={productName} onChange={e => setProductName(e.target.value)} placeholder={images.length ? (nameBusy ? '사진을 분석하는 중…' : '예: 하루한잔 스테인리스 진공 보온텀블러 500ml') : '대표 이미지를 올리면 자동으로 만들어집니다'} className={inputCls} />
-            <p className={`mt-1 text-[11px] ${productName.length > 40 ? 'text-critical' : productName.length > 35 ? 'text-caution' : 'text-ink-3'}`}>{productName.length}자 · 훈프로 기준: 브랜드 → 성별 → 계절 → 제품명 2개 → 소구점 → N종세트, 35자 이하 권장(최대 40), 색상·특수문자 없이.</p>
+            
             {nameSuggest && (
               <div className="mt-2 space-y-1.5">
                 {nameSuggest.candidates.length > 0 && (
