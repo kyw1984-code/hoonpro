@@ -429,7 +429,9 @@ export function Listing() {
       <div className="space-y-4 rounded-card border border-line bg-paper p-4">
         <p className="font-semibold text-ink">새 상품 등록</p>
         <ImagePicker label="대표·추가 이미지 *" hint="첫 장이 대표(썸네일). 올리면 사진을 분석해 훈프로 코칭 기준(강의 자료)의 상품명과 검색어 20개를 자동으로 만듭니다. 정사각형 500px 이상, 글자·테두리 없는 것이 승인에 유리합니다." urls={images} onChange={onImagesChange} max={10} />
-        <div className="grid gap-3 md:grid-cols-[1fr_200px]">
+        {/* 브랜드를 상품명보다 먼저 — 상품명 맨 앞에 브랜드가 들어가므로 먼저 적어야 자동 생성에 반영된다 */}
+        <div className="md:w-72"><label className={labelCls}>브랜드</label><input value={brand} onChange={e => setBrand(e.target.value)} placeholder="없으면 비워도 됩니다 (상품명 맨 앞에 들어갑니다)" className={inputCls} /></div>
+        <div>
           <div>
             <div className="mb-1 flex items-center justify-between">
               <label className={`${labelCls} mb-0`}>상품명 *</label>
@@ -453,7 +455,6 @@ export function Listing() {
               </div>
             )}
           </div>
-          <div><label className={labelCls}>브랜드</label><input value={brand} onChange={e => setBrand(e.target.value)} placeholder="없으면 비워도 됩니다" className={inputCls} /></div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <button type="button" onClick={() => void findCategory()} disabled={categoryBusy} className="inline-flex items-center gap-1 rounded-control bg-accent px-4 py-2 text-[12px] font-semibold text-black hover:opacity-90 disabled:opacity-60">
