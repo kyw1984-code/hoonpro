@@ -6389,7 +6389,9 @@ async function handlePurchaseApply(userId: string, req: VercelRequest, res: Verc
 const EP_LISTING = {
   predict: '/v2/providers/openapi/apis/api/v1/categorization/predict',
   meta: (code: string) => `/v2/providers/seller_api/apis/api/v1/marketplace/meta/category-related-metas/display-category-codes/${code}`,
-  outbound: (vendorId: string) => `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/outboundShippingCenters`,
+  // 출고지 '조회'는 생성(v4 openapi)과 경로가 다르다. v4 경로로 GET을 보내면 401이 온다 — 실제로 그랬다.
+  outbound: '/v2/providers/marketplace_openapi/apis/api/v1/vendor/shipping-place/outbound',
+  outboundLegacy: (vendorId: string) => `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/outboundShippingCenters`,
   returns: (vendorId: string) => `/v2/providers/openapi/apis/api/v4/vendors/${vendorId}/returnShippingCenters`,
 };
 
@@ -6410,21 +6412,25 @@ async function handleListingSettings(userId: string, res: VercelResponse) {
   const got = await listingCreds(userId);
   if ('error' in got) return res.status(got.status).json({ error: got.error });
   const { creds } = got;
-  const [{ data: row }, outbound, returns] = await Promise.all([
+  const [{ data: row }, outboundFirst, returns] = await Promise.all([
     supabase!.from('coupang_listing_settings').select('*').eq('user_id', userId).maybeSingle(),
-    coupangCall(creds, 'GET', EP_LISTING.outbound(creds.vendorId), 'pageNum=1&pageSize=50'),
+    coupangCall(creds, 'GET', EP_LISTING.outbound, 'pageNum=1&pageSize=50'),
     coupangCall(creds, 'GET', EP_LISTING.returns(creds.vendorId), 'pageNum=1&pageSize=50'),
   ]);
+  // 새 경로가 막히면 옛 경로도 한 번 — 어느 쪽이 살아 있는지는 계정마다 다를 수 있다
+  const outbound = outboundFirst.ok ? outboundFirst : await coupangCall(creds, 'GET', EP_LISTING.outboundLegacy(creds.vendorId), 'pageNum=1&pageSize=50');
   // 여기서는 계정을 invalid로 내리지 않는다. 출고지·반품지 조회는 매출·상품 조회와
   // 다른 권한 묶음이라, 수집은 잘 되는 키가 여기서만 401/403을 받을 수 있다. 그걸
   // '키 거부'로 처리하면 멀쩡한 연동이 끊기고 "수집이 멈췄습니다" 메일까지 나간다 —
   // 실제로 그랬다. 오류는 화면에 그대로 보여 주고 관리자 로그에만 남긴다.
-  if (outbound.authFailed || returns.authFailed) {
-    await logSystemError('상품 등록', '출고지·반품지 조회를 쿠팡이 거부했습니다 (권한 또는 경로)', {
+  // 한쪽이 막혀도 다른 쪽 목록은 보여 준다. 어느 호출이 몇 번으로 거부됐는지 화면과 로그에 남긴다.
+  if (!outbound.ok || !returns.ok) {
+    await logSystemError('상품 등록', '출고지·반품지 조회 실패', {
       detail: `outbound=${outbound.status} ${String(outbound.error ?? '').slice(0, 200)} / returns=${returns.status} ${String(returns.error ?? '').slice(0, 200)}`, userId, severity: 'warn',
     });
-    return res.status(400).json({ error: `쿠팡이 출고지·반품지 조회를 거부했습니다 (HTTP ${outbound.status || returns.status}). 이 키에 상품 등록 권한이 없거나 쿠팡 쪽 경로가 바뀐 것일 수 있습니다. 매출 수집에는 영향이 없습니다.` });
   }
+  const describe = (label: string, r: { ok: boolean; status: number; error?: string }) =>
+    r.ok ? '' : `${label} 조회 실패 (HTTP ${r.status})${r.status === 401 || r.status === 403 ? ' — 이 키에 해당 권한이 없을 수 있습니다' : ''}: ${String(r.error ?? '').slice(0, 120)}`;
   const outboundList = listOf(coupangData(outbound.data)?.content ?? coupangData(outbound.data)).map((o: any) => ({
     code: String(pickStr(o, ['outboundShippingPlaceCode', 'shippingPlaceCode', 'code'])),
     name: pickStr(o, ['shippingPlaceName', 'name']),
@@ -6453,7 +6459,7 @@ async function handleListingSettings(userId: string, res: VercelResponse) {
     },
     outbound: outboundList,
     returns: returnList,
-    errors: [outbound.ok ? '' : `출고지: ${outbound.error}`, returns.ok ? '' : `반품지: ${returns.error}`].filter(Boolean),
+    errors: [describe('출고지', outbound), describe('반품지', returns)].filter(Boolean),
   });
 }
 
