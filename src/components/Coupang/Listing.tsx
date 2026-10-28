@@ -7,9 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
-import { coupangApi, type DetailPlanLite, type ListingMeta, type ListingPlace, type ListingReturnPlace, type ListingRow, type ListingSettings } from '../../lib/coupang';
-import { renderClothingDetail } from '../../lib/detailTemplate';
-import { generateClothingShots } from '../../lib/detailShots';
+import { coupangApi, type ListingMeta, type ListingPlace, type ListingReturnPlace, type ListingRow, type ListingSettings } from '../../lib/coupang';
 import { getUser } from '../../lib/auth';
 
 const DELIVERY_COMPANIES: Array<{ code: string; name: string }> = [
@@ -165,12 +163,6 @@ export function Listing() {
   const [noticeBusy, setNoticeBusy] = useState(false);
   const [noticeNote, setNoticeNote] = useState<string | null>(null);
   const [autoStep, setAutoStep] = useState<string | null>(null);
-  // 상세페이지 자동 제작 (의류 템플릿)
-  const [dpBusy, setDpBusy] = useState<string | null>(null);
-  const [dpPlan, setDpPlan] = useState<DetailPlanLite | null>(null);
-  const [dpSections, setDpSections] = useState<string[]>([]);
-  const [dpNote, setDpNote] = useState<string | null>(null);
-  const dpShots = useRef<string[]>([]); // 생성한 모델컷 — 다시 그리기에서 재사용 (재생성 안 함)
   const [tagNote, setTagNote] = useState<string | null>(null);
   // 검색필터(카테고리 속성) 값. 옵션으로 쓰는 속성은 제외하고 나머지를 채운다.
   const [filters, setFilters] = useState<Record<string, string>>({});
@@ -361,7 +353,6 @@ export function Listing() {
           setAutoStep('검색 태그를 채우는 중…');
           await fillTags(r.name, r.productType, true);
           setAutoStep(null);
-          if (latest.current.detailImages.length === 0) void makeDetailPage(undefined, true);
         }
       }
     } catch (e: any) {
@@ -371,70 +362,6 @@ export function Listing() {
     }
   };
   /** 태그 20개 채우기: 상품명·제품 유형에서 시드를 뽑아 쿠팡 자동완성 + 네이버 연관 키워드로 채운다 */
-  /** 상세페이지 자동 제작: 기획(AI 1회) → 모델컷 4장 생성(히어로 high + medium 3) → 캔버스 7구간 → 업로드 → 상세페이지 이미지에 첨부 */
-  const makeDetailPage = async (planOverride?: DetailPlanLite, auto = false) => {
-    const cur = latest.current;
-    if (dpBusy) return;
-    if (cur.images.length === 0 || !cur.productName.trim()) { if (!auto) alert('대표 이미지와 상품명이 먼저 필요합니다.'); return; }
-    try {
-      let plan = planOverride ?? null;
-      if (!plan) {
-        if (!auto) dpShots.current = []; // 문안부터 다시: 모델컷도 새로 만든다
-
-        setDpBusy('문안을 짜는 중…');
-        const colorAttr = cur.optionAttrs.find(a => /색상|컬러/.test(a));
-        const sizeAttr = cur.optionAttrs.find(a => /사이즈|크기/.test(a));
-        const colorsNow = [...new Set(cur.items.map(it => (colorAttr ? it.attributes[colorAttr] : '') || '').filter(Boolean))];
-        const sizesNow = [...new Set(cur.items.map(it => (sizeAttr ? it.attributes[sizeAttr] : '') || '').filter(Boolean))];
-        const materialNow = Object.entries(notices).find(([k, v]) => /소재/.test(k) && v && v !== '상세페이지 참조')?.[1] || filters['소재'] || '';
-        plan = await coupangApi.listingDetailPlan({
-          images: cur.images.slice(0, 2), imageCount: cur.images.length, productName: cur.productName.trim(), brand: cur.brand.trim() || undefined,
-          filters, colors: colorsNow, sizes: sizesNow, material: materialNow,
-        });
-        setDpPlan(plan);
-      }
-      // 모델컷 4장 (히어로 high 1 + medium 3). 이미 만든 게 있으면 다시 쓰고 캔버스만 다시 그린다.
-      let shotNote = '';
-      if (dpShots.current.length === 0) {
-        try {
-          const r = await generateClothingShots(plan, cur.productName.trim(), cur.images, setDpBusy);
-          dpShots.current = r.shots;
-          if (r.failed) shotNote = ` 모델컷 ${r.failed}장은 만들지 못해 올린 사진으로 대신했습니다.`;
-        } catch (e: any) {
-          shotNote = ` 모델컷 생성에 실패해 올린 사진만으로 만들었습니다 (${e?.message || '오류'}).`;
-        }
-      }
-      setDpBusy('구간을 그리는 중…');
-      const colorAttr = cur.optionAttrs.find(a => /색상|컬러/.test(a));
-      const colorsNow = [...new Set(cur.items.map(it => (colorAttr ? it.attributes[colorAttr] : '') || '').filter(Boolean))];
-      const sections = await renderClothingDetail({
-        plan, images: cur.images, shots: dpShots.current, brand: cur.brand.trim(), colors: colorsNow,
-        deliveryCharge: Number(deliveryCharge) || 0, returnCharge: Number(returnCharge) || 0, afterServicePhone: settings.afterServicePhone,
-      });
-      setDpSections(sections);
-      setDpBusy(`업로드 중… (0/${sections.length})`);
-      const urls: string[] = [];
-      for (let i = 0; i < sections.length; i++) {
-        const { url } = await coupangApi.listingUpload(sections[i]);
-        urls.push(url);
-        setDpBusy(`업로드 중… (${i + 1}/${sections.length})`);
-      }
-      setDetailImages(urls);
-      setDpNote(`상세페이지 ${urls.length}구간을 만들어 첨부했습니다.${shotNote} 사이즈표의 치수는 표준값이니 실측값으로 고친 뒤 [다시 그리기]를 누르세요.`);
-      // 만든 상세페이지를 읽어 고시·옵션도 채운다 (사이즈표·소재가 이미 그 안에 있다)
-      if (latest.current.meta) setTimeout(() => void fillNotices(latest.current.meta, urls), 0);
-    } catch (e: any) {
-      setDpNote(e?.message || '상세페이지 제작에 실패했습니다.');
-      if (!auto) alert(e?.message || '상세페이지 제작에 실패했습니다.');
-    } finally {
-      setDpBusy(null);
-    }
-  };
-  const patchSizeCell = (ri: number, ci: number, v: string) => setDpPlan(p => {
-    if (!p) return p;
-    const rows = p.sizeTable.rows.map((r, i) => (i === ri ? { ...r, values: r.values.map((x, j) => (j === ci ? v : x)) } : r));
-    return { ...p, sizeTable: { ...p.sizeTable, rows } };
-  });
   const fillTags = async (name = latest.current.productName, productType = nameSuggest?.productType ?? '', auto = false) => {
     if (tagBusy) return;
     const current = latest.current.searchTags.split(/[,\n]/).map(t => t.trim()).filter(Boolean);
@@ -508,7 +435,7 @@ export function Listing() {
       };
       const r = await coupangApi.listingCreate(body);
       alert(`쿠팡에 등록 요청했습니다.\n등록상품ID ${r.sellerProductId}\n승인에는 보통 몇 시간~하루가 걸립니다. [등록 내역]에서 상태를 확인하세요.`);
-      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false; setFilters({}); setFilterNote(null); appliedBrand.current = ''; setNoticeNote(null); setAutoStep(null); setDpPlan(null); setDpSections([]); setDpNote(null); setManufacturer(''); setCertMode('none'); setCertType(''); setCertCode(''); setParallelImport(false); setAdultOnly(false); setMaxPerPerson(''); setSaleEnd(''); setTaxFree(false);
+      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false; setFilters({}); setFilterNote(null); appliedBrand.current = ''; setNoticeNote(null); setAutoStep(null); setManufacturer(''); setCertMode('none'); setCertType(''); setCertCode(''); setParallelImport(false); setAdultOnly(false); setMaxPerPerson(''); setSaleEnd(''); setTaxFree(false);
       void loadRows();
     } catch (e: any) {
       alert(e?.message || '등록 실패');
@@ -665,45 +592,6 @@ export function Listing() {
                 </table>
               </div>
               {useOptions && <button type="button" onClick={() => setItems(p => [...p, { ...emptyItem(), salePrice: p[p.length - 1]?.salePrice ?? '', originalPrice: p[p.length - 1]?.originalPrice ?? '' }])} className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-ink-2 hover:text-ink"><Plus className="h-3.5 w-3.5" /> 옵션 추가</button>}
-            </div>
-
-            {/* 상세페이지 자동 제작 */}
-            <div className="rounded-card border border-line bg-paper-2 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-[12px] font-semibold text-ink">상세페이지 자동 제작 <span className="font-normal text-ink-3">(의류 템플릿 · 모델컷 4장 생성 + 올린 사진 · 7구간)</span></p>
-                  <p className="mt-0.5 text-[11px] text-ink-3">{dpBusy ? dpBusy : dpNote ?? '대표 이미지로 상품명이 만들어지면 자동으로 제작돼 아래 상세페이지 이미지에 첨부됩니다. 직접 만든 상세페이지가 있으면 아래에서 바꿔 올리세요.'}</p>
-                </div>
-                <div className="flex gap-2">
-                  {dpPlan && <button type="button" onClick={() => void makeDetailPage(dpPlan)} disabled={!!dpBusy} className="rounded-control border border-line px-3 py-1.5 text-[12px] font-semibold text-ink-2 hover:border-line-strong disabled:opacity-60">다시 그리기</button>}
-                  <button type="button" onClick={() => void makeDetailPage()} disabled={!!dpBusy || images.length === 0 || !productName.trim()} className="inline-flex items-center gap-1 rounded-control bg-accent px-3 py-1.5 text-[12px] font-semibold text-black hover:opacity-90 disabled:opacity-60">
-                    {dpBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} {dpPlan ? '문안부터 다시 만들기' : '상세페이지 만들기'}
-                  </button>
-                </div>
-              </div>
-              {dpSections.length > 0 && (
-                <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-                  {dpSections.map((src, i) => <img key={i} src={src} alt={`구간 ${i + 1}`} className="h-36 w-auto shrink-0 rounded-control border border-line bg-white" />)}
-                </div>
-              )}
-              {dpPlan && (
-                <div className="mt-3">
-                  <p className="mb-1 text-[11px] font-semibold text-ink-2">사이즈표 (cm) — 표준값입니다. 실측값으로 고치고 [다시 그리기]</p>
-                  <div className="overflow-x-auto rounded-card border border-line bg-paper">
-                    <table className="w-full text-[12px]">
-                      <thead className="bg-paper-2 text-ink-3"><tr><th className="px-2 py-1.5 text-left">사이즈</th>{dpPlan.sizeTable.columns.map(c => <th key={c} className="px-2 py-1.5 text-center">{c}</th>)}</tr></thead>
-                      <tbody>
-                        {dpPlan.sizeTable.rows.map((r, ri) => (
-                          <tr key={ri} className="border-t border-line">
-                            <td className="px-2 py-1 font-semibold text-ink">{r.size}</td>
-                            {dpPlan.sizeTable.columns.map((_, ci) => <td key={ci} className="px-1 py-1"><input value={r.values[ci] ?? ''} onChange={e => patchSizeCell(ri, ci, e.target.value)} className={`${inputCls} py-1 text-center`} /></td>)}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* 상세페이지 */}

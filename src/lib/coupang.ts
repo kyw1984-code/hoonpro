@@ -555,17 +555,6 @@ export interface PurchaseSummary {
   options: Array<{ vendorItemId: string; optionName: string; avgUnitCost: number | null; currentUnitCost: number | null }>;
 }
 
-/** 상세페이지 자동 제작(의류 템플릿) 기획 */
-export interface DetailPlanLite {
-  headline: string; subline: string; target: string;
-  points: Array<{ title: string; desc: string; imageIndex: number }>;
-  detailCaptions: string[]; fit: string;
-  sizeTable: { columns: string[]; rows: Array<{ size: string; values: string[] }>; note: string };
-  material: string; care: string[]; season: string;
-  /** 생성 컷 연출 지시 (영어, 4개) */
-  shots?: string[];
-}
-
 /** 상품 등록 — 카테고리 메타 */
 export interface ListingMeta {
   allowSingleItem: boolean;
@@ -618,18 +607,6 @@ export const coupangApi = {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data?.error || '검색필터를 채우지 못했습니다.');
     return data as { values: Record<string, string>; filled: number; total: number };
-  },
-  /** 상세페이지 자동 제작 — 기획·문안 (api/ai) */
-  listingDetailPlan: async (body: { images: string[]; imageCount: number; productName: string; brand?: string; filters?: Record<string, string>; colors?: string[]; sizes?: string[]; material?: string }) => {
-    const token = getToken();
-    const res = await fetch('/api/ai?action=detail-plan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data?.error || '상세페이지 기획에 실패했습니다.');
-    return data as DetailPlanLite;
   },
   /** 상세페이지 이미지 → 제공고시·옵션 (api/ai) */
   listingNotices: async (body: { images: string[]; notices: string[]; productName?: string }) => {
