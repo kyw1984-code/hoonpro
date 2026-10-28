@@ -6415,9 +6415,15 @@ async function handleListingSettings(userId: string, res: VercelResponse) {
     coupangCall(creds, 'GET', EP_LISTING.outbound(creds.vendorId), 'pageNum=1&pageSize=50'),
     coupangCall(creds, 'GET', EP_LISTING.returns(creds.vendorId), 'pageNum=1&pageSize=50'),
   ]);
+  // 여기서는 계정을 invalid로 내리지 않는다. 출고지·반품지 조회는 매출·상품 조회와
+  // 다른 권한 묶음이라, 수집은 잘 되는 키가 여기서만 401/403을 받을 수 있다. 그걸
+  // '키 거부'로 처리하면 멀쩡한 연동이 끊기고 "수집이 멈췄습니다" 메일까지 나간다 —
+  // 실제로 그랬다. 오류는 화면에 그대로 보여 주고 관리자 로그에만 남긴다.
   if (outbound.authFailed || returns.authFailed) {
-    await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다.');
-    return res.status(400).json({ error: '쿠팡이 키를 거부했습니다. [연동 설정]에서 키를 확인해주세요.' });
+    await logSystemError('상품 등록', '출고지·반품지 조회를 쿠팡이 거부했습니다 (권한 또는 경로)', {
+      detail: `outbound=${outbound.status} ${String(outbound.error ?? '').slice(0, 200)} / returns=${returns.status} ${String(returns.error ?? '').slice(0, 200)}`, userId, severity: 'warn',
+    });
+    return res.status(400).json({ error: `쿠팡이 출고지·반품지 조회를 거부했습니다 (HTTP ${outbound.status || returns.status}). 이 키에 상품 등록 권한이 없거나 쿠팡 쪽 경로가 바뀐 것일 수 있습니다. 매출 수집에는 영향이 없습니다.` });
   }
   const outboundList = listOf(coupangData(outbound.data)?.content ?? coupangData(outbound.data)).map((o: any) => ({
     code: String(pickStr(o, ['outboundShippingPlaceCode', 'shippingPlaceCode', 'code'])),
@@ -6509,7 +6515,10 @@ async function handleListingCategory(userId: string, req: VercelRequest, res: Ve
     productDescription: String(req.body?.description ?? '').slice(0, 1000) || undefined,
     brand: String(req.body?.brand ?? '').slice(0, 100) || undefined,
   });
-  if (r.authFailed) { await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다.'); return res.status(400).json({ error: '쿠팡이 키를 거부했습니다.' }); }
+  if (r.authFailed) {
+    await logSystemError('상품 등록', '카테고리 추천을 쿠팡이 거부했습니다 (권한 또는 경로)', { detail: `status=${r.status} ${String(r.error ?? '').slice(0, 300)}`, userId, severity: 'warn' });
+    return res.status(400).json({ error: `쿠팡이 카테고리 추천을 거부했습니다 (HTTP ${r.status}). 이 키에 상품 등록 권한이 없을 수 있습니다. 매출 수집에는 영향이 없습니다.` });
+  }
   if (!r.ok) return res.status(502).json({ error: `카테고리 추천 실패: ${r.error}` });
   const d = coupangData(r.data) ?? {};
   const code = String(pickStr(d, ['autoCategoryId', 'displayCategoryCode', 'categoryId']));
@@ -6679,7 +6688,9 @@ async function handleListingCreate(userId: string, req: VercelRequest, res: Verc
   };
 
   const r = await coupangCall(creds, 'POST', EP.sellerProducts, '', payload);
-  if (r.authFailed) { await setAccountStatus(userId, 'invalid', '쿠팡이 키를 거부했습니다.'); return res.status(400).json({ error: '쿠팡이 키를 거부했습니다.' }); }
+  if (r.authFailed) {
+    await logSystemError('상품 등록', '상품 등록 요청을 쿠팡이 거부했습니다 (권한 또는 경로)', { detail: `status=${r.status} ${String(r.error ?? '').slice(0, 300)}`, userId, severity: 'warn' });
+  }
   const sellerProductId = r.ok ? String(coupangData(r.data) ?? '') : '';
   const errText = r.ok ? null : String(r.error ?? `HTTP ${r.status}`).slice(0, 2000);
   const { data: saved } = await supabase!.from('coupang_listings').insert({
