@@ -521,6 +521,8 @@ export interface SyncSummary {
   inquiries: number;
   /** 쿠폰 관리에서 받아 온 쿠폰-옵션 조합 수 */
   couponDefs: number;
+  /** 쿠폰 설정 단계가 401·403으로 거부됐다. 이 단계는 '통과한 앞 단계'로 세지 않는다 */
+  couponRejected?: boolean;
   /** 시간에 잘렸을 때 멈춘 단계(SYNC_STEPS 인덱스). 안 잘렸으면 null */
   stoppedAt: number | null;
   errors: string[];
@@ -1931,6 +1933,7 @@ async function syncCouponDefinitions(userId: string, creds: CoupangCreds, sum: S
     // 이 API는 오픈API 권한 항목이 따로 있다. 거절돼도 판매자 키가 잘못된 것은
     // 아니므로 계정을 건드리지 않고 안내만 남긴다.
     if (r.status === 401 || r.status === 403) {
+      sum.couponRejected = true;
       sum.errors.push(`쿠폰 설정: ${r.error} — 윙 > 판매자 정보 > 추가판매정보 > 오픈API에서 쿠폰 조회 권한을 확인해주세요`);
       return;
     }
@@ -2705,7 +2708,11 @@ async function syncUser(
       sum.errors.push(`${SYNC_STEPS[i]}: 쿠팡이 호출을 거부했습니다(401/403). 앞 단계는 정상이라 키 문제로 보지 않습니다 — 다음 회차 재시도`);
     }
     if (sum.truncated && sum.stoppedAt === null) sum.stoppedAt = i;
-    if (!sum.authFailed && !sum.truncated) stepsDone++;
+    // 쿠폰 설정 단계가 401로 거부된 것은 '통과'가 아니다. 그걸 통과로 세면 다음
+    // 단계의 401이 "앞 단계는 정상"으로 가려져, 시크릿 키가 바뀐 계정이 26일 동안
+    // 매일 '수집 성공 · 0건'으로 남는다 — 실제로 그랬다.
+    const rejectedStep = i === 0 && sum.couponRejected === true;
+    if (!sum.authFailed && !sum.truncated && !rejectedStep) stepsDone++;
   };
 
   // 쿠폰 설정을 맨 앞에 둔다. 호출이 몇 건뿐인데 순이익의 쿠폰 금액이 여기에
