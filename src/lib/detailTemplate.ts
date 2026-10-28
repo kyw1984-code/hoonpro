@@ -1,15 +1,16 @@
 /**
  * 상세페이지 자동 제작 — 의류 템플릿 (브라우저 캔버스).
  *
- * 이미지 생성 모델을 쓰지 않는다. 판매자가 올린 사진이 재료이고, AI는 문안만
- * 짠다(lib/ai/detail-plan.ts). 좋은 상세페이지는 매번 새 레이아웃이 아니라
+ * 재료는 판매자가 올린 사진 + 생성한 모델컷 4장(src/lib/detailShots.ts)이고,
+ * AI는 문안만 짠다(lib/ai/detail-plan.ts). 생성 컷이 없으면 올린 사진만으로 그린다. 좋은 상세페이지는 매번 새 레이아웃이 아니라
  * 정돈된 템플릿에 사진과 문안을 끼운 것이다 — 그래서 구간 순서와 여백, 서체
  * 크기를 여기서 고정한다. 흰 배경, 860px 폭, 구간마다 PNG 한 장.
  *
  *  1 인트로      대표 사진 + 헤드라인
  *  2 포인트 3    사진 조각 + 제목·설명 ×3
  *  3 디테일 컷   사진 2~4장 + 캡션
- *  4 사이즈표 하단에 컬러 옵션을 텍스트로 표기 (사진-색상 매칭을 추측하지 않음)
+ *  4 핏          뒷면/측면 생성 컷 전면 + 핏 문구 (생성 컷이 있을 때)
+ *     컬러 옵션은 사이즈표 하단에 텍스트로 표기 (사진-색상 매칭을 추측하지 않음)
  *  5 사이즈표    표 + 측정 안내
  *  6 소재·세탁   소재 / 세탁·취급 / 핏
  *  7 안내        배송·교환/반품·A/S
@@ -28,6 +29,8 @@ export interface TemplateInput {
   plan: DetailPlanLite;
   /** 올린 사진 (공개 URL 또는 data URL). 0번이 대표 */
   images: string[];
+  /** 생성한 모델컷 (data URL). 0 히어로, 1~3 포인트/디테일/뒷면. 없거나 빈 항목은 올린 사진으로 대신한다 */
+  shots?: string[];
   brand: string;
   colors: string[];
   /** 배송·반품 안내용 */
@@ -109,14 +112,17 @@ export async function renderClothingDetail(input: TemplateInput): Promise<string
   const { plan, brand, colors } = input;
   const accent = input.accent || '#1f6feb';
   const imgs = await Promise.all(input.images.slice(0, 10).map(loadImage));
+  const shots = await Promise.all((input.shots ?? []).slice(0, 4).map(u => (u ? loadImage(u) : Promise.resolve(null))));
+  const hasShots = shots.some(Boolean);
+  const heroImg = shots[0] ?? imgs[0] ?? null;
   const out: string[] = [];
   const pad = 64;
 
   // ── 1 인트로 ──
   {
-    const H = 1000;
+    const H = hasShots ? 1180 : 1000;
     const { c, ctx } = canvas(H);
-    cover(ctx, imgs[0] ?? null, 0, 0, W, H);
+    cover(ctx, heroImg, 0, 0, W, H);
     const g = ctx.createLinearGradient(0, H * 0.45, 0, H);
     g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.62)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
@@ -139,7 +145,7 @@ export async function renderClothingDetail(input: TemplateInput): Promise<string
     sectionTitle(ctx, plan.target || '이런 분께 추천해요', 130);
     let y = 190;
     plan.points.forEach((p, i) => {
-      const img = imgs[p.imageIndex] ?? imgs[Math.min(i + 1, imgs.length - 1)] ?? imgs[0] ?? null;
+      const img = shots[i + 1] ?? imgs[p.imageIndex] ?? imgs[Math.min(i + 1, imgs.length - 1)] ?? imgs[0] ?? null;
       cover(ctx, img, pad, y, 330, blockH - 40, 18);
       // 번호 배지
       ctx.fillStyle = accent; ctx.beginPath(); ctx.roundRect(pad + 350, y + 8, 44, 44, 22); ctx.fill();
@@ -152,7 +158,8 @@ export async function renderClothingDetail(input: TemplateInput): Promise<string
   }
 
   // ── 3 디테일 컷 ──
-  const detailImgs = imgs.slice(1, 5).filter(Boolean) as HTMLImageElement[];
+  // 생성 컷이 있으면 올린 사진은 전부 실제 제품 디테일로 쓴다 (대표도 포함)
+  const detailImgs = (hasShots ? imgs.slice(0, 4) : imgs.slice(1, 5)).filter(Boolean) as HTMLImageElement[];
   if (detailImgs.length >= 1) {
     const cols = detailImgs.length === 1 ? 1 : 2;
     const cw = cols === 1 ? W - pad * 2 : (W - pad * 2 - 24) / 2;
@@ -168,6 +175,19 @@ export async function renderClothingDetail(input: TemplateInput): Promise<string
       const cap = plan.detailCaptions[i];
       if (cap) text(ctx, cap, x + cw / 2, y + ch + 36, { size: 18, weight: 600, color: INK2, align: 'center' });
     });
+    out.push(png(c));
+  }
+
+  // ── 4 핏 (뒷면/측면 생성 컷 전면 + 핏 문구) ──
+  if (shots[3]) {
+    const H = 1100;
+    const { c, ctx } = canvas(H);
+    cover(ctx, shots[3], 0, 0, W, H);
+    const g = ctx.createLinearGradient(0, H * 0.6, 0, H);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.font = `700 15px ${FONT}`; ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.textAlign = 'left'; ctx.fillText('FIT', pad, H - 128);
+    text(ctx, plan.fit || '자연스럽게 떨어지는 핏', pad, H - 80, { size: 30, weight: 800, color: '#fff', maxWidth: W - pad * 2, maxLines: 2, lineHeight: 40 });
     out.push(png(c));
   }
 
