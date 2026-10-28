@@ -6566,10 +6566,32 @@ async function handleListingCategory(userId: string, req: VercelRequest, res: Ve
     return res.status(400).json({ error: `쿠팡이 카테고리 추천을 거부했습니다 (HTTP ${r.status}). 이 키에 상품 등록 권한이 없을 수 있습니다. 매출 수집에는 영향이 없습니다.` });
   }
   if (!r.ok) return res.status(502).json({ error: `카테고리 추천 실패: ${r.error}` });
-  const d = coupangData(r.data) ?? {};
-  const code = String(pickStr(d, ['autoCategoryId', 'displayCategoryCode', 'categoryId']));
-  if (!code) return res.status(502).json({ error: '쿠팡이 카테고리를 추천하지 못했습니다. 상품명을 더 구체적으로 적어주세요.' });
-  const name = pickStr(d, ['autoCategoryName', 'displayCategoryName', 'categoryName']);
+  // 응답이 {code,message,data:{autoCategoryId}} 꼴이 보통이지만 계정·버전에 따라 한 겹
+  // 더 싸여 오거나 이름이 다를 수 있다. 깊이 3까지 뒤져 처음 만나는 코드를 쓴다.
+  const findCode = (v: any, depth = 0): { code: string; name: string } | null => {
+    if (!v || typeof v !== 'object' || depth > 3) return null;
+    const code = pickStr(v, ['autoCategoryId', 'displayCategoryCode', 'categoryId', 'predictedCategoryId', 'displayCategoryId']);
+    if (code && /^\d+$/.test(code)) return { code, name: pickStr(v, ['autoCategoryName', 'displayCategoryName', 'categoryName', 'predictedCategoryName']) };
+    for (const val of Array.isArray(v) ? v : Object.values(v)) {
+      const hit = findCode(val, depth + 1);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const hit = findCode(r.data);
+  if (!hit) {
+    // 값은 남기지 않고 키 이름만 — 어디서 어긋났는지 보려면 이것으로 충분하다
+    const shape = (v: any, depth = 0): any => {
+      if (!v || typeof v !== 'object' || depth > 2) return typeof v;
+      if (Array.isArray(v)) return [v.length ? shape(v[0], depth + 1) : 'empty'];
+      return Object.fromEntries(Object.entries(v).slice(0, 20).map(([k, val]) => [k, shape(val, depth + 1)]));
+    };
+    const shapeText = JSON.stringify(shape(r.data)).slice(0, 600);
+    await logSystemError('상품 등록', '카테고리 추천 응답에서 코드를 찾지 못했습니다', { detail: `status=${r.status} shape=${shapeText}`, userId, severity: 'warn' });
+    return res.status(502).json({ error: `쿠팡이 카테고리를 추천하지 못했습니다. 상품명을 더 구체적으로 적어주세요.\n(응답 형태: ${shapeText})` });
+  }
+  const code = hit.code;
+  const name = hit.name;
   const meta = await fetchCategoryMeta(got.creds, code);
   if ('error' in meta) return res.status(502).json({ error: `카테고리 정보 조회 실패: ${meta.error}` });
   return res.status(200).json({ code, name, meta: meta.meta });
