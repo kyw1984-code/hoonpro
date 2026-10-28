@@ -139,6 +139,21 @@ export function Listing() {
   const [nameBusy, setNameBusy] = useState(false);
   const [nameSuggest, setNameSuggest] = useState<{ candidates: string[]; keywords: string[]; productType: string } | null>(null);
   const nameAutoDone = useRef(false);
+  // 상품명 맨 앞에 넣어 둔 브랜드. 브랜드를 나중에 적거나 고쳐도 상품명 앞자리가 따라 바뀐다.
+  const appliedBrand = useRef('');
+  const changeBrand = (next: string) => {
+    setBrand(next);
+    const prev = appliedBrand.current.trim();
+    const nextTrim = next.trim();
+    setProductName(cur => {
+      let base = cur;
+      if (prev && base.startsWith(prev + ' ')) base = base.slice(prev.length + 1);
+      else if (prev && base === prev) base = '';
+      if (!base.trim()) return nextTrim && !cur.trim() ? '' : (nextTrim ? nextTrim : '');
+      return nextTrim ? `${nextTrim} ${base}` : base;
+    });
+    appliedBrand.current = nextTrim;
+  };
   const [tagBusy, setTagBusy] = useState(false);
   const [tagNote, setTagNote] = useState<string | null>(null);
   // 검색필터(카테고리 속성) 값. 옵션으로 쓰는 속성은 제외하고 나머지를 채운다.
@@ -265,6 +280,7 @@ export function Listing() {
       const r = await coupangApi.listingProductName({ images: urls.slice(0, 3), brand: brand.trim() || undefined, bundleCount: useOptions ? 0 : items.length });
       nameAutoDone.current = true;
       setProductName(r.name);
+      appliedBrand.current = brand.trim() && r.name.startsWith(brand.trim() + ' ') ? brand.trim() : '';
       setNameSuggest({ candidates: r.candidates, keywords: r.keywords, productType: r.productType });
       if (!searchTags.trim() && r.keywords.length) setSearchTags(r.keywords.slice(0, 20).join(', '));
     } catch (e: any) {
@@ -346,7 +362,7 @@ export function Listing() {
       };
       const r = await coupangApi.listingCreate(body);
       alert(`쿠팡에 등록 요청했습니다.\n등록상품ID ${r.sellerProductId}\n승인에는 보통 몇 시간~하루가 걸립니다. [등록 내역]에서 상태를 확인하세요.`);
-      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false; setFilters({}); setFilterNote(null); setManufacturer(''); setCertMode('none'); setCertType(''); setCertCode(''); setParallelImport(false); setAdultOnly(false); setMaxPerPerson(''); setSaleEnd(''); setTaxFree(false);
+      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false; setFilters({}); setFilterNote(null); appliedBrand.current = ''; setManufacturer(''); setCertMode('none'); setCertType(''); setCertCode(''); setParallelImport(false); setAdultOnly(false); setMaxPerPerson(''); setSaleEnd(''); setTaxFree(false);
       void loadRows();
     } catch (e: any) {
       alert(e?.message || '등록 실패');
@@ -429,7 +445,9 @@ export function Listing() {
       <div className="space-y-4 rounded-card border border-line bg-paper p-4">
         <p className="font-semibold text-ink">새 상품 등록</p>
         <ImagePicker label="대표·추가 이미지 *" hint="첫 장이 대표(썸네일). 올리면 사진을 분석해 훈프로 코칭 기준(강의 자료)의 상품명과 검색어 20개를 자동으로 만듭니다. 정사각형 500px 이상, 글자·테두리 없는 것이 승인에 유리합니다." urls={images} onChange={onImagesChange} max={10} />
-        <div className="grid gap-3 md:grid-cols-[1fr_200px]">
+        {/* 브랜드를 상품명보다 먼저 — 상품명 맨 앞에 브랜드가 들어가므로 먼저 적어야 자동 생성에 반영된다 */}
+        <div className="md:w-72"><label className={labelCls}>브랜드</label><input value={brand} onChange={e => changeBrand(e.target.value)} placeholder="없으면 비워도 됩니다 (상품명 맨 앞에 자동으로 들어갑니다)" className={inputCls} /></div>
+        <div>
           <div>
             <div className="mb-1 flex items-center justify-between">
               <label className={`${labelCls} mb-0`}>상품명 *</label>
@@ -445,7 +463,7 @@ export function Listing() {
                 {nameSuggest.candidates.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
                     {nameSuggest.candidates.map(c => (
-                      <button key={c} type="button" onClick={() => setProductName(c)} className="rounded-full border border-line bg-paper-2 px-2.5 py-1 text-left text-[11px] text-ink-2 hover:border-line-strong hover:text-ink">{c}</button>
+                      <button key={c} type="button" onClick={() => { const b = brand.trim(); const name = b && !c.startsWith(b + ' ') ? `${b} ${c}` : c; setProductName(name); appliedBrand.current = b && name.startsWith(b + ' ') ? b : ''; }} className="rounded-full border border-line bg-paper-2 px-2.5 py-1 text-left text-[11px] text-ink-2 hover:border-line-strong hover:text-ink">{c}</button>
                     ))}
                   </div>
                 )}
@@ -453,7 +471,6 @@ export function Listing() {
               </div>
             )}
           </div>
-          <div><label className={labelCls}>브랜드</label><input value={brand} onChange={e => setBrand(e.target.value)} placeholder="없으면 비워도 됩니다" className={inputCls} /></div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <button type="button" onClick={() => void findCategory()} disabled={categoryBusy} className="inline-flex items-center gap-1 rounded-control bg-accent px-4 py-2 text-[12px] font-semibold text-black hover:opacity-90 disabled:opacity-60">
