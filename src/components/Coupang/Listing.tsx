@@ -41,7 +41,7 @@ const fileToDataUrl = (file: File): Promise<string> => new Promise((resolve, rej
   reader.readAsDataURL(file);
 });
 
-function ImagePicker({ label, hint, urls, onChange, max }: { label: string; hint: string; urls: string[]; onChange: (u: string[]) => void; max: number }) {
+function ImagePicker({ label, hint, urls, onChange, max, required = false }: { label: string; hint: string; urls: string[]; onChange: (u: string[]) => void; max: number; required?: boolean }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const add = async (files: FileList | null) => {
@@ -67,7 +67,7 @@ function ImagePicker({ label, hint, urls, onChange, max }: { label: string; hint
     <div>
       <p className="mb-1 text-[12px] font-semibold text-ink-2">{label} <span className="font-normal text-ink-3">({urls.length}/{max})</span></p>
       <p className="mb-2 text-[11px] text-ink-3">{hint}</p>
-      <div className="flex flex-wrap gap-2">
+      <div className={`flex flex-wrap gap-2 rounded-control ${required && urls.length === 0 ? 'border border-critical p-2' : ''}`}>
         {urls.map((u, i) => (
           <div key={u} className="relative h-20 w-20 overflow-hidden rounded-control border border-line">
             <img src={u} alt="" className="h-full w-full object-cover" />
@@ -88,6 +88,8 @@ function ImagePicker({ label, hint, urls, onChange, max }: { label: string; hint
 }
 
 const inputCls = 'w-full rounded-control border border-line bg-paper-2 px-3 py-2 text-sm text-ink focus:border-line-strong focus:outline-none';
+/** 필수 칸이 비어 있으면 빨간 테두리 — 등록 전에 뭘 안 채웠는지 한눈에 보이게 */
+const missing = (empty: boolean) => (empty ? 'border-critical focus:border-critical' : '');
 const labelCls = 'mb-1 block text-[12px] font-semibold text-ink-2';
 
 export function Listing() {
@@ -561,21 +563,21 @@ export function Listing() {
         )}
         {settingsLoading ? <p className="mt-3 inline-flex items-center gap-1 text-[12px] text-ink-3"><Loader2 className="h-3 w-3 animate-spin" /> 윙에서 출고지·반품지를 불러오는 중…</p> : showSettings && (
           <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <div><label className={labelCls}>윙 로그인 ID *</label><input value={settings.wingUserId} onChange={e => setSettings(s => ({ ...s, wingUserId: e.target.value }))} placeholder="쿠팡 윙에 로그인할 때 쓰는 아이디" className={inputCls} /></div>
+            <div><label className={labelCls}>윙 로그인 ID *</label><input value={settings.wingUserId} onChange={e => setSettings(s => ({ ...s, wingUserId: e.target.value }))} placeholder="쿠팡 윙에 로그인할 때 쓰는 아이디" className={`${inputCls} ${missing(!settings.wingUserId.trim())}`} /></div>
             <div><label className={labelCls}>택배사</label>
               <select value={settings.deliveryCompany} onChange={e => setSettings(s => ({ ...s, deliveryCompany: e.target.value }))} className={inputCls}>
                 {DELIVERY_COMPANIES.map(d => <option key={d.code} value={d.code}>{d.name}</option>)}
               </select></div>
             <div><label className={labelCls}>출고지 *</label>
-              <select value={settings.outboundCode} onChange={e => setSettings(s => ({ ...s, outboundCode: e.target.value }))} className={inputCls}>
+              <select value={settings.outboundCode} onChange={e => setSettings(s => ({ ...s, outboundCode: e.target.value }))} className={`${inputCls} ${missing(!settings.outboundCode)}`}>
                 <option value="">선택</option>{outbound.map(o => <option key={o.code} value={o.code}>{o.name}{o.usable ? '' : ' (사용 안 함)'}</option>)}
               </select>
               {outbound.length === 0 && <p className="mt-1 text-[11px] text-ink-3">윙 → 판매자정보 → 출고지/반품지 관리에서 먼저 등록하세요.</p>}</div>
             <div><label className={labelCls}>반품지 *</label>
-              <select value={settings.returnCenterCode} onChange={e => setSettings(s => ({ ...s, returnCenterCode: e.target.value }))} className={inputCls}>
+              <select value={settings.returnCenterCode} onChange={e => setSettings(s => ({ ...s, returnCenterCode: e.target.value }))} className={`${inputCls} ${missing(!settings.returnCenterCode)}`}>
                 <option value="">선택</option>{returns.map(r => <option key={r.code} value={r.code}>{r.name} — {r.address}</option>)}
               </select></div>
-            <div><label className={labelCls}>A/S 연락처 *</label><input value={settings.afterServicePhone} onChange={e => setSettings(s => ({ ...s, afterServicePhone: e.target.value }))} placeholder="010-0000-0000" className={inputCls} /></div>
+            <div><label className={labelCls}>A/S 연락처 *</label><input value={settings.afterServicePhone} onChange={e => setSettings(s => ({ ...s, afterServicePhone: e.target.value }))} placeholder="010-0000-0000" className={`${inputCls} ${missing(!settings.afterServicePhone.trim())}`} /></div>
             <div><label className={labelCls}>A/S 안내</label><input value={settings.afterServiceInfo} onChange={e => setSettings(s => ({ ...s, afterServiceInfo: e.target.value }))} placeholder="예: 고객센터 운영 평일 10~17시" className={inputCls} /></div>
             <div className="md:col-span-2 flex justify-end gap-2">
               <button type="button" onClick={() => void loadSettings()} className="inline-flex items-center gap-1 rounded-control border border-line px-3 py-2 text-[12px] font-semibold text-ink-2 hover:border-line-strong"><RefreshCw className="h-3.5 w-3.5" /> 윙에서 다시 불러오기</button>
@@ -588,7 +590,7 @@ export function Listing() {
       {/* ── 등록 폼 ── */}
       <div className="space-y-4 rounded-card border border-line bg-paper p-4">
         <p className="font-semibold text-ink">새 상품 등록</p>
-        <ImagePicker label="대표·추가 이미지 *" hint="첫 장이 대표(썸네일). 올리면 사진을 분석해 훈프로 코칭 기준(강의 자료)의 상품명과 검색어 20개를 자동으로 만듭니다. 정사각형 500px 이상, 글자·테두리 없는 것이 승인에 유리합니다." urls={images} onChange={onImagesChange} max={10} />
+        <ImagePicker required label="대표·추가 이미지 *" hint="첫 장이 대표(썸네일). 올리면 사진을 분석해 훈프로 코칭 기준(강의 자료)의 상품명과 검색어 20개를 자동으로 만듭니다. 정사각형 500px 이상, 글자·테두리 없는 것이 승인에 유리합니다." urls={images} onChange={onImagesChange} max={10} />
         {/* 브랜드를 상품명보다 먼저 — 상품명 맨 앞에 브랜드가 들어가므로 먼저 적어야 자동 생성에 반영된다 */}
         <div className="md:w-72"><label className={labelCls}>브랜드</label><input value={brand} onChange={e => changeBrand(e.target.value)} placeholder="없으면 비워도 됩니다 (상품명 맨 앞에 자동으로 들어갑니다)" className={inputCls} /></div>
         <div>
@@ -600,7 +602,7 @@ export function Listing() {
                 {nameBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />} 사진으로 상품명 {nameSuggest ? '다시 ' : ''}만들기
               </button>
             </div>
-            <input value={productName} onChange={e => setProductName(e.target.value)} placeholder={images.length ? (nameBusy ? '사진을 분석하는 중…' : '예: 하루한잔 스테인리스 진공 보온텀블러 500ml') : '대표 이미지를 올리면 자동으로 만들어집니다'} className={inputCls} />
+            <input value={productName} onChange={e => setProductName(e.target.value)} placeholder={images.length ? (nameBusy ? '사진을 분석하는 중…' : '예: 하루한잔 스테인리스 진공 보온텀블러 500ml') : '대표 이미지를 올리면 자동으로 만들어집니다'} className={`${inputCls} ${missing(!productName.trim())}`} />
             
             {autoStep && <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-accent"><Loader2 className="h-3 w-3 animate-spin" /> {autoStep}</p>}
             {nameSuggest && (
@@ -652,10 +654,10 @@ export function Listing() {
                   <tbody>
                     {items.map(it => (
                       <tr key={it.id} className="border-t border-line">
-                        {useOptions && optionAttrs.map(a => <td key={a} className="px-2 py-1.5"><input value={it.attributes[a] ?? ''} onChange={e => patchItem(it.id, { attributes: { ...it.attributes, [a]: e.target.value } })} placeholder={a} className={`${inputCls} py-1.5`} /></td>)}
-                        <td className="px-2 py-1.5"><input inputMode="numeric" value={it.salePrice} onChange={e => patchItem(it.id, { salePrice: e.target.value.replace(/\D/g, '') })} className={`${inputCls} py-1.5 text-right`} /></td>
+                        {useOptions && optionAttrs.map(a => <td key={a} className="px-2 py-1.5"><input value={it.attributes[a] ?? ''} onChange={e => patchItem(it.id, { attributes: { ...it.attributes, [a]: e.target.value } })} placeholder={a} className={`${inputCls} py-1.5 ${missing(!(it.attributes[a] ?? '').trim())}`} /></td>)}
+                        <td className="px-2 py-1.5"><input inputMode="numeric" value={it.salePrice} onChange={e => patchItem(it.id, { salePrice: e.target.value.replace(/\D/g, '') })} className={`${inputCls} py-1.5 text-right ${missing(!it.salePrice)}`} /></td>
                         <td className="px-2 py-1.5"><input inputMode="numeric" value={it.originalPrice} onChange={e => patchItem(it.id, { originalPrice: e.target.value.replace(/\D/g, '') })} placeholder="선택" className={`${inputCls} py-1.5 text-right`} /></td>
-                        <td className="px-2 py-1.5"><input inputMode="numeric" value={it.stock} onChange={e => patchItem(it.id, { stock: e.target.value.replace(/\D/g, '') })} className={`${inputCls} py-1.5 text-right`} /></td>
+                        <td className="px-2 py-1.5"><input inputMode="numeric" value={it.stock} onChange={e => patchItem(it.id, { stock: e.target.value.replace(/\D/g, '') })} className={`${inputCls} py-1.5 text-right ${missing(!it.stock)}`} /></td>
                         <td className="px-2 py-1.5 text-right">{items.length > 1 && <button type="button" onClick={() => setItems(p => p.filter(x => x.id !== it.id))} className="text-ink-3 hover:text-critical"><Trash2 className="h-4 w-4" /></button>}</td>
                       </tr>
                     ))}
@@ -706,7 +708,7 @@ export function Listing() {
 
             {/* 상세페이지 */}
             <div>
-              <ImagePicker label="상세페이지 이미지 *" hint="위에서 아래 순서대로. 상세페이지 제작에서 받은 파일을 그대로 올리세요. 올리면 상세페이지를 읽어 제공고시(소재·치수·제조국·세탁법)와 옵션(색상·사이즈)을 자동으로 채웁니다." urls={detailImages} onChange={(urls) => { setDetailImages(urls); if (urls.length > detailImages.length && latest.current.meta) setTimeout(() => void fillNotices(latest.current.meta, urls), 0); }} max={30} />
+              <ImagePicker required label="상세페이지 이미지 *" hint="위에서 아래 순서대로. 상세페이지 제작에서 받은 파일을 그대로 올리세요. 올리면 상세페이지를 읽어 제공고시(소재·치수·제조국·세탁법)와 옵션(색상·사이즈)을 자동으로 채웁니다." urls={detailImages} onChange={(urls) => { setDetailImages(urls); if (urls.length > detailImages.length && latest.current.meta) setTimeout(() => void fillNotices(latest.current.meta, urls), 0); }} max={30} />
               {(noticeBusy || noticeNote) && <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-ink-3">{noticeBusy ? <><Loader2 className="h-3 w-3 animate-spin" /> 상세페이지를 읽는 중…</> : noticeNote}</p>}
             </div>
 
@@ -724,7 +726,7 @@ export function Listing() {
                   {meta.attributes.filter(a => !optionAttrs.includes(a.name)).map(a => (
                     <div key={a.name} className="flex items-center gap-2">
                       <span className="w-28 shrink-0 truncate text-[12px] text-ink-2" title={a.name}>{a.name}{a.basicUnit ? <span className="text-ink-3"> ({a.basicUnit})</span> : null}</span>
-                      <input value={filters[a.name] ?? ''} onChange={e => setFilters(p => ({ ...p, [a.name]: e.target.value }))} placeholder="필수라 입력해주세요" className={`${inputCls} py-1.5`} />
+                      <input value={filters[a.name] ?? ''} onChange={e => setFilters(p => ({ ...p, [a.name]: e.target.value }))} placeholder="필수라 입력해주세요" className={`${inputCls} py-1.5 ${missing(a.required && !(filters[a.name] ?? '').trim())}`} />
                     </div>
                   ))}
                 </div>
@@ -826,7 +828,7 @@ export function Listing() {
                   {noticeList.map(n => (
                     <div key={`${n.category}|${n.name}`} className="flex items-center gap-2">
                       <span className="w-40 shrink-0 truncate text-[12px] text-ink-2" title={`${n.category} › ${n.name}`}>{n.name}{n.required && <span className="text-critical"> *</span>}</span>
-                      <input value={notices[`${n.category}|${n.name}`] ?? ''} onChange={e => setNotices(p => ({ ...p, [`${n.category}|${n.name}`]: e.target.value }))} placeholder="상세페이지 참조" className={inputCls} />
+                      <input value={notices[`${n.category}|${n.name}`] ?? ''} onChange={e => setNotices(p => ({ ...p, [`${n.category}|${n.name}`]: e.target.value }))} placeholder="상세페이지 참조" className={`${inputCls} ${missing(n.required && !(notices[`${n.category}|${n.name}`] ?? '').trim())}`} />
                     </div>
                   ))}
                 </div>
