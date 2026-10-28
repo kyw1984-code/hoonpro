@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Save, Search, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { coupangApi, type ListingMeta, type ListingPlace, type ListingReturnPlace, type ListingRow, type ListingSettings } from '../../lib/coupang';
+import { getUser } from '../../lib/auth';
 
 const DELIVERY_COMPANIES: Array<{ code: string; name: string }> = [
   { code: 'CJGLS', name: 'CJ대한통운' }, { code: 'HANJIN', name: '한진택배' }, { code: 'LOTTE', name: '롯데택배' },
@@ -96,6 +97,15 @@ export function Listing() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // 관리자 진단 — 어느 엔드포인트 변형이 통과하는지
+  const isAdmin = Boolean(getUser()?.isAdmin);
+  const [probe, setProbe] = useState<Array<{ label: string; method: string; path: string; query: string; ok: boolean; status: number; error: string }> | null>(null);
+  const [probeBusy, setProbeBusy] = useState(false);
+  const runProbe = async () => {
+    if (probeBusy) return;
+    setProbeBusy(true);
+    try { setProbe((await coupangApi.listingProbe()).results); } catch (e: any) { alert(e?.message || '진단 실패'); } finally { setProbeBusy(false); }
+  };
 
   // ── 등록 폼 ──
   const [productName, setProductName] = useState('');
@@ -319,6 +329,30 @@ export function Listing() {
           <button type="button" onClick={() => setShowSettings(v => !v)} className="rounded-control border border-line px-3 py-1.5 text-[12px] font-semibold text-ink-2 hover:border-line-strong">{showSettings ? '접기' : '수정'}</button>
         </div>
         {settingsErr && <p className="mt-2 text-[12px] text-critical">{settingsErr}</p>}
+        {isAdmin && (
+          <div className="mt-2">
+            <button type="button" onClick={() => void runProbe()} disabled={probeBusy} className="inline-flex items-center gap-1 rounded-control border border-line px-2.5 py-1 text-[11px] font-semibold text-ink-2 hover:border-line-strong disabled:opacity-60">
+              {probeBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />} 관리자 진단: 엔드포인트 변형별 응답
+            </button>
+            {probe && (
+              <div className="mt-2 overflow-x-auto rounded-card border border-line">
+                <table className="w-full text-[11px]">
+                  <thead className="bg-paper-2 text-ink-3"><tr><th className="px-2 py-1 text-left">호출</th><th className="px-2 py-1 text-left">경로</th><th className="px-2 py-1 text-right">상태</th><th className="px-2 py-1 text-left">응답</th></tr></thead>
+                  <tbody>
+                    {probe.map(r => (
+                      <tr key={r.label} className="border-t border-line">
+                        <td className="px-2 py-1 text-ink">{r.label}</td>
+                        <td className="px-2 py-1 font-mono text-ink-3">{r.method} {r.path}{r.query ? `?${r.query}` : ''}</td>
+                        <td className={`px-2 py-1 text-right font-semibold ${r.ok ? 'text-positive' : 'text-critical'}`}>{r.status}</td>
+                        <td className="px-2 py-1 text-ink-2">{r.ok ? 'OK' : r.error}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
         {settingsLoading ? <p className="mt-3 inline-flex items-center gap-1 text-[12px] text-ink-3"><Loader2 className="h-3 w-3 animate-spin" /> 윙에서 출고지·반품지를 불러오는 중…</p> : showSettings && (
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <div><label className={labelCls}>윙 로그인 ID *</label><input value={settings.wingUserId} onChange={e => setSettings(s => ({ ...s, wingUserId: e.target.value }))} placeholder="쿠팡 윙에 로그인할 때 쓰는 아이디" className={inputCls} /></div>

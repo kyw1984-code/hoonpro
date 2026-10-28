@@ -3408,7 +3408,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return await handleExperimentDelete(userId, req, res);
       }
       case 'listing-settings': case 'listing-settings-save': case 'listing-category': case 'listing-meta':
-      case 'listing-upload': case 'listing-create': case 'listings': {
+      case 'listing-upload': case 'listing-create': case 'listings': case 'listing-probe': {
         {
           const blockedTab = await tabDisabledMessage(supabase, 'listing', decoded.isAdmin === true);
           if (blockedTab) return res.status(403).json({ error: blockedTab });
@@ -3419,6 +3419,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (action === 'listing-meta') return await handleListingMeta(userId, req, res);
         if (action === 'listing-upload') return await handleListingUpload(userId, req, res);
         if (action === 'listing-create') return await handleListingCreate(userId, req, res);
+        if (action === 'listing-probe') {
+          if (decoded.isAdmin !== true) return res.status(403).json({ error: '관리자만 쓸 수 있습니다.' });
+          return await handleListingProbe(userId, res);
+        }
         return await handleListings(userId, res);
       }
       case 'purchases': case 'purchase-save': case 'purchase-delete': case 'purchase-apply': case 'fx-rate': {
@@ -6406,6 +6410,35 @@ async function listingCreds(userId: string): Promise<{ acc: AccountRow; creds: C
   if (!acc) return { error: '먼저 [연동 설정]에서 쿠팡 API 키를 등록해주세요.', status: 400 };
   if (acc.demo === true) return { error: DEMO_NO_COUPANG, status: 400 };
   return { acc, creds: credsOf(acc) };
+}
+
+/**
+ * 관리자 진단 — 상품 등록 쪽 엔드포인트 몇 가지를 변형해 부르고 상태만 모은다.
+ * 같은 서명으로 조회 계열은 되는데 등록 계열만 401 "Invalid signature"가 올 때,
+ * 경로·쿼리·메서드 중 무엇이 갈리는지 실제 응답으로 가른다. 키 값은 남기지 않는다.
+ */
+async function handleListingProbe(userId: string, res: VercelResponse) {
+  const got = await listingCreds(userId);
+  if ('error' in got) return res.status(got.status).json({ error: got.error });
+  const { creds } = got;
+  const v = creds.vendorId;
+  const tests: Array<{ label: string; method: 'GET' | 'POST'; path: string; query?: string; body?: any }> = [
+    { label: '대조: 상품 목록 (seller_api)', method: 'GET', path: EP.sellerProducts, query: `vendorId=${v}&maxPerPage=1` },
+    { label: '대조: 반품 요청 (openapi v4, 쿼리 있음)', method: 'GET', path: `/v2/providers/openapi/apis/api/v4/vendors/${v}/returnRequests`, query: `createdAtFrom=${kstToday()}&createdAtTo=${kstToday()}&status=UC` },
+    { label: '반품지 (openapi v4, pageNum/pageSize)', method: 'GET', path: EP_LISTING.returns(v), query: 'pageNum=1&pageSize=50' },
+    { label: '반품지 (openapi v4, 쿼리 없음)', method: 'GET', path: EP_LISTING.returns(v) },
+    { label: '출고지 (marketplace_openapi v1)', method: 'GET', path: EP_LISTING.outbound, query: 'pageNum=1&pageSize=50' },
+    { label: '출고지 (marketplace_openapi v1, 쿼리 없음)', method: 'GET', path: EP_LISTING.outbound },
+    { label: '출고지 (openapi v4 vendors)', method: 'GET', path: EP_LISTING.outboundLegacy(v), query: 'pageNum=1&pageSize=50' },
+    { label: '카테고리 메타 (seller_api, 63956)', method: 'GET', path: EP_LISTING.meta('63956') },
+    { label: '카테고리 추천 (openapi v1, POST)', method: 'POST', path: EP_LISTING.predict, body: { productName: '남자 가을 니트 스웨터' } },
+  ];
+  const results: any[] = [];
+  for (const t of tests) {
+    const r = await coupangCall(creds, t.method, t.path, t.query ?? '', t.body);
+    results.push({ label: t.label, method: t.method, path: t.path, query: t.query ?? '', ok: r.ok, status: r.status, error: r.ok ? '' : String(r.error ?? '').slice(0, 160), relayError: Boolean(r.relayError) });
+  }
+  return res.status(200).json({ vendorId: v, results });
 }
 
 async function handleListingSettings(userId: string, res: VercelResponse) {
