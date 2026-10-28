@@ -125,6 +125,16 @@ export function Listing() {
   const [outboundDays, setOutboundDays] = useState('1');
   const [searchTags, setSearchTags] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // 상품 주요 정보 (윙의 같은 이름 구간) — 기본값은 윙 기본값과 같다
+  const [manufacturer, setManufacturer] = useState('');
+  const [certMode, setCertMode] = useState<'required' | 'detail' | 'none'>('none');
+  const [certType, setCertType] = useState('');
+  const [certCode, setCertCode] = useState('');
+  const [parallelImport, setParallelImport] = useState(false);
+  const [adultOnly, setAdultOnly] = useState(false);
+  const [maxPerPerson, setMaxPerPerson] = useState('');
+  const [saleEnd, setSaleEnd] = useState('');
+  const [taxFree, setTaxFree] = useState(false);
   // 사진으로 만든 상품명. 첫 대표 이미지가 올라오면 자동으로 한 번 만들고, 버튼으로 다시 만들 수 있다.
   const [nameBusy, setNameBusy] = useState(false);
   const [nameSuggest, setNameSuggest] = useState<{ candidates: string[]; keywords: string[]; productType: string } | null>(null);
@@ -168,9 +178,30 @@ export function Listing() {
     try { await coupangApi.listingSettingsSave(settings); setShowSettings(false); } catch (e: any) { alert(e?.message || '저장 실패'); } finally { setSettingsSaving(false); }
   };
 
+  /** 고시정보 기본값 — 의류 기준. 항목 이름에 맞춰 채우고, 모르는 것은 "상세페이지 참조"(윙의 체크박스와 같은 뜻) */
+  const defaultNotices = (m: ListingMeta, f: Record<string, string> = filters): Record<string, string> => {
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const out: Record<string, string> = {};
+    for (const n of m.notices) for (const d of n.details) {
+      const name = d.name;
+      let v = '상세페이지 참조';
+      if (/소재/.test(name)) v = f['소재'] || f['상하의류 소재'] || '상세페이지 참조';
+      else if (/^색상/.test(name)) v = '상세페이지 참조';
+      else if (/치수|사이즈/.test(name)) v = '상세페이지 참조';
+      else if (/제조자|수입자/.test(name)) v = manufacturer.trim() || brand.trim() || '상세페이지 참조';
+      else if (/제조국/.test(name)) v = '상세페이지 참조';
+      else if (/세탁|취급/.test(name)) v = '세탁기 울코스 또는 손세탁, 표백제 사용 금지, 그늘에서 건조';
+      else if (/제조연월|제조년월|제조일/.test(name)) v = ym;
+      else if (/품질보증/.test(name)) v = '제품 이상 시 공정거래위원회 고시 소비자분쟁해결기준에 의거 보상합니다.';
+      else if (/A\/S|AS|책임자/.test(name)) v = settings.afterServicePhone ? `판매자 ${settings.afterServicePhone}` : '상세페이지 참조';
+      out[`${n.name}|${name}`] = v;
+    }
+    return out;
+  };
   const applyMeta = (m: ListingMeta) => {
     setMeta(m);
-    setNotices({});
+    setNotices(defaultNotices(m, {}));
     const required = m.attributes.filter(a => a.required).map(a => a.name);
     setOptionAttrs(required);
     setUseOptions(required.length > 0 || !m.allowSingleItem);
@@ -188,8 +219,15 @@ export function Listing() {
     setFilterNote(null);
     try {
       const r = await coupangApi.listingAttrs({ images: images.slice(0, 3), attributes: targets, productName: productName.trim() || undefined });
-      setFilters(prev => ({ ...r.values, ...Object.fromEntries(Object.entries(prev).filter(([, v]) => v.trim())) }));
-      setFilterNote(`사진으로 확인된 ${r.filled}/${r.total}개를 채웠습니다. 나머지는 알면 직접 적고, 모르면 비워 두세요.`);
+      const merged = { ...r.values, ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v.trim())) };
+      setFilters(merged);
+      // 소재가 사진으로 확인됐으면 고시정보의 제품 소재도 같이 채운다 ("상세페이지 참조"로 남아 있을 때만)
+      setNotices(prev => {
+        const next = { ...prev };
+        for (const [k, v] of Object.entries(defaultNotices(m, merged))) if (/소재/.test(k) && (!next[k] || next[k] === '상세페이지 참조')) next[k] = v;
+        return next;
+      });
+      setFilterNote(`사진으로 확인된 ${r.filled}/${r.total}개를 채웠습니다. 나머지는 필수 항목이니 직접 입력해주세요.`);
     } catch (e: any) {
       setFilterNote(e?.message || '검색필터를 채우지 못했습니다.');
     } finally {
@@ -296,11 +334,19 @@ export function Listing() {
         deliveryCharge: Number(deliveryCharge) || 0,
         returnCharge: Number(returnCharge) || 0,
         outboundDays: Number(outboundDays) || 1,
+        manufacturer: manufacturer.trim(),
+        certification: certMode === 'required' && certType ? { type: certType, code: certCode.trim() } : null,
+        certificationNote: certMode === 'detail' ? '상세페이지 별도표기' : '',
+        parallelImported: parallelImport,
+        adultOnly,
+        maximumBuyForPerson: Number(maxPerPerson) || 0,
+        saleEndedAt: saleEnd || null,
+        taxFree,
         requestApproval: true,
       };
       const r = await coupangApi.listingCreate(body);
       alert(`쿠팡에 등록 요청했습니다.\n등록상품ID ${r.sellerProductId}\n승인에는 보통 몇 시간~하루가 걸립니다. [등록 내역]에서 상태를 확인하세요.`);
-      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false; setFilters({}); setFilterNote(null);
+      setProductName(''); setBrand(''); setCategory(null); setCategoryCodeInput(''); setMeta(null); setNotices({}); setItems([emptyItem()]); setImages([]); setDetailImages([]); setSearchTags(''); setNameSuggest(null); nameAutoDone.current = false; setFilters({}); setFilterNote(null); setManufacturer(''); setCertMode('none'); setCertType(''); setCertCode(''); setParallelImport(false); setAdultOnly(false); setMaxPerPerson(''); setSaleEnd(''); setTaxFree(false);
       void loadRows();
     } catch (e: any) {
       alert(e?.message || '등록 실패');
@@ -420,47 +466,13 @@ export function Listing() {
           </div>
         </div>
 
+        {/* 순서는 윙 등록 화면과 같다: 이미지 → 상품명 → 옵션 → 가격 → 상세페이지 → 검색필터 → 주요 정보 → 고시 → 검색 태그 */}
         {meta && (
           <>
-            {meta.attributes.some(a => !optionAttrs.includes(a.name)) && (
-              <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <p className={`${labelCls} mb-0`}>검색필터 <span className="font-normal text-ink-3">(이 카테고리 항목 · 채울수록 필터 검색에 더 잡힙니다)</span></p>
-                  <button type="button" onClick={() => void fillFilters()} disabled={filterBusy || images.length === 0} title={images.length === 0 ? '대표 이미지를 먼저 올리세요' : ''}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-2 hover:text-ink disabled:opacity-50">
-                    {filterBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />} 사진으로 채우기
-                  </button>
-                </div>
-                <div className="grid gap-2 md:grid-cols-3">
-                  {meta.attributes.filter(a => !optionAttrs.includes(a.name)).map(a => (
-                    <div key={a.name} className="flex items-center gap-2">
-                      <span className="w-28 shrink-0 truncate text-[12px] text-ink-2" title={a.name}>{a.name}{a.basicUnit ? <span className="text-ink-3"> ({a.basicUnit})</span> : null}</span>
-                      <input value={filters[a.name] ?? ''} onChange={e => setFilters(p => ({ ...p, [a.name]: e.target.value }))} placeholder="모르면 비워 두세요" className={`${inputCls} py-1.5`} />
-                    </div>
-                  ))}
-                </div>
-                {filterNote && <p className="mt-1 text-[11px] text-ink-3">{filterNote}</p>}
-              </div>
-            )}
-
-            {noticeList.length > 0 && (
-              <div>
-                <p className={labelCls}>상품 고시정보 <span className="font-normal text-ink-3">(이 카테고리 필수 항목만 · 모르면 "상세페이지 참조")</span></p>
-                <div className="grid gap-2 md:grid-cols-2">
-                  {noticeList.map(n => (
-                    <div key={`${n.category}|${n.name}`} className="flex items-center gap-2">
-                      <span className="w-40 shrink-0 truncate text-[12px] text-ink-2" title={`${n.category} › ${n.name}`}>{n.name}{n.required && <span className="text-critical"> *</span>}</span>
-                      <input value={notices[`${n.category}|${n.name}`] ?? ''} onChange={e => setNotices(p => ({ ...p, [`${n.category}|${n.name}`]: e.target.value }))} placeholder="상세페이지 참조" className={inputCls} />
-                    </div>
-                  ))}
-                </div>
-                <button type="button" onClick={() => setNotices(Object.fromEntries(noticeList.map(n => [`${n.category}|${n.name}`, notices[`${n.category}|${n.name}`] || '상세페이지 참조'])))} className="mt-2 text-[11px] text-ink-3 underline hover:text-ink">빈 칸을 전부 "상세페이지 참조"로 채우기</button>
-              </div>
-            )}
-
+            {/* 옵션 · 가격 */}
             <div>
               <div className="mb-2 flex flex-wrap items-center gap-3">
-                <p className={`${labelCls} mb-0`}>판매가·재고 *</p>
+                <p className={`${labelCls} mb-0`}>옵션 · 판매가 · 재고 *</p>
                 <label className="inline-flex items-center gap-1 text-[12px] text-ink-2"><input type="checkbox" checked={useOptions} onChange={e => setUseOptions(e.target.checked)} disabled={!meta.allowSingleItem} /> 옵션 있음 (색상·사이즈 등)</label>
                 {useOptions && (
                   <select value="" onChange={e => { if (e.target.value && !optionAttrs.includes(e.target.value)) setOptionAttrs(p => [...p, e.target.value]); }} className={`${inputCls} w-auto py-1 text-[12px]`}>
@@ -491,13 +503,128 @@ export function Listing() {
               {useOptions && <button type="button" onClick={() => setItems(p => [...p, { ...emptyItem(), salePrice: p[p.length - 1]?.salePrice ?? '', originalPrice: p[p.length - 1]?.originalPrice ?? '' }])} className="mt-2 inline-flex items-center gap-1 text-[12px] font-semibold text-ink-2 hover:text-ink"><Plus className="h-3.5 w-3.5" /> 옵션 추가</button>}
             </div>
 
-            <ImagePicker label="상세 이미지 *" hint="위에서 아래 순서대로. 상세페이지 제작에서 받은 파일을 그대로 올리세요." urls={detailImages} onChange={setDetailImages} max={30} />
+            {/* 상세페이지 */}
+            <ImagePicker label="상세페이지 이미지 *" hint="위에서 아래 순서대로. 상세페이지 제작에서 받은 파일을 그대로 올리세요." urls={detailImages} onChange={setDetailImages} max={30} />
 
-            <div className="grid gap-3 md:grid-cols-4">
-              <div><label className={labelCls}>배송비 (0이면 무료)</label><input inputMode="numeric" value={deliveryCharge} onChange={e => setDeliveryCharge(e.target.value.replace(/\D/g, ''))} className={inputCls} /></div>
-              <div><label className={labelCls}>반품 배송비 (편도)</label><input inputMode="numeric" value={returnCharge} onChange={e => setReturnCharge(e.target.value.replace(/\D/g, ''))} className={inputCls} /></div>
-              <div><label className={labelCls}>출고 소요일</label><input inputMode="numeric" value={outboundDays} onChange={e => setOutboundDays(e.target.value.replace(/\D/g, ''))} className={inputCls} /></div>
+            {/* 검색필터 */}
+            {meta.attributes.some(a => !optionAttrs.includes(a.name)) && (
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <p className={`${labelCls} mb-0`}>검색필터 <span className="font-normal text-ink-3">(이 카테고리 항목 · 채울수록 필터 검색에 더 잡힙니다)</span></p>
+                  <button type="button" onClick={() => void fillFilters()} disabled={filterBusy || images.length === 0} title={images.length === 0 ? '대표 이미지를 먼저 올리세요' : ''}
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-ink-2 hover:text-ink disabled:opacity-50">
+                    {filterBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />} 사진으로 채우기
+                  </button>
+                </div>
+                <div className="grid gap-2 md:grid-cols-3">
+                  {meta.attributes.filter(a => !optionAttrs.includes(a.name)).map(a => (
+                    <div key={a.name} className="flex items-center gap-2">
+                      <span className="w-28 shrink-0 truncate text-[12px] text-ink-2" title={a.name}>{a.name}{a.basicUnit ? <span className="text-ink-3"> ({a.basicUnit})</span> : null}</span>
+                      <input value={filters[a.name] ?? ''} onChange={e => setFilters(p => ({ ...p, [a.name]: e.target.value }))} placeholder="필수라 입력해주세요" className={`${inputCls} py-1.5`} />
+                    </div>
+                  ))}
+                </div>
+                {filterNote && <p className="mt-1 text-[11px] text-ink-3">{filterNote}</p>}
+              </div>
+            )}
+
+            {/* 상품 주요 정보 */}
+            <div>
+              <p className={labelCls}>상품 주요 정보</p>
+              <div className="divide-y divide-line rounded-card border border-line">
+                <div className="grid gap-2 px-3 py-2.5 md:grid-cols-[140px_1fr] md:items-center">
+                  <span className="text-[12px] text-ink-2">제조사</span>
+                  <input value={manufacturer} onChange={e => setManufacturer(e.target.value)} placeholder="제조사를 알 수 없는 경우 브랜드명을 입력해주세요." className={`${inputCls} py-1.5`} />
+                </div>
+                <div className="grid gap-2 px-3 py-2.5 md:grid-cols-[140px_1fr] md:items-center">
+                  <span className="text-[12px] text-ink-2">상품 구성</span>
+                  <span className="text-[12px] text-ink-3">동일한 상품으로 구성됨 (혼합 구성은 윙에서 등록)</span>
+                </div>
+                <div className="grid gap-2 px-3 py-2.5 md:grid-cols-[140px_1fr] md:items-center">
+                  <span className="text-[12px] text-ink-2">인증정보</span>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-4 text-[12px] text-ink">
+                      {([['required', '인증·신고 대상'], ['detail', '상세페이지 별도표기'], ['none', '인증·신고 대상 아님']] as const).map(([v, l]) => (
+                        <label key={v} className="inline-flex items-center gap-1"><input type="radio" name="cert" checked={certMode === v} onChange={() => setCertMode(v)} /> {l}</label>
+                      ))}
+                    </div>
+                    {certMode === 'required' && (
+                      <div className="flex flex-wrap gap-2">
+                        <select value={certType} onChange={e => setCertType(e.target.value)} className={`${inputCls} w-auto min-w-56 py-1.5`}>
+                          <option value="">인증 종류 선택</option>
+                          {meta.certifications.map(c => <option key={c.type} value={c.type}>{c.name || c.type}{c.required ? ' (필수)' : ''}</option>)}
+                          {meta.certifications.length === 0 && <option value="KC">KC 인증</option>}
+                        </select>
+                        <input value={certCode} onChange={e => setCertCode(e.target.value)} placeholder="인증번호" className={`${inputCls} w-56 py-1.5`} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="grid gap-2 px-3 py-2.5 md:grid-cols-[140px_1fr] md:items-center">
+                  <span className="text-[12px] text-ink-2">병행수입</span>
+                  <div className="flex gap-4 text-[12px] text-ink">
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="parallel" checked={parallelImport} onChange={() => setParallelImport(true)} /> 병행수입</label>
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="parallel" checked={!parallelImport} onChange={() => setParallelImport(false)} /> 병행수입 아님</label>
+                  </div>
+                </div>
+                <div className="grid gap-2 px-3 py-2.5 md:grid-cols-[140px_1fr] md:items-center">
+                  <span className="text-[12px] text-ink-2">구매 연령</span>
+                  <div className="flex gap-4 text-[12px] text-ink">
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="adult" checked={!adultOnly} onChange={() => setAdultOnly(false)} /> 전체 연령</label>
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="adult" checked={adultOnly} onChange={() => setAdultOnly(true)} /> 성인 전용 (19세 이상)</label>
+                  </div>
+                </div>
+                <div className="grid gap-2 px-3 py-2.5 md:grid-cols-[140px_1fr] md:items-center">
+                  <span className="text-[12px] text-ink-2">인당 최대구매수량</span>
+                  <div className="flex flex-wrap items-center gap-4 text-[12px] text-ink">
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="maxp" checked={!!maxPerPerson} onChange={() => setMaxPerPerson(maxPerPerson || '1')} /> 설정함</label>
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="maxp" checked={!maxPerPerson} onChange={() => setMaxPerPerson('')} /> 설정안함</label>
+                    {maxPerPerson && <input inputMode="numeric" value={maxPerPerson} onChange={e => setMaxPerPerson(e.target.value.replace(/\D/g, ''))} className={`${inputCls} w-24 py-1.5`} />}
+                  </div>
+                </div>
+                <div className="grid gap-2 px-3 py-2.5 md:grid-cols-[140px_1fr] md:items-center">
+                  <span className="text-[12px] text-ink-2">판매기간</span>
+                  <div className="flex flex-wrap items-center gap-4 text-[12px] text-ink">
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="period" checked={!!saleEnd} onChange={() => setSaleEnd(saleEnd || new Date(Date.now() + 365 * 86400_000).toISOString().slice(0, 10))} /> 설정함</label>
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="period" checked={!saleEnd} onChange={() => setSaleEnd('')} /> 설정안함</label>
+                    {saleEnd && <span className="inline-flex items-center gap-1">종료일 <input type="date" value={saleEnd} onChange={e => setSaleEnd(e.target.value)} className={`${inputCls} w-auto py-1.5`} /></span>}
+                  </div>
+                </div>
+                <div className="grid gap-2 px-3 py-2.5 md:grid-cols-[140px_1fr] md:items-center">
+                  <span className="text-[12px] text-ink-2">부가세</span>
+                  <div className="flex gap-4 text-[12px] text-ink">
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="tax" checked={!taxFree} onChange={() => setTaxFree(false)} /> 과세</label>
+                    <label className="inline-flex items-center gap-1"><input type="radio" name="tax" checked={taxFree} onChange={() => setTaxFree(true)} /> 면세</label>
+                  </div>
+                </div>
+                <div className="grid gap-2 px-3 py-2.5 md:grid-cols-[140px_1fr] md:items-center">
+                  <span className="text-[12px] text-ink-2">배송 · 반품</span>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <label className="text-[11px] text-ink-3">배송비 (0이면 무료)<input inputMode="numeric" value={deliveryCharge} onChange={e => setDeliveryCharge(e.target.value.replace(/\D/g, ''))} className={`${inputCls} mt-0.5 py-1.5`} /></label>
+                    <label className="text-[11px] text-ink-3">반품 배송비 (편도)<input inputMode="numeric" value={returnCharge} onChange={e => setReturnCharge(e.target.value.replace(/\D/g, ''))} className={`${inputCls} mt-0.5 py-1.5`} /></label>
+                    <label className="text-[11px] text-ink-3">출고 소요일<input inputMode="numeric" value={outboundDays} onChange={e => setOutboundDays(e.target.value.replace(/\D/g, ''))} className={`${inputCls} mt-0.5 py-1.5`} /></label>
+                  </div>
+                </div>
+              </div>
             </div>
+
+            {/* 상품정보 제공고시 */}
+            {noticeList.length > 0 && (
+              <div>
+                <p className={labelCls}>상품정보 제공고시 <span className="font-normal text-ink-3">(의류 기준 기본값을 채워 두었습니다 · 제조국·치수 등 아는 값은 고쳐 주세요)</span></p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {noticeList.map(n => (
+                    <div key={`${n.category}|${n.name}`} className="flex items-center gap-2">
+                      <span className="w-40 shrink-0 truncate text-[12px] text-ink-2" title={`${n.category} › ${n.name}`}>{n.name}{n.required && <span className="text-critical"> *</span>}</span>
+                      <input value={notices[`${n.category}|${n.name}`] ?? ''} onChange={e => setNotices(p => ({ ...p, [`${n.category}|${n.name}`]: e.target.value }))} placeholder="상세페이지 참조" className={inputCls} />
+                    </div>
+                  ))}
+                </div>
+                <button type="button" onClick={() => setNotices(Object.fromEntries(noticeList.map(n => [`${n.category}|${n.name}`, notices[`${n.category}|${n.name}`] || '상세페이지 참조'])))} className="mt-2 text-[11px] text-ink-3 underline hover:text-ink">빈 칸을 전부 "상세페이지 참조"로 채우기</button>
+              </div>
+            )}
+
+            {/* 검색 태그 */}
             <div>
               <div className="mb-1 flex items-center justify-between">
                 <label className={`${labelCls} mb-0`}>검색 태그 <span className="font-normal text-ink-3">(쉼표 구분 · {searchTags.split(/[,\n]/).map(t => t.trim()).filter(Boolean).length}/20개)</span></label>

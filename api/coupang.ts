@@ -6660,6 +6660,15 @@ async function handleListingCreate(userId: string, req: VercelRequest, res: Verc
   const deliveryCompany = String(b.deliveryCompany ?? st?.delivery_company ?? 'CJGLS').trim() || 'CJGLS';
   const afterServicePhone = String(b.afterServicePhone ?? st?.after_service_phone ?? '').trim();
   const afterServiceInfo = String(b.afterServiceInfo ?? st?.after_service_info ?? '').trim() || '고객센터로 문의해주세요.';
+  // 상품 주요 정보 — 윙의 같은 구간. 기본값은 윙 기본값(전체 연령·병행수입 아님·과세·기간 없음)
+  const manufacturer = String(b.manufacturer ?? '').trim().slice(0, 100) || brand.slice(0, 100) || '상세페이지 참조';
+  const cert = b.certification && typeof b.certification === 'object' && String(b.certification.type ?? '').trim()
+    ? { certificationType: String(b.certification.type).trim().slice(0, 60), certificationCode: String(b.certification.code ?? '').trim().slice(0, 100) }
+    : null;
+  const parallelImported = b.parallelImported === true ? 'PARALLEL_IMPORTED' : 'NOT_PARALLEL_IMPORTED';
+  const adultOnly = b.adultOnly === true ? 'ADULT_ONLY' : 'EVERYONE';
+  const maxPerPerson = Math.max(0, Math.round(Number(b.maximumBuyForPerson) || 0));
+  const saleEndDate = /^\d{4}-\d{2}-\d{2}$/.test(String(b.saleEndedAt ?? '')) ? `${b.saleEndedAt}T23:59:59` : '2099-12-31T23:59:59';
 
   const missing: string[] = [];
   if (!productName) missing.push('상품명');
@@ -6697,19 +6706,19 @@ async function handleListingCreate(userId: string, req: VercelRequest, res: Verc
       originalPrice: original,
       salePrice: sale,
       maximumBuyCount: Math.round(Number(it.stock)),
-      maximumBuyForPerson: 0,
+      maximumBuyForPerson: maxPerPerson,
       maximumBuyForPersonPeriod: 1,
       outboundShippingTimeDay: outboundDays,
       unitCount: 1,
-      adultOnly: 'EVERYONE',
-      taxType: b.taxFree ? 'FREE' : 'TAX',
-      parallelImported: 'NOT_PARALLEL_IMPORTED',
+      adultOnly,
+      taxType: b.taxFree === true ? 'FREE' : 'TAX',
+      parallelImported,
       overseasPurchased: 'NOT_OVERSEAS_PURCHASED',
       pccNeeded: false,
       externalVendorSku: String(it.sku ?? '').trim().slice(0, 50) || `HP-${now.getTime().toString(36)}-${idx + 1}`,
       emptyBarcode: true,
       emptyBarcodeReason: '바코드 없는 상품',
-      certifications: [],
+      certifications: cert ? [cert] : [],
       searchTags,
       images: imageRows,
       notices: noticeRows,
@@ -6727,7 +6736,7 @@ async function handleListingCreate(userId: string, req: VercelRequest, res: Verc
     sellerProductName: productName.slice(0, 100),
     vendorId: creds.vendorId,
     saleStartedAt: fmt(now),
-    saleEndedAt: '2099-12-31T23:59:59',
+    saleEndedAt: saleEndDate,
     displayProductName: productName.slice(0, 100),
     brand: brand.slice(0, 100),
     deliveryMethod: 'SEQUENCIAL',
@@ -6753,6 +6762,8 @@ async function handleListingCreate(userId: string, req: VercelRequest, res: Verc
     requested: b.requestApproval !== false,
     items: itemRows,
     requiredDocuments: [],
+    manufacture: manufacturer,
+    extraInfoMessage: String(b.certificationNote ?? '').trim().slice(0, 200) || undefined,
   };
 
   const r = await coupangCall(creds, 'POST', EP.sellerProducts, '', payload);
