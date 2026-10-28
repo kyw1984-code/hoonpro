@@ -608,6 +608,18 @@ export const coupangApi = {
     if (!res.ok) throw new Error(data?.error || '검색필터를 채우지 못했습니다.');
     return data as { values: Record<string, string>; filled: number; total: number };
   },
+  /** 상세페이지 이미지 → 제공고시·옵션 (api/ai) */
+  listingNotices: async (body: { images: string[]; notices: string[]; productName?: string }) => {
+    const token = getToken();
+    const res = await fetch('/api/ai?action=listing-notices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || '상세페이지 분석에 실패했습니다.');
+    return data as { notices: Record<string, string>; options: { colors: string[]; sizes: string[] }; summary: string; filled: number; total: number };
+  },
   /** 제품 사진 → 쿠팡 상위노출 기준 상품명 (api/ai) */
   listingProductName: async (body: { images: string[]; brand?: string; hint?: string; bundleCount?: number }) => {
     const token = getToken();
