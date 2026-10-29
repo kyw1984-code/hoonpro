@@ -7,7 +7,7 @@ import { withVat } from '../src/lib/vat.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
 import { emailFrom } from '../src/lib/emailFrom.js';
 import { wrapEmail as wrapEmailBase } from '../src/lib/emailTemplate.js';
-import { sendAdminSms, paymentSmsText } from '../src/lib/adminSms.js';
+import { sendAdminSms, paymentSmsText, adminSmsRecipients } from '../src/lib/adminSms.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 
@@ -656,6 +656,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (action === 'admin-subscriptions') return await adminSubscriptions(req, res);
       if (action === 'admin-payments') return await adminPayments(req, res);
       if (action === 'admin-config') return await adminBillingConfig(req, res);
+      if (action === 'admin-sms-test') {
+        // 결제 문자 설정 확인 — 실제 결제 없이 운영자 번호로 한 통 보낸다
+        const r = await sendAdminSms(paymentSmsText('신규', '테스트', 54780, '월간'));
+        return res.status(200).json({ ...r, to: adminSmsRecipients().map(n => n.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3')) });
+      }
     }
 
     return res.status(400).json({ error: '잘못된 요청입니다.' });
