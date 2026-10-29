@@ -3024,6 +3024,12 @@ function daysToExpiry(keyExpiresAt: string | null): number | null {
 async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
   const key = process.env.RESEND_API_KEY;
   if (!key || !to) return false;
+  // 이 파일의 메일은 전부 알림(수집 중단·키 만료·브리핑·주간 성과)이라 수신 거부를 따른다.
+  // 결제 메일(api/billing)은 여기 없다. 거부한 사람에게는 '보낸 것'으로 쳐서 매일 다시 시도하지 않는다.
+  try {
+    const { data: u } = await supabase.from('users').select('email_opt_out').eq('email', to).maybeSingle();
+    if (u?.email_opt_out) return true;
+  } catch { /* 조회 실패는 발송 쪽으로 */ }
   try {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
