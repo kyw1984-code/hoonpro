@@ -7,6 +7,7 @@ import { withVat } from '../src/lib/vat.js';
 import { runCron } from '../src/lib/cronHeartbeat.js';
 import { emailFrom } from '../src/lib/emailFrom.js';
 import { wrapEmail as wrapEmailBase } from '../src/lib/emailTemplate.js';
+import { sendAdminSms, paymentSmsText } from '../src/lib/adminSms.js';
 import jwt from 'jsonwebtoken';
 import crypto from 'node:crypto';
 
@@ -561,6 +562,7 @@ async function chargeSubscription(sub: any, plan: any, user: any): Promise<{ ok:
       `<p>다음 결제 예정일: <b style="color:#e8ecf5;">${nextBilling}</b></p>` +
       (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('구독 관리 열기'))),
       { userId: sub.user_id, kind: 'payment-ok', ref: orderId });
+    if (amount > 0) await sendAdminSms(paymentSmsText('정기', user.name ?? '', amount, plan.name));
     return { ok: true };
   }
 
@@ -889,6 +891,7 @@ async function subscribe(user: any, req: VercelRequest, res: VercelResponse) {
       `<p>결제 금액: <b style="color:#e8ecf5;">${won(amount)}</b>${discount > 0 ? ` (쿠폰 할인 ${won(discount)})` : ''}<br>다음 결제일: <b style="color:#e8ecf5;">${periodEnd}</b></p>` +
       (result.receiptUrl ? emailButton('영수증 보기', result.receiptUrl) : emailButton('훈프로 열기'))),
       { userId: user.userId, kind: 'subscribe-ok', ref: orderId });
+    if (amount > 0) await sendAdminSms(paymentSmsText('신규', userRow?.name ?? user.name ?? '', amount, plan.name));
   } else {
     await sendEmail(userRow?.email ?? user.email, `[훈프로] 무료 이용 시작 (${coupon!.value}일)`, wrapEmail(
       '무료 이용이 시작됐습니다',
