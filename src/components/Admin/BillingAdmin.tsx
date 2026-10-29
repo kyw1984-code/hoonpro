@@ -102,6 +102,15 @@ async function callBilling(action: string, body?: Record<string, unknown>) {
 
 export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }) {
   const [subs, setSubs] = useState<SubRow[]>([]);
+  const [smsBusy, setSmsBusy] = useState(false);
+  const [smsResult, setSmsResult] = useState<string | null>(null);
+  const testSms = async () => {
+    setSmsBusy(true); setSmsResult(null);
+    try {
+      const r = await callBilling('admin-sms-test');
+      setSmsResult(r.sent > 0 ? `${r.to.join(', ')} 로 ${r.sent}통 보냈습니다. 휴대폰을 확인하세요.` : `보내지 못했습니다: ${r.skipped ?? '알 수 없음'}`);
+    } catch (e: any) { setSmsResult(e?.message || '요청 실패'); } finally { setSmsBusy(false); }
+  };
   const [stats, setStats] = useState<any | null>(null);
   const [revenue, setRevenue] = useState<any | null>(null);
   const [hoverMonth, setHoverMonth] = useState<number | null>(null);
@@ -560,6 +569,18 @@ export function BillingAdmin({ showToast }: { showToast: (msg: string) => void }
           }`}
         >
           {enforced ? '유료화 끄기' : '유료화 켜기'}
+        </button>
+      </div>
+
+      {/* 결제 문자 알림 — 유료 결제 성공 시 운영자 번호로 문자. 여기서 설정만 확인한다 */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-line bg-paper p-5">
+        <div>
+          <h3 className="text-[15px] font-semibold text-ink">결제 문자 알림</h3>
+          <p className="mt-1 text-[12.5px] text-ink-2">유료 결제(신규·정기)가 성공하면 운영자 번호로 문자가 갑니다. 테스트를 누르면 실제로 한 통 보냅니다.</p>
+          {smsResult && <p className="mt-1 text-[12px] text-ink-3">{smsResult}</p>}
+        </div>
+        <button onClick={testSms} disabled={smsBusy} className="rounded-control border border-line px-4 py-2 text-[13px] font-semibold text-ink hover:opacity-90 disabled:opacity-40">
+          {smsBusy ? '보내는 중…' : '문자 테스트'}
         </button>
       </div>
 
