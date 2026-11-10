@@ -261,6 +261,29 @@ export default function App() {
     setRemainingCalls(null);
   };
 
+  // 토큰은 7일이면 끝난다. 탭을 그대로 열어 둔 채 넘기면 화면은 로그인 상태인데
+  // 요청마다 "인증이 필요합니다"만 떴다 — getUser()가 만료 토큰을 지우는데 user
+  // 상태는 그대로였기 때문. 탭으로 돌아올 때와 1분마다 확인해 로그인 화면으로 보낸다.
+  useEffect(() => {
+    if (!user) return;
+    const check = () => {
+      if (!getUser()) {
+        setUser(null);
+        setRemainingCalls(null);
+        alert('로그인이 만료됐습니다. 다시 로그인해주세요.');
+      }
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    const timer = window.setInterval(check, 60_000);
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [user]);
+
   if (!user) {
     // AuthGate 내부에서 다크 테마 푸터를 렌더링
     return <AuthGate onSuccess={() => setUser(getUser())} />;
