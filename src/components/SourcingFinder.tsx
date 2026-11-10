@@ -95,6 +95,7 @@ interface Market {
   generalCount: number;
   rocketRatio: number;
   totalProducts: number;
+  totalProductsEstimated?: boolean;
   keywordVolume: number;
   competitionRate: number | null;
   medianReviews: number;
@@ -1171,7 +1172,7 @@ export function SourcingFinder() {
                           {market.competitionRate === null ? '—' : market.competitionRate}
                         </p>
                         <p className="mt-1 text-[12px] text-ink-3">
-                          총 {market.totalProducts > 0 ? market.totalProducts.toLocaleString() : '?'}개 상품
+                          총 {market.totalProducts > 0 ? `${market.totalProductsEstimated ? '약 ' : ''}${market.totalProducts.toLocaleString()}` : '?'}개 상품
                           {market.keywordVolume > 0 && ` / 검색 ${market.keywordVolume.toLocaleString()}회`}
                         </p>
                       </div>

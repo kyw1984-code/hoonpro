@@ -1107,15 +1107,56 @@ function parseEmbeddedJson(html: string): ParsedProduct[] {
   return [];
 }
 
-function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCount: number; diagnostics: string } {
-  // 총 검색결과 건수 (베스트에포트)
-  let totalCount = 0;
-  const tc =
-    html.match(/검색결과[\s\S]{0,120}?([\d,]{2,12})\s*[건개]/) ||
-    html.match(/총\s*<[^>]+>([\d,]+)<[^>]+>\s*[건개]/) ||
-    html.match(/"totalCount"\s*:\s*(\d+)/) ||
-    html.match(/"searchResultCount"\s*:\s*(\d+)/);
-  if (tc) totalCount = parseInt(tc[1].replace(/,/g, ""), 10) || 0;
+/** 건수 표기를 못 찾았을 때 관련 구간을 app_config에 남긴다 (관리자 확인용, 최신 1건만) */
+async function saveCountDebug(keyword: string, html: string): Promise<void> {
+  try {
+    const snippets: string[] = [];
+    const probes: RegExp[] = [/total/i, /count"\s*:/i, /[?&]page=\d+/, /검색결과/, /개의?\s*상품/, /\d[\d,]{2,}\s*[건개]/];
+    for (const re of probes) {
+      let n = 0;
+      for (const m of html.matchAll(new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g"))) {
+        if (m.index === undefined) continue;
+        snippets.push(`[${re.source}] …${html.slice(Math.max(0, m.index - 120), m.index + 160).replace(/\s+/g, " ")}…`);
+        if (++n >= 2) break;
+      }
+    }
+    await supabase.from("app_config").upsert({
+      key: "sourcing_count_debug",
+      value: JSON.stringify({ keyword, at: new Date().toISOString(), htmlLen: html.length, snippets: snippets.slice(0, 12) }),
+      updated_at: new Date().toISOString(),
+    });
+  } catch { /* 진단용이라 실패해도 무시 */ }
+}
+
+/**
+ * 검색결과 총 건수. 쿠팡이 2025년 가을 검색 페이지를 갈면서 예전 "검색결과 N건"
+ * 문구가 사라져 한 달 넘게 0으로만 잡혔다(경쟁 강도 칸이 "총 ?개"). 여러 표기를
+ * 차례로 보고, 그래도 없으면 페이지 번호 × 페이지당 60개로 어림한다.
+ * 어림값은 totalCountEstimated=true로 돌려 화면에 "약"을 붙인다.
+ */
+function parseTotalCount(html: string): { totalCount: number; estimated: boolean } {
+  const patterns = [
+    /검색결과[\s\S]{0,120}?([\d,]{2,12})\s*[건개]/,
+    /총\s*<[^>]+>([\d,]+)<[^>]+>\s*[건개]/,
+    /([\d,]{2,12})\s*개의?\s*(?:상품|검색\s*결과)/,
+    /"(?:totalCount|searchResultCount|totalProductCount|productTotalCount|totalResults|resultCount|total_count)"\s*:\s*"?(\d{1,9})"?/,
+    /"total"\s*:\s*(\d{2,9})\s*,\s*"(?:page|size|products|list)/,
+  ];
+  for (const re of patterns) {
+    const m = html.match(re);
+    const n = m ? parseInt(m[1].replace(/,/g, ""), 10) : 0;
+    if (n > 0) return { totalCount: n, estimated: false };
+  }
+  // 페이지네이션 어림: page=N 링크 중 가장 큰 N (listSize=60 기준)
+  let maxPage = 0;
+  for (const m of html.matchAll(/[?&]page=(\d{1,4})\b/g)) maxPage = Math.max(maxPage, parseInt(m[1], 10) || 0);
+  if (maxPage === 0) for (const m of html.matchAll(/"(?:totalPage|totalPages|lastPage|pageCount)"\s*:\s*(\d{1,4})/g)) maxPage = Math.max(maxPage, parseInt(m[1], 10) || 0);
+  if (maxPage > 1) return { totalCount: maxPage * 60, estimated: true };
+  return { totalCount: 0, estimated: false };
+}
+
+function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCount: number; totalCountEstimated: boolean; diagnostics: string } {
+  const { totalCount, estimated: totalCountEstimated } = parseTotalCount(html);
 
   // 상품 li 블록을 먼저 본다. 화면에 보이는 순서 그대로이고, 같은 상품이 광고
   // 자리와 자연 자리에 두 번 나오면 둘 다 남는다. schema.org JSON은 상품을 하나로
@@ -1195,7 +1236,7 @@ function parseCoupangSearch(html: string): { products: ParsedProduct[]; totalCou
       `ProductUnit=${count(/ProductUnit_productUnit__/g)}, vp링크=${count(/\/vp\/products\/\d+/g)}, ` +
       `차단여부=${/access denied|보안 확인|captcha/i.test(html)}\n[구조 샘플] ${excerpt.slice(0, 450)}`;
   }
-  return { products, totalCount, diagnostics };
+  return { products, totalCount, totalCountEstimated, diagnostics };
 }
 
 // ─── 리뷰 증가속도 (관측 기록 기반) ───────────────────────────────────────────
@@ -1905,7 +1946,7 @@ async function loadReviewVelocity(productIds: string[]): Promise<Map<string, { p
 // ─── 점수 산출 (실데이터) ─────────────────────────────────────────────────────
 function scoreProducts(
   parsed: ParsedProduct[], keywordVolume: number, totalCount: number, searchKeyword = "",
-  sellerProfile: SellerProfile | null = null,
+  sellerProfile: SellerProfile | null = null, totalCountEstimated = false,
 ) {
   const organic = organicList(parsed);
   // 검색 키워드 자체가 브랜드면 브랜드 표시를 하지 않는다 (의도적 브랜드 조사)
@@ -2018,6 +2059,7 @@ function scoreProducts(
     generalCount,
     rocketRatio,
     totalProducts: totalCount,
+    totalProductsEstimated: totalCountEstimated,
     keywordVolume,
     competitionRate,
     medianReviews,
@@ -2099,7 +2141,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
 
   const cacheKey = `cp:v5:${keyword.replace(/\s+/g, "")}`;
   const cached = await cacheGet(cacheKey);
-  let parsed: { products: ParsedProduct[]; totalCount: number } | null = null;
+  let parsed: { products: ParsedProduct[]; totalCount: number; totalCountEstimated?: boolean } | null = null;
   let servedFrom: "fresh" | "cache" | "stale" = "fresh";
   let parseDebug = "";
 
@@ -2140,7 +2182,9 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
       const p = parseCoupangSearch(result.html!);
       parseDebug = p.diagnostics;
       if (p.products.length > 0) {
-        parsed = { products: p.products, totalCount: p.totalCount };
+        parsed = { products: p.products, totalCount: p.totalCount, totalCountEstimated: p.totalCountEstimated };
+        // 건수를 못 읽으면 페이지의 관련 구간을 남겨 둔다 (관리자가 표기 변화를 확인하는 용도)
+        if (p.totalCount === 0) void saveCountDebug(keyword, result.html!);
         // 불완전 파싱(5개 미만)은 캐시하지 않아 재시도가 가능하도록 함
         if (p.products.length >= 5) await cacheSet(cacheKey, parsed);
         await recordObservations(keyword, p.products); // 리뷰속도 히스토리 축적
@@ -2173,7 +2217,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
 
   // 정산AI가 아는 이 판매자의 실적으로 "내 가게와 닮은 시장"을 가린다
   const sellerProfile = await loadSellerProfile(decoded?.userId);
-  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount, keyword, sellerProfile);
+  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount, keyword, sellerProfile, parsed.totalCountEstimated === true);
   const velocity = await loadReviewVelocity(products.map(p => p.productId));
   const withVelocity = products.map(p => {
     const v = velocity.get(p.productId);
