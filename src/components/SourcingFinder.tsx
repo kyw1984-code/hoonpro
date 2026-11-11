@@ -547,6 +547,13 @@ export function SourcingFinder() {
       return b.calculated.opportunityScore - a.calculated.opportunityScore;
     });
 
+  // 평균 판매가는 아래 목록에 실제로 보이는 상품 기준이다. 전체 평균은 80만원짜리 한 개에
+  // 끌려 올라가 목록의 가격대(3~5만원)와 동떨어진 숫자가 됐다. 필터를 바꾸면 같이 바뀐다.
+  const shownPrices = displayProducts.map(p => p.productPrice).filter(v => v > 0);
+  const shownPrice = shownPrices.length > 0
+    ? { avg: Math.round(shownPrices.reduce((a, b) => a + b, 0) / shownPrices.length), min: Math.min(...shownPrices), max: Math.max(...shownPrices), count: shownPrices.length }
+    : null;
+
   // ─── CSV 내보내기 ───────────────────────────────────────────────────────────
   const downloadCSV = (name: string, headers: string[], rows: (string | number)[][]) => {
     const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
@@ -1184,8 +1191,8 @@ export function SourcingFinder() {
                       </div>
                       <div className="bg-paper-2 rounded-card p-4 border border-line">
                         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">평균 판매가</p>
-                        <p className="text-xl font-semibold text-caution">{market.avgPrice.toLocaleString()}원</p>
-                        <p className="mt-1 text-[12px] text-ink-3">{market.minPrice.toLocaleString()} ~ {market.maxPrice.toLocaleString()}원</p>
+                        <p className="text-xl font-semibold text-caution">{(shownPrice?.avg ?? market.avgPrice).toLocaleString()}원</p>
+                        <p className="mt-1 text-[12px] text-ink-3">{(shownPrice?.min ?? market.minPrice).toLocaleString()} ~ {(shownPrice?.max ?? market.maxPrice).toLocaleString()}원{shownPrice ? ` · 아래 ${shownPrice.count}개 기준` : ''}</p>
                         {/* 세트가 섞인 시장은 표시가가 체감가와 다르다. 2종 세트 41,200원은 낱개 20,600원이다 */}
                         {(market.setRatio ?? 0) >= 20 && (market.unitMedianPrice ?? 0) > 0 && (
                           <p className="mt-1 text-[11.5px] text-accent">
@@ -1199,7 +1206,7 @@ export function SourcingFinder() {
                         내 실제 정산 비율로 원가 상한을 낸다 — 경쟁사는 못 하는 계산이다. */}
                     <div className="mt-4 flex flex-col gap-3">
                       <div id="sourcing-profit">
-                        <SourcingProfit avgPrice={market.avgPrice} product={selectedProduct} />
+                        <SourcingProfit avgPrice={shownPrice?.avg ?? market.avgPrice} product={selectedProduct} />
                       </div>
                       {/* 이 키워드를 전에도 본 적 있으면 그 사이 무엇이 달라졌는지 짚어 준다 */}
                       {/* 새 상품을 찾는 것만큼이나 "내 시장이 지금 어떤가"를 보러 온다 */}
