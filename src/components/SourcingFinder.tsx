@@ -96,6 +96,7 @@ interface Market {
   rocketRatio: number;
   totalProducts: number;
   totalProductsEstimated?: boolean;
+  totalProductsSource?: 'coupang' | 'naver';
   keywordVolume: number;
   competitionRate: number | null;
   medianReviews: number;
@@ -1168,11 +1169,11 @@ export function SourcingFinder() {
                       </div>
                       <div className="bg-paper-2 rounded-card p-4 border border-line">
                         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">경쟁 강도 (상품수 ÷ 검색량)</p>
-                        <p className={`text-xl font-semibold ${market.competitionRate === null ? 'text-ink-3' : market.competitionRate < 2 ? 'text-positive' : market.competitionRate < 8 ? 'text-accent' : 'text-critical'}`}>
+                        <p className={`text-xl font-semibold ${market.competitionRate === null ? 'text-ink-3' : market.totalProductsSource === 'naver' ? 'text-ink' : market.competitionRate < 2 ? 'text-positive' : market.competitionRate < 8 ? 'text-accent' : 'text-critical'}`}>
                           {market.competitionRate === null ? '—' : market.competitionRate}
                         </p>
                         <p className="mt-1 text-[12px] text-ink-3">
-                          총 {market.totalProducts > 0 ? `${market.totalProductsEstimated ? '약 ' : ''}${market.totalProducts.toLocaleString()}` : '?'}개 상품
+                          {market.totalProductsSource === 'naver' ? '네이버쇼핑 ' : '총 '}{market.totalProducts > 0 ? `${market.totalProductsEstimated ? '약 ' : ''}${market.totalProducts.toLocaleString()}` : '?'}개 상품
                           {market.keywordVolume > 0 && ` / 검색 ${market.keywordVolume.toLocaleString()}회`}
                         </p>
                       </div>

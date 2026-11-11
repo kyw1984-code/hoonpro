@@ -1107,11 +1107,33 @@ function parseEmbeddedJson(html: string): ParsedProduct[] {
   return [];
 }
 
+/**
+ * 쿠팡 검색 페이지에는 이제 총 상품 수가 없다(헤더가 "'키워드'에 대한 검색결과"뿐).
+ * 대신 네이버쇼핑 검색 API의 total을 쓴다 — 셀러들이 경쟁 강도를 볼 때 흔히 쓰는
+ * 기준이다. 화면에는 "네이버쇼핑 기준"이라고 밝힌다. 키가 없거나 검색 API가
+ * 꺼져 있으면 0을 돌려준다.
+ */
+async function naverShopTotal(keyword: string): Promise<number> {
+  if (!NAVER_DATALAB_CLIENT_ID || !NAVER_DATALAB_CLIENT_SECRET) return 0;
+  try {
+    const r = await fetch(`https://openapi.naver.com/v1/search/shop.json?query=${encodeURIComponent(keyword)}&display=1`, {
+      headers: { "X-Naver-Client-Id": NAVER_DATALAB_CLIENT_ID, "X-Naver-Client-Secret": NAVER_DATALAB_CLIENT_SECRET },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) { console.error("[소싱] 네이버쇼핑 상품 수 조회 실패", { status: r.status }); return 0; }
+    const d: any = await r.json();
+    return Number(d?.total) > 0 ? Number(d.total) : 0;
+  } catch (e: any) {
+    console.error("[소싱] 네이버쇼핑 상품 수 조회 예외", { detail: e?.message });
+    return 0;
+  }
+}
+
 /** 건수 표기를 못 찾았을 때 관련 구간을 app_config에 남긴다 (관리자 확인용, 최신 1건만) */
 async function saveCountDebug(keyword: string, html: string): Promise<void> {
   try {
     const snippets: string[] = [];
-    const probes: RegExp[] = [/total/i, /count"\s*:/i, /[?&]page=\d+/, /검색결과/, /개의?\s*상품/, /\d[\d,]{2,}\s*[건개]/];
+    const probes: RegExp[] = [/[Pp]agination/, /data-page/, /aria-label="[^"]*페이지/, /[?&]page=\d+/, /\d[\d,]{2,}\s*[건개]/, /count"\s*:/i];
     for (const re of probes) {
       let n = 0;
       for (const m of html.matchAll(new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g"))) {
@@ -1947,6 +1969,8 @@ async function loadReviewVelocity(productIds: string[]): Promise<Map<string, { p
 function scoreProducts(
   parsed: ParsedProduct[], keywordVolume: number, totalCount: number, searchKeyword = "",
   sellerProfile: SellerProfile | null = null, totalCountEstimated = false,
+  /** 네이버쇼핑 건수는 쿠팡보다 훨씬 커서 판정 기준(1.5 / 10)에 넣으면 전부 감점된다 — 표시만 한다 */
+  adjustVerdictByCompetition = true,
 ) {
   const organic = organicList(parsed);
   // 검색 키워드 자체가 브랜드면 브랜드 표시를 하지 않는다 (의도적 브랜드 조사)
@@ -2037,7 +2061,7 @@ function scoreProducts(
 
   // 시장 판정: 로켓 비중 기본 + 경쟁강도(상품수/검색량)로 보정
   let verdictLevel = rocketRatio <= 25 ? 3 : rocketRatio <= 45 ? 2 : rocketRatio <= 65 ? 1 : 0;
-  if (competitionRate !== null) {
+  if (competitionRate !== null && adjustVerdictByCompetition) {
     if (competitionRate >= 10) verdictLevel = Math.max(0, verdictLevel - 1);
     else if (competitionRate <= 1.5) verdictLevel = Math.min(3, verdictLevel + 1);
   }
@@ -2217,7 +2241,19 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
 
   // 정산AI가 아는 이 판매자의 실적으로 "내 가게와 닮은 시장"을 가린다
   const sellerProfile = await loadSellerProfile(decoded?.userId);
-  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount, keyword, sellerProfile, parsed.totalCountEstimated === true);
+  // 쿠팡에서 건수를 못 읽었으면 네이버쇼핑 상품 수로 대신한다 (캐시에도 남겨 다시 부르지 않는다)
+  let countSource: "coupang" | "naver" = (parsed as any).totalCountSource === "naver" ? "naver" : "coupang";
+  if (!(parsed.totalCount > 0)) {
+    const n = await naverShopTotal(keyword);
+    if (n > 0) {
+      parsed = { ...parsed, totalCount: n, totalCountEstimated: false, totalCountSource: "naver" } as any;
+      countSource = "naver";
+      // 캐시에서 온 데이터는 다시 쓰지 않는다 — 수집 시각이 새로 찍혀 낡은 상품 목록이 오래 남는다
+      if (servedFrom === "fresh" && parsed!.products.length >= 5) await cacheSet(cacheKey, parsed);
+    }
+  }
+  parsed = parsed!;
+  const { products, market } = scoreProducts(parsed.products, keywordVolume, parsed.totalCount, keyword, sellerProfile, parsed.totalCountEstimated === true, countSource !== "naver");
   const velocity = await loadReviewVelocity(products.map(p => p.productId));
   const withVelocity = products.map(p => {
     const v = velocity.get(p.productId);
@@ -2232,7 +2268,7 @@ async function handleProducts(req: VercelRequest, res: VercelResponse, decoded: 
   const mine = await findMyProducts(decoded?.userId, withVelocity);
 
   return res.status(200).json({
-    keyword, products: withVelocity, market, servedFrom,
+    keyword, products: withVelocity, market: { ...market, totalProductsSource: countSource }, servedFrom,
     ...(mine.length > 0 ? { myProducts: mine } : {}),
     ...(remaining !== null ? { remaining } : {}),
     ...(parseDebug ? { parseDebug } : {}),
