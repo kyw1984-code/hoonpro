@@ -108,7 +108,7 @@ export function SourcingProfit({
         </p>
       )}
       <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3">
-        판매가에서 수수료 {ratioPct(commissionRate)}{hasRate ? ' (내 최근 60일 실적)' : !data && !error ? ' (실적 확인 중)' : ' (기본값)'}와
+        판매가에서 수수료 {ratioPct(commissionRate)}와
         입출고비 {won(FULFILLMENT_FEE)}을 뺍니다.
       </p>
 
