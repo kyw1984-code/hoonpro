@@ -157,13 +157,13 @@ export const AskHoonpro: React.FC = () => {
             onChange={e => setQuestion(e.target.value)}
             maxLength={500}
             placeholder="예: 쿠팡 광고는 언제부터 돌리는 게 좋나요?"
-            className="flex-1 rounded-control border border-line bg-paper px-3.5 py-2.5 text-[13px] text-ink outline-none transition-colors focus:border-accent"
+            className="min-w-0 flex-1 rounded-control border border-line bg-paper px-3.5 py-2.5 text-[13px] text-ink outline-none transition-colors focus:border-accent"
             disabled={loading}
           />
           <button
             type="submit"
             disabled={loading || !question.trim()}
-            className="flex shrink-0 items-center justify-center gap-1.5 rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="flex shrink-0 items-center justify-center gap-1.5 rounded-control bg-ink px-3.5 py-2.5 text-[13px] font-semibold text-paper sm:px-5 transition-opacity hover:opacity-90 disabled:opacity-40"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             질문하기
