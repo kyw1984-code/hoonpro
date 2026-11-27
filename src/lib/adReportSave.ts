@@ -1,6 +1,6 @@
 /**
  * 광고 보고서 파일을 읽어 광고비·보고서 원본을 저장한다.
- * 북마클릿이 연 창(AdReportReceiver)과 훈프로 도우미 확장 프로그램이 같이 쓴다.
+ * 북마클릿이 연 창(AdReportReceiver)과 쇼크트리AI 확장 프로그램이 같이 쓴다.
  */
 import { parseAdReportBuffer } from './adReport';
 import { extractDailyAdCost, extractItemAdCost } from './adcost';

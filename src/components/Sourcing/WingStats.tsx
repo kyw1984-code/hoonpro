@@ -64,7 +64,7 @@ export function WingStatsBar({ keyword, products, stats, view, onView, onSaved }
   view: 'table' | 'card'; onView: (v: 'table' | 'card') => void;
 }) {
   const [open, setOpen] = useState(false);
-  // 훈프로 도우미(확장 프로그램)가 있으면 즐겨찾기 없이 바로 가져온다
+  // 쇼크트리AI(확장 프로그램)가 있으면 즐겨찾기 없이 바로 가져온다
   const [ext, setExt] = useState<string | null>(null);
   const [extBusy, setExtBusy] = useState<string | null>(null);
   const [extMsg, setExtMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -150,7 +150,7 @@ export function WingStatsBar({ keyword, products, stats, view, onView, onSaved }
             </button>
           </div>
           <div className="mb-3 rounded-control border border-accent bg-accent-soft px-3 py-2.5">
-            <p className="text-[12.5px] font-semibold text-ink">더 쉬운 방법 — 훈프로 도우미(크롬 확장 프로그램)</p>
+            <p className="text-[12.5px] font-semibold text-ink">더 쉬운 방법 — 쇼크트리AI(크롬 확장 프로그램)</p>
             <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-2">
               설치해 두면 즐겨찾기 없이 이 줄의 [윙에서 바로 가져오기] 버튼 하나로 끝납니다. 윙에 로그인만 돼 있으면 윙 화면을 열 필요도 없습니다.
             </p>
