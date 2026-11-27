@@ -21,6 +21,7 @@ import { sortByRelevance } from '../lib/keywordRelevance';
 import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
 import { SaveToWorksButton } from './SaveToWorks';
 import { useWingStats, WingStatLine, WingStatsBar } from './Sourcing/WingStats';
+import { CategoryMix } from './Sourcing/CategoryMix';
 import { SALES_TYPE, salesTypeMix, salesTypeOf, type SalesType } from '../lib/salesType';
 import { ProductTable } from './Sourcing/ProductTable';
 
@@ -564,6 +565,7 @@ export function SourcingFinder() {
   // 끌려 올라가 목록의 가격대(3~5만원)와 동떨어진 숫자가 됐다. 필터를 바꾸면 같이 바뀐다.
   // 광고로 파는 시장인지 — 판매량을 알면 판매량 기준, 모르면 상품 수 기준 (추정)
   const typeMix = salesTypeMix(displayProducts, p => wingStats[p.productId]?.sales28);
+  const shownCategories = displayProducts.map(p => wingStats[p.productId]?.category).filter((c): c is string => !!c);
   const shownPrices = displayProducts.map(p => p.productPrice).filter(v => v > 0);
   const shownPrice = shownPrices.length > 0
     ? { avg: Math.round(shownPrices.reduce((a, b) => a + b, 0) / shownPrices.length), min: Math.min(...shownPrices), max: Math.max(...shownPrices), count: shownPrices.length }
@@ -1313,6 +1315,7 @@ export function SourcingFinder() {
                   </div>
 
                   {/* 상품 그리드 */}
+                  {displayProducts.length > 0 && <CategoryMix current={shownCategories} refreshKey={shownCategories.length} />}
                   <WingStatsBar keyword={activeKeyword ?? ''} products={displayProducts} stats={wingStats} view={productView} onView={changeProductView} onSaved={() => void reloadWingStats()} />
                   {displayProducts.length > 0 && productView === 'table' ? (
                     <ProductTable<Product>

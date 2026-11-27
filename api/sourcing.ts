@@ -1249,6 +1249,7 @@ async function recordObservations(keyword: string, products: ParsedProduct[]): P
         product_name: p.productName ? p.productName.slice(0, 300) : null,
         rank: p.rank,
         is_ad: p.isAd,
+        organic_rank: p.organicRank ?? null,
         rating: p.rating || null,
         delivery_type: p.deliveryType,
         snapshot_at: snapshotAt,

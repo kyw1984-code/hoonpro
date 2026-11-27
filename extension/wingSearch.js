@@ -58,7 +58,17 @@ async function hoonproWingSearchAll(items, base, xsrf, progressKey) {
         if (typeof n === 'string' && n.trim()) return n.trim().slice(0, 300);
       }
     }
-    return undefined;
+    // 알려진 이름에 없으면 이름에 category가 든 항목을 전부 살핀다 (ID·코드 숫자는 건너뛴다)
+    var best;
+    for (var k in h) {
+      if (!/categor/i.test(k)) continue;
+      var c = h[k], s;
+      if (typeof c === 'string') s = c.trim();
+      else if (Array.isArray(c)) s = c.map(function (x) { return typeof x === 'string' ? x : (x && (x.name || x.categoryName || x.displayName)) || ''; }).filter(Boolean).join('>');
+      else if (c && typeof c === 'object') s = c.path || c.fullName || c.name || c.categoryName || '';
+      if (typeof s === 'string' && s && !/^[\d\s,._-]+$/.test(s) && (!best || s.length > best.length)) best = s;
+    }
+    return best ? best.slice(0, 300) : undefined;
   };
 
   var out = [], miss = 0;

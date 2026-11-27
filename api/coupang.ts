@@ -3483,6 +3483,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'rank-revenue': return await handleRankRevenue(userId, res);
       case 'my-rates': return await handleMyRates(userId, req, res);
       case 'wing-stats': return await handleWingStats(req, res);
+      case 'wing-category-mix': return await handleWingCategoryMix(res);
       case 'wing-stats-save': return await handleWingStatsSave(userId, req, res);
       case 'my-products': return await handleMyProducts(userId, req, res);
       case 'price-rules': return await handlePriceRules(userId, res);
@@ -8434,6 +8435,22 @@ async function handleWingStats(req: VercelRequest, res: VercelResponse) {
     stats[r.product_id] = { itemId: r.item_id, pv28: r.pv28, sales28: r.sales28, salePrice: r.sale_price, category: r.category, fetchedAt: r.fetched_at };
   }
   return res.status(200).json({ stats });
+}
+
+/**
+ * 카테고리별 자연·광고 판매 유형 (추정). 윙 판매 데이터에 붙은 카테고리와, 그 상품이
+ * 가장 최근 검색에서 나온 자리(광고 자리인지, 자연 순위가 몇 위인지)를 묶어 센다.
+ * 판매자들이 검색하고 가져올수록 쌓인다.
+ */
+async function handleWingCategoryMix(res: VercelResponse) {
+  const { data, error } = await supabase.rpc('sourcing_category_mix');
+  if (error) {
+    console.error('[카테고리 판매 유형] 집계 실패', { detail: error.message });
+    return res.status(500).json({ error: '카테고리 집계를 불러오지 못했습니다.' });
+  }
+  const rows = (data ?? []).map((r: any) => ({ category: String(r.category), type: String(r.sales_type), n: Number(r.n) || 0, sales: Number(r.sales) || 0 }));
+  res.setHeader('Cache-Control', 'private, max-age=300');
+  return res.status(200).json({ rows });
 }
 
 async function handleWingStatsSave(userId: string, req: VercelRequest, res: VercelResponse) {

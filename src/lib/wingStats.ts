@@ -156,7 +156,16 @@ function collector(origin: string) {
               }
               if (v && typeof v === 'object') { var n2 = v.path || v.fullName || v.name || v.categoryName; if (typeof n2 === 'string' && n2.trim()) return n2.trim().slice(0, 300); }
             }
-            return undefined;
+            var best: any;
+            for (var k in h) {
+              if (!/categor/i.test(k)) continue;
+              var c = h[k], s2: any;
+              if (typeof c === 'string') s2 = c.trim();
+              else if (Array.isArray(c)) s2 = c.map(function (x: any) { return typeof x === 'string' ? x : (x && (x.name || x.categoryName || x.displayName)) || ''; }).filter(Boolean).join('>');
+              else if (c && typeof c === 'object') s2 = c.path || c.fullName || c.name || c.categoryName || '';
+              if (typeof s2 === 'string' && s2 && !/^[\d\s,._-]+$/.test(s2) && (!best || s2.length > best.length)) best = s2;
+            }
+            return best ? best.slice(0, 300) : undefined;
           })(hit),
           keys: out.length === 0 ? Object.keys(hit).slice(0, 60) : undefined,
         });
