@@ -380,7 +380,7 @@ export function Listing() {
       const r = await coupangApi.listingTagSuggest({ seeds: uniq, exclude: current, limit: Math.max(0, 20 - current.length) });
       const merged = [...current, ...r.tags].slice(0, 20);
       setSearchTags(merged.join(', '));
-      setTagNote(`${merged.length}/20개 · 쿠팡 연관 검색어 ${r.sources.coupang}개 + 네이버 검색량 상위 ${r.sources.naver}개 (시드: ${r.seeds.join(', ')})`);
+      setTagNote(`${merged.length}/20개 · 쿠팡 연관 검색어 ${r.sources.coupang}개 + 네이버 검색량 상위 ${r.sources.naver}개 (기준 단어: ${r.seeds.join(', ')})`);
     } catch (e: any) {
       setTagNote(e?.message || '연관 검색어를 가져오지 못했습니다.');
     } finally {

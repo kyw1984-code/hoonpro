@@ -659,7 +659,7 @@ export function SourcingFinder() {
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-2 px-4 py-2 bg-accent-soft rounded-card">
             <KeyRound className="w-4 h-4 text-accent" />
-            <span className="text-sm font-semibold text-accent">니치 키워드 발굴 + 쿠팡 실데이터 분석</span>
+            <span className="text-sm font-semibold text-accent">황금 키워드 발굴 + 쿠팡 실데이터 분석</span>
           </div>
           <p className="text-[11px] text-ink-3 font-semibold hidden md:block">
             쿠팡 실시간 수집 데이터 기반
@@ -738,7 +738,7 @@ export function SourcingFinder() {
         <div className="bg-paper rounded-panel p-5 border border-line">
           <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-3 flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5 text-accent" />
-            쿠팡 대표 카테고리 — 시드 키워드가 떠오르지 않으면 카테고리만 눌러도 추천 키워드가 나옵니다
+            쿠팡 대표 카테고리 — 찾을 상품이 떠오르지 않으면 카테고리만 눌러도 추천 키워드가 나옵니다
           </p>
           <div className="flex gap-2 flex-wrap">
             {KW_CATEGORIES.map(cat => (
@@ -763,7 +763,7 @@ export function SourcingFinder() {
               value={seedInput}
               onChange={e => setSeedInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && fetchKeywords(seedInput)}
-              placeholder="시드 키워드 입력 (예: 캠핑의자) — 연관 니치 키워드를 발굴합니다"
+              placeholder="찾고 싶은 상품 입력 (예: 캠핑의자) — 연관 황금 키워드를 찾아드립니다"
               className="w-full rounded-control border border-line bg-paper py-3 pl-12 pr-4 text-[15px] font-medium text-ink outline-none transition-colors placeholder:font-normal placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent-soft"
             />
           </div>
@@ -852,7 +852,7 @@ export function SourcingFinder() {
                     ? <>{activeMonth}월 시즌 추천 키워드 <span className="text-accent">{displayKeywords.length}개</span></>
                     : activeKwCategory
                       ? <>"{activeKwCategory}" 추천 키워드 <span className="text-accent">{displayKeywords.length}개</span></>
-                      : <>연관 니치 키워드 <span className="text-accent">{displayKeywords.length}개</span></>}
+                      : <>연관 황금 키워드 <span className="text-accent">{displayKeywords.length}개</span></>}
               </h3>
               {cached && (
                 <span className="text-[10px] font-semibold text-ink-3 flex items-center gap-1"><RefreshCw className="w-3 h-3" />캐시 데이터</span>
@@ -971,7 +971,7 @@ export function SourcingFinder() {
                               <LayoutDashboard className="h-3 w-3" />쿠팡 분석
                             </button>
                             <button onClick={() => fetchKeywords(k.keyword, 'drill')}
-                              title="이 키워드를 시드로 다시 확장"
+                              title="이 키워드로 다시 찾기"
                               className="flex items-center gap-1 rounded-control border border-line px-2.5 py-1.5 text-[11px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
                               <TrendingUp className="h-3 w-3" />확장
                             </button>
@@ -1102,9 +1102,9 @@ export function SourcingFinder() {
         ) : !seedStat && !error && !activeKeyword && (
           <div className="flex flex-col items-center justify-center py-20 text-ink-3">
             <KeyRound className="w-16 h-16 mb-6 opacity-20" />
-            <h2 className="text-xl font-semibold">니치 시장 발굴을 시작하세요</h2>
+            <h2 className="text-xl font-semibold">황금 키워드 찾기를 시작하세요</h2>
             <p className="text-sm mt-2 font-medium text-center leading-relaxed">
-              시드 키워드를 검색하거나, 위의 쿠팡 대표 카테고리를 눌러 추천 키워드를 받아보세요.<br />
+              찾고 싶은 상품을 검색하거나, 위의 쿠팡 대표 카테고리를 눌러 추천 키워드를 받아보세요.<br />
               검색량은 많고 경쟁은 적은 키워드를 찾은 뒤 [쿠팡 분석]으로 실제 리뷰·로켓 비중까지 확인합니다
             </p>
           </div>
