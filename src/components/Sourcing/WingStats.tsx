@@ -5,7 +5,8 @@
  * 상품은 모두가 함께 쓰므로, 누군가 이미 조회한 상품은 누르지 않아도 보인다.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BarChart3, BookmarkPlus, Check, Copy, LayoutGrid, List } from 'lucide-react';
+import { BarChart3, BookmarkPlus, Check, Copy, Download, LayoutGrid, List, Loader2, Zap } from 'lucide-react';
+import { runWingStatsViaExtension, waitForExtension } from '../../lib/hoonproExt';
 import { getToken } from '../../lib/auth';
 import { buildWingStatsBookmarklet, conversionRate, itemIdFromUrl, WING_MAX_ITEMS, WING_WANTED_KEY } from '../../lib/wingStats';
 
@@ -31,7 +32,7 @@ export function useWingStats(products: P[]) {
     window.addEventListener('focus', load);
     return () => { window.removeEventListener('storage', onStorage); window.removeEventListener('focus', load); };
   }, [load]);
-  return stats;
+  return { stats, reload: load };
 }
 
 /** 상품 카드 안의 한 줄 */
@@ -58,11 +59,38 @@ export function WingStatLine({ stat, listPrice }: { stat?: WingStat; listPrice: 
 }
 
 /** 목록 위의 안내 줄 — 조회할 상품을 적어 두고, 즐겨찾기를 건넨다 */
-export function WingStatsBar({ keyword, products, stats, view, onView }: {
-  keyword: string; products: P[]; stats: Record<string, WingStat>;
+export function WingStatsBar({ keyword, products, stats, view, onView, onSaved }: {
+  keyword: string; products: P[]; stats: Record<string, WingStat>; onSaved: () => void;
   view: 'table' | 'card'; onView: (v: 'table' | 'card') => void;
 }) {
   const [open, setOpen] = useState(false);
+  // 훈프로 도우미(확장 프로그램)가 있으면 즐겨찾기 없이 바로 가져온다
+  const [ext, setExt] = useState<string | null>(null);
+  const [extBusy, setExtBusy] = useState<string | null>(null);
+  const [extMsg, setExtMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { void waitForExtension().then(setExt); }, []);
+  const fetchViaExtension = async () => {
+    const items = missing.slice(0, WING_MAX_ITEMS).map(p => ({ productId: p.productId, itemId: itemIdFromUrl(p.productUrl), name: p.productName.slice(0, 40) }));
+    if (items.length === 0) return;
+    setExtMsg(null); setExtBusy('윙에 연결하는 중...');
+    try {
+      const r = await runWingStatsViaExtension(items, pr => setExtBusy(`윙에서 읽는 중 ${pr.done + 1} / ${pr.total} (찾음 ${pr.found})${pr.mode === 'tab' ? ' · 윙 탭 사용' : ''}`));
+      setExtBusy('저장하는 중...');
+      const res = await fetch('/api/coupang?action=wing-stats-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+        body: JSON.stringify({ rows: r.rows }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d?.error || '저장에 실패했습니다.');
+      onSaved();
+      setExtMsg({ ok: true, text: `${d.saved ?? r.rows.length}개 상품의 판매 데이터를 가져왔습니다${r.missed ? ` (윙에서 못 찾음 ${r.missed}개)` : ''}${r.partial ? ' · 윙이 중간에 멈춰 일부만' : ''}.` });
+    } catch (e: any) {
+      setExtMsg({ ok: false, text: e?.message || '가져오지 못했습니다.' });
+    } finally {
+      setExtBusy(null);
+    }
+  };
   const [copied, setCopied] = useState(false);
   const linkRef = useRef<HTMLAnchorElement>(null);
   const href = buildWingStatsBookmarklet(window.location.origin);
@@ -93,12 +121,22 @@ export function WingStatsBar({ keyword, products, stats, view, onView }: {
             </button>
           ))}
         </div>
-        {missing.length > 0 && (
+        {missing.length > 0 && ext && (
+          <button onClick={() => void fetchViaExtension()} disabled={!!extBusy}
+            className="inline-flex items-center gap-1.5 rounded-control bg-accent px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-accent-hover disabled:opacity-60">
+            {extBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+            {extBusy ? '가져오는 중' : `윙에서 바로 가져오기 (${Math.min(missing.length, WING_MAX_ITEMS)}개)`}
+          </button>
+        )}
+        {missing.length > 0 && !ext && (
           <button onClick={() => setOpen(o => !o)} className="rounded-control border border-line px-3 py-1.5 text-[12px] font-semibold text-ink-2 hover:border-line-strong hover:text-ink">
             {open ? '닫기' : `나머지 ${Math.min(missing.length, WING_MAX_ITEMS)}개 가져오기`}
           </button>
         )}
       </div>
+      {(extBusy || extMsg) && (
+        <p className={`mt-2 text-[12px] ${extBusy ? 'text-ink-2' : extMsg?.ok ? 'text-positive' : 'text-critical'}`}>{extBusy ?? extMsg?.text}</p>
+      )}
       {open && (
         <div className="mt-3 border-t border-line pt-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -111,6 +149,22 @@ export function WingStatsBar({ keyword, products, stats, view, onView }: {
               {copied ? <Check className="h-3.5 w-3.5 text-positive" /> : <Copy className="h-3.5 w-3.5" />}{copied ? '복사됨' : '주소 복사'}
             </button>
           </div>
+          <div className="mb-3 rounded-control border border-accent bg-accent-soft px-3 py-2.5">
+            <p className="text-[12.5px] font-semibold text-ink">더 쉬운 방법 — 훈프로 도우미(크롬 확장 프로그램)</p>
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-2">
+              설치해 두면 즐겨찾기 없이 이 줄의 [윙에서 바로 가져오기] 버튼 하나로 끝납니다. 윙에 로그인만 돼 있으면 윙 화면을 열 필요도 없습니다.
+            </p>
+            <a href="/hoonpro-extension.zip" download className="mt-2 inline-flex items-center gap-1.5 rounded-control bg-accent px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-accent-hover">
+              <Download className="h-3.5 w-3.5" />확장 프로그램 내려받기
+            </a>
+            <ol className="mt-2 list-decimal space-y-0.5 pl-5 text-[11px] leading-relaxed text-ink-3">
+              <li>내려받은 zip 파일의 압축을 풉니다.</li>
+              <li>크롬 주소창에 <b className="text-ink-2">chrome://extensions</b> 를 입력하고, 오른쪽 위 <b className="text-ink-2">개발자 모드</b>를 켭니다.</li>
+              <li><b className="text-ink-2">압축해제된 확장 프로그램을 로드합니다</b>를 눌러 압축을 푼 폴더를 고릅니다.</li>
+              <li>이 화면을 새로고침하면 [윙에서 바로 가져오기] 버튼이 나타납니다.</li>
+            </ol>
+          </div>
+          <p className="mb-1 text-[11.5px] font-semibold text-ink-2">또는 즐겨찾기로</p>
           <ol className="mt-2.5 list-decimal space-y-1 pl-5 text-[11.5px] leading-relaxed text-ink-3">
             <li>위 버튼을 브라우저 즐겨찾기 바에 한 번 끌어다 놓습니다. (처음 한 번만)</li>
             <li>쿠팡 윙(wing.coupang.com)에 로그인한 화면에서 그 즐겨찾기를 누릅니다.</li>

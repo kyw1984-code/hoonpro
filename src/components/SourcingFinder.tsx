@@ -551,7 +551,7 @@ export function SourcingFinder() {
       return b.calculated.opportunityScore - a.calculated.opportunityScore;
     });
 
-  const wingStats = useWingStats(displayProducts);
+  const { stats: wingStats, reload: reloadWingStats } = useWingStats(displayProducts);
   // 표가 기본 — 여러 상품의 숫자를 견주기 좋다. 고른 보기는 기억해 둔다
   const [productView, setProductView] = useState<'table' | 'card'>(() => (localStorage.getItem('sourcingProductView') === 'card' ? 'card' : 'table'));
   const changeProductView = (v: 'table' | 'card') => {
@@ -1292,7 +1292,7 @@ export function SourcingFinder() {
                   </div>
 
                   {/* 상품 그리드 */}
-                  <WingStatsBar keyword={activeKeyword ?? ''} products={displayProducts} stats={wingStats} view={productView} onView={changeProductView} />
+                  <WingStatsBar keyword={activeKeyword ?? ''} products={displayProducts} stats={wingStats} view={productView} onView={changeProductView} onSaved={() => void reloadWingStats()} />
                   {displayProducts.length > 0 && productView === 'table' ? (
                     <ProductTable<Product>
                       products={displayProducts}
