@@ -217,6 +217,8 @@ export function SourcingFinder() {
 
   // [마진 분석]로 고른 상품 — 아래 손익 계산기가 이 값으로 채워진다
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  // 마진 계산은 버튼을 눌렀을 때만 창으로 띄운다 — 화면에 늘 펼쳐 두면 분석 결과가 묻힌다
+  const [calcOpen, setCalcOpen] = useState(false);
 
 
   // ─── 카테고리 한정어 ──────────────────────────────────────────────────────
@@ -460,7 +462,7 @@ export function SourcingFinder() {
   // 쓰는 손익 계산기와 다른 답을 냈다. 둘이 다르면 어느 쪽도 못 믿는다.
   const openCalcForProduct = (p: Product) => {
     setSelectedProduct(p);
-    document.getElementById('sourcing-profit')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setCalcOpen(true);
   };
 
   // ─── 1688 소싱 ─────────────────────────────────────────────────────────────
@@ -663,7 +665,7 @@ export function SourcingFinder() {
             쿠팡 실시간 수집 데이터 기반
           </p>
           <div className="flex items-center gap-2 ml-auto">
-            <button onClick={() => { setSelectedProduct(null); document.getElementById('sourcing-profit')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}
+            <button onClick={() => { setSelectedProduct(null); setCalcOpen(true); }}
               className="flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
               <Calculator className="w-3.5 h-3.5" />마진 계산기
             </button>
@@ -1205,9 +1207,6 @@ export function SourcingFinder() {
                     {/* 검색량·경쟁까지 봤으면 다음 질문은 "그래서 얼마 남나"다.
                         내 실제 정산 비율로 원가 상한을 낸다 — 경쟁사는 못 하는 계산이다. */}
                     <div className="mt-4 flex flex-col gap-3">
-                      <div id="sourcing-profit">
-                        <SourcingProfit avgPrice={shownPrice?.avg ?? market.avgPrice} product={selectedProduct} monthlySales={selectedProduct ? wingStats[selectedProduct.productId]?.sales28 ?? null : null} />
-                      </div>
                       {/* 이 키워드를 전에도 본 적 있으면 그 사이 무엇이 달라졌는지 짚어 준다 */}
                       {/* 새 상품을 찾는 것만큼이나 "내 시장이 지금 어떤가"를 보러 온다 */}
                       {myProducts.length > 0 && (
@@ -1468,6 +1467,32 @@ export function SourcingFinder() {
             </div>
           )}
         </div>
+
+        {/* ══════════ 마진 계산 모달 ══════════ */}
+        <AnimatePresence>
+          {calcOpen && (
+            <>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setCalcOpen(false)}
+                className="fixed inset-0 z-[80] bg-ink/50 backdrop-blur-sm" />
+              <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                className="fixed inset-0 m-auto z-[90] w-[94%] max-w-[680px] h-fit max-h-[90vh] bg-paper rounded-panel border border-line shadow-overlay overflow-y-auto">
+                <div className="sticky top-0 z-10 flex justify-end bg-paper/90 px-4 pt-3 backdrop-blur">
+                  <button onClick={() => setCalcOpen(false)} className="rounded-full p-1.5 text-ink-3 transition-all hover:bg-paper-2 hover:text-ink-2" aria-label="닫기">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="px-4 pb-5 sm:px-6">
+                  <SourcingProfit
+                    avgPrice={shownPrice?.avg ?? market?.avgPrice ?? 0}
+                    product={selectedProduct}
+                    monthlySales={selectedProduct ? wingStats[selectedProduct.productId]?.sales28 ?? null : null}
+                  />
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
 
         {/* ══════════ 상품 리뷰 분석 모달 ══════════ */}
         <AnimatePresence>
