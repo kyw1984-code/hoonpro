@@ -11,7 +11,7 @@
 ## 배포용 zip 만들기
 
 ```
-cd extension && rm -f ../public/hoonpro-extension.zip && zip -r ../public/hoonpro-extension.zip . -x README.md
+cd extension && rm -f ../public/hoonpro-extension.zip && zip -r ../public/hoonpro-extension.zip . -x README.md -x "store/*"   (manifest.json이 zip 최상단 — 압축 푼 폴더를 그대로 고르면 된다. 웹스토어 업로드에도 같은 파일을 쓴다)
 ```
 
 고친 뒤에는 manifest.json의 version을 올리고 zip을 다시 만든다.
