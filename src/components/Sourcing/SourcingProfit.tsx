@@ -1,183 +1,362 @@
 /**
- * 소싱 손익 계산기 — 판매가에서 수수료와 입출고비만 빼는 단순 계산.
+ * 소싱 마진 계산기 — 판매가에서 실제로 손에 남는 돈까지.
  *
- * 예전에는 광고비·반품·쿠폰 비율과 목표 이익률까지 넣었는데, 소싱 단계에서
- * 보기에는 항목이 많아 답이 흐려졌다. 지금은 두 가지만 뺀다:
- *   수수료  내 최근 60일 실적의 수수료율 (실적이 없으면 기본 10.8%)
- *   입출고비 개당 3,650원 (로켓그로스 입출고·배송)
+ *   매출 − 원가 − 수수료(VAT포함) − 물류비(VAT포함) − 반품손실 − 기타 = 영업이익
+ *   영업이익 − (매출세액 − 매입세액) = 실마진
+ *
+ * 매출세액은 판매가 ÷ 11. 매입세액은 수수료·물류비에 붙은 VAT(쿠팡이 세금계산서를
+ * 준다)와, 원가에 세금계산서·통관 VAT가 있으면 그 몫까지.
+ *
+ * 아래에 광고 시뮬레이션: 타깃 ROAS로 광고 1개 판매 시 마진, 손익분기 ROAS,
+ * 월 판매량을 오가닉·광고로 나눈 월 총 실마진.
+ *
+ * 물류비 사이즈 값은 참고용이다. 쿠팡이 프로모션·카테고리별로 수시로 바꾸므로
+ * 화면에서 직접 고칠 수 있게 했다.
  */
 import { useEffect, useState } from 'react';
-import { Calculator } from 'lucide-react';
+import { BarChart3, Calculator, ChevronDown, ChevronUp } from 'lucide-react';
 import { getToken } from '../../lib/auth';
-import { ratioPct, won } from '../../lib/coupang';
 import type { SellerRates } from '../../lib/sourcingProfit';
 
-interface RatesResponse {
-  hasData: boolean;
-  from: string;
-  to: string;
-  reason?: string;
-  rates?: SellerRates;
-  totals?: {
-    salesAmount: number;
-    netSales: number;
-    commission: number;
-    adCost: number;
-    returnAmount: number;
-    couponDiscount: number;
-    quantity: number;
-  };
-}
-
-
-/** 로켓그로스 입출고·배송비 (개당) */
-const FULFILLMENT_FEE = 3650;
 /** 실적이 없을 때 쓰는 쿠팡 판매 수수료율 */
 const DEFAULT_COMMISSION = 0.108;
+const VAT = 0.1;
+
+/** 로켓그로스 사이즈별 입출고비·배송비 (VAT 별도, 참고값 — 화면에서 고칠 수 있다) */
+const CFS_SIZES = [
+  { key: 'xs', label: '극소형', spec: '~80cm, ~2kg', inout: 1650, ship: 2200 },
+  { key: 's', label: '소형', spec: '~100cm, ~5kg', inout: 1900, ship: 2500 },
+  { key: 'm', label: '중형', spec: '~120cm, ~10kg', inout: 2300, ship: 3100 },
+  { key: 'l1', label: '대형1', spec: '~140cm, ~15kg', inout: 2900, ship: 3900 },
+  { key: 'l2', label: '대형2', spec: '~160cm, ~20kg', inout: 3600, ship: 5000 },
+  { key: 'xl', label: '특대형', spec: '~250cm, ~30kg', inout: 5500, ship: 8000 },
+] as const;
+
+const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
+const pct = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
+const digits = (v: string) => v.replace(/[^0-9]/g, '');
+const decimal = (v: string) => v.replace(/[^0-9.]/g, '');
+
+function Field({ label, value, onChange, unit, mode = 'int', hint, readOnly }: {
+  label: string; value: string; onChange?: (v: string) => void; unit: string;
+  mode?: 'int' | 'dec'; hint?: React.ReactNode; readOnly?: boolean;
+}) {
+  return (
+    <label className="flex min-w-0 flex-col gap-1">
+      <span className="text-[11.5px] font-medium text-ink-2">{label}</span>
+      <div className={`flex items-center rounded-control border px-3 ${readOnly ? 'border-line bg-paper-2' : 'border-line bg-paper focus-within:border-accent'}`}>
+        <input
+          value={value}
+          readOnly={readOnly}
+          onChange={e => onChange?.(mode === 'int' ? digits(e.target.value) : decimal(e.target.value))}
+          inputMode={mode === 'int' ? 'numeric' : 'decimal'}
+          className={`min-w-0 flex-1 bg-transparent py-2 text-[14px] tabular-nums focus:outline-none ${readOnly ? 'text-ink-3' : 'text-ink'}`}
+        />
+        <span className="shrink-0 text-[12px] text-ink-3">{unit}</span>
+      </div>
+      {hint && <span className="text-[11px] text-ink-3">{hint}</span>}
+    </label>
+  );
+}
+
+const Section = ({ title }: { title: string }) => (
+  <p className="mb-2 mt-5 flex items-center gap-1.5 text-[12px] font-semibold text-ink-2">
+    <span className="h-1.5 w-1.5 rounded-full bg-accent" />{title}
+  </p>
+);
+
+function Line({ label, value, tone = 'minus', strong }: { label: string; value: number; tone?: 'minus' | 'plus' | 'plain'; strong?: boolean }) {
+  const cls = tone === 'minus' ? 'text-critical' : tone === 'plus' ? 'text-positive' : 'text-ink';
+  const sign = tone === 'minus' ? '−' : tone === 'plus' ? '+' : '';
+  return (
+    <div className="flex items-center justify-between py-1">
+      <span className={`text-[12.5px] ${strong ? 'font-semibold text-ink' : 'text-ink-2'}`}>{label}</span>
+      <span className={`tabular-nums text-[13px] ${strong ? 'font-semibold' : ''} ${cls}`}>{sign}{won(Math.abs(value))}</span>
+    </div>
+  );
+}
 
 export function SourcingProfit({
   avgPrice,
   product,
+  monthlySales,
 }: {
   avgPrice: number;
   /** 상품 카드에서 [마진 분석]을 누르면 그 상품으로 채워진다 */
-  product?: { productName: string; productPrice: number; estimated1688Price?: number } | null;
+  product?: { productName: string; productPrice: number; productImage?: string; estimated1688Price?: number } | null;
+  /** 윙에서 가져온 그 상품의 최근 28일 판매량 — 월 판매수량 기본값 */
+  monthlySales?: number | null;
 }) {
-  const [data, setData] = useState<RatesResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [rates, setRates] = useState<SellerRates | null>(null);
+  const [channel, setChannel] = useState<'growth' | 'market'>('growth');
   const [price, setPrice] = useState(String(avgPrice || ''));
-  const [quote, setQuote] = useState('');
-  // 1688 위안 가격 → 원화 원가. 예전에는 이 계산이 별도 '마진 계산기'에 있었는데
-  // 수수료 12%·배송비 3,000원이 코드에 박혀 있어 이 화면과 다른 답을 냈다.
-  // 어느 쪽을 믿어야 할지 모르게 되므로 한 곳으로 합쳤다.
+  const [costCurrency, setCostCurrency] = useState<'krw' | 'cny'>('krw');
+  const [cost, setCost] = useState('');
   const [yuan, setYuan] = useState('');
   const [multiplier, setMultiplier] = useState(() => {
     const saved = Number(localStorage.getItem('sourcingMultiplier'));
     return Number.isFinite(saved) && saved > 0 ? saved : 300;
   });
+  const [commission, setCommission] = useState('');
+  const [size, setSize] = useState<string>('xs');
+  const [inout, setInout] = useState(String(CFS_SIZES[0].inout));
+  const [ship, setShip] = useState(String(CFS_SIZES[0].ship));
+  const [marketShip, setMarketShip] = useState('3000');
+  const [etc, setEtc] = useState('0');
+  const [returnRate, setReturnRate] = useState('2');
+  const [costHasVat, setCostHasVat] = useState(false);
+  const [adOpen, setAdOpen] = useState(true);
+  const [roas, setRoas] = useState('500');
+  const [monthlyQty, setMonthlyQty] = useState('');
+  const [adShare, setAdShare] = useState('30');
 
   useEffect(() => { setPrice(String(avgPrice || '')); }, [avgPrice]);
-
-  // 상품 카드에서 고른 상품으로 갈아 끼운다
   useEffect(() => {
     if (!product) return;
     setPrice(String(product.productPrice || ''));
-    setYuan(product.estimated1688Price ? String(product.estimated1688Price) : '');
+    if (product.estimated1688Price) { setCostCurrency('cny'); setYuan(String(product.estimated1688Price)); }
   }, [product]);
+  useEffect(() => { if (monthlySales != null) setMonthlyQty(String(monthlySales)); }, [monthlySales, product]);
 
-  // 위안을 넣으면 견적 원가 칸을 대신 채운다. 두 칸에 각각 넣게 하면
-  // 어느 쪽이 쓰이는지 알 수 없다.
+  // 수수료율 기본값은 내 최근 60일 실적, 없으면 10.8%
   useEffect(() => {
-    const y = Number(yuan);
-    if (y > 0) setQuote(String(Math.round(y * multiplier)));
-  }, [yuan, multiplier]);
+    fetch('/api/coupang?action=my-rates&days=60', { headers: { Authorization: `Bearer ${getToken()}` } })
+      .then(r => r.json())
+      .then(d => { if (d?.hasData && d.rates) setRates(d.rates); })
+      .catch(() => { /* 기본값으로 계산한다 */ });
+  }, []);
+  useEffect(() => {
+    if (commission) return;
+    const r = rates && rates.commission > 0 ? rates.commission : DEFAULT_COMMISSION;
+    setCommission((Math.round(r * 1000) / 10).toString());
+  }, [rates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveMultiplier = (v: number) => {
     const n = Math.min(1000, Math.max(1, Math.round(v) || 300));
     setMultiplier(n);
-    try { localStorage.setItem('sourcingMultiplier', String(n)); } catch { /* 저장 실패는 계산을 막지 않는다 */ }
+    try { localStorage.setItem('sourcingMultiplier', String(n)); } catch { /* 무시 */ }
+  };
+  const pickSize = (key: string) => {
+    const s = CFS_SIZES.find(x => x.key === key);
+    if (!s) return;
+    setSize(key); setInout(String(s.inout)); setShip(String(s.ship));
   };
 
-  useEffect(() => {
-    fetch('/api/coupang?action=my-rates&days=60', { headers: { Authorization: `Bearer ${getToken()}` } })
-      .then(async r => {
-        const d = await r.json();
-        if (!r.ok) throw new Error(d?.error || '판매 실적을 불러오지 못했습니다.');
-        setData(d);
-      })
-      .catch(e => setError(e?.message ?? '판매 실적을 불러오지 못했습니다.'));
-  }, []);
+  // ── 계산 ──
+  const P = Number(price) || 0;
+  const C = costCurrency === 'cny' ? Math.round((Number(yuan) || 0) * multiplier) : Number(cost) || 0;
+  const feeRate = (Number(commission) || 0) / 100;
+  const feeVat = Math.round(P * feeRate * (1 + VAT));                 // 수수료 (VAT포함)
+  const logisticsNet = channel === 'growth' ? (Number(inout) || 0) + (Number(ship) || 0) : Number(marketShip) || 0;
+  const logistics = channel === 'growth' ? Math.round(logisticsNet * (1 + VAT)) : logisticsNet;
+  const returnLoss = Math.round(P * ((Number(returnRate) || 0) / 100));
+  const other = Number(etc) || 0;
+  const operating = P - C - feeVat - logistics - returnLoss - other;   // 영업이익
+  const salesTax = Math.round(P / 11);
+  const inputTax = Math.round(feeVat / 11) + (channel === 'growth' ? Math.round(logistics / 11) : 0) + (costHasVat ? Math.round(C / 11) : 0);
+  const vatDue = salesTax - inputTax;
+  const realMargin = operating - vatDue;                                 // 실마진
+  const marginRate = P > 0 ? realMargin / P : 0;
 
-  // 실적을 못 불러와도 계산은 된다 — 수수료율만 기본값으로 바뀐다
-  const hasRate = Boolean(data?.hasData && data.rates && data.rates.commission > 0);
-  const commissionRate = hasRate ? data!.rates!.commission : DEFAULT_COMMISSION;
-  const listPrice = Number(price) || 0;
-  const commission = Math.round(listPrice * commissionRate);
-  const maxCost = listPrice - commission - FULFILLMENT_FEE;
-  const quoteCost = Number(quote) || 0;
-  const profit = quoteCost > 0 ? maxCost - quoteCost : null;
+  // ── 광고 ──
+  const R = (Number(roas) || 0) / 100;
+  const adCostPer = R > 0 ? Math.round((P / R) * (1 + VAT)) : 0;
+  const adMarginPer = realMargin - adCostPer;
+  const breakEvenRoas = realMargin > 0 ? (P * (1 + VAT)) / realMargin : null;
+  const Q = Number(monthlyQty) || 0;
+  const share = Math.min(100, Math.max(0, Number(adShare) || 0)) / 100;
+  const adQty = Math.round(Q * share);
+  const orgQty = Q - adQty;
+  const monthRevenue = Q * P;
+  const monthAdBudget = adQty * adCostPer;
+  const monthMargin = orgQty * realMargin + adQty * adMarginPer;
 
   return (
-    <div className="rounded-card border border-line bg-paper-2 p-4">
-      <h4 className="flex items-center gap-1.5 text-[13px] font-semibold text-ink">
-        <Calculator className="h-4 w-4 text-accent" /> 소싱 손익 계산
+    <div className="rounded-card border border-line bg-paper-2 p-4 sm:p-5">
+      <h4 className="flex items-center gap-1.5 text-[13.5px] font-semibold text-ink">
+        <Calculator className="h-4 w-4 text-accent" /> 마진 계산
       </h4>
       {product && (
-        <p className="mt-1 truncate text-[12px] text-ink-2" title={product.productName}>
-          {product.productName}
-        </p>
+        <div className="mt-2 flex items-center gap-3 rounded-control border border-line bg-paper p-2.5">
+          {product.productImage && <img src={product.productImage} alt="" className="h-12 w-12 shrink-0 rounded-control border border-line bg-white object-cover" />}
+          <p className="line-clamp-2 text-[12.5px] font-medium text-ink" title={product.productName}>{product.productName}</p>
+        </div>
       )}
-      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-3">
-        판매가에서 수수료 {ratioPct(commissionRate)}와
-        입출고비 {won(FULFILLMENT_FEE)}을 뺍니다.
-      </p>
 
-      <label className="mt-3 flex flex-col gap-1">
-        <span className="text-[11px] text-ink-3">판매가</span>
-        <input
-          value={price}
-          onChange={e => setPrice(e.target.value.replace(/[^0-9]/g, ''))}
-          inputMode="numeric"
-          className="w-full rounded-control border border-line bg-paper px-2.5 py-1.5 text-[13px] text-ink focus:border-accent focus:outline-none"
-        />
+      {/* 판매 방식 */}
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        {([['market', '마켓플레이스', '직접배송'], ['growth', '로켓그로스', 'CFS 풀필먼트']] as const).map(([v, t, s]) => (
+          <button key={v} onClick={() => setChannel(v)}
+            className={`rounded-control border px-3 py-2.5 text-center transition-colors ${channel === v ? 'border-accent bg-accent-soft' : 'border-line bg-paper hover:border-line-strong'}`}>
+            <p className={`text-[13px] font-semibold ${channel === v ? 'text-accent' : 'text-ink'}`}>{t}</p>
+            <p className="text-[11px] text-ink-3">{s}</p>
+          </button>
+        ))}
+      </div>
+
+      <Section title="판매 정보" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Field label="판매가" value={price} onChange={setPrice} unit="원" />
+        {costCurrency === 'krw'
+          ? <Field label="원가 (매입가)" value={cost} onChange={setCost} unit="원" />
+          : <Field label="원가 (위안)" value={yuan} onChange={setYuan} unit="¥" mode="dec" hint={`× ${multiplier} = ${won(C)}`} />}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <div className="flex overflow-hidden rounded-control border border-line">
+          {([['krw', '원(₩)'], ['cny', '위안(¥)']] as const).map(([v, l]) => (
+            <button key={v} onClick={() => setCostCurrency(v)}
+              className={`px-3 py-1.5 text-[12px] font-semibold ${costCurrency === v ? 'bg-ink text-paper' : 'text-ink-2 hover:text-ink'}`}>{l}</button>
+          ))}
+        </div>
+        {costCurrency === 'cny' && (
+          <label className="flex items-center gap-1.5 text-[11.5px] text-ink-3">
+            배수
+            <input value={multiplier} onChange={e => saveMultiplier(Number(digits(e.target.value)))} inputMode="numeric"
+              title="환율에 관세·통관·배대지까지 얹은 배수 — 1위안당 실제로 드는 원화"
+              className="w-16 rounded-control border border-line bg-paper px-2 py-1 text-right text-[12px] tabular-nums text-ink focus:border-accent focus:outline-none" />
+          </label>
+        )}
+      </div>
+
+      <Section title="플랫폼 수수료" />
+      <Field label="수수료율" value={commission} onChange={setCommission} unit="%" mode="dec"
+        hint={<span className="text-caution">VAT 별도 — 실부담 {pct(feeRate * (1 + VAT))} = {won(feeVat)}</span>} />
+
+      <Section title={channel === 'growth' ? 'CFS 물류비 (입출고 + 배송)' : '배송비'} />
+      {channel === 'growth' ? (
+        <>
+          <p className="mb-2 text-[11.5px] text-ink-3">사이즈 기준값은 참고용입니다. 프로모션·카테고리에 따라 바뀌니 쿠팡윙에서 확인해 아래 칸을 고쳐 주세요.</p>
+          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+            {CFS_SIZES.map(s => (
+              <button key={s.key} onClick={() => pickSize(s.key)}
+                className={`rounded-control border px-1.5 py-2 text-center transition-colors ${size === s.key ? 'border-accent bg-accent-soft' : 'border-line bg-paper hover:border-line-strong'}`}>
+                <p className={`text-[12.5px] font-semibold ${size === s.key ? 'text-accent' : 'text-ink'}`}>{s.label}</p>
+                <p className="text-[10px] text-ink-3">{s.spec}</p>
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <Field label="입출고비 (VAT 별도)" value={inout} onChange={v => { setInout(v); setSize(''); }} unit="원" />
+            <Field label="배송비 (VAT 별도)" value={ship} onChange={v => { setShip(v); setSize(''); }} unit="원" />
+          </div>
+          <div className="mt-2 flex items-center justify-between rounded-control border border-line bg-paper px-3 py-2">
+            <span className="text-[12.5px] font-semibold text-ink">합계 (VAT 포함)</span>
+            <span className="text-[14px] font-semibold tabular-nums text-accent">{won(logistics)}</span>
+          </div>
+        </>
+      ) : (
+        <Field label="택배비 (개당)" value={marketShip} onChange={setMarketShip} unit="원" />
+      )}
+
+      <Section title="부대비용" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Field label="기타 비용 (포장·부자재)" value={etc} onChange={setEtc} unit="원" />
+        <Field label="반품률" value={returnRate} onChange={setReturnRate} unit="%" mode="dec" />
+        <Field label="반품손실 (자동)" value={returnLoss.toLocaleString()} unit="원" readOnly />
+      </div>
+      <label className="mt-3 flex cursor-pointer items-center gap-2 text-[12px] text-ink-2">
+        <input type="checkbox" checked={costHasVat} onChange={e => setCostHasVat(e.target.checked)} />
+        원가에 세금계산서(국내 매입) 또는 통관 VAT가 있음 — 매입세액으로 공제
       </label>
 
-      {/* 결론을 먼저. 계산 과정은 아래에 작게 */}
-      <div className={`mt-3 rounded-control px-3.5 py-3 ${maxCost <= 0 ? 'bg-critical-soft' : 'bg-accent-soft'}`}>
-        {maxCost <= 0 ? (
-          <p className="text-[13px] font-semibold text-critical">
-            이 가격에서는 수수료와 입출고비만으로 남는 금액이 없습니다.
-          </p>
-        ) : (
-          <p className="text-[13.5px] leading-relaxed text-ink">
-            수수료와 입출고비를 빼면 <b className="text-accent">{won(maxCost)}</b>이 남습니다. 원가가 이보다 낮아야 이익입니다.
-          </p>
-        )}
-        <p className="mt-1 text-[11.5px] text-ink-3">
-          판매가 {won(listPrice)} − 수수료 {won(commission)} − 입출고비 {won(FULFILLMENT_FEE)}
-        </p>
-      </div>
-
-      {/* 1688 위안 가격을 넣으면 원가가 자동으로 채워진다 */}
-      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-        <span className="text-[11.5px] text-ink-3">1688 매입가</span>
-        <input
-          value={yuan}
-          onChange={e => setYuan(e.target.value.replace(/[^0-9.]/g, ''))}
-          inputMode="decimal"
-          placeholder="위안"
-          className="w-20 rounded-control border border-line bg-paper px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
-        />
-        <span className="text-[11.5px] text-ink-3">× 배수</span>
-        <input
-          value={multiplier}
-          onChange={e => saveMultiplier(Number(e.target.value.replace(/[^0-9]/g, '')))}
-          inputMode="numeric"
-          title="환율에 관세·통관까지 얹은 배수입니다. 1위안당 실제로 얼마가 드는지 넣으세요"
-          className="w-16 rounded-control border border-line bg-paper px-2.5 py-1.5 text-right text-[12.5px] tabular-nums text-ink focus:border-accent focus:outline-none"
-        />
-        {Number(yuan) > 0 && (
-          <span className="text-[12px] tabular-nums text-ink-2">= {won(Number(yuan) * multiplier)}</span>
-        )}
-      </div>
-
-      {/* 견적을 받아 왔을 때 바로 확인 */}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-[11.5px] text-ink-3">견적 원가를 넣어 확인</span>
-        <input
-          value={quote}
-          onChange={e => setQuote(e.target.value.replace(/[^0-9]/g, ''))}
-          inputMode="numeric"
-          placeholder="예: 8000"
-          className="w-28 rounded-control border border-line bg-paper px-2.5 py-1.5 text-[12.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
-        />
-        {profit !== null && (
-          <span className={`text-[12.5px] font-semibold ${profit > 0 ? 'text-positive' : 'text-critical'}`}>
-            개당 {won(profit)}{listPrice > 0 ? ` · 이익률 ${ratioPct(profit / listPrice)}` : ''}
+      {/* ── 결과 ── */}
+      <div className="mt-5 rounded-card border border-line bg-paper p-4">
+        <div className="flex items-center justify-between">
+          <span className="text-[13px] font-semibold text-ink-2">마진 분석 결과</span>
+          <span className={`text-[26px] font-semibold tabular-nums ${realMargin > 0 ? 'text-accent' : 'text-critical'}`}>{pct(marginRate)}</span>
+        </div>
+        <div className="mt-2 flex items-center justify-between border-b border-dashed border-line pb-2">
+          <span className="text-[13px] font-semibold text-ink">매출</span>
+          <span className="text-[15px] font-semibold tabular-nums text-ink">{won(P)}</span>
+        </div>
+        <div className="mt-1">
+          <Line label="원가" value={C} />
+          <Line label="쿠팡 수수료 (VAT포함)" value={feeVat} />
+          <Line label={channel === 'growth' ? 'CFS 물류비 (VAT포함)' : '택배비'} value={logistics} />
+          <Line label={`반품손실 (${returnRate || 0}%)`} value={returnLoss} />
+          <Line label="기타 비용" value={other} />
+        </div>
+        <div className="mt-2 flex items-center justify-between rounded-control bg-positive-soft px-3 py-2.5">
+          <span className="text-[13px] font-semibold text-ink">영업이익</span>
+          <span className={`text-[15px] font-semibold tabular-nums ${operating >= 0 ? 'text-positive' : 'text-critical'}`}>
+            {won(operating)} <span className="text-[11.5px]">{P > 0 ? pct(operating / P) : ''}</span>
           </span>
-        )}
+        </div>
+        <div className="mt-3 rounded-control border border-dashed border-line px-3 py-2">
+          <p className="mb-1 text-center text-[11.5px] font-semibold text-accent">부가세 정산</p>
+          <Line label="매출세액 (판매가 ÷ 11)" value={salesTax} />
+          <Line label={`매입세액 (수수료${channel === 'growth' ? '·물류비' : ''}${costHasVat ? '·원가' : ''} VAT)`} value={inputTax} tone="plus" />
+          <div className="mt-1 border-t border-line pt-1"><Line label="실 납부 부가세" value={vatDue} strong /></div>
+        </div>
+        <div className={`mt-3 flex items-center justify-between rounded-control px-4 py-3.5 ${realMargin > 0 ? 'bg-accent text-black' : 'bg-critical-soft text-critical'}`}>
+          <span className="text-[14px] font-semibold">실마진</span>
+          <span className="text-[20px] font-semibold tabular-nums">{won(realMargin)} <span className="text-[12px]">{pct(marginRate)}</span></span>
+        </div>
+        <p className="mt-2 text-[11px] leading-relaxed text-ink-3">소득세(개인 6~45%, 법인 9~24%)는 별도로 차감됩니다.</p>
       </div>
 
+      {/* ── 광고 시뮬레이션 ── */}
+      <div className="mt-4 rounded-card border border-line bg-paper">
+        <button onClick={() => setAdOpen(o => !o)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
+          <BarChart3 className="h-4 w-4 text-accent" />
+          <span className="text-[13px] font-semibold text-ink">광고 시뮬레이션</span>
+          <span className="text-[11.5px] text-ink-3">타깃 ROAS · 월 광고비 · 월 총 실마진</span>
+          <span className="ml-auto text-ink-3">{adOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</span>
+        </button>
+        {adOpen && (
+          <div className="border-t border-line px-4 pb-4">
+            <Section title="광고 수익 분석" />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="타깃 ROAS" value={roas} onChange={setRoas} unit="%" />
+              <Field label="손익분기 ROAS" value={breakEvenRoas ? String(Math.ceil(breakEvenRoas * 100)) : '—'} unit="%" readOnly
+                hint="이 아래로 내리면 광고로 팔수록 손해" />
+            </div>
+            <div className="mt-3 rounded-control border border-line bg-paper-2 p-3">
+              <p className="mb-1 text-[11.5px] font-semibold text-ink-3">광고로 1개 판매 시</p>
+              <Line label="실마진 (광고 전)" value={realMargin} tone="plain" />
+              <Line label="광고비 (VAT포함)" value={adCostPer} />
+              <p className="-mt-0.5 text-right text-[10.5px] text-ink-3">{won(P)} ÷ {roas || 0}% × 1.1</p>
+              <div className="mt-1 border-t border-line pt-1">
+                <Line label="광고 1개 실마진" value={adMarginPer} tone={adMarginPer >= 0 ? 'plus' : 'minus'} strong />
+              </div>
+            </div>
+
+            <Section title="월별 목표 수익" />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="월 총 판매수량" value={monthlyQty} onChange={setMonthlyQty} unit="개"
+                hint={monthlySales != null ? '윙 최근 28일 판매량으로 채웠습니다' : undefined} />
+              <Field label="광고 매출 비율" value={adShare} onChange={setAdShare} unit="%" />
+            </div>
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="rounded-control border border-line bg-paper-2 p-3">
+                <p className="mb-1 text-[12px] font-semibold text-positive">오가닉 ({Math.round((1 - share) * 100)}%)</p>
+                <div className="flex items-center justify-between py-1"><span className="text-[12.5px] text-ink-2">수량</span><span className="text-[13px] tabular-nums text-ink">{orgQty.toLocaleString()}개</span></div>
+                <Line label="매출" value={orgQty * P} tone="plain" />
+                <div className="mt-1 border-t border-line pt-1"><Line label="실마진" value={orgQty * realMargin} tone="plus" strong /></div>
+              </div>
+              <div className="rounded-control border border-line bg-paper-2 p-3">
+                <p className="mb-1 text-[12px] font-semibold text-caution">광고 ({Math.round(share * 100)}%)</p>
+                <div className="flex items-center justify-between py-1"><span className="text-[12.5px] text-ink-2">수량</span><span className="text-[13px] tabular-nums text-ink">{adQty.toLocaleString()}개</span></div>
+                <Line label="매출" value={adQty * P} tone="plain" />
+                <Line label="광고비" value={monthAdBudget} />
+                <div className="mt-1 border-t border-line pt-1"><Line label="실마진" value={adQty * adMarginPer} tone={adMarginPer >= 0 ? 'plus' : 'minus'} strong /></div>
+              </div>
+            </div>
+            <div className="mt-3 rounded-control border border-line bg-paper-2 p-3">
+              <Line label="월 총 매출" value={monthRevenue} tone="plain" />
+              <Line label="월 광고비 예산" value={monthAdBudget} />
+              <div className="mt-1 flex items-center justify-between border-t border-line pt-2">
+                <span className="text-[14px] font-semibold text-ink">월 총 실마진</span>
+                <span className={`text-[18px] font-semibold tabular-nums ${monthMargin >= 0 ? 'text-accent' : 'text-critical'}`}>{won(monthMargin)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] text-ink-3">실질 마진율 (광고비 포함)</span>
+                <span className="text-[12.5px] font-semibold tabular-nums text-accent">{monthRevenue > 0 ? pct(monthMargin / monthRevenue) : '—'}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

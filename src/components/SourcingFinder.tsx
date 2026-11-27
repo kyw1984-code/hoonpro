@@ -1206,7 +1206,7 @@ export function SourcingFinder() {
                         내 실제 정산 비율로 원가 상한을 낸다 — 경쟁사는 못 하는 계산이다. */}
                     <div className="mt-4 flex flex-col gap-3">
                       <div id="sourcing-profit">
-                        <SourcingProfit avgPrice={shownPrice?.avg ?? market.avgPrice} product={selectedProduct} />
+                        <SourcingProfit avgPrice={shownPrice?.avg ?? market.avgPrice} product={selectedProduct} monthlySales={selectedProduct ? wingStats[selectedProduct.productId]?.sales28 ?? null : null} />
                       </div>
                       {/* 이 키워드를 전에도 본 적 있으면 그 사이 무엇이 달라졌는지 짚어 준다 */}
                       {/* 새 상품을 찾는 것만큼이나 "내 시장이 지금 어떤가"를 보러 온다 */}
