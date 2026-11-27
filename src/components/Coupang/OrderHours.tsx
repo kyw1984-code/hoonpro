@@ -75,7 +75,7 @@ export function OrderHours() {
                   const top = data.peakHours.includes(h.hour);
                   return (
                     <div key={h.hour} className="group relative flex flex-1 flex-col items-center justify-end" title={`${h.hour}시: ${h.quantity}개 (${pct}%) · ${won(h.amount)}`}>
-                      <div className="w-full rounded-t" style={{ height: `${Math.max(2, (h.quantity / maxHour) * 120)}px`, background: top ? '#7cf5ff' : '#455684' }} />
+                      <div className="w-full rounded-t" style={{ height: `${Math.max(2, (h.quantity / maxHour) * 120)}px`, background: top ? 'var(--color-accent)' : '#455684' }} />
                       <span className="mt-1 text-[10px] tabular-nums text-ink-3">{h.hour}</span>
                     </div>
                   );
@@ -92,7 +92,7 @@ export function OrderHours() {
                   <div key={d.weekday} className="flex items-center gap-2">
                     <span className="w-4 text-[12px] font-semibold text-ink-2">{WEEKDAYS[d.weekday]}</span>
                     <div className="h-4 flex-1 overflow-hidden rounded bg-paper-2">
-                      <div className="h-full rounded" style={{ width: `${(d.quantity / maxDay) * 100}%`, background: d.weekday === data.peakWeekday ? '#7cf5ff' : '#455684' }} />
+                      <div className="h-full rounded" style={{ width: `${(d.quantity / maxDay) * 100}%`, background: d.weekday === data.peakWeekday ? 'var(--color-accent)' : '#455684' }} />
                     </div>
                     <span className="w-14 text-right text-[12px] tabular-nums text-ink-2">{d.quantity.toLocaleString('ko-KR')}개</span>
                   </div>
@@ -112,7 +112,7 @@ export function OrderHours() {
                   <Fragment key={wd}>
                     <span className="text-[11px] font-semibold text-ink-2">{WEEKDAYS[wd]}</span>
                     {row.map((q, h) => (
-                      <div key={`${wd}-${h}`} title={`${WEEKDAYS[wd]}요일 ${h}시: ${q}개`} className="h-5 rounded-sm" style={{ background: q > 0 ? `rgba(124,245,255,${0.12 + (q / maxCell) * 0.78})` : 'var(--color-paper-2)' }} />
+                      <div key={`${wd}-${h}`} title={`${WEEKDAYS[wd]}요일 ${h}시: ${q}개`} className="h-5 rounded-sm" style={{ background: q > 0 ? `rgba(37,99,235,${0.1 + (q / maxCell) * 0.8})` : 'var(--color-paper-2)' }} />
                     ))}
                   </Fragment>
                 ))}

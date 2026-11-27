@@ -172,15 +172,15 @@ export function ReviewAnalyzer() {
           경쟁 상품의 불만은 내 상세페이지의 <b>핵심 차별점</b>이 되고, <b>내 상품</b>을 넣으면 개선할 점이 보입니다.
           소싱AI의 상품 카드 [리뷰 분석AI]에서도 바로 실행할 수 있습니다.
         </p>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-col gap-2 rounded-card border-2 border-accent bg-accent-soft p-2.5 sm:flex-row">
           <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyze()}
             placeholder="쿠팡 상품 URL 또는 상품번호 (coupang.com/vp/products/...)"
-            className="flex-[2] rounded-control border border-line bg-paper px-3 py-2.5 text-[14.5px] outline-none focus:ring-2 focus:ring-accent" />
+            className="flex-[2] rounded-control border border-line-strong bg-paper px-3.5 py-3 text-[14.5px] font-medium text-ink outline-none placeholder:font-normal placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent-soft" />
           <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && analyze()}
             placeholder="상품명 (선택 — 분석 정확도 향상)"
-            className="flex-1 rounded-control border border-line bg-paper px-3 py-2.5 text-[14.5px] outline-none focus:ring-2 focus:ring-accent" />
+            className="flex-1 rounded-control border border-line-strong bg-paper px-3.5 py-3 text-[14.5px] font-medium text-ink outline-none placeholder:font-normal placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent-soft" />
           <button onClick={analyze} disabled={!input.trim() || loading}
-            className="flex items-center justify-center gap-1.5 rounded-control bg-ink px-5 py-2.5 text-[14.5px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
+            className="flex items-center justify-center gap-1.5 rounded-control bg-accent px-6 py-3 text-[14.5px] font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-40">
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}분석
           </button>
         </div>

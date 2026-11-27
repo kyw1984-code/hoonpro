@@ -111,15 +111,15 @@ export function RankTracker() {
           내 상품과 소싱AI에서 찾은 관심 상품이 <b>키워드 검색 결과 몇 위</b>인지 매일 새벽 자동으로 기록합니다.
           광고를 제외한 오가닉 순위가 기준이고, 광고를 포함한 실제 노출 순서도 함께 기록합니다. 1페이지(60위)까지 추적합니다. 소싱AI의 상품 카드 [순위추적AI]로도 등록됩니다. (최대 20개)
         </p>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex flex-col gap-2 rounded-card border-2 border-accent bg-accent-soft p-2.5 sm:flex-row">
           <input value={kw} onChange={e => setKw(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
             placeholder="추적 키워드 (예: 캠핑의자)"
-            className="flex-1 rounded-control border border-line bg-paper px-3 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-accent" />
+            className="flex-1 rounded-control border border-line-strong bg-paper px-3.5 py-3 text-[13px] font-medium text-ink outline-none placeholder:font-normal placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent-soft" />
           <input value={product} onChange={e => setProduct(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
             placeholder="상품 URL 또는 상품번호 (coupang.com/vp/products/...)"
-            className="flex-[2] rounded-control border border-line bg-paper px-3 py-2.5 text-[13px] outline-none focus:ring-2 focus:ring-accent" />
+            className="flex-[2] rounded-control border border-line-strong bg-paper px-3.5 py-3 text-[13px] font-medium text-ink outline-none placeholder:font-normal placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent-soft" />
           <button onClick={add} disabled={!kw.trim() || !product.trim() || adding}
-            className="flex items-center justify-center gap-1.5 rounded-control bg-ink px-5 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40">
+            className="flex items-center justify-center gap-1.5 rounded-control bg-accent px-6 py-3 text-[13px] font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-40">
             {adding ? <><Loader2 className="h-4 w-4 animate-spin" />순위 확인 중...</> : '등록'}
           </button>
         </div>

@@ -185,7 +185,7 @@ select {
 }
 
 /* ──────────────────────────────────────────────────────────────
-   밝은 화면 (소싱AI부터 시험 적용)
+   밝은 화면 (로그인한 앱 전체 — App이 html에 붙인다)
    유틸리티가 모두 var(--color-*)를 읽으므로, 감싼 요소 안에서 토큰 값만
    바꾸면 그 안의 화면 전체(창으로 뜨는 마진 계산·리뷰 분석 포함)가 밝아진다.
    시안 강조는 흰 배경에서 안 읽혀서 진한 파랑으로, 상태색도 한 단계 진하게.
@@ -194,8 +194,8 @@ select {
   --color-ground: #f3f6fb;
   --color-paper: #ffffff;
   --color-paper-2: #f6f8fc;
-  --color-line: #e2e8f0;
-  --color-line-strong: #c3cddc;
+  --color-line: #dbe2ec;
+  --color-line-strong: #b8c4d6;
 
   --color-ink: #0f172a;
   --color-ink-2: #334155;
@@ -221,3 +221,7 @@ select {
 }
 /* 밝은 배경에서는 보조 글씨를 굵게 할 필요가 없다 */
 .theme-light .text-ink-3 { font-weight: 400; }
+html.theme-light {
+  background: var(--color-ground);
+  background-image: none;
+}

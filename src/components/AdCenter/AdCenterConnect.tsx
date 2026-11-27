@@ -145,7 +145,7 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
       {!compact && (
         <p
           className="mt-3 flex items-start gap-2 rounded-card border px-3.5 py-2.5 text-[12.5px] font-medium leading-relaxed"
-          style={{ borderColor: 'rgba(255,180,84,.35)', background: 'rgba(255,180,84,.08)', color: '#ffb454' }}
+          style={{ borderColor: 'rgba(255,180,84,.35)', background: 'rgba(255,180,84,.08)', color: 'var(--color-caution)' }}
         >
           <PlayCircle className="mt-[1px] h-4 w-4 shrink-0" />
           <span>설정이 어려우시면 <b>화면 오른쪽 위 [사용 방법]</b>을 눌러 영상을 확인해주세요.</span>

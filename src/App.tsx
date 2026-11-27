@@ -257,6 +257,14 @@ export default function App() {
     };
   }, []);
 
+  // 로그인한 화면은 밝은 테마. 토큰만 바꾸므로 html에 붙여 두면 창(모달)까지 함께 밝아진다.
+  // 로그인 전(랜딩·가입) 화면은 지금의 어두운 디자인을 그대로 둔다.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (user) root.classList.add('theme-light'); else root.classList.remove('theme-light');
+    return () => root.classList.remove('theme-light');
+  }, [user]);
+
   const handleLogout = () => {
     removeToken();
     setUser(null);
@@ -404,7 +412,7 @@ export default function App() {
                   style={{
                     background: 'rgba(255,180,84,.08)',
                     border: '1px solid rgba(255,180,84,.22)',
-                    color: '#ffb454',
+                    color: 'var(--color-caution)',
                   }}
                 >
                   <Zap className="h-3.5 w-3.5" />

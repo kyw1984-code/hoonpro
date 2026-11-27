@@ -27,10 +27,10 @@ interface Props {
 
 // 다크 테마: 각 액션 카드에 개별 액센트 컬러 지정
 const ACTION_ACCENTS = [
-  { bg: 'rgba(124,245,255,.08)', border: 'rgba(124,245,255,.22)', color: '#7cf5ff' }, // 시안
-  { bg: 'rgba(139,123,255,.08)', border: 'rgba(139,123,255,.22)', color: '#8b7bff' }, // 보라
-  { bg: 'rgba(62,231,163,.08)',  border: 'rgba(62,231,163,.22)',  color: '#3ee7a3' }, // 민트
-  { bg: 'rgba(255,180,84,.08)',  border: 'rgba(255,180,84,.22)',  color: '#ffb454' }, // 앰버
+  { bg: 'rgba(124,245,255,.08)', border: 'rgba(124,245,255,.22)', color: 'var(--color-accent)' }, // 시안
+  { bg: 'rgba(139,123,255,.08)', border: 'rgba(139,123,255,.22)', color: '#7c3aed' }, // 보라
+  { bg: 'rgba(62,231,163,.08)',  border: 'rgba(62,231,163,.22)',  color: 'var(--color-positive)' }, // 민트
+  { bg: 'rgba(255,180,84,.08)',  border: 'rgba(255,180,84,.22)',  color: 'var(--color-caution)' }, // 앰버
 ];
 
 // 온보딩 3단계 — 실제 사용 데이터로 완료를 판정하므로 기존 사용자에게는 뜨지 않는다.
@@ -145,7 +145,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
           <p className="flex items-center gap-2 text-[12px] font-medium text-ink-3 tracking-wide">
             <span
               className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{ background: '#3ee7a3', boxShadow: '0 0 8px #3ee7a3', animation: 'hp-blink 1.6s infinite' }}
+              style={{ background: 'var(--color-positive)', boxShadow: '0 0 8px #3ee7a3', animation: 'hp-blink 1.6s infinite' }}
             />
             {dateLabel} · 실시간
           </p>
@@ -153,7 +153,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
             {userName && (
               <span
                 style={{
-                  background: 'linear-gradient(120deg,#7cf5ff 0%,#8b7bff 60%)',
+                  background: 'linear-gradient(120deg,#2563eb 0%,#7c3aed 60%)',
                   WebkitBackgroundClip: 'text',
                   backgroundClip: 'text',
                   color: 'transparent',
@@ -258,7 +258,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
         {shown('ranktracker') && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="mb-3 flex items-center gap-2">
-            <ListOrdered className="h-4 w-4" style={{ color: '#8b7bff' }} />
+            <ListOrdered className="h-4 w-4" style={{ color: '#7c3aed' }} />
             <h3 className="text-sm font-semibold text-ink">관심 상품 순위</h3>
             <button onClick={() => onNavigate('ranktracker')} className="ml-auto flex items-center gap-0.5 text-[12px] font-medium text-ink-2 hover:text-accent">
               전체 보기 <ChevronRight className="h-3.5 w-3.5" />
@@ -300,7 +300,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
         {shown('sourcing') && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="mb-3 flex items-center gap-2">
-            <TrendingUp className="h-4 w-4" style={{ color: '#3ee7a3' }} />
+            <TrendingUp className="h-4 w-4" style={{ color: 'var(--color-positive)' }} />
             <h3 className="text-sm font-semibold text-ink">관심 키워드 — 리뷰가 빠르게 느는 상품</h3>
             <button onClick={() => onNavigate('sourcing')} className="ml-auto flex items-center gap-0.5 text-[12px] font-medium text-ink-2 hover:text-accent">
               소싱AI <ChevronRight className="h-3.5 w-3.5" />
@@ -310,7 +310,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
             <div className="flex items-center gap-2 py-6 text-ink-3"><Loader2 className="h-4 w-4 animate-spin" /><span className="text-[12px]">불러오는 중...</span></div>
           ) : movers.length === 0 ? (
             <p className="py-4 text-[13px] text-ink-2 leading-relaxed">
-              아직 감지된 상품이 없습니다. <button onClick={() => onNavigate('sourcing')} className="font-semibold text-accent hover:underline">소싱AI</button>에서 <span style={{ color: '#ffb454' }}>★</span>로 키워드를 저장하면 매일 자동 수집되고, 리뷰가 빠르게 느는(≒<b className="text-ink font-medium">잘 팔리는</b>) 상품이 여기 표시됩니다.
+              아직 감지된 상품이 없습니다. <button onClick={() => onNavigate('sourcing')} className="font-semibold text-accent hover:underline">소싱AI</button>에서 <span style={{ color: 'var(--color-caution)' }}>★</span>로 키워드를 저장하면 매일 자동 수집되고, 리뷰가 빠르게 느는(≒<b className="text-ink font-medium">잘 팔리는</b>) 상품이 여기 표시됩니다.
             </p>
           ) : (
             <div className="flex flex-col gap-2">
@@ -333,7 +333,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
       {shown('coupang') && shown('home.goals') && goals !== 'none' && goals !== null && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <BarChart3 className="h-4 w-4" style={{ color: '#7cf5ff' }} />
+            <BarChart3 className="h-4 w-4" style={{ color: 'var(--color-accent)' }} />
             <h3 className="text-sm font-semibold text-ink">{Number(goals.month.slice(5))}월 목표</h3>
             <span className="text-[12px] text-ink-3">{goals.actual.daysPassed}/{goals.actual.daysInMonth}일 지남 · 순이익은 광고비까지 뺀 값</span>
             <button type="button" onClick={() => setGoalEdit(goalEdit ? null : { revenue: String(goals.revenueGoal || ''), profit: String(goals.profitGoal || '') })} className="ml-auto text-[12px] font-medium text-ink-2 hover:text-accent">
@@ -390,7 +390,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
       {shown('coupang') && shown('home.movers') && salesMovers !== 'none' && salesMovers !== null && (salesMovers.drops.length > 0 || salesMovers.rises.length > 0) && (
         <div className="rounded-panel border border-line bg-paper p-5">
           <div className="mb-3 flex items-center gap-2">
-            <TrendingUp className="h-4 w-4" style={{ color: '#ffb454' }} />
+            <TrendingUp className="h-4 w-4" style={{ color: 'var(--color-caution)' }} />
             <h3 className="text-sm font-semibold text-ink">이번 주 매출 변화</h3>
             <span className="text-[12px] text-ink-3">{salesMovers.from.slice(5).replace('-', '/')}~{salesMovers.to.slice(5).replace('-', '/')} vs 그 전 7일</span>
             <button onClick={() => onNavigate('coupang')} className="ml-auto flex items-center gap-0.5 text-[12px] font-medium text-ink-2 hover:text-accent">
@@ -467,7 +467,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
                 onClick={() => onNavigate('sourcing')}
                 className="group flex items-center gap-2 rounded-control border border-line bg-paper px-3 py-1.5 transition-all hover:-translate-y-0.5"
                 style={{ transition: 'all .2s' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#7cf5ff'; }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--color-accent)'; }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = ''; }}
               >
                 <span className="text-[13px] font-semibold text-ink group-hover:text-accent transition-colors">{it.keyword}</span>

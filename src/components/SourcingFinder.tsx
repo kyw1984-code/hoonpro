@@ -603,7 +603,7 @@ export function SourcingFinder() {
 
   // ─── 렌더 ───────────────────────────────────────────────────────────────────
   return (
-    <div className="theme-light min-h-screen rounded-panel bg-ground text-ink">
+    <div className="min-h-screen bg-ground text-ink">
       {/* 1688 소싱처(중달이) 팝업 — 추천인 코드 복사 + 이동 */}
       <AnimatePresence>
         {referralModal && (
@@ -755,22 +755,22 @@ export function SourcingFinder() {
         </div>
 
         {/* 검색바 */}
-        <div className="flex flex-col items-stretch gap-2.5 rounded-card border border-line bg-paper p-3 sm:flex-row sm:items-center">
+        <div className="flex flex-col items-stretch gap-2.5 rounded-card border-2 border-accent bg-paper p-3 shadow-[0_6px_20px_-10px_rgba(37,99,235,0.45)] sm:flex-row sm:items-center">
           <div className="flex-1 relative">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-accent" />
             <input
               type="text"
               value={seedInput}
               onChange={e => setSeedInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && fetchKeywords(seedInput)}
               placeholder="시드 키워드 입력 (예: 캠핑의자) — 연관 니치 키워드를 발굴합니다"
-              className="w-full rounded-control border border-line bg-paper-2 py-2.5 pl-11 pr-4 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
+              className="w-full rounded-control border border-line bg-paper py-3 pl-12 pr-4 text-[15px] font-medium text-ink outline-none transition-colors placeholder:font-normal placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent-soft"
             />
           </div>
           <button
             onClick={() => fetchKeywords(seedInput)}
             disabled={loading}
-            className="flex items-center justify-center gap-2 rounded-control bg-ink px-6 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="flex items-center justify-center gap-2 rounded-control bg-accent px-7 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-40"
           >
             {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
             키워드 발굴

@@ -11,7 +11,7 @@ import type { ProfitDay } from '../../lib/coupang';
 import { won } from '../../lib/coupang';
 
 const AD_COLOR = '#c47a2c';
-const ROAS_COLOR = '#7cf5ff';
+const ROAS_COLOR = 'var(--color-accent)';
 const W = 720;
 const PAD_L = 46;
 const PAD_R = 40;
