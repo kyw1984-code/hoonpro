@@ -118,7 +118,7 @@ export function HowTo({
               ))}
 
               {guide.caution && (
-                <p className="rounded-card border px-3.5 py-3 text-[12px] leading-relaxed" style={{ borderColor: 'rgba(255,180,84,.35)', background: 'rgba(255,180,84,.08)', color: '#ffb454' }}>
+                <p className="rounded-card border px-3.5 py-3 text-[12px] leading-relaxed" style={{ borderColor: 'rgba(255,180,84,.35)', background: 'rgba(255,180,84,.08)', color: 'var(--color-caution)' }}>
                   {guide.caution}
                 </p>
               )}

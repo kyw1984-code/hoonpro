@@ -20,6 +20,8 @@ import { getToken } from '../lib/auth';
 import { sortByRelevance } from '../lib/keywordRelevance';
 import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
 import { SaveToWorksButton } from './SaveToWorks';
+import { useWingStats, WingStatLine, WingStatsBar } from './Sourcing/WingStats';
+import { ProductTable } from './Sourcing/ProductTable';
 
 /** 중달이(1688 소싱처) 가입 시 넣는 훈프로 추천인 코드 */
 const JUNGDARI_REFERRAL_CODE = 'hoonpro05';
@@ -215,6 +217,8 @@ export function SourcingFinder() {
 
   // [마진 분석]로 고른 상품 — 아래 손익 계산기가 이 값으로 채워진다
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  // 마진 계산은 버튼을 눌렀을 때만 창으로 띄운다 — 화면에 늘 펼쳐 두면 분석 결과가 묻힌다
+  const [calcOpen, setCalcOpen] = useState(false);
 
 
   // ─── 카테고리 한정어 ──────────────────────────────────────────────────────
@@ -458,7 +462,7 @@ export function SourcingFinder() {
   // 쓰는 손익 계산기와 다른 답을 냈다. 둘이 다르면 어느 쪽도 못 믿는다.
   const openCalcForProduct = (p: Product) => {
     setSelectedProduct(p);
-    document.getElementById('sourcing-profit')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setCalcOpen(true);
   };
 
   // ─── 1688 소싱 ─────────────────────────────────────────────────────────────
@@ -547,6 +551,14 @@ export function SourcingFinder() {
       return b.calculated.opportunityScore - a.calculated.opportunityScore;
     });
 
+  const wingStats = useWingStats(displayProducts);
+  // 표가 기본 — 여러 상품의 숫자를 견주기 좋다. 고른 보기는 기억해 둔다
+  const [productView, setProductView] = useState<'table' | 'card'>(() => (localStorage.getItem('sourcingProductView') === 'card' ? 'card' : 'table'));
+  const changeProductView = (v: 'table' | 'card') => {
+    setProductView(v);
+    try { localStorage.setItem('sourcingProductView', v); } catch { /* 무시 */ }
+  };
+
   // 평균 판매가는 아래 목록에 실제로 보이는 상품 기준이다. 전체 평균은 80만원짜리 한 개에
   // 끌려 올라가 목록의 가격대(3~5만원)와 동떨어진 숫자가 됐다. 필터를 바꾸면 같이 바뀐다.
   const shownPrices = displayProducts.map(p => p.productPrice).filter(v => v > 0);
@@ -591,7 +603,7 @@ export function SourcingFinder() {
 
   // ─── 렌더 ───────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-paper text-ink">
+    <div className="min-h-screen bg-ground text-ink">
       {/* 1688 소싱처(중달이) 팝업 — 추천인 코드 복사 + 이동 */}
       <AnimatePresence>
         {referralModal && (
@@ -653,7 +665,7 @@ export function SourcingFinder() {
             쿠팡 실시간 수집 데이터 기반
           </p>
           <div className="flex items-center gap-2 ml-auto">
-            <button onClick={() => { setSelectedProduct(null); document.getElementById('sourcing-profit')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}
+            <button onClick={() => { setSelectedProduct(null); setCalcOpen(true); }}
               className="flex items-center gap-1.5 rounded-control border border-line px-3 py-1.5 text-[12px] font-medium text-ink-2 transition-colors hover:border-line-strong hover:text-ink">
               <Calculator className="w-3.5 h-3.5" />마진 계산기
             </button>
@@ -743,22 +755,22 @@ export function SourcingFinder() {
         </div>
 
         {/* 검색바 */}
-        <div className="flex flex-col items-stretch gap-2.5 rounded-card border border-line bg-paper p-3 sm:flex-row sm:items-center">
+        <div className="flex flex-col items-stretch gap-2.5 rounded-card border-2 border-accent bg-paper p-3 shadow-[0_6px_20px_-10px_rgba(37,99,235,0.45)] sm:flex-row sm:items-center">
           <div className="flex-1 relative">
-            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" />
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-accent" />
             <input
               type="text"
               value={seedInput}
               onChange={e => setSeedInput(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && fetchKeywords(seedInput)}
               placeholder="시드 키워드 입력 (예: 캠핑의자) — 연관 니치 키워드를 발굴합니다"
-              className="w-full rounded-control border border-line bg-paper-2 py-2.5 pl-11 pr-4 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-3 focus:border-accent focus:bg-paper"
+              className="w-full rounded-control border border-line bg-paper py-3 pl-12 pr-4 text-[15px] font-medium text-ink outline-none transition-colors placeholder:font-normal placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent-soft"
             />
           </div>
           <button
             onClick={() => fetchKeywords(seedInput)}
             disabled={loading}
-            className="flex items-center justify-center gap-2 rounded-control bg-ink px-6 py-2.5 text-[13px] font-semibold text-paper transition-opacity hover:opacity-90 disabled:opacity-40"
+            className="flex items-center justify-center gap-2 rounded-control bg-accent px-7 py-3 text-[14px] font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-40"
           >
             {loading ? <Loader2 className="animate-spin w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
             키워드 발굴
@@ -1195,9 +1207,6 @@ export function SourcingFinder() {
                     {/* 검색량·경쟁까지 봤으면 다음 질문은 "그래서 얼마 남나"다.
                         내 실제 정산 비율로 원가 상한을 낸다 — 경쟁사는 못 하는 계산이다. */}
                     <div className="mt-4 flex flex-col gap-3">
-                      <div id="sourcing-profit">
-                        <SourcingProfit avgPrice={shownPrice?.avg ?? market.avgPrice} product={selectedProduct} />
-                      </div>
                       {/* 이 키워드를 전에도 본 적 있으면 그 사이 무엇이 달라졌는지 짚어 준다 */}
                       {/* 새 상품을 찾는 것만큼이나 "내 시장이 지금 어떤가"를 보러 온다 */}
                       {myProducts.length > 0 && (
@@ -1283,7 +1292,22 @@ export function SourcingFinder() {
                   </div>
 
                   {/* 상품 그리드 */}
-                  {displayProducts.length > 0 ? (
+                  <WingStatsBar keyword={activeKeyword ?? ''} products={displayProducts} stats={wingStats} view={productView} onView={changeProductView} />
+                  {displayProducts.length > 0 && productView === 'table' ? (
+                    <ProductTable<Product>
+                      products={displayProducts}
+                      stats={wingStats}
+                      rankAdded={rankAdded}
+                      onReview={(p: Product) => fetchReviewAnalysis(p)}
+                      onSource={(p: Product) => handle1688Click(p)}
+                      onCalc={(p: Product) => openCalcForProduct(p)}
+                      onRank={async (p: Product) => {
+                        if (!activeKeyword) return;
+                        const ok = await addRankWatch(activeKeyword, p.productId, p.productName);
+                        if (ok) setRankAdded(prev => ({ ...prev, [p.productId]: true }));
+                      }}
+                    />
+                  ) : displayProducts.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                       {displayProducts.map(product => (
                         <div key={product.productId}
@@ -1362,6 +1386,7 @@ export function SourcingFinder() {
                                 {product.deliveryType === 'rocket' ? '로켓 직접경쟁' : '셀러 진입 가능'}
                               </span>
                             </div>
+                            <WingStatLine stat={wingStats[product.productId]} listPrice={product.productPrice} />
                             {/* 숫자만 있으면 왜 Great인지 알 수 없어 믿기 어렵다. 세 축을 한 줄씩 말한다 */}
                             {(product.setCount ?? 1) > 1 && (
                               <p className="mb-1.5 text-[11px] text-accent">
@@ -1442,6 +1467,33 @@ export function SourcingFinder() {
             </div>
           )}
         </div>
+
+        {/* ══════════ 마진 계산 모달 ══════════ */}
+        <AnimatePresence>
+          {calcOpen && (
+            <>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                onClick={() => setCalcOpen(false)}
+                className="fixed inset-0 z-[80] bg-ink/50 backdrop-blur-sm" />
+              <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                className="fixed inset-0 m-auto z-[90] w-[94%] max-w-[680px] h-fit max-h-[90vh] bg-paper rounded-panel border border-line shadow-overlay overflow-y-auto">
+                <div className="sticky top-0 z-10 flex justify-end bg-paper/90 px-4 pt-3 backdrop-blur">
+                  <button onClick={() => setCalcOpen(false)} className="rounded-full p-1.5 text-ink-3 transition-all hover:bg-paper-2 hover:text-ink-2" aria-label="닫기">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                <div className="px-4 pb-5 sm:px-6">
+                  <SourcingProfit
+                    avgPrice={shownPrice?.avg ?? market?.avgPrice ?? 0}
+                    product={selectedProduct}
+                    monthlySales={selectedProduct ? wingStats[selectedProduct.productId]?.sales28 ?? null : null}
+                    category={selectedProduct ? wingStats[selectedProduct.productId]?.category ?? null : null}
+                  />
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
 
         {/* ══════════ 상품 리뷰 분석 모달 ══════════ */}
         <AnimatePresence>

@@ -116,7 +116,7 @@ export function UsageLimits() {
                 <div className="flex flex-wrap items-baseline gap-x-2">
                   <span className="text-[13px] font-semibold text-ink">{meta.name}</span>
                   <span className="text-[11.5px] text-ink-3">{meta.hint}</span>
-                  <span className="ml-auto text-[12.5px] font-semibold tabular-nums" style={{ color: unlimited ? '#8b7bff' : low ? '#ffb454' : '#22a3b8' }}>
+                  <span className="ml-auto text-[12.5px] font-semibold tabular-nums" style={{ color: unlimited ? '#7c3aed' : low ? 'var(--color-caution)' : '#22a3b8' }}>
                     {unlimited ? '무제한' : `${f.remaining}회 남음`}
                   </span>
                 </div>
@@ -124,7 +124,7 @@ export function UsageLimits() {
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-paper-2">
                     <div
                       className="h-full rounded-full transition-all"
-                      style={{ width: `${unlimited ? 0 : pct}%`, background: low ? '#ffb454' : '#22a3b8' }}
+                      style={{ width: `${unlimited ? 0 : pct}%`, background: low ? 'var(--color-caution)' : '#22a3b8' }}
                     />
                   </div>
                   <span className="w-[74px] shrink-0 text-right text-[11px] tabular-nums text-ink-3">

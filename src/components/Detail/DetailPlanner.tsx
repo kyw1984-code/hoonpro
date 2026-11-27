@@ -337,7 +337,7 @@ export function DetailPlanner() {
             <div className="flex items-center gap-2 text-[12px] text-ink-3">
                 {(['상품 정보', '기획안', '이미지'] as const).map((label, i) => (
                     <span key={label} className="flex items-center gap-2">
-                        <span className={`rounded-full px-2.5 py-1 font-semibold ${step === i + 1 ? 'bg-accent text-black' : step > i + 1 ? 'text-ink-2' : ''}`}>{i + 1}. {label}</span>
+                        <span className={`rounded-full px-2.5 py-1 font-semibold ${step === i + 1 ? 'bg-accent text-white' : step > i + 1 ? 'text-ink-2' : ''}`}>{i + 1}. {label}</span>
                         {i < 2 && <span>›</span>}
                     </span>
                 ))}
@@ -364,7 +364,7 @@ export function DetailPlanner() {
                                 <div className="flex flex-wrap gap-1.5">
                                     {TONES.map(t => (
                                         <button key={t} type="button" onClick={() => setTone(t)}
-                                            className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${tone === t ? 'border-accent bg-accent text-black' : 'border-line text-ink-2 hover:border-line-strong'}`}>
+                                            className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${tone === t ? 'border-accent bg-accent text-white' : 'border-line text-ink-2 hover:border-line-strong'}`}>
                                             {t === 'auto' ? '자동' : t}
                                         </button>
                                     ))}
@@ -375,7 +375,7 @@ export function DetailPlanner() {
                                 <div className="flex gap-1.5">
                                     {COUNTS.map(c => (
                                         <button key={c} type="button" onClick={() => setCount(c)}
-                                            className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${count === c ? 'border-accent bg-accent text-black' : 'border-line text-ink-2 hover:border-line-strong'}`}>
+                                            className={`rounded-full border px-3 py-1 text-[12px] font-semibold ${count === c ? 'border-accent bg-accent text-white' : 'border-line text-ink-2 hover:border-line-strong'}`}>
                                             {c}장
                                         </button>
                                     ))}
@@ -383,7 +383,7 @@ export function DetailPlanner() {
                             </div>
                         </div>
                         <button type="button" onClick={makePlan} disabled={planning}
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-control bg-accent px-4 py-3 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60">
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-control bg-accent px-4 py-3 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60">
                             {planning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                             {planning ? '기획안을 짜는 중…' : '기획안 만들기'}
                         </button>
@@ -436,12 +436,12 @@ export function DetailPlanner() {
                             </button>
                             {hero ? (
                                 <button type="button" onClick={generateAll}
-                                    className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90">
+                                    className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90">
                                     <ImageIcon className="h-4 w-4" /> 이 느낌으로 {sections.length - 1}장 만들기
                                 </button>
                             ) : (
                                 <button type="button" onClick={makeHero} disabled={heroBusy}
-                                    className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60">
+                                    className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60">
                                     {heroBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
                                     {heroBusy ? '대표컷 만드는 중…' : '대표컷 먼저 만들기'}
                                 </button>
@@ -502,7 +502,7 @@ export function DetailPlanner() {
                                 </button>
                             )}
                             <button type="button" onClick={downloadZip} disabled={doneCount === 0 || zipping}
-                                className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60">
+                                className="inline-flex items-center gap-2 rounded-control bg-accent px-4 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60">
                                 {zipping ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} ZIP 내려받기
                             </button>
                         </div>

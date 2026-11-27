@@ -69,7 +69,7 @@ function ImagePicker({ label, hint, urls, onChange, max, required = false }: { l
         {urls.map((u, i) => (
           <div key={u} className="relative h-20 w-20 overflow-hidden rounded-control border border-line">
             <img src={u} alt="" className="h-full w-full object-cover" />
-            {i === 0 && label.includes('대표') && <span className="absolute left-0 top-0 rounded-br bg-accent px-1 text-[10px] font-semibold text-black">대표</span>}
+            {i === 0 && label.includes('대표') && <span className="absolute left-0 top-0 rounded-br bg-accent px-1 text-[10px] font-semibold text-white">대표</span>}
             <button type="button" onClick={() => onChange(urls.filter((_, j) => j !== i))} className="absolute right-0.5 top-0.5 rounded-full bg-black/60 p-0.5 text-white"><X className="h-3 w-3" /></button>
           </div>
         ))}
@@ -508,7 +508,7 @@ export function Listing() {
             <div><label className={labelCls}>A/S 안내</label><input value={settings.afterServiceInfo} onChange={e => setSettings(s => ({ ...s, afterServiceInfo: e.target.value }))} placeholder="예: 고객센터 운영 평일 10~17시" className={inputCls} /></div>
             <div className="md:col-span-2 flex justify-end gap-2">
               <button type="button" onClick={() => void loadSettings()} className="inline-flex items-center gap-1 rounded-control border border-line px-3 py-2 text-[12px] font-semibold text-ink-2 hover:border-line-strong"><RefreshCw className="h-3.5 w-3.5" /> 윙에서 다시 불러오기</button>
-              <button type="button" onClick={() => void saveSettings()} disabled={settingsSaving} className="inline-flex items-center gap-1 rounded-control bg-accent px-4 py-2 text-[12px] font-semibold text-black hover:opacity-90 disabled:opacity-60">{settingsSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} 저장</button>
+              <button type="button" onClick={() => void saveSettings()} disabled={settingsSaving} className="inline-flex items-center gap-1 rounded-control bg-accent px-4 py-2 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-60">{settingsSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} 저장</button>
             </div>
           </div>
         )}
@@ -547,7 +547,7 @@ export function Listing() {
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <button type="button" onClick={() => void findCategory()} disabled={categoryBusy} className="inline-flex items-center gap-1 rounded-control bg-accent px-4 py-2 text-[12px] font-semibold text-black hover:opacity-90 disabled:opacity-60">
+          <button type="button" onClick={() => void findCategory()} disabled={categoryBusy} className="inline-flex items-center gap-1 rounded-control bg-accent px-4 py-2 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-60">
             {categoryBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />} 카테고리 찾기
           </button>
           {category && <span className="rounded-full border border-line bg-paper-2 px-3 py-1.5 text-[12px] text-ink">{category.name} <span className="text-ink-3">#{category.code}</span></span>}
@@ -739,7 +739,7 @@ export function Listing() {
 
             <div className="flex items-center justify-between gap-2 border-t border-line pt-3">
               <p className="text-[12px] text-ink-3">등록 요청 후 쿠팡 승인에 보통 몇 시간~하루가 걸립니다. 지금은 판매자 배송(윙) 상품으로 등록됩니다.</p>
-              <button type="button" onClick={() => void submit()} disabled={submitting || settingsIncomplete} className="inline-flex shrink-0 items-center gap-2 rounded-control bg-accent px-5 py-2.5 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60">
+              <button type="button" onClick={() => void submit()} disabled={submitting || settingsIncomplete} className="inline-flex shrink-0 items-center gap-2 rounded-control bg-accent px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60">
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} 쿠팡에 등록 요청
               </button>
             </div>

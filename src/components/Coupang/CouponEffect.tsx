@@ -146,7 +146,7 @@ export function CouponEffect({ days = 90 }: { days?: number }) {
                     <div className="h-1.5 min-w-[80px] flex-1 overflow-hidden rounded-full bg-paper">
                       <div
                         className="h-full rounded-full"
-                        style={{ width: `${width}%`, background: s.perDayProfit >= 0 ? '#22a3b8' : '#ff8a8a' }}
+                        style={{ width: `${width}%`, background: s.perDayProfit >= 0 ? '#22a3b8' : 'var(--color-critical)' }}
                       />
                     </div>
                     <span className="shrink-0 text-[12.5px] font-semibold tabular-nums text-ink">

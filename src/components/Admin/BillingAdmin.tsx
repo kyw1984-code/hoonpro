@@ -67,7 +67,7 @@ const SUB_STATUS: Record<string, { text: string; cls: string }> = {
 // 차트 색 — dataviz 검증기(6개 검사) 통과 조합.
 // UI 액센트(#7cf5ff)는 밝기가 높아 채움면에는 쓰지 않는다. 글자는 텍스트 토큰이 맡는다.
 const MARK_PRIMARY = '#22a3b8';   // 월간 · 순매출 막대
-const MARK_SECONDARY = '#8b7bff'; // 연간
+const MARK_SECONDARY = '#7c3aed'; // 연간
 
 const monthLabel = (m: string) => `${Number(m.slice(5, 7))}월`;
 

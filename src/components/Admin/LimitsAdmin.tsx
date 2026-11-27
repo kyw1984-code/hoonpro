@@ -147,7 +147,7 @@ export function LimitsAdmin({ showToast }: { showToast: (msg: string) => void })
           <p className="text-[11.5px] text-ink-3">요금({won(data.priceKrw)}) 대비 · 목표 20% 이하</p>
           <p
             className="mt-1 text-[22px] font-bold tabular-nums"
-            style={{ color: avgPct > 30 ? '#ff8a8a' : avgPct > 20 ? '#ffb454' : MARK }}
+            style={{ color: avgPct > 30 ? 'var(--color-critical)' : avgPct > 20 ? 'var(--color-caution)' : MARK }}
           >
             {avgPct}%
           </p>
@@ -165,7 +165,7 @@ export function LimitsAdmin({ showToast }: { showToast: (msg: string) => void })
 
       {avgPct > 25 && (
         <div className="flex items-start gap-2 rounded-card border p-3.5 text-[12.5px]" style={{ borderColor: 'rgba(255,138,138,.4)', background: 'rgba(255,138,138,.08)' }}>
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: '#ff8a8a' }} />
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" style={{ color: 'var(--color-critical)' }} />
           <span className="text-ink-2">
             예상 평균 원가가 요금의 25%를 넘습니다. 아래에서 원가 비중(막대)이 큰 항목의 한도를 낮추세요.
           </span>

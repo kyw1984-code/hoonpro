@@ -183,3 +183,45 @@ select {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────
+   밝은 화면 (로그인한 앱 전체 — App이 html에 붙인다)
+   유틸리티가 모두 var(--color-*)를 읽으므로, 감싼 요소 안에서 토큰 값만
+   바꾸면 그 안의 화면 전체(창으로 뜨는 마진 계산·리뷰 분석 포함)가 밝아진다.
+   시안 강조는 흰 배경에서 안 읽혀서 진한 파랑으로, 상태색도 한 단계 진하게.
+   ────────────────────────────────────────────────────────────── */
+.theme-light {
+  --color-ground: #f3f6fb;
+  --color-paper: #ffffff;
+  --color-paper-2: #f6f8fc;
+  --color-line: #dbe2ec;
+  --color-line-strong: #b8c4d6;
+
+  --color-ink: #0f172a;
+  --color-ink-2: #334155;
+  --color-ink-3: #64748b;
+
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-soft: rgba(37, 99, 235, 0.08);
+  --color-accent-line: rgba(37, 99, 235, 0.35);
+
+  --color-positive: #059669;
+  --color-positive-soft: rgba(5, 150, 105, 0.09);
+  --color-caution: #d97706;
+  --color-caution-soft: rgba(217, 119, 6, 0.1);
+  --color-critical: #dc2626;
+  --color-critical-soft: rgba(220, 38, 38, 0.08);
+
+  --shadow-raised: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-overlay: 0 16px 40px -12px rgba(15, 23, 42, 0.25);
+
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+/* 밝은 배경에서는 보조 글씨를 굵게 할 필요가 없다 */
+.theme-light .text-ink-3 { font-weight: 400; }
+html.theme-light {
+  background: var(--color-ground);
+  background-image: none;
+}
