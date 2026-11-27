@@ -46,3 +46,32 @@ export function runWingStatsViaExtension(items: WingWanted[], onProgress: (p: Ex
     window.postMessage({ hoonproExt: true, type: 'wing-stats', requestId, items }, window.location.origin);
   });
 }
+
+export interface AdReportPayload { base64?: string; url?: string; from: number; to: number; contentType?: string; dateGroup?: string }
+
+/** 확장에게 광고센터 광고 보고서를 받아 오게 한다 (광고센터 탭 안에서 보고서를 만든다) */
+export function runAdReportViaExtension(days: number, onProgress: (step: string) => void): Promise<AdReportPayload> {
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const onMsg = (ev: MessageEvent) => {
+      const d = ev.data;
+      if (ev.source !== window || !d?.hoonproExtReply || d.requestId !== requestId) return;
+      if (d.kind === 'progress') onProgress(String(d.step || ''));
+      else if (d.kind === 'done') { cleanup(); resolve(d as AdReportPayload); }
+      else if (d.kind === 'error') { cleanup(); reject(new Error(d.message || '확장 프로그램 오류')); }
+    };
+    // 보고서 생성은 최대 3분 + 탭 열기·파일 받기
+    const timer = setTimeout(() => { cleanup(); reject(new Error('광고센터가 4분 안에 응답하지 않았습니다. 잠시 뒤 다시 시도해 주세요.')); }, 240_000);
+    const cleanup = () => { window.removeEventListener('message', onMsg); clearTimeout(timer); };
+    window.addEventListener('message', onMsg);
+    window.postMessage({ hoonproExt: true, type: 'ad-report', requestId, days }, window.location.origin);
+  });
+}
+
+/** base64 → ArrayBuffer */
+export function base64ToBuffer(b64: string): ArrayBuffer {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}

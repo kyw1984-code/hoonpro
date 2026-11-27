@@ -13,8 +13,10 @@
  * 크게 나오는데, 언제까지 들어와 있는지 모르면 그걸 알아챌 길이 없다.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { BookmarkPlus, Check, Copy, Megaphone, PlayCircle } from 'lucide-react';
-import { AD_COLLECT_DAYS, buildAdBookmarklet } from '../../lib/adCollector';
+import { BookmarkPlus, Check, Copy, Download, Loader2, Megaphone, PlayCircle, Zap } from 'lucide-react';
+import { AD_COLLECT_DAYS, buildAdBookmarklet, ymdToIso } from '../../lib/adCollector';
+import { base64ToBuffer, runAdReportViaExtension, waitForExtension } from '../../lib/hoonproExt';
+import { saveAdReportBuffer } from '../../lib/adReportSave';
 import { coupangApi, sinceText } from '../../lib/coupang';
 
 /** 고를 수 있는 수집 기간 */
@@ -34,6 +36,42 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
   // 첫 날짜와 실제로 값이 있는 날수를 함께 본다. 기간에 구멍이 있으면 날수가
   // 기간보다 적게 나오므로 그것도 여기서 드러난다.
   const [span, setSpan] = useState<{ first: string; last: string; days: number } | null | undefined>(undefined);
+
+  // 훈프로 도우미(확장 프로그램)가 있으면 광고센터에 가지 않고 여기서 바로 받는다
+  const [ext, setExt] = useState<string | null>(null);
+  const [extBusy, setExtBusy] = useState<string | null>(null);
+  const [extMsg, setExtMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => { void waitForExtension().then(setExt); }, []);
+  const loadSpan = () => coupangApi
+    .adCosts(400)
+    .then(r => {
+      const dates = r.days.map(d => d.date).sort();
+      setSpan(dates.length ? { first: dates[0], last: dates[dates.length - 1], days: dates.length } : null);
+    })
+    .catch(() => setSpan(null));
+  const fetchViaExtension = async () => {
+    setExtMsg(null); setExtBusy('광고센터에 연결하는 중...');
+    try {
+      const p = await runAdReportViaExtension(days, step => setExtBusy(step || '진행 중...'));
+      const from = ymdToIso(p.from), to = ymdToIso(p.to);
+      if (!from || !to) throw new Error('기간 정보가 없습니다.');
+      setExtBusy('훈프로에 저장하는 중...');
+      let total = 0, n = 0, estimated = false;
+      if (p.url) {
+        const r = await coupangApi.adImportUrl(p.url, from, to);
+        total = r.total; n = r.days; estimated = r.source === 'spread';
+      } else if (p.base64) {
+        const r = await saveAdReportBuffer(base64ToBuffer(p.base64), from, to, { contentType: p.contentType, dateGroup: p.dateGroup });
+        total = r.total; n = r.days; estimated = r.estimated;
+      } else throw new Error('보고서 파일이 비어 있습니다.');
+      await loadSpan();
+      setExtMsg({ ok: true, text: `광고비가 반영됐습니다 — ${from} ~ ${to}, ${n}일, 합계 ${Math.round(total).toLocaleString('ko-KR')}원${estimated ? ' (일자 구분 없는 보고서라 기간에 나눠 넣음)' : ''}. 광고분석AI에도 들어갔습니다. 순이익 숫자는 새로고침하면 바뀝니다.` });
+    } catch (e: any) {
+      setExtMsg({ ok: false, text: e?.message || '가져오지 못했습니다.' });
+    } finally {
+      setExtBusy(null);
+    }
+  };
 
   useEffect(() => {
     coupangApi
@@ -96,6 +134,28 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
         길게 잡을수록 보고서가 만들어지는 데 오래 걸립니다. 쿠팡이 거절하면 짧은 쪽을 눌러 다시 끌어다 놓으세요.
         이미 받아 둔 날짜는 덮어쓰기만 하므로 여러 번 눌러도 광고비가 두 번 잡히지 않습니다.
       </p>
+
+      {ext ? (
+        <div className="mt-3 rounded-control border border-accent bg-accent-soft px-3.5 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => void fetchViaExtension()} disabled={!!extBusy}
+              className="inline-flex items-center gap-1.5 rounded-control bg-accent px-4 py-2 text-[13px] font-semibold text-white hover:bg-accent-hover disabled:opacity-60">
+              {extBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+              {extBusy ? '가져오는 중' : `광고센터에서 바로 가져오기 (${days}일)`}
+            </button>
+            <span className="text-[11.5px] text-ink-2">훈프로 도우미 사용 중 · 같은 크롬에서 광고센터에 로그인돼 있어야 합니다</span>
+          </div>
+          {(extBusy || extMsg) && (
+            <p className={`mt-2 text-[12px] ${extBusy ? 'text-ink-2' : extMsg?.ok ? 'text-positive' : 'text-critical'}`}>{extBusy ?? extMsg?.text}</p>
+          )}
+        </div>
+      ) : (
+        <p className="mt-3 text-[12px] text-ink-2">
+          <a href="/hoonpro-extension.zip" download className="inline-flex items-center gap-1 font-semibold text-accent hover:underline"><Download className="h-3.5 w-3.5" />훈프로 도우미(크롬 확장 프로그램)</a>
+          를 설치하면 광고센터에 가지 않고 이 화면에서 버튼 하나로 가져옵니다. (설치: 압축 풀기 → chrome://extensions → 개발자 모드 → 압축해제된 확장 프로그램 로드)
+        </p>
+      )}
+      {ext && <p className="mt-3 text-[11.5px] font-semibold text-ink-3">또는 즐겨찾기로</p>}
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {/* href가 javascript: 라 클릭은 막고 드래그만 살린다. 여기서 실행되면 광고센터가 아니라고 안내만 뜬다 */}
