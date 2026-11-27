@@ -21,6 +21,7 @@ import { sortByRelevance } from '../lib/keywordRelevance';
 import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
 import { SaveToWorksButton } from './SaveToWorks';
 import { useWingStats, WingStatLine, WingStatsBar } from './Sourcing/WingStats';
+import { SALES_TYPE, salesTypeMix, salesTypeOf, type SalesType } from '../lib/salesType';
 import { ProductTable } from './Sourcing/ProductTable';
 
 /** 중달이(1688 소싱처) 가입 시 넣는 훈프로 추천인 코드 */
@@ -561,6 +562,8 @@ export function SourcingFinder() {
 
   // 평균 판매가는 아래 목록에 실제로 보이는 상품 기준이다. 전체 평균은 80만원짜리 한 개에
   // 끌려 올라가 목록의 가격대(3~5만원)와 동떨어진 숫자가 됐다. 필터를 바꾸면 같이 바뀐다.
+  // 광고로 파는 시장인지 — 판매량을 알면 판매량 기준, 모르면 상품 수 기준 (추정)
+  const typeMix = salesTypeMix(displayProducts, p => wingStats[p.productId]?.sales28);
   const shownPrices = displayProducts.map(p => p.productPrice).filter(v => v > 0);
   const shownPrice = shownPrices.length > 0
     ? { avg: Math.round(shownPrices.reduce((a, b) => a + b, 0) / shownPrices.length), min: Math.min(...shownPrices), max: Math.max(...shownPrices), count: shownPrices.length }
@@ -1172,7 +1175,7 @@ export function SourcingFinder() {
                         </span>
                       </div>
                     </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${typeMix ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
                       <div className="bg-paper-2 rounded-card p-4 border border-line">
                         <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-2">배송 유형 (상위 {market.totalOnPage}개)</p>
                         <div className="flex h-2.5 w-full rounded-full overflow-hidden bg-line mb-2">
@@ -1186,6 +1189,24 @@ export function SourcingFinder() {
                           <span className="text-positive">일반 {market.generalCount}</span>
                         </div>
                       </div>
+                      {typeMix && (
+                        <div className="bg-paper-2 rounded-card p-4 border border-line">
+                          <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-2 mb-2">자연 · 광고 판매 비중 (추정)</p>
+                          <div className="flex h-2.5 w-full rounded-full overflow-hidden bg-line mb-2">
+                            {(['organic', 'mixed', 'ad'] as SalesType[]).map(t => (
+                              <div key={t} style={{ width: `${typeMix.share[t]}%` }} className={`h-full ${SALES_TYPE[t].bar}`} />
+                            ))}
+                          </div>
+                          <div className="flex justify-between text-[10px] font-semibold">
+                            <span className="text-positive">자연 {typeMix.share.organic}%</span>
+                            <span className="text-caution">혼합 {typeMix.share.mixed}%</span>
+                            <span className="text-critical">광고 의존 {typeMix.share.ad}%</span>
+                          </div>
+                          <p className="mt-1.5 text-[11px] leading-snug text-ink-3">
+                            {typeMix.basis === 'sales' ? `판매량 기준 · 상품 ${typeMix.total}개` : `상품 수 기준 · ${typeMix.total}개`} · 검색 노출 자리로 가른 추정치
+                          </p>
+                        </div>
+                      )}
                       <div className="bg-paper-2 rounded-card p-4 border border-line">
                         <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">리뷰 진입장벽</p>
                         <p className="text-xl font-semibold text-accent">중앙값 {market.medianReviews.toLocaleString()}</p>
@@ -1357,6 +1378,9 @@ export function SourcingFinder() {
                           <div className="p-5 flex-1 flex flex-col">
                             <h3 className="font-semibold text-[14px] text-ink line-clamp-2 mb-2 h-10 leading-snug">{product.productName}</h3>
                             <div className="flex items-center gap-1.5 mb-3 flex-wrap">
+                              <span title={SALES_TYPE[salesTypeOf(product)].hint} className={`inline-flex items-center px-2 py-0.5 rounded-control text-[10px] font-semibold ${SALES_TYPE[salesTypeOf(product)].cls}`}>
+                                {SALES_TYPE[salesTypeOf(product)].label}
+                              </span>
                               {product.reviewCount > 0 ? (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-control bg-positive-soft text-positive text-[10px] font-semibold ring-1 ring-positive/20">
                                   <Star className="w-3 h-3 fill-emerald-500 text-positive" />

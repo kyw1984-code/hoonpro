@@ -9,13 +9,15 @@ import { useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Star } from 'lucide-react';
 import { conversionRate } from '../../lib/wingStats';
 import type { WingStat } from './WingStats';
+import { SALES_TYPE, salesTypeOf } from '../../lib/salesType';
 
 interface Row {
   productId: string; productName: string; productPrice: number; productUrl: string; productImage: string;
   rating: number; reviewCount: number; deliveryType: 'rocket' | 'jet' | 'general'; rank: number;
+  isAd: boolean; organicRank?: number | null;
   calculated: { opportunityScore: number; grade: string };
 }
-type SortKey = 'default' | 'name' | 'price' | 'reviews' | 'delivery' | 'pv' | 'sales' | 'cvr' | 'revenue';
+type SortKey = 'default' | 'name' | 'price' | 'reviews' | 'delivery' | 'type' | 'pv' | 'sales' | 'cvr' | 'revenue';
 
 /** 배송방법 정렬 순서 — 진입하기 쉬운 쪽(일반)을 위로 */
 const DELIVERY_ORDER: Record<string, number> = { general: 0, jet: 1, rocket: 2 };
@@ -42,6 +44,7 @@ export function ProductTable<T extends Row>({
   const value = (p: T, key: SortKey): number | null => {
     const s = stats[p.productId];
     if (key === 'delivery') return DELIVERY_ORDER[p.deliveryType] ?? 9;
+    if (key === 'type') return SALES_TYPE[salesTypeOf(p)].order;
     if (key === 'price') return p.productPrice;
     if (key === 'reviews') return p.reviewCount;
     if (key === 'pv') return s?.pv28 ?? null;
@@ -83,7 +86,7 @@ export function ProductTable<T extends Row>({
 
   return (
     <div className="overflow-x-auto rounded-card border border-line bg-paper">
-      <table className="w-full min-w-[980px] text-[12.5px]">
+      <table className="w-full min-w-[1080px] text-[12.5px]">
         <thead className="bg-paper-2 text-[11.5px] text-ink-3">
           <tr>
             <th className="w-16 whitespace-nowrap px-3 py-3 text-left font-semibold">이미지</th>
@@ -91,6 +94,7 @@ export function ProductTable<T extends Row>({
             {th('가격', 'price')}
             {th('리뷰수', 'reviews')}
             {th('배송방법', 'delivery', 'center', true)}
+            {th('판매 유형(추정)', 'type', 'center', true)}
             {th('클릭수', 'pv')}
             {th('월 판매량', 'sales')}
             {th('전환율', 'cvr')}
@@ -103,6 +107,7 @@ export function ProductTable<T extends Row>({
             const s = stats[p.productId];
             const cvr = s ? conversionRate(s.pv28, s.sales28) : null;
             const d = DELIVERY[p.deliveryType];
+            const st = SALES_TYPE[salesTypeOf(p)];
             return (
               <tr key={p.productId} className="border-t border-line align-middle hover:bg-paper-2/60">
                 <td className="px-3 py-2.5">
@@ -114,7 +119,7 @@ export function ProductTable<T extends Row>({
                   <a href={p.productUrl} target="_blank" rel="noopener noreferrer" title={p.productName} className="line-clamp-2 font-medium leading-snug text-ink hover:text-accent">
                     {p.productName}
                   </a>
-                  <p className="mt-0.5 text-[10.5px] text-ink-3">노출 {p.rank}위 · 기회지수 {p.calculated.opportunityScore}</p>
+                  <p className="mt-0.5 text-[10.5px] text-ink-3">{p.isAd ? `광고 ${p.rank}위${p.organicRank ? ` · 자연 ${p.organicRank}위` : ''}` : `노출 ${p.rank}위`} · 기회지수 {p.calculated.opportunityScore}</p>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-ink">{p.productPrice.toLocaleString()}원</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-ink-2">
@@ -123,6 +128,9 @@ export function ProductTable<T extends Row>({
                 </td>
                 <td className="px-3 py-2.5 text-center">
                   <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[10.5px] font-semibold ${d.cls}`}>{d.label}</span>
+                </td>
+                <td className="px-3 py-2.5 text-center">
+                  <span title={st.hint} className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[10.5px] font-semibold ${st.cls}`}>{st.label}</span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-ink">{num(s?.pv28)}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-accent">{num(s?.sales28)}</td>
