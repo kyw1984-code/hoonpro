@@ -13,6 +13,8 @@ import { Feedback } from './components/Feedback';
 import { AuthGate } from './components/Auth/AuthGate';
 import { AdReportReceiver } from './components/AdCenter/AdReportReceiver';
 import { AD_COLLECT_QUERY } from './lib/adCollector';
+import { WingStatsReceiver } from './components/Sourcing/WingStatsReceiver';
+import { WING_STATS_QUERY } from './lib/wingStats';
 import { WING_COLLECT_QUERY } from './lib/wingCollector';
 import { WingCancelReceiver } from './components/Coupang/WingCancelReceiver';
 import { AskHoonpro } from './components/QA/AskHoonpro';
@@ -293,6 +295,10 @@ export default function App() {
   // 여기서 탭까지 다 그리면 사용자가 원래 창과 헷갈린다.
   if (new URLSearchParams(window.location.search).get(AD_COLLECT_QUERY) === '1') {
     return <AdReportReceiver />;
+  }
+  // 소싱AI의 윙 판매 데이터 즐겨찾기가 연 창 — 조회수·판매량을 받아 저장만 한다
+  if (new URLSearchParams(window.location.search).get(WING_STATS_QUERY) === '1') {
+    return <WingStatsReceiver />;
   }
   // 윙 판매분석 즐겨찾기가 연 창 — 파일을 받아 취소를 반영하는 것만 한다
   if (new URLSearchParams(window.location.search).get(WING_COLLECT_QUERY) === '1') {

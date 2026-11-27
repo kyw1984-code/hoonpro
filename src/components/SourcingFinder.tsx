@@ -20,6 +20,7 @@ import { getToken } from '../lib/auth';
 import { sortByRelevance } from '../lib/keywordRelevance';
 import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
 import { SaveToWorksButton } from './SaveToWorks';
+import { useWingStats, WingStatLine, WingStatsBar } from './Sourcing/WingStats';
 
 /** 중달이(1688 소싱처) 가입 시 넣는 훈프로 추천인 코드 */
 const JUNGDARI_REFERRAL_CODE = 'hoonpro05';
@@ -546,6 +547,8 @@ export function SourcingFinder() {
       if (prodSort === 'reviewCount') return b.reviewCount - a.reviewCount;
       return b.calculated.opportunityScore - a.calculated.opportunityScore;
     });
+
+  const wingStats = useWingStats(displayProducts);
 
   // 평균 판매가는 아래 목록에 실제로 보이는 상품 기준이다. 전체 평균은 80만원짜리 한 개에
   // 끌려 올라가 목록의 가격대(3~5만원)와 동떨어진 숫자가 됐다. 필터를 바꾸면 같이 바뀐다.
@@ -1283,6 +1286,7 @@ export function SourcingFinder() {
                   </div>
 
                   {/* 상품 그리드 */}
+                  <WingStatsBar keyword={activeKeyword ?? ''} products={displayProducts} stats={wingStats} />
                   {displayProducts.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                       {displayProducts.map(product => (
@@ -1362,6 +1366,7 @@ export function SourcingFinder() {
                                 {product.deliveryType === 'rocket' ? '로켓 직접경쟁' : '셀러 진입 가능'}
                               </span>
                             </div>
+                            <WingStatLine stat={wingStats[product.productId]} listPrice={product.productPrice} />
                             {/* 숫자만 있으면 왜 Great인지 알 수 없어 믿기 어렵다. 세 축을 한 줄씩 말한다 */}
                             {(product.setCount ?? 1) > 1 && (
                               <p className="mb-1.5 text-[11px] text-accent">

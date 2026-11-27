@@ -3482,6 +3482,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       case 'inquiry-reply': return await handleInquiryReply(userId, req, res);
       case 'rank-revenue': return await handleRankRevenue(userId, res);
       case 'my-rates': return await handleMyRates(userId, req, res);
+      case 'wing-stats': return await handleWingStats(req, res);
+      case 'wing-stats-save': return await handleWingStatsSave(userId, req, res);
       case 'my-products': return await handleMyProducts(userId, req, res);
       case 'price-rules': return await handlePriceRules(userId, res);
       case 'price-rule-save': return await handlePriceRuleSave(userId, req, res);
@@ -8412,6 +8414,54 @@ async function handleMyProducts(userId: string, req: VercelRequest, res: VercelR
 //
 // 전부 '쿠폰을 뺀 실매출' 대비로 낸다. 쿠폰만 판매가 대비다 — 쿠폰은 판매가에서
 // 먼저 빠지는 항목이라 기준이 다르다.
+/**
+ * 윙 판매 데이터 (최근 28일 조회수·판매량) — 소싱AI 상품 카드용.
+ * 판매자 브라우저의 북마클릿이 윙에서 읽어 온 값을 상품별로 저장하고 함께 쓴다.
+ * 30일이 지난 값은 돌려주지 않는다 (28일 창이라 그보다 오래되면 뜻이 없다).
+ */
+async function handleWingStats(req: VercelRequest, res: VercelResponse) {
+  const ids = String(req.query.ids ?? '').split(',').map(s => s.trim()).filter(s => /^\d{1,20}$/.test(s)).slice(0, 120);
+  if (ids.length === 0) return res.status(200).json({ stats: {} });
+  const since = new Date(Date.now() - 30 * 86400_000).toISOString();
+  const { data, error } = await supabase
+    .from('sourcing_wing_stats')
+    .select('product_id, item_id, pv28, sales28, sale_price, fetched_at')
+    .in('product_id', ids)
+    .gte('fetched_at', since);
+  if (error) return res.status(500).json({ error: '판매 데이터를 불러오지 못했습니다.' });
+  const stats: Record<string, unknown> = {};
+  for (const r of data ?? []) {
+    stats[r.product_id] = { itemId: r.item_id, pv28: r.pv28, sales28: r.sales28, salePrice: r.sale_price, fetchedAt: r.fetched_at };
+  }
+  return res.status(200).json({ stats });
+}
+
+async function handleWingStatsSave(userId: string, req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows.slice(0, 120) : [];
+  const int = (v: unknown, max: number) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 && n <= max ? Math.round(n) : null;
+  };
+  const id = (v: unknown) => (/^\d{1,20}$/.test(String(v ?? '')) ? String(v) : null);
+  const now = new Date().toISOString();
+  const clean = rows
+    .map((r: any) => ({
+      product_id: id(r?.productId), item_id: id(r?.itemId), vendor_item_id: id(r?.vendorItemId),
+      pv28: int(r?.pv28, 1e9), sales28: int(r?.sales28, 1e8), sale_price: int(r?.salePrice, 1e9),
+      fetched_by: userId, fetched_at: now,
+    }))
+    // 조회수도 판매량도 없으면 저장할 것이 없다
+    .filter((r: any) => r.product_id && (r.pv28 !== null || r.sales28 !== null));
+  if (clean.length === 0) return res.status(200).json({ ok: true, saved: 0 });
+  const { error } = await supabase.from('sourcing_wing_stats').upsert(clean, { onConflict: 'product_id' });
+  if (error) {
+    console.error('[윙 판매 데이터] 저장 실패', { detail: error.message });
+    return res.status(500).json({ error: '저장에 실패했습니다.' });
+  }
+  return res.status(200).json({ ok: true, saved: clean.length });
+}
+
 async function handleMyRates(userId: string, req: VercelRequest, res: VercelResponse) {
   const days = Math.min(Math.max(Number(req.query.days) || 60, 7), 180);
   const to = kstToday();
