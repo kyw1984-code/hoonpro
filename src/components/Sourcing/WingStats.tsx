@@ -95,7 +95,8 @@ export function WingStatsBar({ keyword, products, stats, view, onView, onSaved }
   const linkRef = useRef<HTMLAnchorElement>(null);
   const href = buildWingStatsBookmarklet(window.location.origin);
   const have = products.filter(p => stats[p.productId]).length;
-  const missing = products.filter(p => !stats[p.productId]);
+  // 카테고리 없이 저장된 상품도 다시 가져온다 — 마진 계산의 입출고비 카테고리 자동 선택에 필요하다
+  const missing = products.filter(p => !stats[p.productId] || !stats[p.productId].category);
 
   // React는 javascript: 주소를 href로 넣지 못하게 막는다. DOM에 직접 꽂는다
   useEffect(() => { if (linkRef.current) linkRef.current.setAttribute('href', href); }, [href, open]);

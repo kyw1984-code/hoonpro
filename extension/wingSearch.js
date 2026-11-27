@@ -43,6 +43,23 @@ async function hoonproWingSearchAll(items, base, xsrf, progressKey) {
     throw { status: lastStatus };
   };
   var num = function (v) { var n = Number(v); return isFinite(n) && n >= 0 ? n : null; };
+  // 윙 응답의 카테고리 이름은 계정·버전마다 다르다. 문자열이면 그대로, 객체·배열이면 이름을 이어 붙인다
+  var pickCategory = function (h) {
+    var keys = ['category', 'categoryName', 'categoryPath', 'displayCategoryName', 'displayCategoryPath', 'categoryFullName', 'categoryHierarchy', 'fullCategoryName', 'categoryNames', 'productCategory'];
+    for (var i = 0; i < keys.length; i++) {
+      var v = h[keys[i]];
+      if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 300);
+      if (Array.isArray(v) && v.length) {
+        var names = v.map(function (x) { return typeof x === 'string' ? x : (x && (x.name || x.categoryName || x.displayName)) || ''; }).filter(Boolean);
+        if (names.length) return names.join('>').slice(0, 300);
+      }
+      if (v && typeof v === 'object') {
+        var n = v.path || v.fullName || v.name || v.categoryName;
+        if (typeof n === 'string' && n.trim()) return n.trim().slice(0, 300);
+      }
+    }
+    return undefined;
+  };
 
   var out = [], miss = 0;
   for (var i = 0; i < items.length; i++) {
@@ -66,7 +83,9 @@ async function hoonproWingSearchAll(items, base, xsrf, progressKey) {
         productId: String(it.productId), itemId: hit.itemId != null ? String(hit.itemId) : undefined,
         vendorItemId: hit.vendorItemId != null ? String(hit.vendorItemId) : undefined,
         pv28: num(hit.pvLast28Day), sales28: num(hit.salesLast28d), salePrice: num(hit.salePrice),
-        category: typeof hit.category === 'string' ? hit.category.slice(0, 300) : undefined,
+        category: pickCategory(hit),
+        // 카테고리를 못 찾은 첫 줄만 응답 항목 이름을 함께 보낸다 (값은 보내지 않는다)
+        keys: !pickCategory(hit) && out.length === 0 ? Object.keys(hit).slice(0, 60) : undefined,
       });
     } else miss++;
     await sleep(1200 + Math.floor(Math.random() * 800));
