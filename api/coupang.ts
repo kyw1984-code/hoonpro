@@ -8425,13 +8425,13 @@ async function handleWingStats(req: VercelRequest, res: VercelResponse) {
   const since = new Date(Date.now() - 30 * 86400_000).toISOString();
   const { data, error } = await supabase
     .from('sourcing_wing_stats')
-    .select('product_id, item_id, pv28, sales28, sale_price, fetched_at')
+    .select('product_id, item_id, pv28, sales28, sale_price, category, fetched_at')
     .in('product_id', ids)
     .gte('fetched_at', since);
   if (error) return res.status(500).json({ error: '판매 데이터를 불러오지 못했습니다.' });
   const stats: Record<string, unknown> = {};
   for (const r of data ?? []) {
-    stats[r.product_id] = { itemId: r.item_id, pv28: r.pv28, sales28: r.sales28, salePrice: r.sale_price, fetchedAt: r.fetched_at };
+    stats[r.product_id] = { itemId: r.item_id, pv28: r.pv28, sales28: r.sales28, salePrice: r.sale_price, category: r.category, fetchedAt: r.fetched_at };
   }
   return res.status(200).json({ stats });
 }
@@ -8449,6 +8449,7 @@ async function handleWingStatsSave(userId: string, req: VercelRequest, res: Verc
     .map((r: any) => ({
       product_id: id(r?.productId), item_id: id(r?.itemId), vendor_item_id: id(r?.vendorItemId),
       pv28: int(r?.pv28, 1e9), sales28: int(r?.sales28, 1e8), sale_price: int(r?.salePrice, 1e9),
+      category: typeof r?.category === 'string' && r.category.trim() ? r.category.trim().slice(0, 300) : null,
       fetched_by: userId, fetched_at: now,
     }))
     // 조회수도 판매량도 없으면 저장할 것이 없다

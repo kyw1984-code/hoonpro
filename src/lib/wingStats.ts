@@ -32,6 +32,8 @@ export interface WingWanted { productId: string; itemId?: string; name?: string 
 export interface WingStatRow {
   productId: string; itemId?: string; vendorItemId?: string;
   pv28: number | null; sales28: number | null; salePrice: number | null;
+  /** 쿠팡 카테고리 경로 ("패션의류잡화>남성패션>…") — 입출고비 묶음을 고르는 데 쓴다 */
+  category?: string;
 }
 
 function collector(origin: string) {
@@ -143,6 +145,7 @@ function collector(origin: string) {
           productId: String(it.productId), itemId: hit.itemId != null ? String(hit.itemId) : undefined,
           vendorItemId: hit.vendorItemId != null ? String(hit.vendorItemId) : undefined,
           pv28: num(hit.pvLast28Day), sales28: num(hit.salesLast28d), salePrice: num(hit.salePrice),
+          category: typeof hit.category === 'string' ? hit.category.slice(0, 300) : undefined,
         });
       } else {
         miss++;

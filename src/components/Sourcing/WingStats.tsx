@@ -9,7 +9,7 @@ import { BarChart3, BookmarkPlus, Check, Copy, LayoutGrid, List } from 'lucide-r
 import { getToken } from '../../lib/auth';
 import { buildWingStatsBookmarklet, conversionRate, itemIdFromUrl, WING_MAX_ITEMS, WING_WANTED_KEY } from '../../lib/wingStats';
 
-export interface WingStat { itemId?: string; pv28: number | null; sales28: number | null; salePrice: number | null; fetchedAt: string }
+export interface WingStat { itemId?: string; pv28: number | null; sales28: number | null; salePrice: number | null; category?: string | null; fetchedAt: string }
 type P = { productId: string; productUrl: string; productName: string; productPrice: number };
 
 /** 화면에 있는 상품들의 저장된 판매 데이터를 불러온다. 받는 창이 저장하면 다시 읽는다 */

@@ -10,33 +10,35 @@
  * 아래에 광고 시뮬레이션: 타깃 ROAS로 광고 1개 판매 시 마진, 손익분기 ROAS,
  * 월 판매량을 오가닉·광고로 나눈 월 총 실마진.
  *
- * 물류비 사이즈 값은 참고용이다. 쿠팡이 프로모션·카테고리별로 수시로 바꾸므로
- * 화면에서 직접 고칠 수 있게 했다.
+ * 로켓그로스 입출고비는 Wing 요금표(src/lib/rgFees.ts)에서 카테고리·판매가 구간·
+ * 사이즈로 찾아 자동으로 넣는다. 카테고리는 Wing에서 가져온 경로로 고르고, 화면에서
+ * 바꿀 수 있다. 직접 고친 금액은 카테고리·사이즈·판매가를 바꿀 때까지 유지한다.
  */
 import { useEffect, useState } from 'react';
 import { BarChart3, Calculator, ChevronDown, ChevronUp } from 'lucide-react';
 import { getToken } from '../../lib/auth';
 import type { SellerRates } from '../../lib/sourcingProfit';
+import { FEE_KIND_LABEL, RG_GROUPS, RG_PROMO_UNTIL, bandLabel, groupKey, matchGroup, rgFee } from '../../lib/rgFees';
 
 /** 실적이 없을 때 쓰는 쿠팡 판매 수수료율 */
 const DEFAULT_COMMISSION = 0.108;
 const VAT = 0.1;
 
-/**
- * 로켓그로스 사이즈별 입출고비 (배송비 포함, VAT 별도) — 쿠팡 공식 안내의 "최소 금액(~부터)".
- *   극소형 600 + 1,350 / 소형 650 + 1,550 / 중형 1,250 + 2,100
- *   대형1 1,375 + 2,200 / 대형2 1,375 + 4,100 / 특대형 1,375 + 5,600
- * 실제 금액은 판매가 구간과 카테고리에 따라 이보다 높아진다. 정확한 값은 윙의
- * [입출고/배송 비용 확인]에서 보고 칸에 직접 넣는다.
- */
+/** 로켓그로스 사이즈 유형 (요금표 순서와 같다) */
 const CFS_SIZES = [
-  { key: 'xs', label: '극소형', spec: '~80cm, ~2kg', fee: 1950 },
-  { key: 's', label: '소형', spec: '~100cm, ~5kg', fee: 2200 },
-  { key: 'm', label: '중형', spec: '~120cm, ~10kg', fee: 3350 },
-  { key: 'l1', label: '대형1', spec: '~140cm, ~15kg', fee: 3575 },
-  { key: 'l2', label: '대형2', spec: '~160cm, ~20kg', fee: 5475 },
-  { key: 'xl', label: '특대형', spec: '~250cm, ~30kg', fee: 6975 },
+  { label: '극소형', spec: '80cm·2kg 이하' },
+  { label: '소형', spec: '100cm·5kg 이하' },
+  { label: '중형', spec: '120cm·10kg 이하' },
+  { label: '대형1', spec: '140cm·15kg 이하' },
+  { label: '대형2', spec: '160cm·20kg 이하' },
+  { label: '특대형', spec: '250cm·30kg 이하' },
 ] as const;
+
+/** 1차 분류별로 묶은 카테고리 선택지 */
+const GROUP_OPTIONS = RG_GROUPS.reduce<Record<string, { key: string; label: string }[]>>((acc, g) => {
+  (acc[g.g1] ||= []).push({ key: groupKey(g), label: g.g2 });
+  return acc;
+}, {});
 
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
 const pct = (n: number, d = 1) => `${(n * 100).toFixed(d)}%`;
@@ -86,12 +88,15 @@ export function SourcingProfit({
   avgPrice,
   product,
   monthlySales,
+  category,
 }: {
   avgPrice: number;
   /** 상품 카드에서 [마진 분석]을 누르면 그 상품으로 채워진다 */
   product?: { productName: string; productPrice: number; productImage?: string; estimated1688Price?: number } | null;
   /** 윙에서 가져온 그 상품의 최근 28일 판매량 — 월 판매수량 기본값 */
   monthlySales?: number | null;
+  /** 윙에서 가져온 그 상품의 쿠팡 카테고리 경로 — 입출고비 카테고리를 고른다 */
+  category?: string | null;
 }) {
   const [rates, setRates] = useState<SellerRates | null>(null);
   const [channel, setChannel] = useState<'growth' | 'market'>('growth');
@@ -104,8 +109,12 @@ export function SourcingProfit({
     return Number.isFinite(saved) && saved > 0 ? saved : 300;
   });
   const [commission, setCommission] = useState('');
-  const [size, setSize] = useState<string>('xs');
-  const [cfsFee, setCfsFee] = useState(String(CFS_SIZES[0].fee));
+  const [sizeIdx, setSizeIdx] = useState(0);
+  const [group, setGroup] = useState<string>('');
+  const [groupAuto, setGroupAuto] = useState(false);
+  // 직접 고친 입출고비. null이면 요금표 값을 쓴다
+  const [feeOverride, setFeeOverride] = useState<string | null>(null);
+  const [cfsShip, setCfsShip] = useState('0');
   const [marketShip, setMarketShip] = useState('3000');
   const [etc, setEtc] = useState('0');
   const [returnRate, setReturnRate] = useState('2');
@@ -122,6 +131,11 @@ export function SourcingProfit({
     if (product.estimated1688Price) { setCostCurrency('cny'); setYuan(String(product.estimated1688Price)); }
   }, [product]);
   useEffect(() => { if (monthlySales != null) setMonthlyQty(String(monthlySales)); }, [monthlySales, product]);
+  // 상품을 바꾸면 그 상품의 카테고리로 입출고비 묶음을 다시 고른다
+  useEffect(() => {
+    const k = matchGroup(category);
+    if (k) { setGroup(k); setGroupAuto(true); } else if (product) { setGroupAuto(false); }
+  }, [category, product]);
 
   // 수수료율 기본값은 내 최근 60일 실적, 없으면 10.8%
   useEffect(() => {
@@ -141,18 +155,18 @@ export function SourcingProfit({
     setMultiplier(n);
     try { localStorage.setItem('sourcingMultiplier', String(n)); } catch { /* 무시 */ }
   };
-  const pickSize = (key: string) => {
-    const s = CFS_SIZES.find(x => x.key === key);
-    if (!s) return;
-    setSize(key); setCfsFee(String(s.fee));
-  };
+
 
   // ── 계산 ──
   const P = Number(price) || 0;
   const C = costCurrency === 'cny' ? Math.round((Number(yuan) || 0) * multiplier) : Number(cost) || 0;
   const feeRate = (Number(commission) || 0) / 100;
   const feeVat = Math.round(P * feeRate * (1 + VAT));                 // 수수료 (VAT포함)
-  const logisticsNet = channel === 'growth' ? Number(cfsFee) || 0 : Number(marketShip) || 0;
+  // 요금표 조회 — 카테고리·판매가·사이즈 중 하나라도 바뀌면 직접 고친 값을 버린다
+  const autoFee = group && P > 0 ? rgFee(group, P, sizeIdx) : null;
+  useEffect(() => { setFeeOverride(null); }, [group, sizeIdx, P]);
+  const cfsFee = feeOverride ?? (autoFee ? String(autoFee.fee) : '');
+  const logisticsNet = channel === 'growth' ? (Number(cfsFee) || 0) + (Number(cfsShip) || 0) : Number(marketShip) || 0;
   const logistics = channel === 'growth' ? Math.round(logisticsNet * (1 + VAT)) : logisticsNet;
   const returnLoss = Math.round(P * ((Number(returnRate) || 0) / 100));
   const other = Number(etc) || 0;
@@ -227,25 +241,50 @@ export function SourcingProfit({
       <Field label="수수료율" value={commission} onChange={setCommission} unit="%" mode="dec"
         hint={<span className="text-caution">VAT 별도 — 실부담 {pct(feeRate * (1 + VAT))} = {won(feeVat)}</span>} />
 
-      <Section title={channel === 'growth' ? 'CFS 입출고비 (배송비 포함)' : '배송비'} />
+      <Section title={channel === 'growth' ? 'CFS 입출고비' : '배송비'} />
       {channel === 'growth' ? (
         <>
-          <p className="mb-2 text-[11.5px] text-ink-3">사이즈 금액은 쿠팡 공식 안내의 최소 금액입니다. 판매가 구간·카테고리에 따라 더 높아지니 윙 [입출고/배송 비용 확인]의 금액으로 고쳐 주세요.</p>
-          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
-            {CFS_SIZES.map(s => (
-              <button key={s.key} onClick={() => pickSize(s.key)}
-                className={`rounded-control border px-1.5 py-2 text-center transition-colors ${size === s.key ? 'border-accent bg-accent-soft' : 'border-line bg-paper hover:border-line-strong'}`}>
-                <p className={`text-[12.5px] font-semibold ${size === s.key ? 'text-accent' : 'text-ink'}`}>{s.label}</p>
-                <p className="text-[10px] text-ink-3">{s.spec}</p>
-                <p className="mt-0.5 text-[10.5px] tabular-nums text-ink-2">{s.fee.toLocaleString()}원~</p>
-              </button>
-            ))}
+          <label className="flex flex-col gap-1">
+            <span className="text-[11.5px] font-medium text-ink-2">
+              카테고리 (Wing 요금 분류){groupAuto && <span className="ml-1 font-normal text-accent">· 상품 카테고리로 자동 선택</span>}
+            </span>
+            <select value={group} onChange={e => { setGroup(e.target.value); setGroupAuto(false); }}
+              className={`rounded-control border bg-paper px-3 py-2 text-[13.5px] text-ink focus:border-accent focus:outline-none ${group ? 'border-line' : 'border-critical'}`}>
+              <option value="">카테고리를 골라 주세요</option>
+              {Object.entries(GROUP_OPTIONS).map(([g1, items]) => (
+                <optgroup key={g1} label={g1}>
+                  {items.map(it => <option key={it.key} value={it.key}>{g1} › {it.label}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            {category && <span className="truncate text-[11px] text-ink-3" title={category}>쿠팡 카테고리: {category.replace(/>/g, ' › ')}</span>}
+          </label>
+          <div className="mt-3 grid grid-cols-3 gap-1.5 sm:grid-cols-6">
+            {CFS_SIZES.map((s, i) => {
+              const f = group && P > 0 ? rgFee(group, P, i) : null;
+              return (
+                <button key={s.label} onClick={() => setSizeIdx(i)}
+                  className={`rounded-control border px-1.5 py-2 text-center transition-colors ${sizeIdx === i ? 'border-accent bg-accent-soft' : 'border-line bg-paper hover:border-line-strong'}`}>
+                  <p className={`text-[12.5px] font-semibold ${sizeIdx === i ? 'text-accent' : 'text-ink'}`}>{s.label}</p>
+                  <p className="text-[10px] text-ink-3">{s.spec}</p>
+                  <p className="mt-0.5 text-[11px] font-semibold tabular-nums text-ink-2">{f ? `${f.fee.toLocaleString()}원` : '—'}</p>
+                </button>
+              );
+            })}
           </div>
-          <div className="mt-3">
-            <Field label="입출고비 (배송비 포함, VAT 별도)" value={cfsFee} onChange={v => { setCfsFee(v); setSize(''); }} unit="원" />
+          {autoFee && (
+            <p className="mt-2 text-[11.5px] text-ink-3">
+              판매가 {bandLabel(autoFee.band)} 구간 · <b className="text-ink-2">{FEE_KIND_LABEL[autoFee.kind]}</b>
+              {autoFee.kind !== 'list' && <> (프로모션 {RG_PROMO_UNTIL.replace(/-/g, '.')}까지)</>} · VAT 별도
+            </p>
+          )}
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <Field label="입출고비 (VAT 별도)" value={cfsFee} onChange={v => setFeeOverride(v)} unit="원"
+              hint={feeOverride !== null ? '직접 고친 금액' : autoFee ? 'Wing 요금표 자동' : group ? '' : '카테고리를 고르면 자동으로 들어갑니다'} />
+            <Field label="배송비 (VAT 별도)" value={cfsShip} onChange={setCfsShip} unit="원" hint="Wing 요금표에 따로 청구되면 넣어 주세요" />
           </div>
           <div className="mt-2 flex items-center justify-between rounded-control border border-line bg-paper px-3 py-2">
-            <span className="text-[12.5px] font-semibold text-ink">합계 (VAT 포함)</span>
+            <span className="text-[12.5px] font-semibold text-ink">물류비 합계 (VAT 포함)</span>
             <span className="text-[14px] font-semibold tabular-nums text-accent">{won(logistics)}</span>
           </div>
         </>
@@ -277,7 +316,7 @@ export function SourcingProfit({
         <div className="mt-1">
           <Line label="원가" value={C} />
           <Line label="쿠팡 수수료 (VAT포함)" value={feeVat} />
-          <Line label={channel === 'growth' ? 'CFS 입출고비 (VAT포함)' : '택배비'} value={logistics} />
+          <Line label={channel === 'growth' ? 'CFS 물류비 (VAT포함)' : '택배비'} value={logistics} />
           <Line label={`반품손실 (${returnRate || 0}%)`} value={returnLoss} />
           <Line label="기타 비용" value={other} />
         </div>

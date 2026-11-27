@@ -1487,6 +1487,7 @@ export function SourcingFinder() {
                     avgPrice={shownPrice?.avg ?? market?.avgPrice ?? 0}
                     product={selectedProduct}
                     monthlySales={selectedProduct ? wingStats[selectedProduct.productId]?.sales28 ?? null : null}
+                    category={selectedProduct ? wingStats[selectedProduct.productId]?.category ?? null : null}
                   />
                 </div>
               </motion.div>
