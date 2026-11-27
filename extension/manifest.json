@@ -2,17 +2,44 @@
   "manifest_version": 3,
   "name": "훈프로 도우미",
   "short_name": "훈프로",
-  "version": "1.0.0",
-  "description": "훈프로 소싱AI에서 버튼 한 번으로 쿠팡 윙의 경쟁 상품 최근 28일 클릭수·판매량을 가져옵니다.",
-  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
-  "action": { "default_title": "훈프로 도우미", "default_popup": "popup.html", "default_icon": { "16": "icons/16.png", "48": "icons/48.png" } },
-  "background": { "service_worker": "background.js" },
-  "permissions": ["cookies", "scripting", "tabs"],
-  "host_permissions": ["https://wing.coupang.com/*"],
+  "version": "1.1.0",
+  "description": "훈프로에서 버튼 한 번으로 쿠팡 윙의 경쟁 상품 판매 데이터와 광고센터 광고비 보고서를 가져옵니다.",
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "훈프로 도우미",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/16.png",
+      "48": "icons/48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "cookies",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://wing.coupang.com/*",
+    "https://advertising.coupang.com/*"
+  ],
   "content_scripts": [
     {
-      "matches": ["https://hoonproai.com/*", "https://www.hoonproai.com/*", "http://localhost/*", "http://127.0.0.1/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://hoonproai.com/*",
+        "https://www.hoonproai.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_start"
     }
   ]

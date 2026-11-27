@@ -14,9 +14,9 @@
     var d = ev.data;
     if (!d || d.hoonproExt !== true) return;
     if (d.type === 'ping') { announce(); return; }
-    if (d.type !== 'wing-stats') return;
+    if (d.type !== 'wing-stats' && d.type !== 'ad-report') return;
 
-    var port = chrome.runtime.connect({ name: 'wing-stats' });
+    var port = chrome.runtime.connect({ name: d.type });
     var reply = function (msg) {
       msg.hoonproExtReply = true; msg.requestId = d.requestId;
       window.postMessage(msg, location.origin);
@@ -26,7 +26,8 @@
       var err = chrome.runtime.lastError;
       if (err) reply({ kind: 'error', message: '확장 프로그램과 연결이 끊겼습니다. 페이지를 새로고침해 주세요.' });
     });
-    port.postMessage({ items: Array.isArray(d.items) ? d.items.slice(0, 40) : [] });
+    if (d.type === 'wing-stats') port.postMessage({ items: Array.isArray(d.items) ? d.items.slice(0, 40) : [] });
+    else port.postMessage({ days: Number(d.days) || 30 });
   });
 
   announce();
