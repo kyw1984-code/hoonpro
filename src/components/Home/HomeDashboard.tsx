@@ -229,7 +229,7 @@ export function HomeDashboard({ onNavigate, hiddenTabs = [] }: Props) {
       })()}
 
       {/* 빠른 시작 — 다크 컬러 코딩 */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {quickLinks.map(({ tab, label, desc, icon: Icon }, i) => {
           const acc = ACTION_ACCENTS[i];
           return (

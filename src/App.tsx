@@ -488,7 +488,7 @@ export default function App() {
               </h1>
             </button>
 
-            <div className="flex shrink-0 items-center gap-3">
+            <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
               {/* 무제한은 -1로 온다. 그대로 두면 "오늘 -1회"가 된다 */}
               {!user.isAdmin && remainingCalls !== null && remainingCalls >= 0 && (
                 <span
@@ -514,9 +514,10 @@ export default function App() {
               <span className="hidden whitespace-nowrap text-[13px] font-medium text-ink sm:inline">{user.name}</span>
               <button
                 onClick={handleLogout}
+                aria-label="로그아웃"
                 className="flex items-center gap-1 whitespace-nowrap rounded-control px-2 py-1 text-[14px] text-ink-2 transition-colors hover:bg-white/5 hover:text-ink"
               >
-                <LogOut className="h-3.5 w-3.5" />로그아웃
+                <LogOut className="h-4 w-4 sm:h-3.5 sm:w-3.5" /><span className="hidden sm:inline">로그아웃</span>
               </button>
             </div>
           </div>
