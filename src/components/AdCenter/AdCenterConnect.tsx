@@ -22,6 +22,9 @@ import { coupangApi, sinceText } from '../../lib/coupang';
 /** 고를 수 있는 수집 기간 */
 const DAY_CHOICES = [30, 90, 180, 365] as const;
 
+// 웹스토어 승인 전까지 설치 안내는 숨겨둔다 (true로 바꾸면 다시 보인다)
+const SHOW_EXT_GUIDE = false;
+
 export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
   const [days, setDays] = useState<number>(AD_COLLECT_DAYS);
   const bookmarklet = useMemo(() => buildAdBookmarklet(window.location.origin, days), [days]);
@@ -149,7 +152,7 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
             <p className={`mt-2 text-[12px] ${extBusy ? 'text-ink-2' : extMsg?.ok ? 'text-positive' : 'text-critical'}`}>{extBusy ?? extMsg?.text}</p>
           )}
         </div>
-      ) : (
+      ) : SHOW_EXT_GUIDE && (
         <p className="mt-3 text-[12px] text-ink-2">
           <a href="/hoonpro-extension.zip" download className="inline-flex items-center gap-1 font-semibold text-accent hover:underline"><Download className="h-3.5 w-3.5" />쇼크트리AI(크롬 확장 프로그램)</a>
           를 설치하면 광고센터에 가지 않고 이 화면에서 버튼 하나로 가져옵니다. (설치: 압축 풀기 → chrome://extensions → 개발자 모드 → 압축해제된 확장 프로그램 로드)
