@@ -145,7 +145,20 @@ function collector(origin: string) {
           productId: String(it.productId), itemId: hit.itemId != null ? String(hit.itemId) : undefined,
           vendorItemId: hit.vendorItemId != null ? String(hit.vendorItemId) : undefined,
           pv28: num(hit.pvLast28Day), sales28: num(hit.salesLast28d), salePrice: num(hit.salePrice),
-          category: typeof hit.category === 'string' ? hit.category.slice(0, 300) : undefined,
+          category: (function (h: any) {
+            var ks = ['category', 'categoryName', 'categoryPath', 'displayCategoryName', 'displayCategoryPath', 'categoryFullName', 'categoryHierarchy', 'fullCategoryName', 'categoryNames', 'productCategory'];
+            for (var q = 0; q < ks.length; q++) {
+              var v = h[ks[q]];
+              if (typeof v === 'string' && v.trim()) return v.trim().slice(0, 300);
+              if (Array.isArray(v) && v.length) {
+                var nm = v.map(function (x: any) { return typeof x === 'string' ? x : (x && (x.name || x.categoryName || x.displayName)) || ''; }).filter(Boolean);
+                if (nm.length) return nm.join('>').slice(0, 300);
+              }
+              if (v && typeof v === 'object') { var n2 = v.path || v.fullName || v.name || v.categoryName; if (typeof n2 === 'string' && n2.trim()) return n2.trim().slice(0, 300); }
+            }
+            return undefined;
+          })(hit),
+          keys: out.length === 0 ? Object.keys(hit).slice(0, 60) : undefined,
         });
       } else {
         miss++;

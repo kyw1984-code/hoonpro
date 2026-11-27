@@ -8454,6 +8454,11 @@ async function handleWingStatsSave(userId: string, req: VercelRequest, res: Verc
     }))
     // 조회수도 판매량도 없으면 저장할 것이 없다
     .filter((r: any) => r.product_id && (r.pv28 !== null || r.sales28 !== null));
+  // 카테고리가 하나도 없으면 윙 응답의 항목 이름을 남긴다 (값은 남기지 않는다) — 이름이 바뀐 걸 알아채려고
+  if (clean.length > 0 && clean.every((r: any) => !r.category)) {
+    const sampleKeys = rows.find((r: any) => Array.isArray(r?.keys))?.keys;
+    console.warn('[윙 판매 데이터] 카테고리 없음', { rows: clean.length, keys: Array.isArray(sampleKeys) ? sampleKeys.map((k: unknown) => String(k).slice(0, 40)).slice(0, 60) : null });
+  }
   if (clean.length === 0) return res.status(200).json({ ok: true, saved: 0 });
   const { error } = await supabase.from('sourcing_wing_stats').upsert(clean, { onConflict: 'product_id' });
   if (error) {
