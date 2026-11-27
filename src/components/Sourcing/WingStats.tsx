@@ -116,10 +116,6 @@ export function WingStatsBar({ keyword, products, stats, view, onView }: {
             <li>쿠팡 윙(wing.coupang.com)에 로그인한 화면에서 그 즐겨찾기를 누릅니다.</li>
             <li>훈프로 창이 하나 열리고 1~2분 뒤 저장됩니다. 이 화면으로 돌아오면 카드에 표시됩니다.</li>
           </ol>
-          <p className="mt-2 text-[11px] leading-relaxed text-ink-3">
-            윙의 내부 검색을 대표님 브라우저에서 그대로 쓰는 방식입니다. 로그인 정보는 저장하지 않으며, 한 번에 {WING_MAX_ITEMS}개까지만 천천히 조회하고 윙이 거절하면 바로 멈춥니다.
-            공식 API가 아니라 쿠팡이 화면을 바꾸면 동작하지 않을 수 있습니다.
-          </p>
         </div>
       )}
     </div>
