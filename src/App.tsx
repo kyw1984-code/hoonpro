@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import React, { lazy, Suspense, useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect, type ReactNode } from 'react';
 import { SourcingFinder } from './components/SourcingFinder';
 import { RankTracker } from './components/RankTracker';
 import { ReviewAnalyzer } from './components/ReviewAnalyzer';
@@ -20,7 +20,7 @@ import { WingCancelReceiver } from './components/Coupang/WingCancelReceiver';
 import { AskHoonpro } from './components/QA/AskHoonpro';
 import { HomeDashboard } from './components/Home/HomeDashboard';
 import { CoupangDashboard } from './components/Coupang/CoupangDashboard';
-import { Home, FolderOpen, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag, Loader2, LayoutTemplate, PackagePlus } from 'lucide-react';
+import { Home, FolderOpen, Image as ImageIcon, BarChart3, LogOut, ShieldCheck, Zap, TrendingUp, ListOrdered, MessageSquareText, MessageCircleQuestion, CreditCard, Lock, ShoppingBag, Loader2, LayoutTemplate, PackagePlus, Menu, X, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { getUser, getToken, removeToken, type AuthUser } from './lib/auth';
 import { fetchBillingStatus, type BillingStatus } from './lib/billing';
 
@@ -116,11 +116,29 @@ const applyTabOrder = (order: string[] | null): TabDef[] => {
 /**
  * 다크 테크 탭 — 활성 탭에 시안 언더라인 + 상단 미세 글로우
  */
-const getTabButtonClass = (active: boolean): string => (
-  `relative flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-3.5 py-3 text-[15px] transition-all -mb-px ${
+
+/**
+ * 왼쪽 메뉴의 무리. 탭이 한 줄에 다 안 들어가 가로로 밀어야 했고, 11개가 나열만
+ * 돼 있어 처음 온 사람이 흐름을 못 읽었다. 하는 일로 묶어 세로로 놓는다.
+ * 무리 안의 순서는 관리자가 정한 탭 순서(tab_order)를 그대로 따른다.
+ */
+const TAB_GROUPS: { label: string | null; ids: Tab[] }[] = [
+  { label: null, ids: ['home'] },
+  { label: '상품 찾기', ids: ['sourcing', 'ranktracker', 'review'] },
+  { label: '만들고 등록하기', ids: ['listing', 'detail', 'thumbnail'] },
+  { label: '판매 관리', ids: ['coupang', 'analyzer'] },
+  { label: '도움', ids: ['qa', 'works'] },
+];
+
+const SIDEBAR_COLLAPSED_KEY = 'hoonpro_sidebar_collapsed';
+
+const getNavItemClass = (active: boolean, collapsed: boolean): string => (
+  `flex w-full items-center gap-2.5 rounded-control text-[14.5px] transition-colors ${
+    collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2'
+  } ${
     active
-      ? 'border-accent text-ink font-semibold'
-      : 'border-transparent text-ink-2 font-medium hover:text-ink hover:bg-white/[0.02]'
+      ? 'bg-accent-soft text-accent font-semibold'
+      : 'text-ink-2 font-medium hover:bg-paper-2 hover:text-ink'
   }`
 );
 
@@ -136,6 +154,16 @@ const initialTab = (): Tab => {
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(getUser);
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
+  // 왼쪽 메뉴 접기(아이콘만) — 표를 넓게 볼 때. 고른 상태를 기억한다
+  const [navCollapsed, setNavCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'; } catch { return false; }
+  });
+  const toggleNavCollapsed = () => setNavCollapsed(v => {
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, v ? '0' : '1'); } catch { /* 무시 */ }
+    return !v;
+  });
+  // 좁은 화면(휴대폰)에서는 ☰ 버튼으로 여는 메뉴
+  const [navOpen, setNavOpen] = useState(false);
   const [remainingCalls, setRemainingCalls] = useState<number | null>(null);
   const [qaVisible, setQaVisible] = useState(false);
   const [tabOrder, setTabOrder] = useState<string[] | null>(loadCachedTabOrder);
@@ -313,6 +341,54 @@ export default function App() {
     return <WingCancelReceiver />;
   }
 
+  // 왼쪽 메뉴 본문 — 넓은 화면의 고정 메뉴와 휴대폰의 열리는 메뉴가 같이 쓴다
+  const renderNav = (collapsed: boolean, onPick: () => void) => {
+    const visible = applyTabOrder(tabOrder)
+      .filter(tab => tab.id !== 'qa' || qaVisible)
+      .filter(tab => !isHidden(tab.id));
+    const grouped = new Set<string>(TAB_GROUPS.flatMap(g => g.ids));
+    const groups = [
+      ...TAB_GROUPS.map(g => ({ label: g.label, tabs: visible.filter(t => g.ids.includes(t.id)) })),
+      // 무리에 안 든 새 탭이 생겨도 사라지지 않게
+      { label: '기타', tabs: visible.filter(t => !grouped.has(t.id)) },
+    ].filter(g => g.tabs.length > 0);
+    const item = (id: Tab, label: string, Icon: typeof ImageIcon, extra?: ReactNode) => (
+      <button
+        key={id}
+        type="button"
+        onClick={() => { setActiveTab(id); onPick(); }}
+        aria-current={activeTab === id ? 'page' : undefined}
+        title={collapsed ? label : undefined}
+        className={getNavItemClass(activeTab === id, collapsed)}
+      >
+        <Icon className="h-[18px] w-[18px] shrink-0" />
+        {!collapsed && <span className="truncate">{label}</span>}
+        {!collapsed && extra}
+      </button>
+    );
+    return (
+      <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2.5 py-3">
+        {groups.map((g, gi) => (
+          <div key={g.label ?? 'top'} className={gi > 0 ? 'mt-4' : ''}>
+            {g.label && (collapsed
+              ? <div className="mx-2 mb-2 border-t border-line" />
+              : <p className="mb-1 px-3 text-[11.5px] font-semibold tracking-wide text-ink-3">{g.label}</p>)}
+            <div className="flex flex-col gap-0.5">
+              {g.tabs.map(tab => item(tab.id, tab.label, tab.icon,
+                user.isAdmin && hiddenTabs.includes(tab.id)
+                  ? <span className="ml-auto rounded-control border border-line px-1 py-0.5 text-[9.5px] font-semibold text-ink-3" title="수강생에게는 보이지 않습니다">숨김</span>
+                  : undefined))}
+            </div>
+          </div>
+        ))}
+        <div className="mt-auto flex flex-col gap-0.5 border-t border-line pt-3">
+          {item('billing', '구독 관리', CreditCard)}
+          {user.isAdmin && item('admin', '관리자', ShieldCheck)}
+        </div>
+      </nav>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-ground flex flex-col font-sans">
         {/* ─── 구독 필요 안내 ─── */}
@@ -382,7 +458,15 @@ export default function App() {
         {/* ─── 다크 테크 헤더 ─── */}
         <header className="sticky top-0 z-20 backdrop-blur-xl bg-ground/75 border-b border-line">
           {/* 상단 줄 — 브랜드와 계정 */}
-          <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-2 px-4 sm:gap-4 sm:px-6">
+          <div className="flex h-14 items-center justify-between gap-2 px-3 sm:gap-4 sm:px-5">
+            <button
+              type="button"
+              onClick={() => setNavOpen(true)}
+              aria-label="메뉴 열기"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-ink-2 hover:bg-paper-2 hover:text-ink lg:hidden"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
             <button
               type="button"
               onClick={() => setActiveTab('home')}
@@ -437,50 +521,42 @@ export default function App() {
             </div>
           </div>
 
-          {/* 아래 줄 — 탭 */}
-          <div className="border-t border-line">
-            <nav className="mx-auto flex max-w-[1240px] gap-1 overflow-x-auto px-4 sm:px-6" aria-label="주요 기능">
-              {applyTabOrder(tabOrder)
-                .filter(tab => tab.id !== 'qa' || qaVisible)
-                .filter(tab => !isHidden(tab.id))
-                .map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  aria-current={activeTab === tab.id ? 'page' : undefined}
-                  className={getTabButtonClass(activeTab === tab.id)}
-                >
-                  <tab.icon className="h-4 w-4 shrink-0" />{tab.label}
-                  {user.isAdmin && hiddenTabs.includes(tab.id) && (
-                    <span
-                      className="rounded-control border border-line px-1 py-0.5 text-[9.5px] font-semibold text-ink-3"
-                      title="수강생에게는 보이지 않습니다"
-                    >
-                      숨김
-                    </span>
-                  )}
-                </button>
-              ))}
-              <button
-                onClick={() => setActiveTab('billing')}
-                aria-current={activeTab === 'billing' ? 'page' : undefined}
-                className={`${getTabButtonClass(activeTab === 'billing')} ml-auto`}
-              >
-                <CreditCard className="h-4 w-4 shrink-0" />구독 관리
-              </button>
-              {user.isAdmin && (
-                <button
-                  onClick={() => setActiveTab('admin')}
-                  aria-current={activeTab === 'admin' ? 'page' : undefined}
-                  className={getTabButtonClass(activeTab === 'admin')}
-                >
-                  <ShieldCheck className="h-4 w-4 shrink-0" />관리자
-                </button>
-              )}
-            </nav>
-          </div>
         </header>
 
+        <div className="flex flex-1">
+          {/* ─── 왼쪽 메뉴 (넓은 화면) ─── */}
+          <aside
+            className={`sticky top-14 hidden h-[calc(100vh-3.5rem)] shrink-0 flex-col border-r border-line bg-paper lg:flex ${navCollapsed ? 'w-[68px]' : 'w-[216px]'}`}
+            aria-label="주요 기능"
+          >
+            {renderNav(navCollapsed, () => {})}
+            <button
+              type="button"
+              onClick={toggleNavCollapsed}
+              className="flex items-center gap-2 border-t border-line px-4 py-3 text-[12.5px] text-ink-3 hover:text-ink"
+              title={navCollapsed ? '메뉴 펼치기' : '메뉴 접기'}
+            >
+              {navCollapsed ? <PanelLeftOpen className="mx-auto h-4 w-4" /> : <><PanelLeftClose className="h-4 w-4" />메뉴 접기</>}
+            </button>
+          </aside>
+
+          {/* ─── 좁은 화면: ☰로 여는 메뉴 ─── */}
+          {navOpen && (
+            <div className="fixed inset-0 z-40 lg:hidden">
+              <div className="absolute inset-0 bg-ink/40" onClick={() => setNavOpen(false)} />
+              <aside className="absolute inset-y-0 left-0 flex w-[260px] flex-col bg-paper shadow-overlay" aria-label="주요 기능">
+                <div className="flex h-14 items-center justify-between border-b border-line px-4">
+                  <span className="text-[14px] font-semibold text-ink">메뉴</span>
+                  <button type="button" onClick={() => setNavOpen(false)} aria-label="메뉴 닫기" className="rounded-control p-1.5 text-ink-3 hover:bg-paper-2 hover:text-ink">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+                {renderNav(false, () => setNavOpen(false))}
+              </aside>
+            </div>
+          )}
+
+          <div className="flex min-w-0 flex-1 flex-col">
         <main className={`flex-grow ${activeTab === 'analyzer' || activeTab === 'sourcing' ? '' : 'py-8'}`}>
           {billingLocked && activeTab !== 'billing' && activeTab !== 'admin' ? (
             <div className="py-8">
@@ -514,6 +590,8 @@ export default function App() {
         </main>
 
       <Footer />
+          </div>
+        </div>
     </div>
   );
 }
