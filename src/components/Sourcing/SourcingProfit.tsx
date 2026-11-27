@@ -22,14 +22,20 @@ import type { SellerRates } from '../../lib/sourcingProfit';
 const DEFAULT_COMMISSION = 0.108;
 const VAT = 0.1;
 
-/** 로켓그로스 사이즈별 입출고비·배송비 (VAT 별도, 참고값 — 화면에서 고칠 수 있다) */
+/**
+ * 로켓그로스 사이즈별 입출고비 (배송비 포함, VAT 별도) — 쿠팡 공식 안내의 "최소 금액(~부터)".
+ *   극소형 600 + 1,350 / 소형 650 + 1,550 / 중형 1,250 + 2,100
+ *   대형1 1,375 + 2,200 / 대형2 1,375 + 4,100 / 특대형 1,375 + 5,600
+ * 실제 금액은 판매가 구간과 카테고리에 따라 이보다 높아진다. 정확한 값은 윙의
+ * [입출고/배송 비용 확인]에서 보고 칸에 직접 넣는다.
+ */
 const CFS_SIZES = [
-  { key: 'xs', label: '극소형', spec: '~80cm, ~2kg', inout: 1650, ship: 2200 },
-  { key: 's', label: '소형', spec: '~100cm, ~5kg', inout: 1900, ship: 2500 },
-  { key: 'm', label: '중형', spec: '~120cm, ~10kg', inout: 2300, ship: 3100 },
-  { key: 'l1', label: '대형1', spec: '~140cm, ~15kg', inout: 2900, ship: 3900 },
-  { key: 'l2', label: '대형2', spec: '~160cm, ~20kg', inout: 3600, ship: 5000 },
-  { key: 'xl', label: '특대형', spec: '~250cm, ~30kg', inout: 5500, ship: 8000 },
+  { key: 'xs', label: '극소형', spec: '~80cm, ~2kg', fee: 1950 },
+  { key: 's', label: '소형', spec: '~100cm, ~5kg', fee: 2200 },
+  { key: 'm', label: '중형', spec: '~120cm, ~10kg', fee: 3350 },
+  { key: 'l1', label: '대형1', spec: '~140cm, ~15kg', fee: 3575 },
+  { key: 'l2', label: '대형2', spec: '~160cm, ~20kg', fee: 5475 },
+  { key: 'xl', label: '특대형', spec: '~250cm, ~30kg', fee: 6975 },
 ] as const;
 
 const won = (n: number) => `${Math.round(n).toLocaleString('ko-KR')}원`;
@@ -99,8 +105,7 @@ export function SourcingProfit({
   });
   const [commission, setCommission] = useState('');
   const [size, setSize] = useState<string>('xs');
-  const [inout, setInout] = useState(String(CFS_SIZES[0].inout));
-  const [ship, setShip] = useState(String(CFS_SIZES[0].ship));
+  const [cfsFee, setCfsFee] = useState(String(CFS_SIZES[0].fee));
   const [marketShip, setMarketShip] = useState('3000');
   const [etc, setEtc] = useState('0');
   const [returnRate, setReturnRate] = useState('2');
@@ -139,7 +144,7 @@ export function SourcingProfit({
   const pickSize = (key: string) => {
     const s = CFS_SIZES.find(x => x.key === key);
     if (!s) return;
-    setSize(key); setInout(String(s.inout)); setShip(String(s.ship));
+    setSize(key); setCfsFee(String(s.fee));
   };
 
   // ── 계산 ──
@@ -147,7 +152,7 @@ export function SourcingProfit({
   const C = costCurrency === 'cny' ? Math.round((Number(yuan) || 0) * multiplier) : Number(cost) || 0;
   const feeRate = (Number(commission) || 0) / 100;
   const feeVat = Math.round(P * feeRate * (1 + VAT));                 // 수수료 (VAT포함)
-  const logisticsNet = channel === 'growth' ? (Number(inout) || 0) + (Number(ship) || 0) : Number(marketShip) || 0;
+  const logisticsNet = channel === 'growth' ? Number(cfsFee) || 0 : Number(marketShip) || 0;
   const logistics = channel === 'growth' ? Math.round(logisticsNet * (1 + VAT)) : logisticsNet;
   const returnLoss = Math.round(P * ((Number(returnRate) || 0) / 100));
   const other = Number(etc) || 0;
@@ -222,22 +227,22 @@ export function SourcingProfit({
       <Field label="수수료율" value={commission} onChange={setCommission} unit="%" mode="dec"
         hint={<span className="text-caution">VAT 별도 — 실부담 {pct(feeRate * (1 + VAT))} = {won(feeVat)}</span>} />
 
-      <Section title={channel === 'growth' ? 'CFS 물류비 (입출고 + 배송)' : '배송비'} />
+      <Section title={channel === 'growth' ? 'CFS 입출고비 (배송비 포함)' : '배송비'} />
       {channel === 'growth' ? (
         <>
-          <p className="mb-2 text-[11.5px] text-ink-3">사이즈 기준값은 참고용입니다. 프로모션·카테고리에 따라 바뀌니 쿠팡윙에서 확인해 아래 칸을 고쳐 주세요.</p>
+          <p className="mb-2 text-[11.5px] text-ink-3">사이즈 금액은 쿠팡 공식 안내의 최소 금액입니다. 판매가 구간·카테고리에 따라 더 높아지니 윙 [입출고/배송 비용 확인]의 금액으로 고쳐 주세요.</p>
           <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6">
             {CFS_SIZES.map(s => (
               <button key={s.key} onClick={() => pickSize(s.key)}
                 className={`rounded-control border px-1.5 py-2 text-center transition-colors ${size === s.key ? 'border-accent bg-accent-soft' : 'border-line bg-paper hover:border-line-strong'}`}>
                 <p className={`text-[12.5px] font-semibold ${size === s.key ? 'text-accent' : 'text-ink'}`}>{s.label}</p>
                 <p className="text-[10px] text-ink-3">{s.spec}</p>
+                <p className="mt-0.5 text-[10.5px] tabular-nums text-ink-2">{s.fee.toLocaleString()}원~</p>
               </button>
             ))}
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <Field label="입출고비 (VAT 별도)" value={inout} onChange={v => { setInout(v); setSize(''); }} unit="원" />
-            <Field label="배송비 (VAT 별도)" value={ship} onChange={v => { setShip(v); setSize(''); }} unit="원" />
+          <div className="mt-3">
+            <Field label="입출고비 (배송비 포함, VAT 별도)" value={cfsFee} onChange={v => { setCfsFee(v); setSize(''); }} unit="원" />
           </div>
           <div className="mt-2 flex items-center justify-between rounded-control border border-line bg-paper px-3 py-2">
             <span className="text-[12.5px] font-semibold text-ink">합계 (VAT 포함)</span>
@@ -272,7 +277,7 @@ export function SourcingProfit({
         <div className="mt-1">
           <Line label="원가" value={C} />
           <Line label="쿠팡 수수료 (VAT포함)" value={feeVat} />
-          <Line label={channel === 'growth' ? 'CFS 물류비 (VAT포함)' : '택배비'} value={logistics} />
+          <Line label={channel === 'growth' ? 'CFS 입출고비 (VAT포함)' : '택배비'} value={logistics} />
           <Line label={`반품손실 (${returnRate || 0}%)`} value={returnLoss} />
           <Line label="기타 비용" value={other} />
         </div>
