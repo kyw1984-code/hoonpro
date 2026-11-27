@@ -21,6 +21,7 @@ import { sortByRelevance } from '../lib/keywordRelevance';
 import { ReviewSummaryView, SaveReviewButton, safeJson } from './ReviewAnalyzer';
 import { SaveToWorksButton } from './SaveToWorks';
 import { useWingStats, WingStatLine, WingStatsBar } from './Sourcing/WingStats';
+import { ProductTable } from './Sourcing/ProductTable';
 
 /** 중달이(1688 소싱처) 가입 시 넣는 훈프로 추천인 코드 */
 const JUNGDARI_REFERRAL_CODE = 'hoonpro05';
@@ -549,6 +550,12 @@ export function SourcingFinder() {
     });
 
   const wingStats = useWingStats(displayProducts);
+  // 표가 기본 — 여러 상품의 숫자를 견주기 좋다. 고른 보기는 기억해 둔다
+  const [productView, setProductView] = useState<'table' | 'card'>(() => (localStorage.getItem('sourcingProductView') === 'card' ? 'card' : 'table'));
+  const changeProductView = (v: 'table' | 'card') => {
+    setProductView(v);
+    try { localStorage.setItem('sourcingProductView', v); } catch { /* 무시 */ }
+  };
 
   // 평균 판매가는 아래 목록에 실제로 보이는 상품 기준이다. 전체 평균은 80만원짜리 한 개에
   // 끌려 올라가 목록의 가격대(3~5만원)와 동떨어진 숫자가 됐다. 필터를 바꾸면 같이 바뀐다.
@@ -1286,8 +1293,22 @@ export function SourcingFinder() {
                   </div>
 
                   {/* 상품 그리드 */}
-                  <WingStatsBar keyword={activeKeyword ?? ''} products={displayProducts} stats={wingStats} />
-                  {displayProducts.length > 0 ? (
+                  <WingStatsBar keyword={activeKeyword ?? ''} products={displayProducts} stats={wingStats} view={productView} onView={changeProductView} />
+                  {displayProducts.length > 0 && productView === 'table' ? (
+                    <ProductTable<Product>
+                      products={displayProducts}
+                      stats={wingStats}
+                      rankAdded={rankAdded}
+                      onReview={(p: Product) => fetchReviewAnalysis(p)}
+                      onSource={(p: Product) => handle1688Click(p)}
+                      onCalc={(p: Product) => openCalcForProduct(p)}
+                      onRank={async (p: Product) => {
+                        if (!activeKeyword) return;
+                        const ok = await addRankWatch(activeKeyword, p.productId, p.productName);
+                        if (ok) setRankAdded(prev => ({ ...prev, [p.productId]: true }));
+                      }}
+                    />
+                  ) : displayProducts.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                       {displayProducts.map(product => (
                         <div key={product.productId}
