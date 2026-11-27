@@ -3,6 +3,7 @@
  *
  * 표는 대표님이 쿠팡 Wing [로켓그로스 비용/수수료 > 입출고/배송 비용]에서 받은
  * 엑셀을 그대로 옮긴 것이다(src/data/rgFees.json, 2026.11.27 조회, VAT 별도).
+ * 금액은 상품 1개·1주문 기준 입출고비 + 배송비 합계이고, 입출고비 몫을 따로 갖고 있다.
  *
  * 적용 순서 (엑셀 안내 그대로)
  *   1) 프로모션 기간(2027.01.31까지)이고 판매가 14,000원 미만이며 그 카테고리에
@@ -18,7 +19,9 @@
 import data from '../data/rgFees.json';
 
 export type FeeKind = 'low' | 'promo' | 'list';
-export interface RgBand { min: number; max: number | null; list: (number | null)[] | null; promo: (number | null)[] | null; low: (number | null)[] | null }
+type Six = (number | null)[] | null;
+/** list·promo·low = 입출고비 + 배송비 합계, in* = 그중 입출고비 */
+export interface RgBand { min: number; max: number | null; list: Six; promo: Six; low: Six; inList: Six; inPromo: Six; inLow: Six }
 export interface RgGroup { g1: string; g2: string; cats: string[]; bands: RgBand[] }
 
 export const RG_SIZES = data.sizes as string[];
@@ -39,26 +42,31 @@ export function promoActive(today = new Date()): boolean {
   return kst <= RG_PROMO_UNTIL;
 }
 
-export interface FeeResult { fee: number; kind: FeeKind; band: RgBand }
+/** fee = 입출고비 + 배송비, inout = 입출고비, ship = 배송비 (모두 VAT 별도) */
+export interface FeeResult { fee: number; inout: number | null; ship: number | null; kind: FeeKind; band: RgBand }
 
-/** 그 묶음·판매가·사이즈의 입출고비 (VAT 별도). 표에 없으면 null */
+/** 그 묶음·판매가·사이즈의 입출고비 + 배송비 (VAT 별도). 표에 없으면 null */
 export function rgFee(key: string, price: number, sizeIndex: number, today = new Date()): FeeResult | null {
   const g = RG_GROUPS.find(x => groupKey(x) === key);
   if (!g || !(price >= 0) || sizeIndex < 0 || sizeIndex > 5) return null;
   const band = g.bands.find(b => price >= b.min && (b.max === null || price < b.max));
   if (!band) return null;
-  const pick = (arr: (number | null)[] | null) => (arr && arr[sizeIndex] != null ? Number(arr[sizeIndex]) : null);
+  const pick = (arr: Six) => (arr && arr[sizeIndex] != null ? Number(arr[sizeIndex]) : null);
+  const result = (fee: number, inArr: Six, kind: FeeKind): FeeResult => {
+    const inout = pick(inArr);
+    return { fee, inout, ship: inout != null ? fee - inout : null, kind, band };
+  };
   const promo = promoActive(today);
   if (promo && price < data.lowPriceUnder) {
     const v = pick(band.low);
-    if (v != null) return { fee: v, kind: 'low', band };
+    if (v != null) return result(v, band.inLow, 'low');
   }
   if (promo) {
     const v = pick(band.promo);
-    if (v != null) return { fee: v, kind: 'promo', band };
+    if (v != null) return result(v, band.inPromo, 'promo');
   }
   const v = pick(band.list);
-  return v != null ? { fee: v, kind: 'list', band } : null;
+  return v != null ? result(v, band.inList, 'list') : null;
 }
 
 /** 쿠팡 카테고리 경로 → 표의 묶음 키. 고를 수 없으면 null */

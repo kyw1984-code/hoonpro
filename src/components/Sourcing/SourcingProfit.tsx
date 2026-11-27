@@ -114,7 +114,6 @@ export function SourcingProfit({
   const [groupAuto, setGroupAuto] = useState(false);
   // 직접 고친 입출고비. null이면 요금표 값을 쓴다
   const [feeOverride, setFeeOverride] = useState<string | null>(null);
-  const [cfsShip, setCfsShip] = useState('0');
   const [marketShip, setMarketShip] = useState('3000');
   const [etc, setEtc] = useState('0');
   const [returnRate, setReturnRate] = useState('2');
@@ -166,7 +165,7 @@ export function SourcingProfit({
   const autoFee = group && P > 0 ? rgFee(group, P, sizeIdx) : null;
   useEffect(() => { setFeeOverride(null); }, [group, sizeIdx, P]);
   const cfsFee = feeOverride ?? (autoFee ? String(autoFee.fee) : '');
-  const logisticsNet = channel === 'growth' ? (Number(cfsFee) || 0) + (Number(cfsShip) || 0) : Number(marketShip) || 0;
+  const logisticsNet = channel === 'growth' ? Number(cfsFee) || 0 : Number(marketShip) || 0;
   const logistics = channel === 'growth' ? Math.round(logisticsNet * (1 + VAT)) : logisticsNet;
   const returnLoss = Math.round(P * ((Number(returnRate) || 0) / 100));
   const other = Number(etc) || 0;
@@ -241,7 +240,7 @@ export function SourcingProfit({
       <Field label="수수료율" value={commission} onChange={setCommission} unit="%" mode="dec"
         hint={<span className="text-caution">VAT 별도 — 실부담 {pct(feeRate * (1 + VAT))} = {won(feeVat)}</span>} />
 
-      <Section title={channel === 'growth' ? 'CFS 입출고비' : '배송비'} />
+      <Section title={channel === 'growth' ? 'CFS 입출고비 + 배송비' : '배송비'} />
       {channel === 'growth' ? (
         <>
           <label className="flex flex-col gap-1">
@@ -278,13 +277,14 @@ export function SourcingProfit({
               {autoFee.kind !== 'list' && <> (프로모션 {RG_PROMO_UNTIL.replace(/-/g, '.')}까지)</>} · VAT 별도
             </p>
           )}
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <Field label="입출고비 (VAT 별도)" value={cfsFee} onChange={v => setFeeOverride(v)} unit="원"
-              hint={feeOverride !== null ? '직접 고친 금액' : autoFee ? 'Wing 요금표 자동' : group ? '' : '카테고리를 고르면 자동으로 들어갑니다'} />
-            <Field label="배송비 (VAT 별도)" value={cfsShip} onChange={setCfsShip} unit="원" hint="Wing 요금표에 따로 청구되면 넣어 주세요" />
+          <div className="mt-3">
+            <Field label="입출고비 + 배송비 (VAT 별도)" value={cfsFee} onChange={v => setFeeOverride(v)} unit="원"
+              hint={feeOverride !== null ? '직접 고친 금액'
+                : autoFee ? (autoFee.inout != null ? `Wing 요금표 자동 · 입출고비 ${autoFee.inout.toLocaleString()}원 + 배송비 ${(autoFee.ship ?? 0).toLocaleString()}원` : 'Wing 요금표 자동')
+                : group ? '' : '카테고리를 고르면 자동으로 들어갑니다'} />
           </div>
           <div className="mt-2 flex items-center justify-between rounded-control border border-line bg-paper px-3 py-2">
-            <span className="text-[12.5px] font-semibold text-ink">물류비 합계 (VAT 포함)</span>
+            <span className="text-[12.5px] font-semibold text-ink">입출고비 + 배송비 (VAT 포함)</span>
             <span className="text-[14px] font-semibold tabular-nums text-accent">{won(logistics)}</span>
           </div>
         </>
@@ -316,7 +316,7 @@ export function SourcingProfit({
         <div className="mt-1">
           <Line label="원가" value={C} />
           <Line label="쿠팡 수수료 (VAT포함)" value={feeVat} />
-          <Line label={channel === 'growth' ? 'CFS 물류비 (VAT포함)' : '택배비'} value={logistics} />
+          <Line label={channel === 'growth' ? 'CFS 입출고·배송비 (VAT포함)' : '택배비'} value={logistics} />
           <Line label={`반품손실 (${returnRate || 0}%)`} value={returnLoss} />
           <Line label="기타 비용" value={other} />
         </div>
