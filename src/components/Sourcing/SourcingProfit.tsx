@@ -26,12 +26,12 @@ const VAT = 0.1;
 
 /** 로켓그로스 사이즈 유형 (요금표 순서와 같다) */
 const CFS_SIZES = [
-  { label: '극소형', spec: '80cm·2kg 이하' },
-  { label: '소형', spec: '100cm·5kg 이하' },
-  { label: '중형', spec: '120cm·10kg 이하' },
-  { label: '대형1', spec: '140cm·15kg 이하' },
-  { label: '대형2', spec: '160cm·20kg 이하' },
-  { label: '특대형', spec: '250cm·30kg 이하' },
+  { label: '극소형', spec: '80cm·2kg' },
+  { label: '소형', spec: '100cm·5kg' },
+  { label: '중형', spec: '120cm·10kg' },
+  { label: '대형1', spec: '140cm·15kg' },
+  { label: '대형2', spec: '160cm·20kg' },
+  { label: '특대형', spec: '250cm·30kg' },
 ] as const;
 
 /** 1차 분류별로 묶은 카테고리 선택지 */
@@ -332,7 +332,7 @@ export function SourcingProfit({
           <Line label={`매입세액 (수수료${channel === 'growth' ? '·물류비' : ''}${costHasVat ? '·원가' : ''} VAT)`} value={inputTax} tone="plus" />
           <div className="mt-1 border-t border-line pt-1"><Line label="실 납부 부가세" value={vatDue} strong /></div>
         </div>
-        <div className={`mt-3 flex items-center justify-between rounded-control px-4 py-3.5 ${realMargin > 0 ? 'bg-accent text-black' : 'bg-critical-soft text-critical'}`}>
+        <div className={`mt-3 flex items-center justify-between rounded-control px-4 py-3.5 ${realMargin > 0 ? 'bg-accent text-white' : 'bg-critical-soft text-critical'}`}>
           <span className="text-[14px] font-semibold">실마진</span>
           <span className="text-[20px] font-semibold tabular-nums">{won(realMargin)} <span className="text-[12px]">{pct(marginRate)}</span></span>
         </div>

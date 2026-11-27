@@ -125,12 +125,12 @@ export function ProductTable<T extends Row>({
                   <span className={`inline-block whitespace-nowrap rounded-full px-2.5 py-1 text-[10.5px] font-semibold ${d.cls}`}>{d.label}</span>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-ink">{num(s?.pv28)}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-ink">{num(s?.sales28)}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-accent">{num(s?.sales28)}</td>
                 <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-ink-2">{num(cvr, '%')}</td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums text-ink">{num(s?.sales28 != null ? s.sales28 * p.productPrice : null, '원')}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums text-positive">{num(s?.sales28 != null ? s.sales28 * p.productPrice : null, '원')}</td>
                 <td className="px-3 py-2.5">
                   <div className="grid grid-cols-2 gap-1">
-                    <button onClick={() => onCalc(p)} className="rounded-control bg-accent px-2 py-1.5 text-[11px] font-semibold text-black hover:opacity-90">마진 분석</button>
+                    <button onClick={() => onCalc(p)} className="rounded-control bg-accent px-2 py-1.5 text-[11px] font-semibold text-white hover:opacity-90">마진 분석</button>
                     <button onClick={() => onReview(p)} className="rounded-control border border-line px-2 py-1.5 text-[11px] font-semibold text-ink-2 hover:border-line-strong hover:text-ink">리뷰 분석</button>
                     <button onClick={() => onSource(p)} className="rounded-control border border-line px-2 py-1.5 text-[11px] font-semibold text-ink-2 hover:border-line-strong hover:text-ink">1688</button>
                     <button onClick={() => onRank(p)} disabled={rankAdded[p.productId]} className="rounded-control border border-line px-2 py-1.5 text-[11px] font-semibold text-ink-2 hover:border-line-strong hover:text-ink disabled:opacity-50">

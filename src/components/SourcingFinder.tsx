@@ -603,7 +603,7 @@ export function SourcingFinder() {
 
   // ─── 렌더 ───────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-paper text-ink">
+    <div className="theme-light min-h-screen rounded-panel bg-ground text-ink">
       {/* 1688 소싱처(중달이) 팝업 — 추천인 코드 복사 + 이동 */}
       <AnimatePresence>
         {referralModal && (
