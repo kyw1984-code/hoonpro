@@ -1,4 +1,4 @@
-# 크롬 웹스토어 등록 자료 — 훈프로 도우미
+# 크롬 웹스토어 등록 자료 — 쇼크트리AI
 
 등록 주소: https://chrome.google.com/webstore/devconsole (개발자 등록 1회 5달러)
 올릴 파일: `public/hoonpro-extension.zip` (zip 안에 manifest.json이 `hoonpro-extension/` 폴더 아래에 있으면
@@ -6,7 +6,7 @@
 
 ## 스토어 등록정보 (Store listing)
 
-- **이름**: 훈프로 도우미
+- **이름**: 쇼크트리AI
 - **요약 (132자 이내)**:
   훈프로에서 버튼 한 번으로 쿠팡 윙의 경쟁 상품 판매 데이터와 광고센터 광고비 보고서를 가져옵니다.
 - **카테고리**: 생산성 (Productivity) 또는 비즈니스 도구

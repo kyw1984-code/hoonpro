@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "훈프로 도우미",
-  "short_name": "훈프로",
-  "version": "1.1.0",
+  "name": "쇼크트리AI",
+  "short_name": "쇼크트리AI",
+  "version": "1.1.1",
   "description": "훈프로에서 버튼 한 번으로 쿠팡 윙의 경쟁 상품 판매 데이터와 광고센터 광고비 보고서를 가져옵니다.",
   "icons": {
     "16": "icons/16.png",
@@ -10,7 +10,7 @@
     "128": "icons/128.png"
   },
   "action": {
-    "default_title": "훈프로 도우미",
+    "default_title": "쇼크트리AI",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/16.png",

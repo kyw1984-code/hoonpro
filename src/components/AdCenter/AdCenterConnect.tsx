@@ -37,7 +37,7 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
   // 기간보다 적게 나오므로 그것도 여기서 드러난다.
   const [span, setSpan] = useState<{ first: string; last: string; days: number } | null | undefined>(undefined);
 
-  // 훈프로 도우미(확장 프로그램)가 있으면 광고센터에 가지 않고 여기서 바로 받는다
+  // 쇼크트리AI(확장 프로그램)가 있으면 광고센터에 가지 않고 여기서 바로 받는다
   const [ext, setExt] = useState<string | null>(null);
   const [extBusy, setExtBusy] = useState<string | null>(null);
   const [extMsg, setExtMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -143,7 +143,7 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
               {extBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
               {extBusy ? '가져오는 중' : `광고센터에서 바로 가져오기 (${days}일)`}
             </button>
-            <span className="text-[11.5px] text-ink-2">훈프로 도우미 사용 중 · 같은 크롬에서 광고센터에 로그인돼 있어야 합니다</span>
+            <span className="text-[11.5px] text-ink-2">쇼크트리AI 사용 중 · 같은 크롬에서 광고센터에 로그인돼 있어야 합니다</span>
           </div>
           {(extBusy || extMsg) && (
             <p className={`mt-2 text-[12px] ${extBusy ? 'text-ink-2' : extMsg?.ok ? 'text-positive' : 'text-critical'}`}>{extBusy ?? extMsg?.text}</p>
@@ -151,7 +151,7 @@ export function AdCenterConnect({ compact = false }: { compact?: boolean }) {
         </div>
       ) : (
         <p className="mt-3 text-[12px] text-ink-2">
-          <a href="/hoonpro-extension.zip" download className="inline-flex items-center gap-1 font-semibold text-accent hover:underline"><Download className="h-3.5 w-3.5" />훈프로 도우미(크롬 확장 프로그램)</a>
+          <a href="/hoonpro-extension.zip" download className="inline-flex items-center gap-1 font-semibold text-accent hover:underline"><Download className="h-3.5 w-3.5" />쇼크트리AI(크롬 확장 프로그램)</a>
           를 설치하면 광고센터에 가지 않고 이 화면에서 버튼 하나로 가져옵니다. (설치: 압축 풀기 → chrome://extensions → 개발자 모드 → 압축해제된 확장 프로그램 로드)
         </p>
       )}

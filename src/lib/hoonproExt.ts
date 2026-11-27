@@ -1,5 +1,5 @@
 /**
- * 훈프로 도우미(크롬 확장 프로그램)와 이야기하는 쪽.
+ * 쇼크트리AI(크롬 확장 프로그램)와 이야기하는 쪽.
  *
  * 확장 프로그램의 content script가 이 페이지에 들어와 있으면 html에
  * data-hoonpro-ext 속성을 달고 "hoonproExtReady"를 보낸다. 요청은 postMessage로
