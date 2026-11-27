@@ -6,7 +6,7 @@
  * 열 머리를 누르면 그 숫자로 정렬된다.
  */
 import { useState } from 'react';
-import { ArrowDown, ArrowUp, Star } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Star } from 'lucide-react';
 import { conversionRate } from '../../lib/wingStats';
 import type { WingStat } from './WingStats';
 
@@ -15,7 +15,10 @@ interface Row {
   rating: number; reviewCount: number; deliveryType: 'rocket' | 'jet' | 'general'; rank: number;
   calculated: { opportunityScore: number; grade: string };
 }
-type SortKey = 'default' | 'price' | 'reviews' | 'pv' | 'sales' | 'cvr' | 'revenue';
+type SortKey = 'default' | 'name' | 'price' | 'reviews' | 'delivery' | 'pv' | 'sales' | 'cvr' | 'revenue';
+
+/** 배송방법 정렬 순서 — 진입하기 쉬운 쪽(일반)을 위로 */
+const DELIVERY_ORDER: Record<string, number> = { general: 0, jet: 1, rocket: 2 };
 
 const DELIVERY: Record<Row['deliveryType'], { label: string; cls: string }> = {
   rocket: { label: '로켓배송', cls: 'bg-critical-soft text-critical' },
@@ -38,6 +41,7 @@ export function ProductTable<T extends Row>({
 
   const value = (p: T, key: SortKey): number | null => {
     const s = stats[p.productId];
+    if (key === 'delivery') return DELIVERY_ORDER[p.deliveryType] ?? 9;
     if (key === 'price') return p.productPrice;
     if (key === 'reviews') return p.reviewCount;
     if (key === 'pv') return s?.pv28 ?? null;
@@ -48,6 +52,7 @@ export function ProductTable<T extends Row>({
   };
   // 값이 없는 상품은 방향과 상관없이 늘 아래로 보낸다
   const rows = sort.key === 'default' ? products : [...products].sort((a, b) => {
+    if (sort.key === 'name') return sort.desc ? b.productName.localeCompare(a.productName, 'ko') : a.productName.localeCompare(b.productName, 'ko');
     const va = value(a, sort.key), vb = value(b, sort.key);
     if (va === null && vb === null) return 0;
     if (va === null) return 1;
@@ -55,18 +60,25 @@ export function ProductTable<T extends Row>({
     return sort.desc ? vb - va : va - vb;
   });
 
-  const th = (label: string, key: SortKey) => (
-    <th className="px-3 py-3 text-right font-semibold">
-      <button
-        onClick={() => setSort(s => (s.key === key ? (s.desc ? { key, desc: false } : { key: 'default', desc: true }) : { key, desc: true }))}
-        className={`inline-flex items-center gap-0.5 hover:text-ink ${sort.key === key ? 'text-accent' : ''}`}
-        title="누르면 이 숫자로 정렬합니다"
-      >
-        {label}
-        {sort.key === key && (sort.desc ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />)}
-      </button>
-    </th>
-  );
+  // 정렬되는 열은 늘 ↕ 표시를 달아 누를 수 있다는 걸 보이게 한다.
+  // 누를 때마다 높은순 → 낮은순 → 원래 순서 (상품명·배송방법은 가나다순·일반 먼저부터)
+  const th = (label: string, key: SortKey, align: 'left' | 'right' | 'center' = 'right', firstAsc = false) => {
+    const active = sort.key === key;
+    const next = () => setSort(s => {
+      if (s.key !== key) return { key, desc: !firstAsc };
+      if (s.desc === !firstAsc) return { key, desc: firstAsc };
+      return { key: 'default', desc: true };
+    });
+    return (
+      <th className={`whitespace-nowrap px-3 py-3 font-semibold ${align === 'left' ? 'text-left' : align === 'center' ? 'text-center' : 'text-right'}`}>
+        <button onClick={next} title="누르면 정렬합니다"
+          className={`inline-flex items-center gap-1 whitespace-nowrap hover:text-ink ${active ? 'text-accent' : ''}`}>
+          {label}
+          {active ? (sort.desc ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-50" />}
+        </button>
+      </th>
+    );
+  };
   const num = (v: number | null | undefined, suffix = '') => (v == null ? <span className="text-ink-3">—</span> : <>{v.toLocaleString()}{suffix}</>);
 
   return (
@@ -74,16 +86,16 @@ export function ProductTable<T extends Row>({
       <table className="w-full min-w-[980px] text-[12.5px]">
         <thead className="bg-paper-2 text-[11.5px] text-ink-3">
           <tr>
-            <th className="w-14 px-3 py-3 text-left font-semibold">이미지</th>
-            <th className="px-3 py-3 text-left font-semibold">상품명</th>
+            <th className="w-16 whitespace-nowrap px-3 py-3 text-left font-semibold">이미지</th>
+            {th('상품명', 'name', 'left', true)}
             {th('가격', 'price')}
             {th('리뷰수', 'reviews')}
-            <th className="px-3 py-3 text-center font-semibold">배송방법</th>
+            {th('배송방법', 'delivery', 'center', true)}
             {th('클릭수', 'pv')}
             {th('월 판매량', 'sales')}
             {th('전환율', 'cvr')}
             {th('월 매출', 'revenue')}
-            <th className="w-[168px] px-3 py-3 text-center font-semibold">분석/마진</th>
+            <th className="w-[168px] whitespace-nowrap px-3 py-3 text-center font-semibold">분석/마진</th>
           </tr>
         </thead>
         <tbody>
